@@ -1,0 +1,100 @@
+syntax = "proto3";
+
+
+package world.willfrog.alphafrogmicro.domestic.idl;
+
+/**
+  基金基本信息
+ */
+message DomesticFundInfoFullItem {
+  string tsCode = 1;
+  string name = 2;
+  optional string management = 3;
+  optional string custodian = 4;
+  optional string fundType = 5;
+  optional int64 foundDate = 6;
+  optional int64 dueDate = 7;
+  optional int64 listDate = 8;
+  optional int64 issueDate = 25;
+  optional int64 delistDate = 9;
+  optional double issueAmount = 10;
+  optional double mFee = 11;
+  optional double cFee = 12;
+  optional double durationYear = 13;
+  optional double pValue = 14;
+  optional double minAmount = 15;
+  optional double expReturn = 16;
+  optional string benchmark = 17;
+  optional string status = 18;
+  optional string investType = 19;
+  optional string type = 20;
+  optional string trustee = 21;
+  optional int64 purcStartDate = 22;
+  optional int64 redmStartDate = 23;
+  optional string market = 24;
+}
+
+message DomesticFundInfoSimpleItem {
+  string tsCode = 1;
+  string name = 2;
+  optional string management = 3;
+  optional string fundType = 4;
+  optional int64 foundDate = 5;
+  optional string benchmark = 6;
+}
+
+
+message DomesticFundInfoByTsCodeRequest {
+  string tsCode = 1;
+}
+
+message DomesticFundInfoByTsCodeResponse {
+  repeated DomesticFundInfoFullItem items = 1;
+}
+
+/**
+  基金净值
+ */
+
+message DomesticFundNavItem {
+  string tsCode = 1;
+  int64 annDate = 2;
+  int64 navDate = 3;
+  double unitNav = 4;
+  optional double accumNav = 5;
+  optional double accumDiv = 6;
+  optional double netAsset = 7;
+  optional double totalNetAsset = 8;
+  double adjNav = 9;
+}
+
+
+message DomesticFundNavsByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDateTimestamp = 2;
+  int64 endDateTimestamp = 3;
+}
+
+message DomesticFundNavsByTsCodeAndDateRangeResponse {
+  repeated DomesticFundNavItem items = 1;
+}
+
+
+/**
+  基金搜索
+ */
+
+message DomesticFundSearchRequest {
+  string query = 1;
+}
+
+message DomesticFundSearchResponse {
+  repeated DomesticFundInfoSimpleItem items = 1;
+}
+
+service DomesticFundService {
+
+  rpc getDomesticFundInfoByTsCode(DomesticFundInfoByTsCodeRequest) returns (DomesticFundInfoByTsCodeResponse);
+  rpc getDomesticFundNavsByTsCodeAndDateRange(DomesticFundNavsByTsCodeAndDateRangeRequest) returns (DomesticFundNavsByTsCodeAndDateRangeResponse);
+  rpc searchFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
+}

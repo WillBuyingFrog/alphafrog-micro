@@ -1,0 +1,14 @@
+server:
+  port: 8090
+
+spring:
+  kafka:
+    bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
+
+dubbo:
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  #    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848?username=${NACOS_USERNAME:nacos}&password=${NACOS_PASSWORD:nacos}
+  application:
+    name: alphafrog-frontend
+    logger: slf4j
