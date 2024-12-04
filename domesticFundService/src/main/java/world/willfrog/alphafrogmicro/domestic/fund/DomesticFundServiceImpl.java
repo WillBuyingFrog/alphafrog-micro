@@ -12,9 +12,6 @@ import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundServiceTriple
 
 import java.util.List;
 import java.util.ArrayList;
-import java.util.Objects;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 @DubboService
 @Service
@@ -181,7 +178,58 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
         return null;
     }
 
-    public DomesticFundSearchResponse searchFundInfo(DomesticFundSearchRequest request) {
-        return null;
+    @Override
+    public DomesticFundSearchResponse searchDomesticFundInfo(DomesticFundSearchRequest request) {
+        
+        String query = request.getQuery();
+
+        List<FundInfo> fundInfoList = new ArrayList<>();
+        List<DomesticFundInfoSimpleItem> items = new ArrayList<>();
+
+        try{
+            fundInfoList = fundInfoDao.getFundInfoByTsCode(query);
+            fundInfoList.addAll(fundInfoDao.getFundInfoByName(query));
+            // 去重
+            fundInfoList = fundInfoList.stream()
+                    .distinct()
+                    .toList();
+        } catch (Exception e) {
+            log.error("Error occurred while searching fund info", e);
+            return null;
+        }
+        
+
+        try {
+            for (FundInfo fundInfo : fundInfoList) {
+                DomesticFundInfoSimpleItem.Builder itemBuilder = DomesticFundInfoSimpleItem.newBuilder()
+                        .setTsCode(fundInfo.getTsCode())
+                        .setName(fundInfo.getName());
+                
+                if (fundInfo.getManagement() != null) {
+                    itemBuilder.setManagement(fundInfo.getManagement());
+                }
+
+                if (fundInfo.getFundType() != null) {
+                    itemBuilder.setFundType(fundInfo.getFundType());
+                }
+
+                if (fundInfo.getFoundDate() != null) {
+                    itemBuilder.setFoundDate(fundInfo.getFoundDate());
+                }
+
+                if (fundInfo.getBenchmark() != null) {
+                    itemBuilder.setBenchmark(fundInfo.getBenchmark());
+                }
+
+                items.add(itemBuilder.build());
+            }
+
+            return DomesticFundSearchResponse.newBuilder()
+                    .addAllItems(items)
+                    .build();
+        } catch (Exception e) {
+            log.error("Error occurred while converting DAO response object to protobuf object", e);
+            return null;
+        }
     }
 }

@@ -5,9 +5,7 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-/**
- * Hello world!
- */
+
 @SpringBootApplication
 @EnableDubbo
 @MapperScan("world.willfrog.alphafrogmicro.common.dao")

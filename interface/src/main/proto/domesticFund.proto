@@ -6,6 +6,11 @@ package world.willfrog.alphafrogmicro.domestic.idl;
 /**
   基金基本信息
  */
+
+/**
+  基金基本信息--实体类消息
+ */
+// 包含所有（可能存在的）字段的消息
 message DomesticFundInfoFullItem {
   string tsCode = 1;
   string name = 2;
@@ -34,6 +39,7 @@ message DomesticFundInfoFullItem {
   optional string market = 24;
 }
 
+// 根据关键字查询基金时返回的消息
 message DomesticFundInfoSimpleItem {
   string tsCode = 1;
   string name = 2;
@@ -43,7 +49,11 @@ message DomesticFundInfoSimpleItem {
   optional string benchmark = 6;
 }
 
+/**
+  基金基本信息--服务间通信用消息
+ */
 
+// 根据基金代码，查询指定基金的完整信息
 message DomesticFundInfoByTsCodeRequest {
   string tsCode = 1;
 }
@@ -52,8 +62,20 @@ message DomesticFundInfoByTsCodeResponse {
   repeated DomesticFundInfoFullItem items = 1;
 }
 
+// 根据关键字，查询基金的简单信息
+
+message DomesticFundSearchRequest {
+  string query = 1;
+}
+
+message DomesticFundSearchResponse {
+  repeated DomesticFundInfoSimpleItem items = 1;
+}
+
+
+
 /**
-  基金净值
+  基金净值--实体类消息
  */
 
 message DomesticFundNavItem {
@@ -68,7 +90,12 @@ message DomesticFundNavItem {
   double adjNav = 9;
 }
 
+/**
+  基金净值--服务间通信用消息
+ */
 
+
+// 根据基金代码和时间范围，查询基金净值
 message DomesticFundNavsByTsCodeAndDateRangeRequest {
   string tsCode = 1;
   int64 startDateTimestamp = 2;
@@ -81,20 +108,92 @@ message DomesticFundNavsByTsCodeAndDateRangeResponse {
 
 
 /**
-  基金搜索
+  基金持仓
  */
 
-message DomesticFundSearchRequest {
-  string query = 1;
+/**
+  基金持仓--实体类消息
+ */
+
+message DomesticFundPortfolioItem {
+  string tsCode = 1;
+  int64 annDate = 2;
+  int64 endDate = 3;
+  string symbol = 4;
+  double mkv = 5;
+  double amount = 6;
+  double sktMkvRatio = 7;
+  double sktFloatRatio = 8;
 }
 
-message DomesticFundSearchResponse {
-  repeated DomesticFundInfoSimpleItem items = 1;
+/**
+  基金持仓--服务间通信用消息
+ */
+
+// 根据基金代码和时间范围，查询基金持仓
+message DomesticFundPortfolioByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDateTimestamp = 2;
+  int64 endDateTimestamp = 3;
 }
+
+message DomesticFundPortfolioByTsCodeAndDateRangeResponse {
+  repeated DomesticFundPortfolioItem items = 1;
+}
+
+
+/**
+  基金数据爬取
+ */
+
+// 根据基金所在交易市场爬取基金基本信息
+message DomesticFundInfoFetchByMarketRequest {
+  string market = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticFundInfoFetchByMarketResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 根据交易日期爬取基金净值
+message DomesticFundNavFetchByTradeDateRequest {
+  int64 tradeDateTimestamp = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticFundNavFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 根据公告时间范围爬取基金持仓
+message DomesticFundPortfolioFetchByDateRangeRequest {
+  int64 startDateTimestamp = 1;
+  int64 endDateTimestamp = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticFundPortfolioFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
 
 service DomesticFundService {
 
   rpc getDomesticFundInfoByTsCode(DomesticFundInfoByTsCodeRequest) returns (DomesticFundInfoByTsCodeResponse);
   rpc getDomesticFundNavsByTsCodeAndDateRange(DomesticFundNavsByTsCodeAndDateRangeRequest) returns (DomesticFundNavsByTsCodeAndDateRangeResponse);
-  rpc searchFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
+  rpc searchDomesticFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
+  rpc getDomesticFundPortfolioByTsCodeAndDateRange(DomesticFundPortfolioByTsCodeAndDateRangeRequest) returns (DomesticFundPortfolioByTsCodeAndDateRangeResponse);
+
+  rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
+  rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
+  rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
+
 }

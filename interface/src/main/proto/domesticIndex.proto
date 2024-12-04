@@ -1,0 +1,174 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.domestic.idl;
+
+/**
+  指数基本信息
+ */
+
+/**
+  指数基本信息--实体类消息
+ */
+
+// 包含所有（可能存在的）字段的消息
+message DomesticIndexInfoFullItem {
+  string tsCode = 1;
+  string name = 2;
+  string fullname = 3;
+  string market = 4;
+  optional string publisher = 5;
+  optional string indexType = 6;
+  optional string category = 7;
+  optional int64 baseDate = 8;
+  optional double basePoint = 9;
+  optional double listDate = 10;
+  optional string weightRule = 11;
+  optional string desc = 12;
+  optional int64 expDate = 13;
+}
+
+
+// 指数搜索场景下，只需要返回简单信息
+message DomesticIndexInfoSimpleItem {
+  string tsCode = 1;
+  string name = 2;
+  string fullname = 3;
+  string market = 4;
+}
+
+/**
+  指数基本信息-服务间通信用消息
+ */
+
+// 根据指数代码，查询指定指数的完整信息
+message DomesticIndexInfoByTsCodeRequest {
+  string tsCode = 1;
+}
+
+message DomesticIndexInfoByTsCodeResponse {
+  DomesticIndexInfoFullItem item = 1;
+}
+
+// 搜索指数
+message DomesticIndexSearchRequest {
+  string query = 1;
+}
+
+message DomesticIndexSearchResponse {
+  repeated DomesticIndexInfoSimpleItem items = 1;
+}
+
+
+/**
+  指数行情--实体类消息
+ */
+
+message DomesticIndexDailyItem {
+  string tsCode = 1;
+  int64 tradeDate = 2;
+  double close = 3;
+  double open = 4;
+  double high = 5;
+  double low = 6;
+  double preClose = 7;
+  double change = 8;
+  double pctChg = 9;
+  double vol = 10;
+  double amount = 11;
+}
+
+/**
+  指数行情--服务间通信用消息
+ */
+
+
+message DomesticIndexDailyByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message DomesticIndexDailyByTsCodeAndDateRangeResponse {
+  repeated DomesticIndexDailyItem items = 1;
+}
+
+/**
+  指数成分股--实体类消息
+ */
+
+message DomesticIndexWeightItem {
+  string indexCode = 1;
+  string conCode = 2;
+  int64 tradeDate = 3;
+  double weight = 4;
+}
+
+/**
+  指数成分股--服务间通信用消息
+ */
+
+
+// 获取某个指数在某段时间内的成分股
+message DomesticIndexWeightByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message DomesticIndexWeightByTsCodeAndDateRangeResponse {
+  repeated DomesticIndexWeightItem items = 1;
+}
+
+/**
+  指数数据爬取服务
+ */
+
+
+// 按照交易所或服务商爬取指数基本信息
+message DomesticIndexInfoFetchByMarketRequest {
+  string market = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticIndexInfoFetchByMarketResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按照交易日范围爬取指数行情
+message DomesticIndexDailyFetchByDateRangeRequest {
+  int64 startDate = 1;
+  int64 endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticIndexDailyFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按照交易日范围爬取指数成分股
+message DomesticIndexWeightFetchByDateRangeRequest {
+  int64 startDate = 1;
+  int64 endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticIndexWeightFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+service DomesticIndexService{
+  rpc getDomesticIndexInfoByTsCode(DomesticIndexInfoByTsCodeRequest) returns (DomesticIndexInfoByTsCodeResponse);
+  rpc searchDomesticIndex(DomesticIndexSearchRequest) returns (DomesticIndexSearchResponse);
+  rpc getDomesticIndexDailyByTsCodeAndDateRange(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
+  rpc getDomesticIndexWeightByTsCodeAndDateRange(DomesticIndexWeightByTsCodeAndDateRangeRequest) returns (DomesticIndexWeightByTsCodeAndDateRangeResponse);
+
+  rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
+  rpc fetchDomesticIndexDailyByDateRange(DomesticIndexDailyFetchByDateRangeRequest) returns (DomesticIndexDailyFetchByDateRangeResponse);
+  rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);
+}

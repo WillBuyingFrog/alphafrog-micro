@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.frontend.controller.domestic;
 
 import com.google.protobuf.util.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.coyote.Response;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -38,4 +39,23 @@ public class DomesticFundController {
 
         return ResponseEntity.ok(jsonResponse);
     }
+
+    @GetMapping("/search")
+    public ResponseEntity<String> searchFundInfo(@RequestParam(name = "query") String query) {
+        DomesticFund.DomesticFundSearchResponse response = domesticFundService.searchDomesticFundInfo(
+                DomesticFund.DomesticFundSearchRequest.newBuilder().setQuery(query).build()
+        );
+
+        // JSON序列化
+        String jsonResponse;
+        try {
+            jsonResponse = JsonFormat.printer().omittingInsignificantWhitespace().print(response);
+        } catch (IOException e) {
+            log.error("Error converting response to JSON: ", e);
+            return ResponseEntity.status(500).body("Internal Server Error");
+        }
+
+        return ResponseEntity.ok(jsonResponse);
+    }
+
 }

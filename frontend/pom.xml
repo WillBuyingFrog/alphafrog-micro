@@ -27,16 +27,6 @@
             <version>2.2.1</version>
         </dependency>
         <dependency>
-            <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java</artifactId>
-            <version>4.28.3</version>
-        </dependency>
-        <dependency>
-            <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java-util</artifactId>
-            <version>4.28.3</version>
-        </dependency>
-        <dependency>
             <groupId>org.apache.dubbo</groupId>
             <artifactId>dubbo-spring-boot-starter</artifactId>
         </dependency>
@@ -68,6 +58,16 @@
             <version>1.0-SNAPSHOT</version>
             <scope>compile</scope>
         </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java</artifactId>
+            <version>${protobuf-java.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>com.google.protobuf</groupId>
+            <artifactId>protobuf-java-util</artifactId>
+            <version>${protobuf-java.version}</version>
+        </dependency>
 
 
 
@@ -92,44 +92,35 @@
     </dependencyManagement>
 
     <build>
-        <plugins>
-            <plugin>
+        <extensions>
+            <extension>
                 <groupId>kr.motd.maven</groupId>
                 <artifactId>os-maven-plugin</artifactId>
-                <version>1.7.1</version>
-                <executions>
-                    <execution>
-                        <id>os-maven-plugin</id>
-                        <phase>initialize</phase>
-                        <goals>
-                            <goal>detect</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
+                <version>1.6.1</version>
+            </extension>
+        </extensions>
+        <plugins>
             <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <version>3.13.0</version>
-                <configuration>
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                            <version>1.18.36</version>
-                        </path>
-                    </annotationProcessorPaths>
-                </configuration>
+                <groupId>org.springframework.boot</groupId>
+                <artifactId>spring-boot-maven-plugin</artifactId>
             </plugin>
-<!--            编译idl-->
             <plugin>
                 <groupId>org.xolstice.maven.plugins</groupId>
                 <artifactId>protobuf-maven-plugin</artifactId>
                 <version>0.6.1</version>
                 <configuration>
-                    <protocArtifact>com.google.protobuf:protoc:3.11.0:exe:${os.detected.classifier}</protocArtifact>
-                    <outputDirectory>${project.build.directory}/generated-sources/java</outputDirectory>
-                    <protoSourceRoot>${project.basedir}/src/main/proto</protoSourceRoot>
+                    <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
+                    <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
+                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot>
+                    <protocPlugins>
+                        <protocPlugin>
+                            <id>dubbo</id>
+                            <groupId>org.apache.dubbo</groupId>
+                            <artifactId>dubbo-compiler</artifactId>
+                            <version>${dubbo.version}</version>
+                            <mainClass>org.apache.dubbo.gen.tri.Dubbo3TripleGenerator</mainClass>
+                        </protocPlugin>
+                    </protocPlugins>
                 </configuration>
                 <executions>
                     <execution>
@@ -158,22 +149,19 @@
                 </executions>
             </plugin>
             <plugin>
-                <groupId>org.springframework.boot</groupId>
-                <artifactId>spring-boot-maven-plugin</artifactId>
-                <version>${spring-boot.version}</version>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-compiler-plugin</artifactId>
+                <version>3.13.0</version>
                 <configuration>
-                    <mainClass>world.willfrog.alphafrogmicro.frontend.FrontendApplication</mainClass>
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                            <version>1.18.36</version>
+                        </path>
+                    </annotationProcessorPaths>
                 </configuration>
-                <executions>
-                    <execution>
-                        <id>repackage</id>
-                        <goals>
-                            <goal>repackage</goal>
-                        </goals>
-                    </execution>
-                </executions>
             </plugin>
-
         </plugins>
     </build>
 
