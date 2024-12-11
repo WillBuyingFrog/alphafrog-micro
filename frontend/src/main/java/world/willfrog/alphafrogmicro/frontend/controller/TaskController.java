@@ -11,8 +11,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.util.Map;
 
-@Controller
-@RequestMapping("/tasks")
+//@Controller
+//@RequestMapping("/tasks")
 public class TaskController {
 
     private final KafkaTemplate<String, String> kafkaTemplate;

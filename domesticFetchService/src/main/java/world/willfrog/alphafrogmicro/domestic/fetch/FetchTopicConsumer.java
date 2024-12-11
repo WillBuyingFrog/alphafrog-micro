@@ -7,13 +7,13 @@ import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.service.domestic.fetch.DomesticFundFetchService;
 
-@Service
+//@Service
 @Slf4j
 public class FetchTopicConsumer {
 
-    private final DomesticFundFetchService domesticFundFetchService;
+    private final DomesticFundFetchServiceImpl domesticFundFetchService;
 
-    public FetchTopicConsumer(DomesticFundFetchService domesticFundFetchService){
+    public FetchTopicConsumer(DomesticFundFetchServiceImpl domesticFundFetchService){
         this.domesticFundFetchService = domesticFundFetchService;
     }
 
@@ -50,7 +50,8 @@ public class FetchTopicConsumer {
                     // 0: 爬取指定交易日范围内的所有基金净值
                     if (taskSubType == 0) {
                         long tradeDateTimestamp = taskParams.getLongValue("trade_date_timestamp");
-                        result = domesticFundFetchService.batchFetchFundNavByTradeDate(tradeDateTimestamp);
+//                        result = domesticFundFetchService.fetchDomesticFundNavByTradeDateAsync(tradeDateTimestamp);
+                        result = -1;
                     } else {
                         result = -1;
                     }
