@@ -20,6 +20,8 @@
             <scope>test</scope>
         </dependency>
 
+<!--        Spring必需组件与微服务治理-->
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter</artifactId>

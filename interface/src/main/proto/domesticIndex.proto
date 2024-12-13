@@ -167,7 +167,9 @@ service DomesticIndexService{
   rpc searchDomesticIndex(DomesticIndexSearchRequest) returns (DomesticIndexSearchResponse);
   rpc getDomesticIndexDailyByTsCodeAndDateRange(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
   rpc getDomesticIndexWeightByTsCodeAndDateRange(DomesticIndexWeightByTsCodeAndDateRangeRequest) returns (DomesticIndexWeightByTsCodeAndDateRangeResponse);
+}
 
+service DomesticIndexFetchService {
   rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
   rpc fetchDomesticIndexDailyByDateRange(DomesticIndexDailyFetchByDateRangeRequest) returns (DomesticIndexDailyFetchByDateRangeResponse);
   rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);

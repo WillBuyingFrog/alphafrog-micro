@@ -1,0 +1,28 @@
+spring:
+  application:
+    name: domestic-fetch-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
+  data:
+    redis:
+      host: ${AF_REDIS_HOST:127.0.0.1}
+      port: 6379
+      password: ${AF_REDIS_PASSWORD:default}
+
+dubbo:
+  application:
+    name: domestic-index-service
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  #    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848?username=${NACOS_USER:nacos}&password=${NACOS_PASSWORD:nacos}
+  protocol:
+    port: 50053
+    name: tri
+  consumer:
+    check: false
+
+tushare:
+  token: ${TUSHARE_TOKEN}
