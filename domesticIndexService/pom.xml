@@ -170,7 +170,7 @@
                 <configuration>
                     <archive>
                         <manifest>
-                            <mainClass>world.willfrog.alphafrogmicro.domestic.fund.DomesticFundServiceImplApplication</mainClass>
+                            <mainClass>world.willfrog.alphafrogmicro.domestic.index.DomesticIndexServiceImplApplication</mainClass>
                         </manifest>
                     </archive>
                 </configuration>
