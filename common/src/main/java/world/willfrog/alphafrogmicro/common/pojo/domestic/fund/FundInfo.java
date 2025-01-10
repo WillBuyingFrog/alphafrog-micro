@@ -9,7 +9,6 @@ import java.util.Objects;
 @Entity
 @Getter
 @Setter
-@ToString
 @NoArgsConstructor
 @Table(name = "alphafrog_fund_info",
         uniqueConstraints = {

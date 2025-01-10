@@ -1,6 +1,7 @@
 package world.willfrog.alphafrogmicro.frontend.controller;
 
 import com.alibaba.fastjson2.JSONObject;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.kafka.core.KafkaTemplate;
@@ -11,8 +12,9 @@ import org.springframework.web.bind.annotation.RequestMapping;
 
 import java.util.Map;
 
-//@Controller
-//@RequestMapping("/tasks")
+@Controller
+@Slf4j
+@RequestMapping("/tasks")
 public class TaskController {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
@@ -34,6 +36,7 @@ public class TaskController {
             String message = taskConfigJSON.toString();
             kafkaTemplate.send(topic, message);
         } catch (Exception e) {
+            log.error("Failed to create task", e);
             res.put("message", "Failed to create task");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(res.toString());
         }

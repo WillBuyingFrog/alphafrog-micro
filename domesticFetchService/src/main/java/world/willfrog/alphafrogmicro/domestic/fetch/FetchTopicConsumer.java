@@ -5,17 +5,18 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.service.domestic.fetch.DomesticFundFetchService;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
 
-//@Service
+@Service
 @Slf4j
 public class FetchTopicConsumer {
 
-    private final DomesticFundFetchServiceImpl domesticFundFetchService;
+    private final DomesticIndexFetchServiceImpl domesticIndexFetchService;
 
-    public FetchTopicConsumer(DomesticFundFetchServiceImpl domesticFundFetchService){
-        this.domesticFundFetchService = domesticFundFetchService;
+    public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService){
+        this.domesticIndexFetchService = domesticIndexFetchService;
     }
+
 
     @KafkaListener(topics = "fetch_topic", groupId = "alphafrog-micro")
     public void listenFetchTask(String message, Acknowledgment acknowledgment){
@@ -41,20 +42,24 @@ public class FetchTopicConsumer {
                     result = -1;
                     break;
                 case "index_quote":
-                    result = -1;
+                    if(taskSubType == 1) {
+                        long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticIndexDailyFetchByTradeDateRequest request =
+                                DomesticIndex.DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
+                                .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build();
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyByTradeDate(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
                     break;
                 case "fund_info":
                     result = -1;
                     break;
                 case "fund_nav":
                     // 0: 爬取指定交易日范围内的所有基金净值
-                    if (taskSubType == 0) {
-                        long tradeDateTimestamp = taskParams.getLongValue("trade_date_timestamp");
-//                        result = domesticFundFetchService.fetchDomesticFundNavByTradeDateAsync(tradeDateTimestamp);
-                        result = -1;
-                    } else {
-                        result = -1;
-                    }
+                    result = -1;
                     break;
                 default:
                     result = -2;
@@ -64,6 +69,7 @@ public class FetchTopicConsumer {
             log.info("Task result : {}", result);
         } catch (Exception e){
             log.error("Failed to start task: {}", message);
+            log.error("Stack trace", e);
             acknowledgment.acknowledge();
         }
     }

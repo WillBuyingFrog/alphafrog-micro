@@ -5,13 +5,17 @@ import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -21,11 +25,14 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     private final TuShareRequestUtils tuShareRequestUtils;
     private final DomesticIndexStoreUtils domesticIndexStoreUtils;
+    private final IndexInfoDao indexInfoDao;
 
     public DomesticIndexFetchServiceImpl(TuShareRequestUtils tuShareRequestUtils,
-                                         DomesticIndexStoreUtils domesticIndexStoreUtils) {
+                                         DomesticIndexStoreUtils domesticIndexStoreUtils,
+                                         IndexInfoDao indexInfoDao) {
         this.tuShareRequestUtils = tuShareRequestUtils;
         this.domesticIndexStoreUtils = domesticIndexStoreUtils;
+        this.indexInfoDao = indexInfoDao;
     }
 
 
@@ -73,6 +80,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
     public DomesticIndexDailyFetchByDateRangeResponse fetchDomesticIndexDailyByDateRange(
             DomesticIndexDailyFetchByDateRangeRequest request) {
 
+        String tsCode = request.getTsCode();
         long startDateTimestamp = request.getStartDate();
         long endDateTimestamp = request.getEndDate();
         int limit = request.getLimit();
@@ -82,6 +90,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "index_daily");
+        queryParams.put("ts_code", tsCode);
         queryParams.put("start_date", DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd"));
         queryParams.put("end_date", DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd"));
         queryParams.put("limit", limit);
@@ -108,6 +117,76 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             return DomesticIndexDailyFetchByDateRangeResponse.newBuilder().setStatus("success")
                     .setFetchedItemsCount(result).build();
         }
+
+    }
+
+    @Override
+    public DomesticIndexDailyFetchByTradeDateResponse fetchDomesticIndexDailyByTradeDate(
+            DomesticIndexDailyFetchByTradeDateRequest request
+    ) {
+
+        // 从本地数据源中获得所有要爬取的指数
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(request.getOffset(), request.getLimit());
+
+        if (allTsCode.isEmpty()) {
+            log.error("No index info found in the database.");
+            return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        long tradeDateTimestamp = request.getTradeDate();
+
+        int _counter = 0;
+
+        for (String tsCode : allTsCode) {
+
+            // 对每个指数代码，爬取并储存指定日期的行情数据
+            Map<String, Object> params = new HashMap<>();
+            Map<String, Object> queryParams = new HashMap<>();
+
+            params.put("api_name", "index_daily");
+            queryParams.put("ts_code", tsCode);
+            queryParams.put("trade_date", DateConvertUtils.convertTimestampToString(tradeDateTimestamp, "yyyyMMdd"));
+            params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
+            params.put("params", queryParams);
+
+            // 爬取
+            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+            if (response == null) {
+                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(-1).build();
+            }
+
+            JSONArray data = response.getJSONObject("data").getJSONArray("items");
+            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+
+            // 储存
+            int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
+
+            if (_result < 0) {
+                log.error("Failed to store index daily data for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
+                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(-1).build();
+            }
+
+            _counter++;
+
+            // 调试用输出
+            if(_counter % 200 == 0) {
+                log.info("Fetched {} IndexDaily items from trade date {}", _counter, tradeDateTimestamp);
+            }
+
+            try{
+                Thread.sleep(500);
+            } catch (InterruptedException e) {
+                log.error("Thread sleep interrupted.");
+            }
+        }
+
+        return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(_counter).build();
 
     }
 

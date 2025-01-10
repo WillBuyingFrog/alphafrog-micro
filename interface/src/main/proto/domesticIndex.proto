@@ -58,6 +58,16 @@ message DomesticIndexSearchResponse {
   repeated DomesticIndexInfoSimpleItem items = 1;
 }
 
+// 获得所有指数基本信息
+message DomesticIndexAllRequest {
+  int32 offset = 1;
+  int32 limit = 2;
+}
+
+message DomesticIndexAllResponse {
+  repeated DomesticIndexInfoSimpleItem items = 1;
+}
+
 
 /**
   指数行情--实体类消息
@@ -81,7 +91,7 @@ message DomesticIndexDailyItem {
   指数行情--服务间通信用消息
  */
 
-
+// 根据时间范围获取单一指数行情
 message DomesticIndexDailyByTsCodeAndDateRangeRequest {
   string tsCode = 1;
   int64 startDate = 2;
@@ -138,13 +148,26 @@ message DomesticIndexInfoFetchByMarketResponse {
 
 // 按照交易日范围爬取指数行情
 message DomesticIndexDailyFetchByDateRangeRequest {
-  int64 startDate = 1;
-  int64 endDate = 2;
-  int32 offset = 3;
-  int32 limit = 4;
+  string tsCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+  int32 offset = 4;
+  int32 limit = 5;
 }
 
 message DomesticIndexDailyFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按照指定交易日爬取所有指数行情
+message DomesticIndexDailyFetchByTradeDateRequest {
+  int64 tradeDate = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticIndexDailyFetchByTradeDateResponse {
   string status = 1;
   int32 fetchedItemsCount = 2;
 }
@@ -162,15 +185,40 @@ message DomesticIndexWeightFetchByDateRangeResponse {
   int32 fetchedItemsCount = 2;
 }
 
+
+/**
+  交易日历爬取服务
+ */
+
+// 按照日期范围爬取交易日历
+message DomesticTradeCalendarFetchByDateRangeRequest {
+  int64 startDate = 1;
+  int64 endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticTradeCalendarFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
 service DomesticIndexService{
   rpc getDomesticIndexInfoByTsCode(DomesticIndexInfoByTsCodeRequest) returns (DomesticIndexInfoByTsCodeResponse);
   rpc searchDomesticIndex(DomesticIndexSearchRequest) returns (DomesticIndexSearchResponse);
   rpc getDomesticIndexDailyByTsCodeAndDateRange(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
+  rpc getDomesticIndexDailyByTradeDate(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
   rpc getDomesticIndexWeightByTsCodeAndDateRange(DomesticIndexWeightByTsCodeAndDateRangeRequest) returns (DomesticIndexWeightByTsCodeAndDateRangeResponse);
 }
 
 service DomesticIndexFetchService {
   rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
   rpc fetchDomesticIndexDailyByDateRange(DomesticIndexDailyFetchByDateRangeRequest) returns (DomesticIndexDailyFetchByDateRangeResponse);
+  rpc fetchDomesticIndexDailyByTradeDate(DomesticIndexDailyFetchByTradeDateRequest) returns (DomesticIndexDailyFetchByTradeDateResponse);
   rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);
+}
+
+service DomesticTradeCalendarFetchService {
+  rpc fetchDomesticTradeCalendarByDateRange(DomesticTradeCalendarFetchByDateRangeRequest) returns (DomesticTradeCalendarFetchByDateRangeResponse);
 }

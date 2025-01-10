@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.common.dao.domestic.index;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 
@@ -27,7 +28,7 @@ public interface IndexInfoDao {
     @Select("SELECT count(*) FROM alphafrog_index_info")
     int getIndexInfoCount();
 
-    @Select("SELECT (ts_code) from alphafrog_index_info limit ${limit} offset ${offset}")
-    List<String> getAllIndexInfoTsCodes(int offset, int limit);
+    @Select("SELECT (ts_code) from alphafrog_index_info limit #{limit} offset #{offset}")
+    List<String> getAllIndexInfoTsCodes(@Param("offset") int offset,@Param("limit") int limit);
 
 }
