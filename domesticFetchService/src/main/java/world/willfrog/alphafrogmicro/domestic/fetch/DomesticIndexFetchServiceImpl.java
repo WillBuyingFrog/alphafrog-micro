@@ -179,7 +179,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             }
 
             try{
-                Thread.sleep(500);
+                Thread.sleep(300);
             } catch (InterruptedException e) {
                 log.error("Thread sleep interrupted.");
             }
