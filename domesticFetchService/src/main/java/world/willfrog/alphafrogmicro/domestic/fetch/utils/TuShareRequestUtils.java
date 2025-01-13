@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.domestic.fetch.utils;
 
 import java.util.Map;
 
+import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.client5.http.classic.methods.HttpPost;
@@ -20,6 +21,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 @Component
+@Slf4j
 //@PropertySource("classpath:application.yml")
 public class TuShareRequestUtils {
 
@@ -37,7 +39,6 @@ public class TuShareRequestUtils {
                 jsonParams.put(entry.getKey(), entry.getValue());
             }
             String jsonParamsString = jsonParams.toString();
-            System.out.println("jsonParamsString: " + jsonParamsString);
             StringEntity entity = new StringEntity(jsonParamsString, ContentType.APPLICATION_JSON);
             request.setEntity(entity);
 
@@ -57,7 +58,10 @@ public class TuShareRequestUtils {
                     return null;
                 }
             } catch (Exception e) {
-                e.printStackTrace();
+                log.error("Error occurred while fetching data from TuShare!");
+                log.error("jsonParamString: " + jsonParamsString);
+                log.error("Error stack trace", e);
+//                e.printStackTrace();
                 return null;
             }
 
