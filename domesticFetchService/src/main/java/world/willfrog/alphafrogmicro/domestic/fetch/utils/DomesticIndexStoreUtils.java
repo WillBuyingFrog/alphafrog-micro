@@ -190,23 +190,34 @@ public class DomesticIndexStoreUtils {
         int totalAffected = 0;
         int batchSize = 50;
         String[] tsCodes = new String[indexDailyList.size()];
-        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH, false)) {
-            IndexQuoteDao dao = sqlSession.getMapper(IndexQuoteDao.class);
-            for (IndexDaily daily : indexDailyList) {
-                tsCodes[totalAffected] = daily.getTsCode();
+//        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH, false)) {
+//            IndexQuoteDao dao = sqlSession.getMapper(IndexQuoteDao.class);
+//            for (IndexDaily daily : indexDailyList) {
+//                tsCodes[totalAffected] = daily.getTsCode();
+//                totalAffected++;
+//                dao.insertIndexDaily(daily);
+////                if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
+////                    sqlSession.commit();
+////                }
+//            }
+//            sqlSession.commit();
+//            log.info("All TsCodes: {}", tsCodes);
+//        } catch ( Exception e ){
+//            log.error("Error occurred while inserting index daily data", e);
+//            return -2;
+//        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.SIMPLE)) {
+            IndexQuoteDao indexQuoteDao = sqlSession.getMapper(IndexQuoteDao.class);
+            for (IndexDaily indexDaily : indexDailyList) {
+                indexQuoteDao.insertIndexDaily(indexDaily);
                 totalAffected++;
-                dao.insertIndexDaily(daily);
-//                if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
-//                    sqlSession.commit();
-//                }
             }
             sqlSession.commit();
-            log.info("All TsCodes: {}", tsCodes);
-        } catch ( Exception e ){
+        } catch (Exception e) {
             log.error("Error occurred while inserting index daily data", e);
             return -2;
         }
-
 
 
         return totalAffected;
