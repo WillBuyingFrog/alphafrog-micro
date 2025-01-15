@@ -189,18 +189,23 @@ public class DomesticIndexStoreUtils {
         }
         int totalAffected = 0;
         int batchSize = 50;
+        String[] tsCodes = new String[indexDailyList.size()];
         try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
             IndexQuoteDao dao = sqlSession.getMapper(IndexQuoteDao.class);
             for (IndexDaily daily : indexDailyList) {
+                tsCodes[totalAffected] = daily.getTsCode();
                 totalAffected++;
                 dao.insertIndexDaily(daily);
                 if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
                     log.info("Flushing all statements");
                     sqlSession.flushStatements();
+                    sqlSession.commit();
                     sqlSession.clearCache();
+
                 }
             }
             sqlSession.commit();
+            log.info("All TsCodes: {}", tsCodes);
         } catch ( Exception e ){
             log.error("Error occurred while inserting index daily data", e);
             return -2;
