@@ -210,8 +210,7 @@ public class DomesticIndexStoreUtils {
         try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.SIMPLE)) {
             IndexQuoteDao indexQuoteDao = sqlSession.getMapper(IndexQuoteDao.class);
             for (IndexDaily indexDaily : indexDailyList) {
-                indexQuoteDao.insertIndexDaily(indexDaily);
-                totalAffected++;
+                totalAffected += indexQuoteDao.insertIndexDaily(indexDaily);
             }
             sqlSession.commit();
         } catch (Exception e) {
