@@ -196,13 +196,9 @@ public class DomesticIndexStoreUtils {
                 tsCodes[totalAffected] = daily.getTsCode();
                 totalAffected++;
                 dao.insertIndexDaily(daily);
-                if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
-                    log.info("Flushing all statements");
-                    sqlSession.flushStatements();
-                    sqlSession.commit();
-                    sqlSession.clearCache();
-
-                }
+//                if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
+//                    sqlSession.commit();
+//                }
             }
             sqlSession.commit();
             log.info("All TsCodes: {}", tsCodes);
