@@ -59,10 +59,18 @@ public class DomesticFundStoreUtils {
 
             // 批量插入数据的写法，详见
             // https://github.com/mybatis/mybatis-3/wiki/FAQ#how-do-i-code-a-batch-insert
+            // https://stackoverflow.com/questions/56513222/fastest-way-to-update-huge-number-of-rows-with-input-param-listt-in-mybatis-to/56515063#56515063
             try ( SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH) ) {
                 FundNavDao fundNavDao = sqlSession.getMapper(FundNavDao.class);
+                int i = 0;
+                int batchSize = 50;
                 for (FundNav fundNav : fundNavList) {
+                    i++;
                     fundNavDao.insertFundNav(fundNav);
+                    if (i % batchSize == 0 || i == fundNavList.size()) {
+                        sqlSession.flushStatements();
+                        sqlSession.clearCache();
+                    }
                 }
                 sqlSession.commit();
             } catch (Exception e) {
@@ -133,10 +141,16 @@ public class DomesticFundStoreUtils {
                 fundInfoList.add(fundInfo);
             }
 
+            int batchSize = 5;
             try ( SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
                 FundInfoDao fundInfoDao = sqlSession.getMapper(FundInfoDao.class);
                 for (FundInfo fundInfo : fundInfoList) {
-                    affectedRows += fundInfoDao.insertFundInfo(fundInfo);
+                    affectedRows++;
+                    fundInfoDao.insertFundInfo(fundInfo);
+                    if (affectedRows % batchSize == 0 || affectedRows == fundInfoList.size()) {
+                        sqlSession.flushStatements();
+                        sqlSession.clearCache();
+                    }
                 }
                 sqlSession.commit();
             } catch (Exception e) {
@@ -160,6 +174,7 @@ public class DomesticFundStoreUtils {
         List<FundPortfolio> fundPortfolioList = new ArrayList<>();
 
         int affectedRows = 0;
+        int batchSize = 50;
 
         try {
             for (int i = 0; i < data.size(); i++) {
@@ -185,7 +200,12 @@ public class DomesticFundStoreUtils {
             try ( SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH) ) {
                 FundPortfolioDao fundPortfolioDao = sqlSession.getMapper(FundPortfolioDao.class);
                 for (FundPortfolio fundPortfolio : fundPortfolioList) {
-                    affectedRows += fundPortfolioDao.insertFundPortfolio(fundPortfolio);
+                    affectedRows++;
+                    fundPortfolioDao.insertFundPortfolio(fundPortfolio);
+                    if (affectedRows % batchSize == 0 || affectedRows == fundPortfolioList.size()) {
+                        sqlSession.flushStatements();
+                        sqlSession.clearCache();
+                    }
                 }
                 sqlSession.commit();
             } catch (Exception e) {

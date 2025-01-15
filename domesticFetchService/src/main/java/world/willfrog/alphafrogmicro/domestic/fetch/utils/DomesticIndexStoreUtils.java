@@ -188,11 +188,16 @@ public class DomesticIndexStoreUtils {
             return -1;
         }
         int totalAffected = 0;
-        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.SIMPLE)) {
+        int batchSize = 50;
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
             IndexQuoteDao dao = sqlSession.getMapper(IndexQuoteDao.class);
             for (IndexDaily daily : indexDailyList) {
-//                log.info("Inserting index daily data: {}", daily);
-                totalAffected += dao.insertIndexDaily(daily);
+                totalAffected++;
+                dao.insertIndexDaily(daily);
+                if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
+                    sqlSession.flushStatements();
+                    sqlSession.clearCache();
+                }
             }
             sqlSession.commit();
         } catch ( Exception e ){
