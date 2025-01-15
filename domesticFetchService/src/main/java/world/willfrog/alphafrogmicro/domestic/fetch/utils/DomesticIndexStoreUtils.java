@@ -187,11 +187,12 @@ public class DomesticIndexStoreUtils {
             log.error("Error occurred while converting raw TuShare data to IndexDaily", e);
             return -1;
         }
-
-        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
-            IndexQuoteDao indexQuoteDao = sqlSession.getMapper(IndexQuoteDao.class);
-            for (IndexDaily indexDaily : indexDailyList) {
-                indexQuoteDao.insertIndexDaily(indexDaily);
+        int totalAffected = 0;
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.SIMPLE)) {
+            IndexQuoteDao dao = sqlSession.getMapper(IndexQuoteDao.class);
+            for (IndexDaily daily : indexDailyList) {
+//                log.info("Inserting index daily data: {}", daily);
+                totalAffected += dao.insertIndexDaily(daily);
             }
             sqlSession.commit();
         } catch ( Exception e ){
@@ -199,7 +200,7 @@ public class DomesticIndexStoreUtils {
             return -2;
         }
 
-        return indexDailyList.size();
+        return totalAffected;
     }
 
     public int storeIndexWeightByRawTuShareOutput(JSONArray data, JSONArray fields) {

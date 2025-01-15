@@ -35,10 +35,9 @@ public class TuShareRequestUtils {
 
             JSONObject jsonParams = new JSONObject();
             jsonParams.put("token", tushareToken);
-            for (Map.Entry<String, Object> entry : params.entrySet()) {
-                jsonParams.put(entry.getKey(), entry.getValue());
-            }
+            jsonParams.putAll(params);
             String jsonParamsString = jsonParams.toString();
+            log.info("[DEBUG] jsonParamsString: " + jsonParamsString);
             StringEntity entity = new StringEntity(jsonParamsString, ContentType.APPLICATION_JSON);
             request.setEntity(entity);
 

@@ -8,37 +8,37 @@ import lombok.Setter;
 @Setter
 public class Quote {
     @Column(name = "ts_code")
-    String tsCode;
+    public String tsCode;
 
     @Column(name = "trade_date")
-    Long tradeDate;
+    public Long tradeDate;
 
     @Column(name = "close")
-    Double close;
+    public Double close;
 
     @Column(name = "open")
-    Double open;
+    public Double open;
 
     @Column(name = "high")
-    Double high;
+    public Double high;
 
     @Column(name = "low")
-    Double low;
+    public Double low;
 
     @Column(name = "pre_close")
-    Double preClose;
+    public Double preClose;
 
     @Column(name = "change")
-    Double change;
+    public Double change;
 
     @Column(name = "pct_chg")
-    Double pctChg;
+    public Double pctChg;
 
     @Column(name = "vol")
-    Double vol;
+    public Double vol;
 
     @Column(name = "amount")
-    Double amount;
+    public Double amount;
 
 
     @Override

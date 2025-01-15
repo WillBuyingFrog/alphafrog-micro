@@ -168,10 +168,10 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             if (_result < 0) {
                 log.error("Failed to store index daily data for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
                 return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(-1).build();
+                        .setFetchedItemsCount(_result).build();
             }
 
-            _counter++;
+            _counter += _result;
 
             // 调试用输出
             if(_counter % 200 == 0) {

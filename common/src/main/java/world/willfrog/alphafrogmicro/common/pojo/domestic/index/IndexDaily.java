@@ -21,4 +21,22 @@ public class IndexDaily extends Quote {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long indexDailyId;
 
+    @Override
+    public String toString() {
+        return "IndexDaily{" +
+                "indexDailyId=" + indexDailyId +
+                ", tsCode='" + tsCode + '\'' +
+                ", tradeDate=" + tradeDate +
+                ", close=" + close +
+                ", open=" + open +
+                ", high=" + high +
+                ", low=" + low +
+                ", preClose=" + preClose +
+                ", change=" + change +
+                ", pctChg=" + pctChg +
+                ", vol=" + vol +
+                ", amount=" + amount +
+                '}';
+    }
+
 }
