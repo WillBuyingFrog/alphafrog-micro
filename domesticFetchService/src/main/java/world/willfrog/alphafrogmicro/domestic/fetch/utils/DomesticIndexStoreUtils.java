@@ -195,6 +195,7 @@ public class DomesticIndexStoreUtils {
                 totalAffected++;
                 dao.insertIndexDaily(daily);
                 if (totalAffected % batchSize == 0 || totalAffected == indexDailyList.size()) {
+                    log.info("Flushing all statements");
                     sqlSession.flushStatements();
                     sqlSession.clearCache();
                 }

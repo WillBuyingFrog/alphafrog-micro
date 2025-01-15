@@ -173,10 +173,6 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
             _counter += _result;
 
-            // 调试用输出
-            if(_counter % 200 == 0) {
-                log.info("Fetched {} IndexDaily items from trade date {}", _counter, tradeDateTimestamp);
-            }
 
             try{
                 Thread.sleep(300);
