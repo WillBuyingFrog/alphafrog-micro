@@ -8,7 +8,7 @@ import java.util.List;
 
 public interface IndexQuoteDao {
     @Insert("INSERT INTO alphafrog_index_daily (ts_code, trade_date, close, open, high, low, pre_close, change, pct_chg, vol, amount) " +
-            "VALUES (#{tsCode}, #{tradeDate}, #{close}, #{open}, #{high}, #{low}, #{preClose}, #{change}, #{pctChg}, #{vol}, #{amount})" +
+            "VALUES (#{tsCode}, #{tradeDate,jdbcType=BIGINT}, #{close}, #{open}, #{high}, #{low}, #{preClose}, #{change}, #{pctChg}, #{vol}, #{amount})" +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertIndexDaily(IndexDaily indexDaily);
 
