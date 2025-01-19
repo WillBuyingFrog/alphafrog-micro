@@ -13,7 +13,8 @@ public interface StockQuoteDao {
     @Insert({
             "INSERT INTO alphafrog_stock_daily (ts_code, trade_date, close, open, high, low, pre_close, change, pct_chg, vol, amount) " +
                     "VALUES (#{tsCode}, #{tradeDate}, #{close}, #{open}, #{high}, #{low}, #{preClose}, #{change}," +
-                    " #{pctChg}, #{vol}, #{amount})"
+                    " #{pctChg}, #{vol}, #{amount})" +
+                    "ON CONFLICT(ts_code, trade_date) DO NOTHING"
     })
     int insertStockDaily(StockDaily stockDaily);
 
