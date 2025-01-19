@@ -37,7 +37,6 @@ public class TaskController {
             kafkaTemplate.send(topic, message);
         } catch (Exception e) {
             log.error("Failed to create task", e);
-            e.printStackTrace();
             res.put("message", "Failed to create task");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(res.toString());
         }

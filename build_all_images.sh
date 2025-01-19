@@ -1,0 +1,5 @@
+bash domesticFetchService/docker_build.sh
+bash domesticFundService/docker_build.sh
+bash domesticIndexService/docker_build.sh
+bash domesticStockService/docker_build.sh
+bash frontend/docker_build.sh

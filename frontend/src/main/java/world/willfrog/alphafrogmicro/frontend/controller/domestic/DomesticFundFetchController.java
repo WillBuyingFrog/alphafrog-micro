@@ -17,7 +17,7 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class DomesticFundFetchController {
 
-    @DubboReference(timeout = 12000)
+    @DubboReference(timeout = 25000)
     private DomesticFundFetchService domesticFundFetchService;
 
     @GetMapping("/info/market")

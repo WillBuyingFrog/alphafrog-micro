@@ -1,0 +1,164 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.domestic.idl;
+
+/**
+  股票基本信息
+ */
+
+/**
+  股票基本信息--实体类消息
+ */
+
+
+// 包含所有（可能存在的）字段的信息
+message DomesticStockInfoFullItem {
+  int64 stockInfoId = 1;
+  string tsCode = 2;
+  string symbol = 3;
+  string name = 4;
+  optional string area = 5;
+  optional string industry = 6;
+  optional string fullName = 7;
+  optional string enName = 8;
+  optional string cnspell = 9;
+  optional string market = 10;
+  optional string exchange = 11;
+  optional string currType = 12;
+  optional string listStatus = 13;
+  optional int64 listDate = 14;
+  optional int64 delistDate = 15;
+  optional string isHs = 16;
+  optional string actName = 17;
+  optional string actEntType = 18;
+}
+
+// 股票搜索场景下，只需要返回简单信息
+message DomesticStockInfoSimpleItem {
+  string tsCode = 1;
+  string symbol = 2;
+  string name = 3;
+  string area = 4;
+  string industry = 5;
+}
+
+/**
+  股票基本信息-服务间通信用消息
+ */
+
+
+// 根据TsCode查询股票详情
+
+message DomesticStockInfoByTsCodeRequest {
+  string tsCode = 1;
+}
+
+message DomesticStockInfoByTsCodeResponse {
+  DomesticStockInfoFullItem item = 1;
+}
+
+// 根据关键词搜索股票
+
+message DomesticStockSearchRequest {
+  string query = 1;
+}
+
+message DomesticStockSearchResponse {
+  repeated DomesticStockInfoSimpleItem items = 1;
+}
+
+
+/**
+  股票行情--实体类消息
+ */
+
+message DomesticStockDailyItem {
+  int64 stockDailyId = 1;
+  string tsCode = 2;
+  int64 tradeDate = 3;
+  double close = 4;
+  double open = 5;
+  double high = 6;
+  double low = 7;
+  double preClose = 8;
+  double change = 9;
+  double pctChg = 10;
+  double vol = 11;
+  double amount = 12;
+}
+
+
+/**
+  股票行情-服务间通信用消息
+ */
+
+// 根据时间范围获取单一股票行情
+
+message DomesticStockDailyByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message DomesticStockDailyByTsCodeAndDateRangeResponse {
+  repeated DomesticStockDailyItem items = 1;
+}
+
+// 根据交易日获取全市场行情
+
+message DomesticStockDailyByTradeDateRequest {
+  int64 tradeDate = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticStockDailyByTradeDateResponse {
+  repeated DomesticStockDailyItem items = 1;
+  // 未来可以添加更多自定义分析字段
+}
+
+/**
+  股票数据爬取服务
+ */
+
+// 按照上市交易所爬取股票基本信息
+
+message DomesticStockInfoFetchByMarketRequest {
+  string market = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+
+message DomesticStockInfoFetchByMarketResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按照交易日爬取股票日线行情
+
+message DomesticStockDailyFetchByTradeDateRequest {
+  int64 tradeDate = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticStockDailyFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
+
+service DomesticStockService {
+  rpc getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest) returns (DomesticStockInfoByTsCodeResponse);
+  rpc searchStock(DomesticStockSearchRequest) returns (DomesticStockSearchResponse);
+  rpc getStockDailyByTsCodeAndDateRange(DomesticStockDailyByTsCodeAndDateRangeRequest) returns (DomesticStockDailyByTsCodeAndDateRangeResponse);
+  rpc getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest) returns (DomesticStockDailyByTradeDateResponse);
+}
+
+
+service DomesticStockFetchService {
+  rpc fetchStockInfoByMarket(DomesticStockInfoFetchByMarketRequest) returns (DomesticStockInfoFetchByMarketResponse);
+  rpc fetchStockDailyByTradeDate(DomesticStockDailyFetchByTradeDateRequest) returns (DomesticStockDailyFetchByTradeDateResponse);
+}
