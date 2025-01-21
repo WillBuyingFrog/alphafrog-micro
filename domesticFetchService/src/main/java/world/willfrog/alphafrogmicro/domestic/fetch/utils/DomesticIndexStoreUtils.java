@@ -154,13 +154,25 @@ public class DomesticIndexStoreUtils {
                             indexDaily.setClose(item.getBigDecimal(j).doubleValue());
                             break;
                         case "open":
-                            indexDaily.setOpen(item.getBigDecimal(j).doubleValue());
+                            if (item.getBigDecimal(j) == null) {
+                                indexDaily.setOpen(null);
+                            } else {
+                                indexDaily.setOpen(item.getBigDecimal(j).doubleValue());
+                            }
                             break;
                         case "high":
-                            indexDaily.setHigh(item.getBigDecimal(j).doubleValue());
+                            if (item.getBigDecimal(j) == null) {
+                                indexDaily.setHigh(null);
+                            } else {
+                                indexDaily.setHigh(item.getBigDecimal(j).doubleValue());
+                            }
                             break;
                         case "low":
-                            indexDaily.setLow(item.getBigDecimal(j).doubleValue());
+                            if (item.getBigDecimal(j) == null) {
+                                indexDaily.setLow(null);
+                            } else {
+                                indexDaily.setLow(item.getBigDecimal(j).doubleValue());
+                            }
                             break;
                         case "pre_close":
                             indexDaily.setPreClose(item.getBigDecimal(j).doubleValue());
@@ -172,10 +184,18 @@ public class DomesticIndexStoreUtils {
                             indexDaily.setPctChg(item.getBigDecimal(j).doubleValue());
                             break;
                         case "vol":
-                            indexDaily.setVol(item.getBigDecimal(j).doubleValue());
+                            if (item.getBigDecimal(j) == null) {
+                                indexDaily.setVol(null);
+                            } else {
+                                indexDaily.setVol(item.getBigDecimal(j).doubleValue());
+                            }
                             break;
                         case "amount":
-                            indexDaily.setAmount(item.getBigDecimal(j).doubleValue());
+                            if (item.getBigDecimal(j) == null) {
+                                indexDaily.setAmount(null);
+                            } else {
+                                indexDaily.setAmount(item.getBigDecimal(j).doubleValue());
+                            }
                             break;
                         default:
                             break;
@@ -207,16 +227,6 @@ public class DomesticIndexStoreUtils {
             return -2;
         }
 
-//        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.SIMPLE)) {
-//            IndexQuoteDao indexQuoteDao = sqlSession.getMapper(IndexQuoteDao.class);
-//            for (IndexDaily indexDaily : indexDailyList) {
-//                totalAffected += indexQuoteDao.insertIndexDaily(indexDaily);
-//            }
-//            sqlSession.commit();
-//        } catch (Exception e) {
-//            log.error("Error occurred while inserting index daily data", e);
-//            return -2;
-//        }
 
 
         return totalAffected;

@@ -77,14 +77,14 @@ message DomesticIndexDailyItem {
   string tsCode = 1;
   int64 tradeDate = 2;
   double close = 3;
-  double open = 4;
-  double high = 5;
-  double low = 6;
+  optional double open = 4;
+  optional double high = 5;
+  optional double low = 6;
   double preClose = 7;
   double change = 8;
   double pctChg = 9;
-  double vol = 10;
-  double amount = 11;
+  optional double vol = 10;
+  optional double amount = 11;
 }
 
 /**
