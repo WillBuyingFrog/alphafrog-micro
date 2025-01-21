@@ -8,6 +8,7 @@ import org.springframework.context.annotation.ComponentScan;
 @SpringBootApplication
 @EnableDubbo
 @ComponentScan("world.willfrog.alphafrogmicro.frontend.controller.domestic")
+@ComponentScan("world.willfrog.alphafrogmicro.frontend.controller")
 public class FrontendApplication {
 
     public static void main(String[] args) {
