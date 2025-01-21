@@ -9,7 +9,7 @@ import lombok.*;
 @Entity
 @Table(name = "alphafrog_stock_info",
         uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"ts_code"})
+                @UniqueConstraint(columnNames = {"ts_code", "symbol"})
         })
 public class StockInfo {
 

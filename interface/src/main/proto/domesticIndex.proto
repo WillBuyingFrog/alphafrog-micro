@@ -146,7 +146,7 @@ message DomesticIndexInfoFetchByMarketResponse {
   int32 fetchedItemsCount = 2;
 }
 
-// 按照交易日范围爬取指数行情
+// 按照交易日范围爬取指定指数行情
 message DomesticIndexDailyFetchByDateRangeRequest {
   string tsCode = 1;
   int64 startDate = 2;
@@ -168,6 +168,20 @@ message DomesticIndexDailyFetchByTradeDateRequest {
 }
 
 message DomesticIndexDailyFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按照指定交易日范围爬取所有指数行情
+
+message DomesticindexDailyFetchAllByDateRangeRequest {
+  int64 startDate = 1;
+  int64 endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticIndexDailyFetchAllByDateRangeResponse {
   string status = 1;
   int32 fetchedItemsCount = 2;
 }
@@ -216,6 +230,7 @@ service DomesticIndexFetchService {
   rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
   rpc fetchDomesticIndexDailyByDateRange(DomesticIndexDailyFetchByDateRangeRequest) returns (DomesticIndexDailyFetchByDateRangeResponse);
   rpc fetchDomesticIndexDailyByTradeDate(DomesticIndexDailyFetchByTradeDateRequest) returns (DomesticIndexDailyFetchByTradeDateResponse);
+  rpc fetchDomesticIndexDailyAllByDateRange(DomesticindexDailyFetchAllByDateRangeRequest) returns (DomesticIndexDailyFetchAllByDateRangeResponse);
   rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);
 }
 

@@ -17,12 +17,16 @@ public class IndexWeight {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long indexWeightId;
 
+    @Column(name = "index_code")
     String indexCode;
 
+    @Column(name = "con_code")
     String conCode;
 
+    @Column(name = "trade_date")
     Long tradeDate;
 
+    @Column(name = "weight")
     Double weight;
 
 }

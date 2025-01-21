@@ -22,6 +22,7 @@ public class DomesticIndexFetchController {
     @DubboReference
     private DomesticIndexFetchService domesticIndexFetchService;
 
+    @GetMapping("/info/market")
     public ResponseEntity<String> fetchDomesticIndexInfoByMarket(@RequestParam(name = "market") String market,
                                                                  @RequestParam(name = "offset") int offset,
                                                                  @RequestParam(name = "limit") int limit) {
@@ -42,14 +43,7 @@ public class DomesticIndexFetchController {
     }
 
 
-    @GetMapping("/quote/daily/all")
-    public ResponseEntity<String> fetchDomesticIndexDailyByTradeDate(@RequestParam(name = "trade_date_timestamp") long tradeDateTimestamp,
-                                                                     @RequestParam(name = "offset") int offset,
-                                                                     @RequestParam(name = "limit") int limit) {
 
-
-        return ResponseEntity.ok("Task created. Please refer to the console for the result.");
-    }
 
 
 

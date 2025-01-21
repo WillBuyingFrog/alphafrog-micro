@@ -9,7 +9,6 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
@@ -81,6 +80,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             DomesticIndexDailyFetchByDateRangeRequest request) {
 
         String tsCode = request.getTsCode();
+
         long startDateTimestamp = request.getStartDate();
         long endDateTimestamp = request.getEndDate();
         int limit = request.getLimit();
@@ -175,7 +175,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
 
             try{
-                Thread.sleep(300);
+                Thread.sleep(200);
             } catch (InterruptedException e) {
                 log.error("Thread sleep interrupted.");
             }
@@ -184,6 +184,69 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("success")
                 .setFetchedItemsCount(_counter).build();
 
+    }
+
+    @Override
+    public DomesticIndexDailyFetchAllByDateRangeResponse fetchDomesticIndexDailyAllByDateRange(
+            DomesticindexDailyFetchAllByDateRangeRequest request) {
+
+        long startDateTimestamp = request.getStartDate();
+        long endDateTimestamp = request.getEndDate();
+        int limit = request.getLimit();
+        int offset = request.getOffset();
+
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(offset, limit);
+
+        if (allTsCode.isEmpty()) {
+            log.error("No index info found in the database.");
+            return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        int _counter = 0;
+
+        for (String tsCode : allTsCode) {
+
+            Map<String, Object> params = new HashMap<>();
+            Map<String, Object> queryParams = new HashMap<>();
+
+            params.put("api_name", "index_daily");
+            queryParams.put("ts_code", tsCode);
+            queryParams.put("start_date", DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd"));
+            queryParams.put("end_date", DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd"));
+            params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
+            params.put("params", queryParams);
+
+            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+            if (response == null) {
+                return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(-1).build();
+            }
+
+            JSONArray data = response.getJSONObject("data").getJSONArray("items");
+            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+            int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
+
+            if (_result < 0) {
+                log.error("Failed to store index daily data for ts_code {} between trade date {} and {}",
+                        tsCode, startDateTimestamp, endDateTimestamp);
+                return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(_result).build();
+            }
+
+            _counter += _result;
+
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                log.error("Thread sleep interrupted.");
+            }
+        }
+
+        return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(_counter).build();
     }
 
     @Override
