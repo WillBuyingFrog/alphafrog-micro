@@ -19,7 +19,7 @@ import java.util.concurrent.CompletableFuture;
 @Slf4j
 public class DomesticIndexFetchController {
 
-    @DubboReference
+    @DubboReference(timeout = 25000)
     private DomesticIndexFetchService domesticIndexFetchService;
 
     @GetMapping("/info/market")
