@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.common.dao.domestic.stock;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 
@@ -19,7 +20,8 @@ public interface StockQuoteDao {
     int insertStockDaily(StockDaily stockDaily);
 
     @Select("SELECT * FROM alphafrog_stock_daily WHERE ts_code = #{tsCode} AND trade_date between #{startDate} and #{endDate}")
-    List<StockDaily> getStockDailyByTsCodeAndDateRange(String tsCode, long startDate, long endDate);
+    List<StockDaily> getStockDailyByTsCodeAndDateRange(@Param("tsCode") String tsCode,
+                                                       @Param("startDate") long startDate, @Param("endDate") long endDate);
 
     @Select("SELECT * FROM alphafrog_stock_daily WHERE ts_code = #{tsCode} AND trade_date = #{tradeDate}")
     List<StockDaily> getStockDailyByTradeDate(long tradeDateTimestamp);

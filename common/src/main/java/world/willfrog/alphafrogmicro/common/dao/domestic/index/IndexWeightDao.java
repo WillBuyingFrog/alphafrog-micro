@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.common.dao.domestic.index;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
 
@@ -17,6 +18,6 @@ public interface IndexWeightDao {
 
 
     @Select("SELECT * FROM alphafrog_index_weight WHERE index_code = #{indexCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
-    List<IndexWeight> getIndexWeightsByTsCodeAndDateRange(String tsCode, long startDate, long endDate);
+    List<IndexWeight> getIndexWeightsByTsCodeAndDateRange(@Param("tsCode") String tsCode, @Param("startDate") long startDate, @Param("endDate") long endDate);
 
 }

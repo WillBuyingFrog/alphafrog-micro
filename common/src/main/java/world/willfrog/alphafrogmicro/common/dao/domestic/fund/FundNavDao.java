@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.common.dao.domestic.fund;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundNav;
 
@@ -17,6 +18,8 @@ public interface FundNavDao {
 
     @Select("select * from alphafrog_fund_nav where ts_code = #{tsCode} " +
             "and nav_date >= #{startDateTimestamp} and nav_date <= #{endDateTimestamp}")
-    List<FundNav> getFundNavsByTsCodeAndDateRange(String tsCode, long startDateTimestamp, long endDateTimestamp);
+    List<FundNav> getFundNavsByTsCodeAndDateRange(@Param("tsCode") String tsCode,
+                                                  @Param("startDateTimestamp") long startDateTimestamp,
+                                                  @Param("endDateTimestamp") long endDateTimestamp);
 
 }

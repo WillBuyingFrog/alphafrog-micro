@@ -1,7 +1,6 @@
 package world.willfrog.alphafrogmicro.common.dao.domestic.index;
 
-import org.apache.ibatis.annotations.Insert;
-import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.*;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexDaily;
 
 import java.util.List;
@@ -13,5 +12,18 @@ public interface IndexQuoteDao {
     int insertIndexDaily(IndexDaily indexDaily);
 
     @Select("SELECT * FROM alphafrog_index_daily WHERE ts_code = #{tsCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
-    List<IndexDaily> getIndexDailiesByTsCodeAndDateRange(String tsCode, Long startDate, Long endDate);
+    @Results({
+            @Result(column = "ts_code", property = "tsCode"),
+            @Result(column = "trade_date", property = "tradeDate"),
+            @Result(column = "close", property = "close"),
+            @Result(column = "open", property = "open"),
+            @Result(column = "high", property = "high"),
+            @Result(column = "low", property = "low"),
+            @Result(column = "pre_close", property = "preClose"),
+            @Result(column = "change", property = "change"),
+            @Result(column = "pct_chg", property = "pctChg"),
+            @Result(column = "vol", property = "vol"),
+            @Result(column = "amount", property = "amount")
+    })
+    List<IndexDaily> getIndexDailiesByTsCodeAndDateRange(@Param("tsCode") String tsCode, @Param("startDate") Long startDate, @Param("endDate") Long endDate);
 }

@@ -119,6 +119,7 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
                 DomesticIndexDailyByTsCodeAndDateRangeResponse.newBuilder();
 
         for (IndexDaily indexDaily : indexDailyList) {
+            log.info("IndexDaily: {}", indexDaily);
             DomesticIndexDailyItem.Builder itemBuilder = DomesticIndexDailyItem.newBuilder()
                     .setTsCode(indexDaily.getTsCode()).setTradeDate(indexDaily.getTradeDate())
                     .setClose(indexDaily.getClose()).setOpen(indexDaily.getOpen())
