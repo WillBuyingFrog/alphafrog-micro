@@ -31,7 +31,11 @@ public class DomesticFundController {
         // JSON序列化
         String jsonResponse;
         try {
-            jsonResponse = JsonFormat.printer().omittingInsignificantWhitespace().print(response);
+            jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
         } catch (IOException e) {
             log.error("Error converting response to JSON: ", e);
             return ResponseEntity.status(500).body("Internal Server Error");
@@ -49,7 +53,11 @@ public class DomesticFundController {
         // JSON序列化
         String jsonResponse;
         try {
-            jsonResponse = JsonFormat.printer().omittingInsignificantWhitespace().print(response);
+            jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
         } catch (IOException e) {
             log.error("Error converting response to JSON: ", e);
             return ResponseEntity.status(500).body("Internal Server Error");

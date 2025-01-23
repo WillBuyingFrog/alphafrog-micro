@@ -27,9 +27,12 @@ public class DomesticIndexController {
         try {
             DomesticIndexInfoByTsCodeResponse response = domesticIndexService.getDomesticIndexInfoByTsCode(
                     DomesticIndexInfoByTsCodeRequest.newBuilder().setTsCode(tsCode).build());
-            DomesticIndexInfoFullItem indexInfo = response.getItem();
-
-            return ResponseEntity.ok(indexInfo.toString());
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
              log.error("Error occurred while getting index info by ts code: {}", e.getMessage());
              return ResponseEntity.status(500).body("Error occurred while getting index info by ts code");
@@ -47,8 +50,11 @@ public class DomesticIndexController {
                             .setStartDate(startDateTimestamp)
                             .setEndDate(endDateTimestamp)
                             .build());
-            List<DomesticIndexDailyItem> indexDailies = response.getItemsList();
-            String jsonResponse = JsonFormat.printer().omittingInsignificantWhitespace().print(response);
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
             return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
             log.error("Error occurred while getting index dailies by ts code and date range: {}", e.getMessage());
@@ -71,7 +77,10 @@ public class DomesticIndexController {
                                     .setEndDate(endDateTimestamp)
                                     .build()
                     );
-            String jsonResponse = JsonFormat.printer().omittingInsignificantWhitespace().print(response);
+            String jsonResponse = JsonFormat.printer().preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
             return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
             log.error("Error occurred while getting index weight by ts code and date range: {}", e.getMessage());

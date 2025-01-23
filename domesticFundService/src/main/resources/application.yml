@@ -24,6 +24,10 @@ spring:
       port: 6379
       password: ${AF_REDIS_PASSWORD:default}
 
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
 dubbo:
   application:
     name: domestic-fund-service

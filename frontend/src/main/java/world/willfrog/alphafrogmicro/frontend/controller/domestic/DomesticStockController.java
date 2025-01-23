@@ -1,5 +1,6 @@
 package world.willfrog.alphafrogmicro.frontend.controller.domestic;
 
+import com.google.protobuf.util.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.ResponseEntity;
@@ -57,7 +58,12 @@ public class DomesticStockController {
                     DomesticStockDailyByTsCodeAndDateRangeRequest.newBuilder().setTsCode(tsCode)
                             .setStartDate(startDate).setEndDate(endDate).build();
             DomesticStockDailyByTsCodeAndDateRangeResponse response = domesticStockService.getStockDailyByTsCodeAndDateRange(request);
-            return ResponseEntity.ok(response.getItemsList().toString());
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
             log.error("Error occurred while getting stock daily by ts code: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error occurred while getting stock daily by ts code");

@@ -18,7 +18,7 @@ public interface FundInfoDao {
             "ON CONFLICT (ts_code) DO NOTHING")
     int insertFundInfo(FundInfo fundInfo);
 
-    @Select("SELECT * FROM alphafrog_fund_info WHERE ts_code like '%${tsCode}%'")
+    @Select("SELECT * FROM alphafrog_fund_info WHERE ts_code like '%#{tsCode}%'")
     @Results({
             @Result(column = "ts_code", property = "tsCode"),
             @Result(column = "fund_type", property = "fundType"),
@@ -37,7 +37,7 @@ public interface FundInfoDao {
             @Result(column = "purc_startdate", property = "purcStartDate"),
             @Result(column = "redm_startdate", property = "redmStartDate")
     })
-    List<FundInfo> getFundInfoByTsCode(String tsCode);
+    List<FundInfo> getFundInfoByTsCode(@Param("ts_code") String tsCode);
 
     @Select("SELECT * FROM alphafrog_fund_info WHERE name like '%${name}%'")
     List<FundInfo> getFundInfoByName(String name);
