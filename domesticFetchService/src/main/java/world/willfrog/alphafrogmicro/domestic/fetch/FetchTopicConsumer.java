@@ -64,8 +64,22 @@ public class FetchTopicConsumer {
                         result = -1;
                     }
                     break;
-                case "fund_info":
-                    result = -1;
+
+                case "index_weight":
+                    if (taskSubType == 1) {
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticIndexWeightFetchByDateRangeRequest request =
+                                DomesticIndex.DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchDomesticIndexWeightByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
                     break;
                 case "fund_nav":
                     // 0: 爬取指定交易日范围内的所有基金净值

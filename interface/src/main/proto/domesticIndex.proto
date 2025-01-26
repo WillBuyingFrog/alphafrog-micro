@@ -129,6 +129,19 @@ message DomesticIndexWeightByTsCodeAndDateRangeResponse {
   repeated DomesticIndexWeightItem items = 1;
 }
 
+// 获取某只股票在某段时间内是哪些指数的成分股
+
+message DomesticIndexWeightByConCodeAndDateRangeRequest {
+  string conCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message DomesticIndexWeightByConCodeAndDateRangeResponse {
+  repeated DomesticIndexWeightItem items = 1;
+}
+
+
 /**
   指数数据爬取服务
  */
@@ -219,11 +232,19 @@ message DomesticTradeCalendarFetchByDateRangeResponse {
 
 
 service DomesticIndexService{
+  // 根据指数代码查询指数信息
   rpc getDomesticIndexInfoByTsCode(DomesticIndexInfoByTsCodeRequest) returns (DomesticIndexInfoByTsCodeResponse);
+  // 根据关键词查询指数
   rpc searchDomesticIndex(DomesticIndexSearchRequest) returns (DomesticIndexSearchResponse);
+  // 根据代码和时间范围查询指数日线行情
   rpc getDomesticIndexDailyByTsCodeAndDateRange(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
+  // 根据交易日查询所有指数日线行情
   rpc getDomesticIndexDailyByTradeDate(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
+  // 根据代码和时间范围查询指数成分股
   rpc getDomesticIndexWeightByTsCodeAndDateRange(DomesticIndexWeightByTsCodeAndDateRangeRequest) returns (DomesticIndexWeightByTsCodeAndDateRangeResponse);
+  // 根据指定股票代码查询所有含有此股票的指数
+  rpc getDomesticIndexWeightByConCodeAndDateRange(DomesticIndexWeightByConCodeAndDateRangeRequest) returns (DomesticIndexWeightByConCodeAndDateRangeResponse);
+
 }
 
 service DomesticIndexFetchService {

@@ -5,8 +5,10 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexQuoteDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexWeightDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexServiceTriple.DomesticIndexServiceImplBase;
 
@@ -19,12 +21,14 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
 
     private final IndexInfoDao indexInfoDao;
     private final IndexQuoteDao indexQuoteDao;
+    private final IndexWeightDao indexWeightDao;
 
 
     public DomesticIndexServiceImpl(IndexInfoDao indexInfoDao,
-                                    IndexQuoteDao indexQuoteDao) {
+                                    IndexQuoteDao indexQuoteDao, IndexWeightDao indexWeightDao) {
         this.indexInfoDao = indexInfoDao;
         this.indexQuoteDao = indexQuoteDao;
+        this.indexWeightDao = indexWeightDao;
     }
 
 
@@ -112,7 +116,7 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
         );
 
         if(indexDailyList.isEmpty()) {
-            return null;
+            return DomesticIndexDailyByTsCodeAndDateRangeResponse.newBuilder().build();
         }
 
         DomesticIndexDailyByTsCodeAndDateRangeResponse.Builder responseBuilder =
@@ -132,4 +136,61 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
 
         return responseBuilder.build();
     }
+
+
+    @Override
+    public DomesticIndexWeightByTsCodeAndDateRangeResponse getDomesticIndexWeightByTsCodeAndDateRange(
+            DomesticIndexWeightByTsCodeAndDateRangeRequest request) {
+
+        List<IndexWeight> indexWeightList = indexWeightDao.getIndexWeightsByTsCodeAndDateRange(
+                request.getTsCode(), request.getStartDate(), request.getEndDate()
+        );
+
+        if (indexWeightList.isEmpty()) {
+            return DomesticIndexWeightByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
+
+        DomesticIndexWeightByTsCodeAndDateRangeResponse.Builder builder =
+                DomesticIndexWeightByTsCodeAndDateRangeResponse.newBuilder();
+
+        for (IndexWeight indexWeight : indexWeightList) {
+            DomesticIndexWeightItem.Builder itemBuilder = DomesticIndexWeightItem.newBuilder()
+                    .setIndexCode(indexWeight.getIndexCode()).setTradeDate(indexWeight.getTradeDate())
+                    .setWeight(indexWeight.getWeight());
+
+            builder.addItems(itemBuilder.build());
+        }
+
+        return builder.build();
+    }
+
+
+    @Override
+    public DomesticIndexWeightByConCodeAndDateRangeResponse getDomesticIndexWeightByConCodeAndDateRange(
+            DomesticIndexWeightByConCodeAndDateRangeRequest request) {
+        
+        List<IndexWeight> indexWeightList = indexWeightDao.getIndexWeightsByConCodeAndDateRange(
+                request.getConCode(), request.getStartDate(), request.getEndDate()
+        );
+
+        if (indexWeightList.isEmpty()) {
+            return DomesticIndexWeightByConCodeAndDateRangeResponse.newBuilder().build();
+        }
+
+        DomesticIndexWeightByConCodeAndDateRangeResponse.Builder builder =
+                DomesticIndexWeightByConCodeAndDateRangeResponse.newBuilder();
+
+        for (IndexWeight indexWeight : indexWeightList) {
+            DomesticIndexWeightItem.Builder itemBuilder = DomesticIndexWeightItem.newBuilder()
+                    .setIndexCode(indexWeight.getIndexCode()).setTradeDate(indexWeight.getTradeDate())
+                    .setWeight(indexWeight.getWeight());
+
+            builder.addItems(itemBuilder.build());
+        }
+        
+        return builder.build();
+
+    }
+
+
 }

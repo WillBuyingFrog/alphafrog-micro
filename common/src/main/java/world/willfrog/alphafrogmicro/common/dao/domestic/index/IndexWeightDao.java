@@ -17,7 +17,10 @@ public interface IndexWeightDao {
     int insertIndexWeight(IndexWeight indexWeight);
 
 
-    @Select("SELECT * FROM alphafrog_index_weight WHERE index_code = #{indexCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
+    @Select("SELECT * FROM alphafrog_index_weight WHERE index_code = #{tsCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
     List<IndexWeight> getIndexWeightsByTsCodeAndDateRange(@Param("tsCode") String tsCode, @Param("startDate") long startDate, @Param("endDate") long endDate);
+
+    @Select("SELECT * FROM alphafrog_index_weight WHERE con_code = #{conCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
+    List<IndexWeight> getIndexWeightsByConCodeAndDateRange(@Param("conCode") String conCode, @Param("startDate") long startDate, @Param("endDate") long endDate);
 
 }

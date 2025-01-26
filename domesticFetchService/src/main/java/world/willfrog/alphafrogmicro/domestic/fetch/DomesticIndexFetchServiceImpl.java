@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
@@ -258,41 +259,54 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         int limit = request.getLimit();
         int offset = request.getOffset();
 
+        int _counter = 0;
+
         String startDate = DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd");
         String endDate = DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd");
 
-        Map<String, Object> params = new HashMap<>();
-        Map<String, Object> queryParams = new HashMap<>();
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(offset, limit);
 
-        params.put("api_name", "index_daily");
-        queryParams.put("start_date", startDate);
-        queryParams.put("end_date", endDate);
-        queryParams.put("limit", limit);
-        queryParams.put("offset", offset);
-        params.put("fields", "index_code,con_code,trade_date,weight");
-        params.put("params", queryParams);
+        for (String tsCode : allTsCode) {
+            Map<String, Object> params = new HashMap<>();
+            Map<String, Object> queryParams = new HashMap<>();
 
-        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+            params.put("api_name", "index_weight");
+            queryParams.put("index_code", tsCode);
+            queryParams.put("start_date", startDate);
+            queryParams.put("end_date", endDate);
+            params.put("fields", "index_code,con_code,trade_date,weight");
+            params.put("params", queryParams);
 
-        if(response == null) {
-            return DomesticIndexWeightFetchByDateRangeResponse.newBuilder()
-                    .setStatus("failure")
-                    .setFetchedItemsCount(-1)
-                    .build();
+            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+            if (response == null) {
+                return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(-1).build();
+            }
+
+            JSONArray data = response.getJSONObject("data").getJSONArray("items");
+            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+            int _result = domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
+
+            if (_result < 0) {
+                log.error("Failed to store index weight data for ts_code {} between trade date {} and {}",
+                        tsCode, startDate, endDate);
+                return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(_result).build();
+            }
+
+            _counter += _result;
+
+            try {
+                Thread.sleep(200);
+            } catch (InterruptedException e) {
+                log.error("Thread sleep interrupted.");
+            }
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
-
-        int result = domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
-
-        if (result < 0) {
-            return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
-                    .setFetchedItemsCount(-1).build();
-        } else {
-            return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("success")
-                    .setFetchedItemsCount(result).build();
-        }
+        return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(_counter).build();
     }
 
 

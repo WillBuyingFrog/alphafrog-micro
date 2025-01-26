@@ -2,7 +2,6 @@ package world.willfrog.alphafrogmicro.frontend.controller.domestic;
 
 import com.google.protobuf.util.JsonFormat;
 import lombok.extern.slf4j.Slf4j;
-import org.apache.coyote.Response;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Controller;
@@ -11,8 +10,6 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndexService;
-
-import java.util.List;
 
 @Slf4j
 @Controller
@@ -62,10 +59,23 @@ public class DomesticIndexController {
         }
     }
 
+    @GetMapping("/search")
+    public ResponseEntity<String> searchIndexInfo(@RequestParam(name = "query") String query) {
+        try {
+            DomesticIndexSearchResponse response = domesticIndexService.searchDomesticIndex(
+                    DomesticIndexSearchRequest.newBuilder().setQuery(query).build());
+            String jsonResponse = JsonFormat.printer().preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (Exception e) {
+            log.error("Error occurred while searching index info: {}", e.getMessage());
+            return ResponseEntity.status(500).body("Error occurred while searching index info");
+        }
+    }
 
-
-
-    @GetMapping("/weight")
+    @GetMapping("/weight/ts_code")
     public ResponseEntity<String> getIndexWeightByTsCodeAndDateRange(@RequestParam(name = "ts_code") String tsCode,
                                                                      @RequestParam(name = "start_date_timestamp") long startDateTimestamp,
                                                                      @RequestParam(name = "end_date_timestamp") long endDateTimestamp) {
@@ -88,4 +98,22 @@ public class DomesticIndexController {
         }
     }
 
+    @GetMapping("/weight/con_code")
+    public ResponseEntity<String> getIndexWeightByConCodeAndDateRange(@RequestParam(name = "con_code") String conCode,
+                                                                      @RequestParam(name = "start_date_timestamp") long startDateTimestamp,
+                                                                      @RequestParam(name = "end_date_timestamp") long endDateTimestamp) {
+        try {
+            DomesticIndexWeightByConCodeAndDateRangeResponse response = domesticIndexService.getDomesticIndexWeightByConCodeAndDateRange(
+                    DomesticIndexWeightByConCodeAndDateRangeRequest.newBuilder().setConCode(conCode).setStartDate(startDateTimestamp).setEndDate(endDateTimestamp).build());
+            String jsonResponse = JsonFormat.printer().preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (Exception e) {
+            log.error("Error occurred while getting index weight by con code and date range: {}", e.getMessage());
+            return ResponseEntity.status(500).body("Error occurred while getting index weight by con code and date range");
+        }
+    }   
+    
 }

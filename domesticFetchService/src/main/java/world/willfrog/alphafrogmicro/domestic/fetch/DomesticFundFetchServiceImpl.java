@@ -4,25 +4,14 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
-import org.apache.ibatis.session.ExecutorType;
-import org.apache.ibatis.session.SqlSession;
-import org.apache.ibatis.session.SqlSessionFactory;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundInfoDao;
-import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundNavDao;
-import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundPortfolioDao;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundInfo;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundNav;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundPortfolio;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticFundStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundFetchServiceTriple.DomesticFundFetchServiceImplBase;
 
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @DubboService
