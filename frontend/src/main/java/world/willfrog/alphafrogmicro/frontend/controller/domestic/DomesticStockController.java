@@ -28,7 +28,13 @@ public class DomesticStockController {
 
             DomesticStockInfoFullItem item = response.getItem();
 
-            return ResponseEntity.ok(item.toString());
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(item);
+
+            return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
             log.error("Error occurred while getting stock info by ts code: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error occurred while getting stock info by ts code");
@@ -42,7 +48,13 @@ public class DomesticStockController {
 
             DomesticStockSearchResponse response = domesticStockService.searchStock(request);
 
-            return ResponseEntity.ok(response.getItemsList().toString());
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+
+            return ResponseEntity.ok(jsonResponse);
         } catch (Exception e) {
             log.error("Error occurred while searching stock: {}", e.getMessage());
             return ResponseEntity.status(500).body("Error occurred while searching stock info");
