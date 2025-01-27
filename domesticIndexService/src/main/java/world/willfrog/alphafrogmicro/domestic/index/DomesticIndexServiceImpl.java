@@ -182,7 +182,8 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
 
         for (IndexWeight indexWeight : indexWeightList) {
             DomesticIndexWeightItem.Builder itemBuilder = DomesticIndexWeightItem.newBuilder()
-                    .setIndexCode(indexWeight.getIndexCode()).setTradeDate(indexWeight.getTradeDate())
+                    .setIndexCode(indexWeight.getIndexCode()).setConCode(indexWeight.getConCode())
+                    .setTradeDate(indexWeight.getTradeDate())
                     .setWeight(indexWeight.getWeight());
 
             builder.addItems(itemBuilder.build());
