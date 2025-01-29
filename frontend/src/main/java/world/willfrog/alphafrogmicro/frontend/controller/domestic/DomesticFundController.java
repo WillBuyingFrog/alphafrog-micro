@@ -66,4 +66,81 @@ public class DomesticFundController {
         return ResponseEntity.ok(jsonResponse);
     }
 
+
+    @GetMapping("/nav/ts_code")
+    public ResponseEntity<String> getFundNavByTsCodeAndDateRange(@RequestParam(name = "ts_code") String tsCode,
+                                                                   @RequestParam(name = "start_date_timestamp") long startDateTimestamp,
+                                                                   @RequestParam(name = "end_date_timestamp") long endDateTimestamp) {
+        DomesticFund.DomesticFundNavsByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundNavsByTsCodeAndDateRange(
+                DomesticFund.DomesticFundNavsByTsCodeAndDateRangeRequest.newBuilder()
+                        .setTsCode(tsCode)
+                        .setStartDateTimestamp(startDateTimestamp)
+                        .setEndDateTimestamp(endDateTimestamp)
+                        .build()
+        );
+
+        try {
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (IOException e) {
+            log.error("Error converting response to JSON: ", e);
+            return ResponseEntity.status(500).body("Internal Server Error");
+        }
+    }
+
+    @GetMapping("/portfolio/ts_code")
+    public ResponseEntity<String> getFundPortfolioByTsCodeAndDateRange(@RequestParam(name = "ts_code") String tsCode,
+                                                                       @RequestParam(name = "start_date_timestamp") long startDateTimestamp,
+                                                                       @RequestParam(name = "end_date_timestamp") long endDateTimestamp) {
+        DomesticFund.DomesticFundPortfolioByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioByTsCodeAndDateRange(
+                DomesticFund.DomesticFundPortfolioByTsCodeAndDateRangeRequest.newBuilder()
+                        .setTsCode(tsCode)
+                        .setStartDateTimestamp(startDateTimestamp)
+                        .setEndDateTimestamp(endDateTimestamp)
+                        .build()
+        );
+
+        try {
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (IOException e) {
+            log.error("Error converting response to JSON: ", e);
+            return ResponseEntity.status(500).body("Internal Server Error");
+        }
+    }
+
+
+    @GetMapping("/portfolio/symbol")
+    public ResponseEntity<String> getFundPortfolioBySymbolAndDateRange(@RequestParam(name = "symbol") String symbol,
+                                                                       @RequestParam(name = "start_date_timestamp") long startDateTimestamp,
+                                                                       @RequestParam(name = "end_date_timestamp") long endDateTimestamp) {
+        DomesticFund.DomesticFundPortfolioBySymbolAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioBySymbolAndDateRange(
+                DomesticFund.DomesticFundPortfolioBySymbolAndDateRangeRequest.newBuilder()
+                        .setSymbol(symbol)
+                        .setStartDateTimestamp(startDateTimestamp)
+                        .setEndDateTimestamp(endDateTimestamp)
+                        .build()
+        );
+
+        try {
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (IOException e) {
+            log.error("Error converting response to JSON: ", e);
+            return ResponseEntity.status(500).body("Internal Server Error");
+        }
+    }
+
 }

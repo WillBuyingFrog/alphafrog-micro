@@ -22,5 +22,10 @@ public interface FundPortfolioDao {
                                                              @Param("startDateTimestamp") long startDateTimestamp,
                                                              @Param("endDateTimestamp") long endDateTimestamp);
 
+    @Select("SELECT * FROM alphafrog_fund_portfolio WHERE symbol = #{symbol} AND" +
+            " ann_date BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
+    List<FundPortfolio> getFundPortfolioBySymbolAndDateRange(@Param("symbol") String symbol,
+                                                             @Param("startDateTimestamp") long startDateTimestamp,
+                                                             @Param("endDateTimestamp") long endDateTimestamp);
 
 }

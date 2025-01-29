@@ -263,8 +263,16 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                     DomesticFundPortfolioItem.Builder itemBuilder = DomesticFundPortfolioItem.newBuilder()
                             .setTsCode(fundPortfolio.getTsCode()).setAnnDate(fundPortfolio.getAnnDate())
                             .setEndDate(fundPortfolio.getEndDate()).setSymbol(fundPortfolio.getSymbol())
-                            .setMkv(fundPortfolio.getMkv()).setAmount(fundPortfolio.getAmount())
-                            .setSktMkvRatio(fundPortfolio.getStkMkvRatio()).setSktFloatRatio(fundPortfolio.getStkFloatRatio());
+                            .setMkv(fundPortfolio.getMkv()).setAmount(fundPortfolio.getAmount());
+
+                    if (fundPortfolio.getStkMkvRatio() != null) {
+                        itemBuilder.setSktMkvRatio(fundPortfolio.getStkMkvRatio());
+                    }
+
+                    if (fundPortfolio.getStkFloatRatio() != null) {
+                        itemBuilder.setSktFloatRatio(fundPortfolio.getStkFloatRatio());
+                    }
+
 
                     responseBuilder.addItems(itemBuilder.build());
                 }
@@ -277,4 +285,54 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
             return null;
         }
     }
+
+    @Override
+    public DomesticFundPortfolioBySymbolAndDateRangeResponse getDomesticFundPortfolioBySymbolAndDateRange(
+            DomesticFundPortfolioBySymbolAndDateRangeRequest request
+    ) {
+        String symbol = request.getSymbol();
+        long startDateTimestamp = request.getStartDateTimestamp();
+        long endDateTimestamp = request.getEndDateTimestamp();
+
+        List<FundPortfolio> fundPortfolioList = null;
+
+        try{
+            fundPortfolioList = fundPortfolioDao.getFundPortfolioBySymbolAndDateRange(symbol,
+                    startDateTimestamp, endDateTimestamp);
+        } catch (Exception e) {
+            log.error("Error occurred while getting fund portfolio", e);
+        }
+
+        // 创建响应对象
+        DomesticFundPortfolioBySymbolAndDateRangeResponse.Builder responseBuilder =
+                DomesticFundPortfolioBySymbolAndDateRangeResponse.newBuilder();
+
+        if(fundPortfolioList != null) {
+            try {
+                for (FundPortfolio fundPortfolio : fundPortfolioList) {
+                    DomesticFundPortfolioItem.Builder itemBuilder = DomesticFundPortfolioItem.newBuilder()
+                            .setTsCode(fundPortfolio.getTsCode()).setAnnDate(fundPortfolio.getAnnDate())
+                            .setEndDate(fundPortfolio.getEndDate()).setSymbol(fundPortfolio.getSymbol())
+                            .setMkv(fundPortfolio.getMkv()).setAmount(fundPortfolio.getAmount());
+
+                    if (fundPortfolio.getStkMkvRatio() != null) {
+                        itemBuilder.setSktMkvRatio(fundPortfolio.getStkMkvRatio());
+                    }
+
+                    if (fundPortfolio.getStkFloatRatio() != null) {
+                        itemBuilder.setSktFloatRatio(fundPortfolio.getStkFloatRatio());
+                    }
+
+                    responseBuilder.addItems(itemBuilder.build());
+                }
+                return responseBuilder.build();
+            } catch (Exception e) {
+                log.error("Error occurred while converting DAO response object to protobuf object", e);
+                return null;
+            }
+        } else {
+            return null;
+        }
+    }
+
 }

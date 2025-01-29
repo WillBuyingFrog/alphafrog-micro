@@ -142,6 +142,19 @@ message DomesticFundPortfolioByTsCodeAndDateRangeResponse {
 }
 
 
+// 根据指定股票代码及时间范围，查询基金持仓
+
+message DomesticFundPortfolioBySymbolAndDateRangeRequest {
+  string symbol = 1;
+  int64 startDateTimestamp = 2;
+  int64 endDateTimestamp = 3;
+}
+
+message DomesticFundPortfolioBySymbolAndDateRangeResponse {
+  repeated DomesticFundPortfolioItem items = 1;
+}
+
+
 /**
   基金数据爬取
  */
@@ -192,6 +205,7 @@ service DomesticFundService {
   rpc getDomesticFundNavsByTsCodeAndDateRange(DomesticFundNavsByTsCodeAndDateRangeRequest) returns (DomesticFundNavsByTsCodeAndDateRangeResponse);
   rpc searchDomesticFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
   rpc getDomesticFundPortfolioByTsCodeAndDateRange(DomesticFundPortfolioByTsCodeAndDateRangeRequest) returns (DomesticFundPortfolioByTsCodeAndDateRangeResponse);
+  rpc getDomesticFundPortfolioBySymbolAndDateRange(DomesticFundPortfolioBySymbolAndDateRangeRequest) returns (DomesticFundPortfolioBySymbolAndDateRangeResponse);
 
 }
 
@@ -199,5 +213,4 @@ service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
-
 }
