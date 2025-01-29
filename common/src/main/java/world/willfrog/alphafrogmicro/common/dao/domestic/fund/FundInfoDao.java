@@ -42,5 +42,8 @@ public interface FundInfoDao {
     @Select("SELECT * FROM alphafrog_fund_info WHERE name like '%${name}%'")
     List<FundInfo> getFundInfoByName(String name);
 
+    @Select("SELECT ts_code FROM alphafrog_fund_info LIMIT #{limit} OFFSET #{offset}")
+    List<String> getFundTsCode(@Param("offset") int offset, @Param("limit") int limit);
+
 
 }

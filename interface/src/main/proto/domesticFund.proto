@@ -174,8 +174,9 @@ message DomesticFundNavFetchByTradeDateResponse {
 message DomesticFundPortfolioFetchByDateRangeRequest {
   int64 startDateTimestamp = 1;
   int64 endDateTimestamp = 2;
-  int32 offset = 3;
-  int32 limit = 4;
+  optional string tsCode = 3;
+  int32 offset = 4;
+  int32 limit = 5;
 }
 
 message DomesticFundPortfolioFetchByDateRangeResponse {
