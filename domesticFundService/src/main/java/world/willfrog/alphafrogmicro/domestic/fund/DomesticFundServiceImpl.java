@@ -5,8 +5,10 @@ import org.springframework.stereotype.Service;
 import org.apache.dubbo.config.annotation.DubboService;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundNavDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundPortfolioDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundNav;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundPortfolio;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundServiceTriple.DomesticFundServiceImplBase;
 
@@ -20,10 +22,12 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
 
     private final FundNavDao fundNavDao;
     private final FundInfoDao fundInfoDao;
+    private final FundPortfolioDao fundPortfolioDao;
 
-    public DomesticFundServiceImpl(FundNavDao fundNavDao, FundInfoDao fundInfoDao) {
+    public DomesticFundServiceImpl(FundNavDao fundNavDao, FundInfoDao fundInfoDao, FundPortfolioDao fundPortfolioDao) {
         this.fundNavDao = fundNavDao;
         this.fundInfoDao = fundInfoDao;
+        this.fundPortfolioDao = fundPortfolioDao;
     }
 
 
@@ -229,6 +233,47 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                     .build();
         } catch (Exception e) {
             log.error("Error occurred while converting DAO response object to protobuf object", e);
+            return null;
+        }
+    }
+
+    public DomesticFundPortfolioByTsCodeAndDateRangeResponse getDomesticFundPortfolioByTsCodeAndDateRange(
+            DomesticFundPortfolioByTsCodeAndDateRangeRequest request
+    ) {
+        String tsCode = request.getTsCode();
+        long startDateTimestamp = request.getStartDateTimestamp();
+        long endDateTimestamp = request.getEndDateTimestamp();
+
+        List<FundPortfolio> fundPortfolioList = null;
+
+        try{
+            fundPortfolioList = fundPortfolioDao.getFundPortfolioByTsCodeAndDateRange(tsCode,
+                    startDateTimestamp, endDateTimestamp);
+        } catch (Exception e) {
+            log.error("Error occurred while getting fund portfolio", e);
+        }
+
+        // 创建响应对象
+        DomesticFundPortfolioByTsCodeAndDateRangeResponse.Builder responseBuilder =
+                DomesticFundPortfolioByTsCodeAndDateRangeResponse.newBuilder();
+
+        if(fundPortfolioList != null) {
+            try {
+                for (FundPortfolio fundPortfolio : fundPortfolioList) {
+                    DomesticFundPortfolioItem.Builder itemBuilder = DomesticFundPortfolioItem.newBuilder()
+                            .setTsCode(fundPortfolio.getTsCode()).setAnnDate(fundPortfolio.getAnnDate())
+                            .setEndDate(fundPortfolio.getEndDate()).setSymbol(fundPortfolio.getSymbol())
+                            .setMkv(fundPortfolio.getMkv()).setAmount(fundPortfolio.getAmount())
+                            .setSktMkvRatio(fundPortfolio.getStkMkvRatio()).setSktFloatRatio(fundPortfolio.getStkFloatRatio());
+
+                    responseBuilder.addItems(itemBuilder.build());
+                }
+                return responseBuilder.build();
+            } catch (Exception e) {
+                log.error("Error occurred while converting DAO response object to protobuf object", e);
+                return null;
+            }
+        } else {
             return null;
         }
     }

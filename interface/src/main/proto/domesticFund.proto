@@ -192,12 +192,11 @@ service DomesticFundService {
   rpc searchDomesticFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
   rpc getDomesticFundPortfolioByTsCodeAndDateRange(DomesticFundPortfolioByTsCodeAndDateRangeRequest) returns (DomesticFundPortfolioByTsCodeAndDateRangeResponse);
 
-
-
 }
 
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
+
 }

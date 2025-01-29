@@ -57,25 +57,4 @@ public class DomesticFundFetchController {
         return ResponseEntity.ok("Task created. Please refer to the console for the result.");
     }
 
-
-    @GetMapping("/portfolio/date_range")
-    public ResponseEntity<String> fetchDomesticFundPortfolioByDateRange(@RequestParam(name = "start_Date_timestamp") long startDateTimestamp,
-                                                                        @RequestParam(name = "end_date_timestamp") long endDateTimestamp,
-                                                               @RequestParam(name = "offset") int offset,
-                                                               @RequestParam(name = "limit") int limit) {
-        CompletableFuture<DomesticFund.DomesticFundPortfolioFetchByDateRangeResponse> futureResponse = domesticFundFetchService.fetchDomesticFundPortfolioByDateRangeAsync(
-                DomesticFund.DomesticFundPortfolioFetchByDateRangeRequest.newBuilder()
-                        .setStartDateTimestamp(startDateTimestamp).setEndDateTimestamp(endDateTimestamp)
-                        .setOffset(offset).setLimit(limit).build()
-        );
-
-        futureResponse.thenApply(response -> {
-            int fetchedItemsCount = response.getFetchedItemsCount();
-            log.info("Fetched {} items from date range {} to {}", fetchedItemsCount, startDateTimestamp, endDateTimestamp);
-            return null;
-        });
-
-        return ResponseEntity.ok("Task created. Please refer to the console for the result.");
-    }
-
 }

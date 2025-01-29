@@ -140,6 +140,8 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         params.put("api_name", "fund_portfolio");
         queryParams.put("start_date", startDate);
         queryParams.put("end_date", endDate);
+        queryParams.put("offset", offset);
+        queryParams.put("limit", limit);
         params.put("params", queryParams);
         params.put("fields", "ts_code,ann_date,end_date,symbol,mkv,amount,stk_mkv_ratio,stk_float_ratio");
 

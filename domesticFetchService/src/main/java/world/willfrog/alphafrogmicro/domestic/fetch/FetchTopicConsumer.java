@@ -5,6 +5,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
 
 @Service
@@ -12,9 +13,12 @@ import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
 public class FetchTopicConsumer {
 
     private final DomesticIndexFetchServiceImpl domesticIndexFetchService;
+    private final DomesticFundFetchServiceImpl domesticFundFetchService;
 
-    public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService){
+    public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
+                              DomesticFundFetchServiceImpl domesticFundFetchService) {
         this.domesticIndexFetchService = domesticIndexFetchService;
+        this.domesticFundFetchService = domesticFundFetchService;
     }
 
 
@@ -84,6 +88,22 @@ public class FetchTopicConsumer {
                 case "fund_nav":
                     // 0: 爬取指定交易日范围内的所有基金净值
                     result = -1;
+                    break;
+                case "fund_portfolio":
+                    if (taskSubType == 1){
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticFund.DomesticFundPortfolioFetchByDateRangeRequest request =
+                                DomesticFund.DomesticFundPortfolioFetchByDateRangeRequest.newBuilder()
+                                        .setStartDateTimestamp(startDateTimestamp).setEndDateTimestamp(endDateTimestamp)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticFundFetchService.fetchDomesticFundPortfolioByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
                     break;
                 default:
                     result = -2;
