@@ -1,9 +1,6 @@
 package world.willfrog.alphafrogmicro.common.dao.domestic.stock;
 
-import org.apache.ibatis.annotations.Mapper;
-import org.apache.ibatis.annotations.Result;
-import org.apache.ibatis.annotations.Results;
-import org.apache.ibatis.annotations.Select;
+import org.apache.ibatis.annotations.*;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 
 import java.util.List;
@@ -47,5 +44,8 @@ public interface StockInfoDao {
     @Select("SELECT * FROM alphafrog_stock_info WHERE name like '%${name}%'")
     List<StockInfo> getStockInfoByName(String Name);
 
+
+    @Select("SELECT ts_code FROM alphafrog_stock_info OFFSET #{offset} LIMIT #{limit}")
+    List<String> getStockTsCode(@Param("offset") int offset, @Param("limit") int limit);
 
 }

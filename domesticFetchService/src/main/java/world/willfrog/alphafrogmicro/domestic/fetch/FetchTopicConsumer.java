@@ -14,11 +14,14 @@ public class FetchTopicConsumer {
 
     private final DomesticIndexFetchServiceImpl domesticIndexFetchService;
     private final DomesticFundFetchServiceImpl domesticFundFetchService;
+    private final DomesticStockFetchServiceImpl domesticStockFetchService;
 
     public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
-                              DomesticFundFetchServiceImpl domesticFundFetchService) {
+                              DomesticFundFetchServiceImpl domesticFundFetchService,
+                              DomesticStockFetchServiceImpl domesticStockFetchService) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
+        this.domesticStockFetchService = domesticStockFetchService;
     }
 
 
@@ -101,6 +104,19 @@ public class FetchTopicConsumer {
                                         .setOffset(offset).setLimit(limit)
                                         .build();
                         result = domesticFundFetchService.fetchDomesticFundPortfolioByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_quote":
+                    if (taskSubType == 1) {
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+
+                        result = domesticStockFetchService.fetchStockDailyByDateRange(startDateTimestamp, endDateTimestamp, offset, limit);
                     } else {
                         result = -1;
                     }

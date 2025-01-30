@@ -14,6 +14,7 @@ import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockFetchServiceTriple.*;
 
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -113,5 +114,58 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
             return DomesticStockInfoFetchByMarketResponse.newBuilder().setStatus("success")
                     .setFetchedItemsCount(result).build();
         }
+    }
+
+    public int fetchStockDailyByDateRange(long startDateTimestamp, long endDateTimestamp, int offset, int limit) {
+        int affectedRows = 0;
+
+        String startDate = DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd");
+        String endDate = DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd");
+
+        List<String> stockTsCodeList = stockInfoDao.getStockTsCode(offset, limit);
+
+        try {
+            for (String stockTsCode : stockTsCodeList) {
+                Map<String, Object> params = new HashMap<>();
+                Map<String, Object> queryParams = new HashMap<>();
+
+                params.put("api_name", "daily");
+                queryParams.put("ts_code", stockTsCode);
+                queryParams.put("start_date", startDate);
+                queryParams.put("end_date", endDate);
+                params.put("fields", "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg," +
+                        "vol,amount");
+                params.put("params", queryParams);
+
+                JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+                if (response == null) {
+                    continue;
+                }
+
+                JSONArray data = response.getJSONObject("data").getJSONArray("items");
+                JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+                int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
+
+                if (result < 0) {
+                    log.error("Failed to store stock daily data for ts_code: {}", stockTsCode);
+                    return -2;
+                } else {
+                    affectedRows += result;
+                }
+
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    log.error("Thread sleep interrupted", e);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Failed to fetch stock daily data by date range", e);
+            return -1;
+        }
+
+        return affectedRows;
     }
 }
