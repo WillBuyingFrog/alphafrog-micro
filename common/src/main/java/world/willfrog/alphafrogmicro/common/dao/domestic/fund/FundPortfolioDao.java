@@ -17,13 +17,13 @@ public interface FundPortfolioDao {
     int insertFundPortfolio(FundPortfolio fundPortfolio);
 
     @Select("SELECT * FROM alphafrog_fund_portfolio WHERE ts_code = #{tsCode} AND" +
-            " ann_date BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
+            " end_date BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
     List<FundPortfolio> getFundPortfolioByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                              @Param("startDateTimestamp") long startDateTimestamp,
                                                              @Param("endDateTimestamp") long endDateTimestamp);
 
     @Select("SELECT * FROM alphafrog_fund_portfolio WHERE symbol = #{symbol} AND" +
-            " ann_date BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
+            " end_date BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
     List<FundPortfolio> getFundPortfolioBySymbolAndDateRange(@Param("symbol") String symbol,
                                                              @Param("startDateTimestamp") long startDateTimestamp,
                                                              @Param("endDateTimestamp") long endDateTimestamp);
