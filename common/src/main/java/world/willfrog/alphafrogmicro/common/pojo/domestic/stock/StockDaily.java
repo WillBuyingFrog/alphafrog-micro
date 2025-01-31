@@ -1,6 +1,6 @@
 package world.willfrog.alphafrogmicro.common.pojo.domestic.stock;
 
-import jakarta.persistence.*;
+import jakarta.persistence.Column;
 import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
@@ -12,6 +12,7 @@ import world.willfrog.alphafrogmicro.common.pojo.domestic.quote.Quote;
 @Setter
 @NoArgsConstructor
 public class StockDaily extends Quote {
+    @Column(name = "id")
     Long stockDailyId;
 
     @Override
