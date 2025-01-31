@@ -34,6 +34,6 @@ public interface StockQuoteDao {
     List<StockDaily> getStockDailyByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                        @Param("startDate") long startDate, @Param("endDate") long endDate);
 
-    @Select("SELECT * FROM alphafrog_stock_daily WHERE ts_code = #{tsCode} AND trade_date = #{tradeDate}")
-    List<StockDaily> getStockDailyByTradeDate(long tradeDateTimestamp);
+    @Select("SELECT * FROM alphafrog_stock_daily WHERE trade_date = #{tradeDateTimestamp}")
+    List<StockDaily> getStockDailyByTradeDate(@Param("tradeDateTimestamp") long tradeDateTimestamp);
 }
