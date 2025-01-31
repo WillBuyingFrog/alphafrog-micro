@@ -37,7 +37,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         DomesticStockInfoFullItem.Builder builder = DomesticStockInfoFullItem.newBuilder();
 
         builder.setTsCode(stockInfo.getTsCode()).setSymbol(stockInfo.getSymbol())
-                .setStockInfoId(stockInfo.getStockInfoId()).setName(stockInfo.getName());
+                .setStockInfoId(-1).setName(stockInfo.getName());
 
         if (stockInfo.getArea() != null) {
             builder.setMarket(stockInfo.getArea());
@@ -141,7 +141,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         for (StockDaily stockDaily : stockDailyList) {
             log.info("stockDaily: {}", stockDaily);
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
-            itemBuilder.setStockDailyId(stockDaily.getStockDailyId())
+            itemBuilder.setStockDailyId(-1)
                     .setTsCode(stockDaily.getTsCode())
                     .setTradeDate(stockDaily.getTradeDate())
                     .setClose(stockDaily.getClose())
@@ -175,7 +175,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
-            itemBuilder.setStockDailyId(stockDaily.getStockDailyId())
+            itemBuilder.setStockDailyId(-1)
                     .setTsCode(stockDaily.getTsCode())
                     .setTradeDate(stockDaily.getTradeDate())
                     .setClose(stockDaily.getClose())
