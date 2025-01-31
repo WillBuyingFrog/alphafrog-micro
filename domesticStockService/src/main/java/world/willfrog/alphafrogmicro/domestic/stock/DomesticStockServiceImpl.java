@@ -139,6 +139,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
         // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
+            log.info("stockDaily: {}", stockDaily);
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
             itemBuilder.setStockDailyId(stockDaily.getStockDailyId())
                     .setTsCode(stockDaily.getTsCode())
