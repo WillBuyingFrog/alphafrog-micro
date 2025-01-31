@@ -7,18 +7,11 @@ import lombok.Setter;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.quote.Quote;
 
 
-@Entity
-@Table(name = "alphafrog_stock_daily",
-        uniqueConstraints = {
-                @UniqueConstraint(columnNames = {"ts_code", "trade_date"})
-        }
-)
+
 @Getter
 @Setter
 @NoArgsConstructor
 public class StockDaily extends Quote {
-    @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
     Long stockDailyId;
 
     @Override

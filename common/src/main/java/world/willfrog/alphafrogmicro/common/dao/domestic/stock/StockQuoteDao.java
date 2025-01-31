@@ -18,7 +18,7 @@ public interface StockQuoteDao {
 
     @Select("SELECT * FROM alphafrog_stock_daily WHERE ts_code = #{tsCode} AND trade_date between #{startDate} and #{endDate}")
     @Results({
-            @Result(property = "stockDailyId", column = "id"),
+            @Result(property = "stockDailyId", column = "id", id = true),
             @Result(property = "tsCode", column = "ts_code"),
             @Result(property = "tradeDate", column = "trade_date"),
             @Result(property = "close", column = "close"),
