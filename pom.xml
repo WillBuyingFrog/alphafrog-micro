@@ -36,7 +36,6 @@
         </plugins>
     </build>
     <modules>
-        <module>domesticAnalysisService</module>
         <module>domesticIndexService</module>
         <module>domesticFundService</module>
         <module>domesticStockService</module>

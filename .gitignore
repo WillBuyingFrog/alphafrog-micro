@@ -40,3 +40,7 @@ build/
 
 .mvn
 
+### Django ###
+__pycache__/
+db.sqlite3
+start_regular.sh
