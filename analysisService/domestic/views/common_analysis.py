@@ -12,4 +12,3 @@ def common_analysis(request):
 
         user_prompt = data['user_prompt']
         reason_model = data['reason_model']
-        

@@ -5,9 +5,9 @@ from openai import OpenAI
 import os
 import re
 
+
 @shared_task(bind=True)
 def common_analysis_with_reasoning_model(self, user_prompt, reason_model):
-
     if reason_model == 'deepseek-reasoner':
         client = OpenAI(api_key=os.getenv('AF_DEEPSEEK_API_KEY'), base_url="https://api.deepseek.com/")
 
@@ -37,14 +37,13 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model):
                 if not output_start:
                     output_start = True
                 output_content += chunk.choices[0].delta.content
-        
+
         # 将格式化的输出内容写入临时文件并执行
 
         # （假设LLM返回的代码不是恶意的）
         # 将LLM返回的python脚本代码写到指定的临时文件夹中，然后按顺序执行文件
         # 执行结果为文件，需要持久化保存到另一指定目录
         # 临时的脚本文件需要定时删除
-        
 
 
 def save_code_blocks(input_content, output_suffix, output_dir) -> int:
@@ -59,7 +58,7 @@ def save_code_blocks(input_content, output_suffix, output_dir) -> int:
     """
     # 正则表达式匹配需求标题和代码块
     pattern = r"(需求\d+)\s*```python\n(.*?)\n```"
-    
+
     try:
         # 确保输出目录存在，如果不存在则创建
         os.makedirs(output_dir, exist_ok=True)
@@ -75,14 +74,14 @@ def save_code_blocks(input_content, output_suffix, output_dir) -> int:
         for i, (requirement, code) in enumerate(matches, start=1):
             # 构造输出文件名
             output_filename = f"question{i}-{output_suffix}.py"
-            
+
             # 拼接完整的输出路径
             full_output_path = os.path.join(output_dir, output_filename)
-            
+
             # 将代码保存到文件
             with open(full_output_path, 'w', encoding='utf-8') as output_file:
                 output_file.write(code.strip())  # 去除多余的空白字符
-            
+
             print(f"已保存: {full_output_path}")
             return 0
 
