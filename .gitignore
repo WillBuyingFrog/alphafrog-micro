@@ -44,3 +44,4 @@ build/
 __pycache__/
 db.sqlite3
 start_regular.sh
+start_regular_celery.sh

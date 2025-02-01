@@ -60,7 +60,7 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model,
             model=model_name,
             messages=[{"role": "user", "content": user_prompt}],
             stream=True,
-            max_tokens=80000
+            max_tokens=800000
         )
 
         reason_start = False
@@ -91,6 +91,12 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model,
                         if not output_start and '</think>' in chunk.choices[0].delta.content:
                             output_start = True
                             self.update_state(state='PROGRESS', meta={'progress': 'output'})
+                    
+                    if len(output_content) % 1000 <= 10:
+                        if not output_start:
+                            self.update_state(state='PROGRESS', meta={'progress': 'reasoning', 'cumulative_length': len(output_content)})
+                        else:
+                            self.update_state(state='PROGRESS', meta={'progress': 'output', 'cumulative_length': len(output_content)})
             except Exception as e:
                 exc_info = {
                     'exc_type': type(e).__name__,
@@ -99,12 +105,18 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model,
                 }   
                 self.update_state(state='FAILURE', meta=exc_info)
                 return
+            
 
             # 按照</think>分割output_content
             if '</think>' in output_content:
                 reasoning_content, output_content = output_content.split('</think>', 1)
                 reasoning_content = reasoning_content.strip()
                 output_content = output_content.strip()
+
+            with open(os.path.join(output_dir, 'reasoning_content.txt'), 'w') as f:
+                f.write(reasoning_content)
+            with open(os.path.join(output_dir, 'output_content.txt'), 'w') as f:
+                f.write(output_content)
             
         
         self.update_state(state='PROGRESS', meta={'progress': 'done'})
@@ -134,8 +146,17 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model,
         
         for file in os.listdir(output_dir):
             if file.endswith('.py'):
-                exit_code = os.system(f"python {os.path.join(output_dir, file)}")
-                if exit_code != 0:
+                try:
+                    exit_code = os.system(f"python {os.path.join(output_dir, file)} --output_path {output_dir}")
+                    if exit_code != 0:
+                        exc_info = {
+                            'exc_type': type(e).__name__,
+                            'exc_message': str(e),
+                            'custom_meta': {'progress': 'error', 'detail': f"执行脚本 {file} 失败，退出码为 {exit_code}"}
+                        }
+                        self.update_state(state='FAILURE', meta=exc_info)
+                        return
+                except Exception as e:
                     exc_info = {
                         'exc_type': type(e).__name__,
                         'exc_message': str(e),
@@ -143,7 +164,6 @@ def common_analysis_with_reasoning_model(self, user_prompt, reason_model,
                     }
                     self.update_state(state='FAILURE', meta=exc_info)
                     return
-                
         
         self.update_state(state='SUCCESS', meta={'progress': 'done'})
                 
@@ -163,7 +183,7 @@ def save_code_blocks(input_content, output_suffix, output_dir) -> int:
     :return: 0 成功，-1 未找到任何需求或代码块，-2 发生其他错误
     """
     # 正则表达式匹配需求标题和代码块
-    pattern = r"(需求\d+)\s*```python\n(.*?)\n```"
+    pattern = r"需求(\d+)\s*```python\s*(.*?)\s*```"
     
     try:
         # 确保输出目录存在，如果不存在则创建
@@ -189,7 +209,8 @@ def save_code_blocks(input_content, output_suffix, output_dir) -> int:
                 output_file.write(code.strip())  # 去除多余的空白字符
             
             # print(f"已保存: {full_output_path}")
-            return 0
+        
+        return 0
 
     except Exception as e:
         print(f"发生错误：{e}")
