@@ -45,3 +45,7 @@ __pycache__/
 db.sqlite3
 start_regular.sh
 start_regular_celery.sh
+
+
+### ElasticSearch Certs ###
+http_ca.crt

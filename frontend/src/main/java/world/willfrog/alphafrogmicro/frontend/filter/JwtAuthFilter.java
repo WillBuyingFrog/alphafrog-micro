@@ -7,6 +7,7 @@ import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -22,6 +23,7 @@ import java.util.Collections;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtConfig jwtConfig;
@@ -50,13 +52,15 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private boolean validateToken(String token) {
         try {
+            log.info("parsing token {}", token);
             Jwts.parser()
                     .verifyWith(secretKey)
                     .build()
                     .parseSignedClaims(token);
             return true;
         } catch (Exception e) {
-            throw new BadCredentialsException("Invalid token");
+            log.error("Error occurred while validating token: {}", e.getMessage());
+            return false;
         }
     }
 

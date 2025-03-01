@@ -11,6 +11,12 @@ spring:
       host: ${AF_REDIS_HOST:127.0.0.1}
       port: 6379
       password: ${AF_REDIS_PASSWORD:default}
+  elasticsearch:
+    uris: ${AF_ES_HOST:localhost}:${AF_ES_PORT:9200}
+    username: ${AF_ES_USER:elastic}
+    password: ${AF_ES_PASSWORD:elastic}
+
+    
 
 mybatis:
   configuration:

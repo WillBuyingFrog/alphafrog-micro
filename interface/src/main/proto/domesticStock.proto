@@ -42,6 +42,16 @@ message DomesticStockInfoSimpleItem {
   string industry = 5;
 }
 
+message DomesticStockInfoESItem {
+  string tsCode = 1;
+  string symbol = 2;
+  string name = 3;
+  optional string enName = 4;
+  optional string fullName = 5;
+  optional string area = 6;
+  optional string industry = 7;
+}
+
 /**
   股票基本信息-服务间通信用消息
  */
@@ -65,6 +75,16 @@ message DomesticStockSearchRequest {
 
 message DomesticStockSearchResponse {
   repeated DomesticStockInfoSimpleItem items = 1;
+}
+
+// 根据关键词搜索股票--Elasticsearch
+
+message DomesticStockSearchESRequest {
+  string query = 1;
+}
+
+message DomesticStockSearchESResponse {
+  repeated DomesticStockInfoESItem items = 1;
 }
 
 
@@ -155,6 +175,7 @@ service DomesticStockService {
   rpc searchStock(DomesticStockSearchRequest) returns (DomesticStockSearchResponse);
   rpc getStockDailyByTsCodeAndDateRange(DomesticStockDailyByTsCodeAndDateRangeRequest) returns (DomesticStockDailyByTsCodeAndDateRangeResponse);
   rpc getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest) returns (DomesticStockDailyByTradeDateResponse);
+  rpc searchStockES(DomesticStockSearchESRequest) returns (DomesticStockSearchESResponse);
 }
 
 

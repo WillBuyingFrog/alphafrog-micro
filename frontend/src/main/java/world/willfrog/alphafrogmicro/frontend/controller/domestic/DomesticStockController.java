@@ -61,6 +61,26 @@ public class DomesticStockController {
         }
     }
 
+    @GetMapping("/search_advanced")
+    public ResponseEntity<String> searchStockES(@RequestParam("query") String query) {
+        try {
+            DomesticStockSearchESRequest request = DomesticStockSearchESRequest.newBuilder().setQuery(query).build();
+
+            DomesticStockSearchESResponse response = domesticStockService.searchStockES(request);
+
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+
+            return ResponseEntity.ok(jsonResponse);
+        } catch (Exception e) {
+            log.error("Error occurred while searching stock with Elasticsearch: {}", e.getMessage());
+            return ResponseEntity.status(500).body("Error occurred while searching stock info with Elasticsearch");
+        }
+    }
+
     @GetMapping("/daily/ts_code")
     public ResponseEntity<String> getStockDailyByTsCode(@RequestParam("ts_code") String tsCode,
                                                         @RequestParam("start_date_timestamp") long startDate,

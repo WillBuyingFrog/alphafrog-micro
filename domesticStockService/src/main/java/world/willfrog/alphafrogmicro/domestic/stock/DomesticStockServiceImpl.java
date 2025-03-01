@@ -2,14 +2,17 @@ package world.willfrog.alphafrogmicro.domestic.stock;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.core.query.StringQuery;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockQuoteDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
+import world.willfrog.alphafrogmicro.domestic.stock.doc.StockInfoES;
 
 import java.util.List;
 
@@ -21,10 +24,14 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
 
+    private final ElasticsearchOperations elasticsearchOperations;
+
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
-                                    StockQuoteDao stockQuoteDao) {
+                                    StockQuoteDao stockQuoteDao,
+                                    ElasticsearchOperations elasticsearchOperations) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
+        this.elasticsearchOperations = elasticsearchOperations;
     }
 
     @Override
@@ -121,6 +128,36 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
             responseBuilder.addItems(itemBuilder.build());
         }
+
+        return responseBuilder.build();
+    }
+
+
+    @Override
+    public DomesticStockSearchESResponse searchStockES(DomesticStockSearchESRequest request) {
+        String query = request.getQuery();
+
+        String queryString = String.format("{\"bool\": {\"should\": [{\"match\": {\"ts_code\": \"%s\"}}, {\"match\": {\"name\": \"%s\"}}, {\"match\": {\"fullname\": \"%s\"}}]}}", query, query, query);
+
+        StringQuery stringQuery = new StringQuery(queryString);
+
+        SearchHits<StockInfoES> searchHits = elasticsearchOperations.search(stringQuery, StockInfoES.class);
+
+        DomesticStockSearchESResponse.Builder responseBuilder = DomesticStockSearchESResponse.newBuilder();
+
+        searchHits.forEach(searchHit -> {
+            StockInfoES stockInfoES = searchHit.getContent();
+
+            log.info("Get StockInfoES: {}", stockInfoES);
+            DomesticStockInfoESItem.Builder itemBuilder = DomesticStockInfoESItem.newBuilder();
+            itemBuilder.setTsCode(stockInfoES.getTsCode())
+                    .setSymbol(stockInfoES.getSymbol())
+                    .setName(stockInfoES.getName())
+                    .setArea(stockInfoES.getArea() != null ? stockInfoES.getArea() : "")
+                    .setIndustry(stockInfoES.getIndustry() != null ? stockInfoES.getIndustry() : "");
+
+            responseBuilder.addItems(itemBuilder.build());
+        });
 
         return responseBuilder.build();
     }

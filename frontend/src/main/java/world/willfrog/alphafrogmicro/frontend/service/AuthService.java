@@ -28,6 +28,8 @@ public class AuthService {
 
     // 为登录成功的用户生成token
     public String generateToken(String username) {
+
+        log.info("Signing with SecretKey: {}", secretKey);
         return Jwts.builder()
                 .subject(username)
                 .issuedAt(new Date())

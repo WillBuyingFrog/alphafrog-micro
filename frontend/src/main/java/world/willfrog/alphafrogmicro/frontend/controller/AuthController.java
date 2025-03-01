@@ -42,7 +42,9 @@ public class AuthController {
         // 登录流程
         if (authService.validateCredentials(username, password)) {
             authService.markAsLoggedIn(username);
-            return ResponseEntity.ok(authService.generateToken(username));
+            String authToken = authService.generateToken(username);
+            log.info("User {} logged in successfully with token {}", username, authToken);
+            return ResponseEntity.ok(authToken);
         } else {
             return ResponseEntity.badRequest().body("Invalid credentials");
         }
