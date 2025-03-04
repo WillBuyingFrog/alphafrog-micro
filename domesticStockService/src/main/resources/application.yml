@@ -16,7 +16,7 @@ spring:
     username: ${AF_ES_USER:elastic}
     password: ${AF_ES_PASSWORD:elastic}
 
-    
+
 
 mybatis:
   configuration:
@@ -36,3 +36,7 @@ dubbo:
 
 tushare:
   token: ${TUSHARE_TOKEN}
+
+
+advanced:
+  es-enabled: false

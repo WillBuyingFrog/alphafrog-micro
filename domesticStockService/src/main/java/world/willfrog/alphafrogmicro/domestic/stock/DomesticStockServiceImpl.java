@@ -2,6 +2,8 @@ package world.willfrog.alphafrogmicro.domestic.stock;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
 import org.springframework.data.elasticsearch.core.SearchHits;
 import org.springframework.data.elasticsearch.core.query.StringQuery;
@@ -24,7 +26,11 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
 
+    @Autowired(required = false)
     private final ElasticsearchOperations elasticsearchOperations;
+
+    @Value("${advanced.es-enabled}")
+    private boolean elasticsearchEnabled;
 
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
                                     StockQuoteDao stockQuoteDao,
@@ -135,6 +141,11 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     @Override
     public DomesticStockSearchESResponse searchStockES(DomesticStockSearchESRequest request) {
+
+        if (elasticsearchOperations == null || !elasticsearchEnabled) {
+            return DomesticStockSearchESResponse.newBuilder().build();
+        }
+
         String query = request.getQuery();
 
         String queryString = String.format("{\"bool\": {\"should\": [{\"match\": {\"ts_code\": \"%s\"}}, {\"match\": {\"name\": \"%s\"}}, {\"match\": {\"fullname\": \"%s\"}}]}}", query, query, query);
