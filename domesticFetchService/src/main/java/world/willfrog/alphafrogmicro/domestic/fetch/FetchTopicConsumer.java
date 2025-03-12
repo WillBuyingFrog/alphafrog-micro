@@ -90,7 +90,20 @@ public class FetchTopicConsumer {
                     break;
                 case "fund_nav":
                     // 0: 爬取指定交易日范围内的所有基金净值
-                    result = -1;
+                    if (taskSubType == 1) {
+                        long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticFund.DomesticFundNavFetchByTradeDateRequest request =
+                                DomesticFund.DomesticFundNavFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDateTimestamp(tradeDateTimestamp)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticFundFetchService.fetchDomesticFundNavByTradeDate(request).getFetchedItemsCount();
+                        Thread.sleep(200);
+                    } else {
+                        result = -1;
+                    }
                     break;
                 case "fund_portfolio":
                     if (taskSubType == 1){
