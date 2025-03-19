@@ -52,7 +52,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private boolean validateToken(String token) {
         try {
-            log.info("parsing token {}", token);
+//            log.info("parsing token {}", token);
             Jwts.parser()
                     .verifyWith(secretKey)
                     .build()
