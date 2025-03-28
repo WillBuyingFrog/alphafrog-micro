@@ -15,8 +15,10 @@ import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
 import world.willfrog.alphafrogmicro.domestic.stock.doc.StockInfoES;
+import world.willfrog.alphafrogmicro.domestic.stock.service.StockCacheService;
 
 import java.util.List;
+import java.util.concurrent.TimeUnit;
 
 @Service
 @DubboService
@@ -25,6 +27,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
+    private final StockCacheService stockCacheService;
 
     @Autowired(required = false)
     private final ElasticsearchOperations elasticsearchOperations;
@@ -34,9 +37,12 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
                                     StockQuoteDao stockQuoteDao,
+                                    StockCacheService stockCacheService,
                                     ElasticsearchOperations elasticsearchOperations) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
+        this.stockCacheService = stockCacheService;
+
         this.elasticsearchOperations = elasticsearchOperations;
     }
 
@@ -44,7 +50,18 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockInfoByTsCodeResponse getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest request) {
         String tsCode = request.getTsCode();
 
-        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
+//        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
+
+        // 使用缓存，键使用前缀加tsCode，缓存24小时
+        String cacheKey = "stock:info:" + tsCode;
+
+        List<StockInfo> stockInfoList = stockCacheService.getListWithCache(
+                cacheKey,
+                () -> stockInfoDao.getStockInfoByTsCode(tsCode),
+                24,
+                TimeUnit.HOURS,
+                StockInfo.class
+        );
 
         StockInfo stockInfo = stockInfoList.get(0);
         DomesticStockInfoFullItem.Builder builder = DomesticStockInfoFullItem.newBuilder();
@@ -179,7 +196,18 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         long endDate = request.getEndDate();
 
         // 根据时间范围和股票代码查询股票日线行情
-        List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate);
+//        List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate);
+
+        String cacheKey = "stock:daily_tscode:";
+
+        List<StockDaily> stockDailyList = stockCacheService.getListWithCache(
+                cacheKey,
+                () -> stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate),
+                24,
+                TimeUnit.HOURS,
+                StockDaily.class
+        );
+
 
         // 构建响应对象
         DomesticStockDailyByTsCodeAndDateRangeResponse.Builder responseBuilder = DomesticStockDailyByTsCodeAndDateRangeResponse.newBuilder();
