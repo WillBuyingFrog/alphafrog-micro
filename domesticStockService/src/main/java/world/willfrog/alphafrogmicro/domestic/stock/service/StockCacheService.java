@@ -8,8 +8,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 
-import java.lang.reflect.Type;
 import java.util.List;
+import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.TimeUnit;
 import java.util.function.Supplier;
 
@@ -62,7 +62,7 @@ public class StockCacheService {
     /**
      * 从缓存获取列表数据
      */
-    public <T> List<T> getListWithCache(String key, Supplier<List<T>> dbFallback, long expireTime, TimeUnit timeUnit, Class<T> elementType) {
+    public <T> List<T> getListWithCache(String key, Supplier<List<T>> dbFallback, long expireTimestamp, TimeUnit timeUnit, Class<T> elementType) {
         // 从缓存获取JSON字符串
         String cachedJson = (String) redisTemplate.opsForValue().get(key);
         if (cachedJson != null) {
@@ -81,7 +81,8 @@ public class StockCacheService {
         if (value != null) {
             String json = serializeToJson(value);
             if (json != null) {
-                redisTemplate.opsForValue().set(key, json, expireTime, timeUnit);
+                long finalExpireTimestamp = expireTimestamp + ThreadLocalRandom.current().nextInt(0, 10);
+                redisTemplate.opsForValue().set(key, json, finalExpireTimestamp, timeUnit);
             }
         }
         return value;

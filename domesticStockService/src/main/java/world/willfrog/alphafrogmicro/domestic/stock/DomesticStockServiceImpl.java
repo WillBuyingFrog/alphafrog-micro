@@ -189,22 +189,42 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         return responseBuilder.build();
     }
 
+
+    @Override
+    public DomesticStockTsCodeResponse getStockTsCode(DomesticStockTsCodeRequest request) {
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 根据偏移量和限制数量查询股票代码
+        List<String> stockTsCodeList = stockInfoDao.getStockTsCode(offset, limit);
+
+        // 构建响应对象
+        DomesticStockTsCodeResponse.Builder responseBuilder = DomesticStockTsCodeResponse.newBuilder();
+
+        // 将查询结果转换为股票代码对象
+        for (String tsCode : stockTsCodeList) {
+            responseBuilder.addTsCodes(tsCode);
+        }
+
+        return responseBuilder.build();
+    }
+
+
+
     @Override
     public DomesticStockDailyByTsCodeAndDateRangeResponse getStockDailyByTsCodeAndDateRange(DomesticStockDailyByTsCodeAndDateRangeRequest request) {
         String tsCode = request.getTsCode();
         long startDate = request.getStartDate();
         long endDate = request.getEndDate();
 
-        // 根据时间范围和股票代码查询股票日线行情
-//        List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate);
-
-        String cacheKey = "stock:daily_tscode:";
+        String cacheKey = String.format("domestic:stock_daily:%s:%s:%s",
+                tsCode, startDate, endDate);
 
         List<StockDaily> stockDailyList = stockCacheService.getListWithCache(
                 cacheKey,
                 () -> stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate),
-                24,
-                TimeUnit.HOURS,
+                24 * 60,
+                TimeUnit.MINUTES,
                 StockDaily.class
         );
 
@@ -237,8 +257,8 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     @Override
     public DomesticStockDailyByTradeDateResponse getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest request) {
         long tradeDate = request.getTradeDate();
-        int offset = request.getOffset();
-        int limit = request.getLimit();
+        // int offset = request.getOffset();
+        // int limit = request.getLimit();
 
         // 根据交易日查询股票日线行情
         List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTradeDate(tradeDate);

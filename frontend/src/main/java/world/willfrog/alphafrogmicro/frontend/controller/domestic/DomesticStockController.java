@@ -81,6 +81,28 @@ public class DomesticStockController {
         }
     }
 
+    @GetMapping("/ts_code")
+    public ResponseEntity<String> getStockTsCodes(@RequestParam("offset") int offset, @RequestParam("limit") int limit) {
+        try {
+
+            if(limit > 1000) {
+                return ResponseEntity.badRequest().body("Limit should be no more than 1000");
+            }
+
+            DomesticStockTsCodeRequest request = DomesticStockTsCodeRequest.newBuilder().setOffset(offset).setLimit(limit).build();
+            DomesticStockTsCodeResponse response = domesticStockService.getStockTsCode(request);
+            String jsonResponse = JsonFormat.printer()
+                    .preservingProtoFieldNames()
+                    .omittingInsignificantWhitespace()
+                    .includingDefaultValueFields()
+                    .print(response);
+            return ResponseEntity.ok(jsonResponse);
+        } catch (Exception e) {
+            log.error("Error occurred while getting stock ts codes: {}", e.getMessage());
+            return ResponseEntity.status(500).body("Error occurred while getting stock ts codes");
+        }
+    }
+
     @GetMapping("/daily/ts_code")
     public ResponseEntity<String> getStockDailyByTsCode(@RequestParam("ts_code") String tsCode,
                                                         @RequestParam("start_date_timestamp") long startDate,

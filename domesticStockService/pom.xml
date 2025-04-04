@@ -13,6 +13,9 @@
     <version>1.0-SNAPSHOT</version>
     <name>domesticStockService</name>
     <url>http://maven.apache.org</url>
+    <properties>
+        <protoc.version>3.22.3</protoc.version>
+    </properties>
     <dependencies>
 
         <!--        Spring必需组件与微服务治理-->
