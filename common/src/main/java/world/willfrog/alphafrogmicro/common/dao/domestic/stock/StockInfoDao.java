@@ -1,6 +1,7 @@
 package world.willfrog.alphafrogmicro.common.dao.domestic.stock;
 
 import org.apache.ibatis.annotations.*;
+import org.springframework.cache.annotation.Cacheable;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 
 import java.util.List;
@@ -36,6 +37,7 @@ public interface StockInfoDao {
             @Result(column = "act_name", property = "actName"),
             @Result(column = "act_ent_type", property = "actEntType")
     })
+    @Cacheable(value = "stockInfoCache", key = "'stock:info:' + #tsCode", cacheManager = "stockInfoCacheManager")
     List<StockInfo> getStockInfoByTsCode(String tsCode);
 
     @Select("SELECT * FROM alphafrog_stock_info WHERE fullname like '%${fullName}%'")

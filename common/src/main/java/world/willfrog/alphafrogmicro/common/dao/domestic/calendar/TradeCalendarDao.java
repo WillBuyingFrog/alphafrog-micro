@@ -19,4 +19,18 @@ public interface TradeCalendarDao {
             "cal_date_timestamp BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
     List<TradeCalendar> getTradeCalendarByDateRange(long startDateTimestamp, long endDateTimestamp);
 
+    /**
+     * Finds the latest actual trading day timestamp (YYYYMMDD long format)
+     * that is strictly before the given currentCalDateLongYYYYMMDD.
+     *
+     * @param exchange The stock exchange identifier (e.g., "SSE").
+     * @param currentCalDateTimestamp The current date as a long timestamp,
+     *                                   the search will be for trading days before this date.
+     * @return The timestamp of the previous trading day in YYYYMMDD long format, or null if not found.
+     */
+    @Select("SELECT cal_date_timestamp FROM alphafrog_trade_calendar " +
+            "WHERE exchange = #{exchange} AND cal_date_timestamp < #{currentCalDateTimestamp} AND is_open = 1 " +
+            "ORDER BY cal_date_timestamp DESC LIMIT 1")
+    Long getActualPreviousTradingDayTimestamp(String exchange, long currentCalDateTimestamp);
+
 }

@@ -1,0 +1,63 @@
+现在，请你基于以上提供的api，根据我最后提供的分析需求，判断出需要调用哪些api，你判断需要调用这些api的思路是怎么样的，你判断调用这些api的调用的顺序是什么样的（也就是说，你需要分析出调用api过程中必须要遵循的所有顺序，比如说某种情况下要先搜索基金再根据基金代码查询日线行情；如果一些api的调用顺序是任意的，那么这些api之间的相对顺序取任意组合即可），给出每一步api调用的请求参数（如果请求参数需要依赖于之前的api调用结果，请在下方输出格式示例中的param_value处用自然语言填写相关说明，具体方法可以参考示例）。
+
+输出格式需严格遵循以下json格式，不得有任何其他内容：
+```json
+{
+    "analysis_idea_summary": "你判断需要调用以下api的思路",
+    "api_calls": [
+        {
+            "api_order": 1,
+            "api_path": "{{baseUrl}}/path/to/api",
+            "api_method": "GET",
+            "api_params": {
+                "param_name": "param_value",
+                ...
+            }
+        },
+        ...
+    ]
+}
+```
+
+为了辅助你理解任务，接下来我给出一些分析需求以及期望输出的示例。
+
+示例1:
+
+分析需求是：我想知道如果在2024年每个月第一个交易日定投1000元的沪深300，这样到2024年最后一个交易日结束，我的收益率是多少。
+
+期望输出:
+```json
+{
+    "analysis_idea_summary": "直接买指数肯定不行，用户说定投指数肯定意思是买对应的场外基金，所以要先搜索名字里带沪深300的基金，然后看搜索结果里哪些是场外的，然后选一个创立日期早一点的场外基金（一般来说成立时间早的基金规模会大一些，管理团队也更成熟一些），然后根据基金代码调用api获取基金的净值数据，然后根据净值数据计算定投的收益率。",
+    "api_calls": [
+        {
+            "api_order": 1,
+            "api_path: "{{baseUrl}}/domestic/fund/search",
+            "api_method": "GET",
+            "api_params": {
+                "query": "沪深300"
+            }
+        },
+        {
+            "api_order": 2,
+            "api_path": "{{baseUrl}}/domestic/fund/info/tsCode",
+            "api_method": "GET",
+            "api_params": {
+                "ts_code": "上一步搜索到的基金代码，因为一次只能搜索一个基金，所以要挨个请求一遍"
+            }
+        },
+        {
+            "api_order": 3,
+            "api_path": "{{baseUrl}}/domestic/fund/nav/ts_code",
+            "api_method": "GET",
+            "api_params": {
+                "tsCode": "基于上一步搜索到的基金基本信息中，选择的创立时间最早且已经上市的基金的tsCode"
+            }
+        }
+    ]
+}
+```
+
+
+现在，给出真正需要你分析的分析需求：
+

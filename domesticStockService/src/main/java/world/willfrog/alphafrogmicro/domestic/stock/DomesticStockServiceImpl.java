@@ -15,10 +15,8 @@ import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
 import world.willfrog.alphafrogmicro.domestic.stock.doc.StockInfoES;
-import world.willfrog.alphafrogmicro.domestic.stock.service.StockCacheService;
 
 import java.util.List;
-import java.util.concurrent.TimeUnit;
 
 @Service
 @DubboService
@@ -27,7 +25,6 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
-    private final StockCacheService stockCacheService;
 
     @Autowired(required = false)
     private final ElasticsearchOperations elasticsearchOperations;
@@ -37,11 +34,9 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
                                     StockQuoteDao stockQuoteDao,
-                                    StockCacheService stockCacheService,
                                     ElasticsearchOperations elasticsearchOperations) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
-        this.stockCacheService = stockCacheService;
 
         this.elasticsearchOperations = elasticsearchOperations;
     }
@@ -50,18 +45,12 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockInfoByTsCodeResponse getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest request) {
         String tsCode = request.getTsCode();
 
-//        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
+        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
 
-        // 使用缓存，键使用前缀加tsCode，缓存24小时
-        String cacheKey = "stock:info:" + tsCode;
-
-        List<StockInfo> stockInfoList = stockCacheService.getListWithCache(
-                cacheKey,
-                () -> stockInfoDao.getStockInfoByTsCode(tsCode),
-                24,
-                TimeUnit.HOURS,
-                StockInfo.class
-        );
+        if (stockInfoList == null || stockInfoList.isEmpty()) {
+            log.warn("StockInfo not found for tsCode: {}", tsCode);
+            return DomesticStockInfoByTsCodeResponse.newBuilder().build();
+        }
 
         StockInfo stockInfo = stockInfoList.get(0);
         DomesticStockInfoFullItem.Builder builder = DomesticStockInfoFullItem.newBuilder();
@@ -134,13 +123,10 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockSearchResponse searchStock(DomesticStockSearchRequest request) {
         String query = request.getQuery();
 
-        // 根据关键词查询股票信息
         List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByName(query);
 
-        // 构建响应对象
         DomesticStockSearchResponse.Builder responseBuilder = DomesticStockSearchResponse.newBuilder();
 
-        // 将查询结果转换为简单信息对象
         for (StockInfo stockInfo : stockInfoList) {
             DomesticStockInfoSimpleItem.Builder itemBuilder = DomesticStockInfoSimpleItem.newBuilder();
             itemBuilder.setTsCode(stockInfo.getTsCode())
@@ -195,13 +181,10 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         int offset = request.getOffset();
         int limit = request.getLimit();
 
-        // 根据偏移量和限制数量查询股票代码
         List<String> stockTsCodeList = stockInfoDao.getStockTsCode(offset, limit);
 
-        // 构建响应对象
         DomesticStockTsCodeResponse.Builder responseBuilder = DomesticStockTsCodeResponse.newBuilder();
 
-        // 将查询结果转换为股票代码对象
         for (String tsCode : stockTsCodeList) {
             responseBuilder.addTsCodes(tsCode);
         }
@@ -217,22 +200,15 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         long startDate = request.getStartDate();
         long endDate = request.getEndDate();
 
-        String cacheKey = String.format("domestic:stock_daily:%s:%s:%s",
-                tsCode, startDate, endDate);
+        List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate);
 
-        List<StockDaily> stockDailyList = stockCacheService.getListWithCache(
-                cacheKey,
-                () -> stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate),
-                24 * 60,
-                TimeUnit.MINUTES,
-                StockDaily.class
-        );
+        if (stockDailyList == null) {
+            log.warn("StockDaily list is null for tsCode: {}, startDate: {}, endDate: {}", tsCode, startDate, endDate);
+            return DomesticStockDailyByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
 
-
-        // 构建响应对象
         DomesticStockDailyByTsCodeAndDateRangeResponse.Builder responseBuilder = DomesticStockDailyByTsCodeAndDateRangeResponse.newBuilder();
 
-        // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
             itemBuilder.setStockDailyId(-1)
@@ -257,16 +233,11 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     @Override
     public DomesticStockDailyByTradeDateResponse getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest request) {
         long tradeDate = request.getTradeDate();
-        // int offset = request.getOffset();
-        // int limit = request.getLimit();
 
-        // 根据交易日查询股票日线行情
         List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTradeDate(tradeDate);
 
-        // 构建响应对象
         DomesticStockDailyByTradeDateResponse.Builder responseBuilder = DomesticStockDailyByTradeDateResponse.newBuilder();
 
-        // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
             itemBuilder.setStockDailyId(-1)
