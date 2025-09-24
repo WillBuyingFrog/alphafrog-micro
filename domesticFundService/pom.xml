@@ -58,11 +58,11 @@
             <version>42.7.4</version>
         </dependency>
 
-<!--        项目内依赖与idl-->
+        <!--        项目内依赖与idl-->
 
         <dependency>
             <groupId>world.willfrog</groupId>
-            <artifactId>interface</artifactId>
+            <artifactId>domestic-fund-api</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
 
@@ -125,7 +125,7 @@
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
                     <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
-                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot>
+                    <protoSourceRoot>${project.basedir}/../domesticFundApi/src/main/proto</protoSourceRoot>
                     <protocPlugins>
                         <protocPlugin>
                             <id>dubbo</id>

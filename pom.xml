@@ -66,5 +66,9 @@
         <module>interface</module>
         <module>frontend</module>
         <module>portfolioService</module>
+        <module>domesticStockApi</module>
+        <module>domesticFundApi</module>
+        <module>domesticIndexApi</module>
+        <module>portfolioSummaryApi</module>
     </modules>
 </project>
