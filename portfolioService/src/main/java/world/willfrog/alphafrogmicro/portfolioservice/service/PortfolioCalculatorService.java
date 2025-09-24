@@ -1,7 +1,7 @@
 package world.willfrog.alphafrogmicro.portfolioservice.service;
 
 import world.willfrog.alphafrogmicro.common.pojo.portfolio.PortfolioHolding;
-import world.willfrog.alphafrogmicro.portfolioservice.dto.HoldingPerformanceDto;
+import world.willfrog.alphafrogmicro.common.pojo.portfolio.HoldingPerformanceDto;
 import world.willfrog.alphafrogmicro.portfolioservice.model.AssetInfo;
 import world.willfrog.alphafrogmicro.portfolioservice.model.AssetPriceInfo;
 

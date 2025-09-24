@@ -4,7 +4,6 @@ import world.willfrog.alphafrogmicro.common.pojo.portfolio.AssetType;
 import world.willfrog.alphafrogmicro.portfolioservice.model.AssetPriceInfo;
 
 import java.time.LocalDate;
-import java.util.List;
 import java.util.Map;
 
 public interface AssetPriceService {

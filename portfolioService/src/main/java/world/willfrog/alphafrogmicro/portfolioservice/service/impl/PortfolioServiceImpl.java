@@ -1,9 +1,10 @@
 package world.willfrog.alphafrogmicro.portfolioservice.service.impl;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import lombok.extern.slf4j.Slf4j;
 import world.willfrog.alphafrogmicro.common.dao.portfolio.PortfolioHoldingDao; // Placeholder - replace with your actual DAO
 import world.willfrog.alphafrogmicro.common.dao.portfolio.PortfolioDao; // Placeholder - replace with your actual DAO
 import world.willfrog.alphafrogmicro.common.pojo.portfolio.Portfolio;
@@ -15,9 +16,8 @@ import java.util.Optional;
 
 
 @Service
+@Slf4j
 public class PortfolioServiceImpl implements PortfolioService {
-
-    private static final Logger logger = LoggerFactory.getLogger(PortfolioServiceImpl.class);
 
     private final PortfolioDao portfolioDao; // Placeholder
     private final PortfolioHoldingDao portfolioHoldingDao; // Placeholder
@@ -35,7 +35,7 @@ public class PortfolioServiceImpl implements PortfolioService {
         // Assuming portfolio object passed here might not have an ID yet.
         // The DAO's insert method should populate the ID if auto-generated.
         portfolioDao.insert(portfolio);
-        logger.info("Created portfolio with ID: {}", portfolio.getId());
+        log.info("Created portfolio with ID: {}", portfolio.getId());
         return portfolio;
     }
 
@@ -66,7 +66,7 @@ public class PortfolioServiceImpl implements PortfolioService {
     public Portfolio updatePortfolio(Portfolio portfolio) {
         // Ensure portfolio has an ID for update
         if (portfolio.getId() == null) {
-            logger.error("Portfolio ID is null, cannot update.");
+            log.error("Portfolio ID is null, cannot update.");
             // Or throw IllegalArgumentException
             return null; 
         }
@@ -84,7 +84,7 @@ public class PortfolioServiceImpl implements PortfolioService {
         // If not, delete holdings first:
         // portfolioHoldingRepository.deleteByPortfolioId(portfolioId);
         portfolioDao.deleteById(portfolioId);
-        logger.info("Deleted portfolio with ID: {}", portfolioId);
+        log.info("Deleted portfolio with ID: {}", portfolioId);
     }
 
     @Override
@@ -95,10 +95,10 @@ public class PortfolioServiceImpl implements PortfolioService {
             holding.setPortfolio(portfolioOpt.get()); // Set the portfolio reference
             // Ensure the holding.portfolio.id is correctly used by MyBatis insert if needed
             portfolioHoldingDao.insert(holding);
-            logger.info("Added holding with ID: {} to portfolio ID: {}", holding.getId(), portfolioId);
+            log.info("Added holding with ID: {} to portfolio ID: {}", holding.getId(), portfolioId);
             return holding;
         } else {
-            logger.error("Portfolio with ID: {} not found. Cannot add holding.", portfolioId);
+            log.error("Portfolio with ID: {} not found. Cannot add holding.", portfolioId);
             // Or throw exception
             return null;
         }
@@ -110,7 +110,7 @@ public class PortfolioServiceImpl implements PortfolioService {
         // Ensure portfolioId matches the one in holding if it's set, or that holding belongs to this portfolio.
         // For simplicity, assuming holding object is self-contained for update by its ID.
         if (holding.getId() == null) {
-            logger.error("Holding ID is null, cannot update.");
+            log.error("Holding ID is null, cannot update.");
             return null;
         }
         // Optional: Check if holding actually belongs to portfolioId before updating
@@ -123,7 +123,7 @@ public class PortfolioServiceImpl implements PortfolioService {
     public void removeHoldingFromPortfolio(Long portfolioId, Long holdingId) {
         // Optional: Check if holdingId actually belongs to portfolioId before deleting
         portfolioHoldingDao.deleteById(holdingId);
-        logger.info("Removed holding ID: {} from portfolio ID: {}", holdingId, portfolioId);
+        log.info("Removed holding ID: {} from portfolio ID: {}", holdingId, portfolioId);
     }
 
     @Override

@@ -49,3 +49,7 @@ start_regular_celery.sh
 
 ### ElasticSearch Certs ###
 http_ca.crt
+
+
+### Test Secrets ###
+test-secrets.yml

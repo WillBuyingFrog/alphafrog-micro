@@ -1,10 +1,9 @@
-package world.willfrog.alphafrogmicro.portfolioservice.dto;
+package world.willfrog.alphafrogmicro.common.pojo.portfolio;
 
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
-import world.willfrog.alphafrogmicro.common.pojo.portfolio.AssetType;
 
 import java.math.BigDecimal;
 

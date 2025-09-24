@@ -5,10 +5,11 @@ import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
-import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioDailySummaryDto;
+import world.willfrog.alphafrogmicro.common.pojo.portfolio.PortfolioDailySummaryDto;
 import world.willfrog.alphafrogmicro.portfolioservice.service.PortfolioSummaryService;
 
 import java.time.LocalDate;
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/portfolio")
@@ -24,14 +25,15 @@ public class PortfolioSummaryController {
     @GetMapping("/{portfolioId}/summary/daily")
     public ResponseEntity<PortfolioDailySummaryDto> getDailyPortfolioSummary(
             @PathVariable Long portfolioId,
-            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
+            @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date,
+            @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) List<LocalDate> comparisonDates) {
 
         if (portfolioId == null || date == null) {
             return ResponseEntity.badRequest().build(); // Or a more descriptive error
         }
 
         try {
-            PortfolioDailySummaryDto summaryDto = portfolioSummaryService.generateDailySummary(portfolioId, date);
+            PortfolioDailySummaryDto summaryDto = portfolioSummaryService.generateDailySummary(portfolioId, date, comparisonDates);
             if (summaryDto == null) {
                 // This could happen if portfolio is not found, handled by service returning null
                 return ResponseEntity.notFound().build();

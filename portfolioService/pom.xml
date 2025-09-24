@@ -138,10 +138,22 @@
             <extension>
                 <groupId>kr.motd.maven</groupId>
                 <artifactId>os-maven-plugin</artifactId>
-                <version>1.6.1</version> <!-- Check for latest version -->
+                <version>1.6.1</version>
             </extension>
         </extensions>
         <plugins>
+            <plugin>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>detect</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
             <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
@@ -160,10 +172,9 @@
                 <version>0.6.1</version>
                 <configuration>
                     <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <!-- Assuming proto files related to this service might be in its own src/main/proto or from interface module -->
-                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot> <!-- Adjust if protos are elsewhere -->
-                    <outputDirectory>build/generated/source/proto/main/java</outputDirectory> 
-                    <clearOutputDirectory>false</clearOutputDirectory>
+                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot>
+                    <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
+                    <clearOutputDirectory>true</clearOutputDirectory>
                     <protocPlugins>
                         <protocPlugin>
                             <id>dubbo</id>
@@ -176,6 +187,8 @@
                 </configuration>
                 <executions>
                     <execution>
+                        <id>compile-protobuf</id>
+                        <phase>generate-sources</phase>
                         <goals>
                             <goal>compile</goal>
                         </goals>
@@ -195,7 +208,7 @@
                         </goals>
                         <configuration>
                             <sources>
-                                <source>${project.build.directory}/generated-sources/java</source>
+                                <source>build/generated/source/proto/main/java</source>
                             </sources>
                         </configuration>
                     </execution>
@@ -222,7 +235,7 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-jar-plugin</artifactId>
-                <!-- Version should be managed -->
+                <version>3.3.0</version> <!-- Specify a recent stable version -->
                 <configuration>
                     <archive>
                         <manifest>
@@ -230,6 +243,17 @@
                             <addDefaultImplementationEntries>true</addDefaultImplementationEntries>
                         </manifest>
                     </archive>
+                </configuration>
+            </plugin>
+            <plugin>
+                <groupId>org.apache.maven.plugins</groupId>
+                <artifactId>maven-surefire-plugin</artifactId>
+                <version>3.5.3</version> <!-- Use the latest stable version -->
+                <configuration>
+                    <useModulePath>false</useModulePath>
+                    <systemPropertyVariables>
+                        <spring.profiles.active>it</spring.profiles.active>
+                    </systemPropertyVariables>
                 </configuration>
             </plugin>
         </plugins>
