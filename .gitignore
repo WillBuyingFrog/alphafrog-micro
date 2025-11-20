@@ -53,3 +53,14 @@ http_ca.crt
 
 ### Test Secrets ###
 test-secrets.yml
+
+
+# Coding Agent configs
+
+/.qwen
+/.codex
+/.kilocode
+
+# Coding Agent Guides
+
+/agent-guides
