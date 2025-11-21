@@ -1,0 +1,175 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.portfolio.idl;
+
+import "google/protobuf/empty.proto";
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.portfolio.idl";
+option java_outer_classname = "PortfolioServiceProto";
+
+message PortfolioMessage {
+  int64 id = 1;
+  string user_id = 2;
+  string name = 3;
+  string visibility = 4;
+  repeated string tags = 5;
+  string status = 6;
+  string timezone = 7;
+  string created_at = 8;
+  string updated_at = 9;
+}
+
+message CreatePortfolioRequest {
+  string user_id = 1;
+  string name = 2;
+  string visibility = 3;
+  repeated string tags = 4;
+  string timezone = 5;
+}
+
+message UpdatePortfolioRequest {
+  string user_id = 1;
+  int64 id = 2;
+  string name = 3;
+  string visibility = 4;
+  repeated string tags = 5;
+  string status = 6;
+}
+
+message ArchivePortfolioRequest {
+  string user_id = 1;
+  int64 id = 2;
+}
+
+message GetPortfolioRequest {
+  string user_id = 1;
+  int64 id = 2;
+}
+
+message ListPortfolioRequest {
+  string user_id = 1;
+  string status = 2;
+  string keyword = 3;
+  int32 page = 4;
+  int32 size = 5;
+}
+
+message ListPortfolioResponse {
+  repeated PortfolioMessage items = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message HoldingMessage {
+  int64 id = 1;
+  int64 portfolio_id = 2;
+  string symbol = 3;
+  string symbol_type = 4;
+  string exchange = 5;
+  string position_side = 6;
+  string quantity = 7; // decimal as string
+  string avg_cost = 8; // decimal as string
+  string updated_at = 9;
+}
+
+message HoldingsBulkUpsertRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+  repeated HoldingMessage items = 3;
+}
+
+message HoldingsListRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+}
+
+message HoldingsListResponse {
+  repeated HoldingMessage items = 1;
+}
+
+message TradeMessage {
+  int64 id = 1;
+  int64 portfolio_id = 2;
+  string symbol = 3;
+  string event_type = 4;
+  string quantity = 5;
+  string price = 6;
+  string fee = 7;
+  string slippage = 8;
+  string trade_time = 9;   // ISO-8601 string
+  string settle_date = 10; // ISO-8601 string
+  string note = 11;
+}
+
+message TradesCreateRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+  repeated TradeMessage items = 3;
+}
+
+message TradesListRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+  string from = 3;
+  string to = 4;
+  string event_type = 5;
+  int32 page = 6;
+  int32 size = 7;
+}
+
+message TradesListResponse {
+  repeated TradeMessage items = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message ValuationPositionMessage {
+  string symbol = 1;
+  string symbol_type = 2;
+  string quantity = 3;
+  string last_price = 4;
+  string market_value = 5;
+}
+
+message ValuationResponse {
+  string total_value = 1;
+  string pnl_abs = 2;
+  string pnl_pct = 3;
+  repeated ValuationPositionMessage positions = 4;
+}
+
+message ValuationRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+}
+
+message MetricsRequest {
+  string user_id = 1;
+  int64 portfolio_id = 2;
+  string from = 3;
+  string to = 4;
+}
+
+message MetricsResponse {
+  string return_pct = 1;
+  string volatility = 2;
+  string max_drawdown = 3;
+  string note = 4;
+}
+
+service PortfolioDubboService {
+  rpc CreatePortfolio(CreatePortfolioRequest) returns (PortfolioMessage);
+  rpc UpdatePortfolio(UpdatePortfolioRequest) returns (PortfolioMessage);
+  rpc ArchivePortfolio(ArchivePortfolioRequest) returns (google.protobuf.Empty);
+  rpc GetPortfolio(GetPortfolioRequest) returns (PortfolioMessage);
+  rpc ListPortfolio(ListPortfolioRequest) returns (ListPortfolioResponse);
+  rpc HoldingsBulkUpsert(HoldingsBulkUpsertRequest) returns (HoldingsListResponse);
+  rpc HoldingsList(HoldingsListRequest) returns (HoldingsListResponse);
+  rpc TradesCreate(TradesCreateRequest) returns (google.protobuf.Empty);
+  rpc TradesList(TradesListRequest) returns (TradesListResponse);
+  rpc Valuation(ValuationRequest) returns (ValuationResponse);
+  rpc Metrics(MetricsRequest) returns (MetricsResponse);
+}

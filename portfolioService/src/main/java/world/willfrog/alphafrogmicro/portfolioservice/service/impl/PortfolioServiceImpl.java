@@ -10,6 +10,7 @@ import world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioPo;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PageResult;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioCreateRequest;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioResponse;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioUpdateRequest;
 import world.willfrog.alphafrogmicro.portfolioservice.exception.BizException;
 import world.willfrog.alphafrogmicro.portfolioservice.mapper.PortfolioMapper;
 import world.willfrog.alphafrogmicro.portfolioservice.service.PortfolioService;
@@ -108,5 +109,45 @@ public class PortfolioServiceImpl implements PortfolioService {
             throw new BizException(ResponseCode.PARAM_ERROR, "status 仅支持 active/archived");
         }
         return status;
+    }
+
+    @Override
+    @Transactional
+    public PortfolioResponse update(Long id, String userId, PortfolioUpdateRequest request) {
+        PortfolioPo po = portfolioMapper.findByIdAndUser(id, userId);
+        if (po == null) {
+            throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
+        }
+        if (StringUtils.isNotBlank(request.getName())
+                && !StringUtils.equals(request.getName(), po.getName())
+                && portfolioMapper.countActiveName(userId, request.getName()) > 0) {
+            throw new BizException(ResponseCode.DATA_EXIST, "同名组合已存在");
+        }
+        if (StringUtils.isNotBlank(request.getVisibility())) {
+            po.setVisibility(defaultVisibility(request.getVisibility()));
+        }
+        if (request.getTags() != null) {
+            po.setTagsJson(PortfolioConverter.toTagsJson(request.getTags(), objectMapper));
+        }
+        if (StringUtils.isNotBlank(request.getStatus())) {
+            po.setStatus(normalizeStatus(request.getStatus()));
+        }
+        if (StringUtils.isNotBlank(request.getName())) {
+            po.setName(request.getName());
+        }
+
+        portfolioMapper.update(po);
+        return PortfolioConverter.toResponse(po, objectMapper);
+    }
+
+    @Override
+    @Transactional
+    public void archive(Long id, String userId) {
+        PortfolioPo po = portfolioMapper.findByIdAndUser(id, userId);
+        if (po == null) {
+            throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
+        }
+        po.setStatus("archived");
+        portfolioMapper.update(po);
     }
 }

@@ -20,6 +20,11 @@ public class GlobalExceptionHandler {
         return ResponseWrapper.error(ex.getCode(), ex.getMessage());
     }
 
+    @ExceptionHandler(IllegalArgumentException.class)
+    public ResponseWrapper<Void> handleIllegalArg(IllegalArgumentException ex) {
+        return ResponseWrapper.error(ResponseCode.PARAM_ERROR, ex.getMessage());
+    }
+
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class, HttpMessageNotReadableException.class})
     public ResponseWrapper<Void> handleValidations(Exception ex) {
         return ResponseWrapper.error(ResponseCode.PARAM_ERROR, ex.getMessage());

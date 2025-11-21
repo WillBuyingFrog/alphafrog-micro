@@ -11,4 +11,8 @@ public interface PortfolioService {
     PageResult<PortfolioResponse> list(String userId, String status, String keyword, int page, int size);
 
     PortfolioResponse getById(Long id, String userId);
+
+    PortfolioResponse update(Long id, String userId, PortfolioUpdateRequest request);
+
+    void archive(Long id, String userId);
 }

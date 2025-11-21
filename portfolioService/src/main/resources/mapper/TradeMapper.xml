@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.alphafrogmicro.portfolioservice.mapper.TradeMapper">
+
+    <resultMap id="TradeResultMap" type="world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioTradePo">
+        <id property="id" column="id"/>
+        <result property="portfolioId" column="portfolio_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="eventType" column="event_type"/>
+        <result property="quantity" column="quantity"/>
+        <result property="price" column="price"/>
+        <result property="fee" column="fee"/>
+        <result property="slippage" column="slippage"/>
+        <result property="tradeTime" column="trade_time"/>
+        <result property="settleDate" column="settle_date"/>
+        <result property="note" column="note"/>
+        <result property="payloadJson" column="payload_json"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO alphafrog_portfolio_trade
+        (portfolio_id, user_id, symbol, event_type, quantity, price, fee, slippage, trade_time, settle_date, note, payload)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.portfolioId}, #{item.userId}, #{item.symbol}, #{item.eventType},
+             #{item.quantity}, #{item.price}, #{item.fee}, #{item.slippage},
+             #{item.tradeTime}, #{item.settleDate}, #{item.note}, CAST(#{item.payloadJson} AS jsonb))
+        </foreach>
+    </insert>
+
+    <select id="list" resultMap="TradeResultMap">
+        SELECT id,
+               portfolio_id,
+               user_id,
+               symbol,
+               event_type,
+               quantity,
+               price,
+               fee,
+               slippage,
+               trade_time,
+               settle_date,
+               note,
+               payload::text AS payload_json,
+               created_at
+        FROM alphafrog_portfolio_trade
+        WHERE portfolio_id = #{portfolioId}
+          AND user_id = #{userId}
+        <if test="from != null">
+            AND trade_time &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND trade_time &lt;= #{to}
+        </if>
+        <if test="eventType != null and eventType != ''">
+            AND event_type = #{eventType}
+        </if>
+        ORDER BY trade_time DESC, id DESC
+        OFFSET #{offset}
+        LIMIT #{limit}
+    </select>
+
+    <select id="count" resultType="long">
+        SELECT COUNT(1)
+        FROM alphafrog_portfolio_trade
+        WHERE portfolio_id = #{portfolioId}
+          AND user_id = #{userId}
+        <if test="from != null">
+            AND trade_time &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND trade_time &lt;= #{to}
+        </if>
+        <if test="eventType != null and eventType != ''">
+            AND event_type = #{eventType}
+        </if>
+    </select>
+</mapper>

@@ -83,4 +83,25 @@
           AND name = #{name}
           AND status = 'active'
     </select>
+
+    <update id="update" parameterType="world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioPo">
+        UPDATE alphafrog_portfolio
+        SET name = #{name},
+            visibility = #{visibility},
+            tags = CAST(#{tagsJson} AS jsonb),
+            status = #{status},
+            timezone = #{timezone},
+            ext = CAST(#{extJson} AS jsonb),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="archive">
+        UPDATE alphafrog_portfolio
+        SET status = 'archived',
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
 </mapper>

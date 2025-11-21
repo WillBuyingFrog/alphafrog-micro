@@ -24,4 +24,8 @@ public interface PortfolioMapper {
                @Param("keyword") String keyword);
 
     long countActiveName(@Param("userId") String userId, @Param("name") String name);
+
+    int update(PortfolioPo po);
+
+    int archive(@Param("id") Long id, @Param("userId") String userId);
 }

@@ -21,3 +21,14 @@ mybatis:
 logging:
   level:
     world.willfrog.alphafrogmicro.portfolioservice: INFO
+
+dubbo:
+  application:
+    name: portfolio-service
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  protocol:
+    name: tri
+    port: 50056
+  consumer:
+    check: false
