@@ -63,8 +63,9 @@ test-secrets.yml
 
 # Coding Agent Files
 
-/agent-guides
+/agent-communication
 /coding-agent-report
+AGENTS.md
 
 # Project Milestones
 
