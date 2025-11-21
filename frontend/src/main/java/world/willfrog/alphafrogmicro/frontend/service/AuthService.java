@@ -4,6 +4,7 @@ import io.jsonwebtoken.Jwts;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
@@ -23,13 +24,12 @@ public class AuthService {
     private final SecretKey secretKey;
     private final UserDao userDao;
     private final RedisTemplate<String, Object> redisTemplate;
+    private final PasswordEncoder passwordEncoder;
 
     private static final String LOGIN_STATUS_PREFIX = "login_status:";
 
     // 为登录成功的用户生成token
     public String generateToken(String username) {
-
-        log.info("Signing with SecretKey: {}", secretKey);
         return Jwts.builder()
                 .subject(username)
                 .issuedAt(new Date())
@@ -45,7 +45,7 @@ public class AuthService {
             return false;
         }
 
-        return matchedUsers.get(0).getPassword().equals(password);
+        return passwordEncoder.matches(password, matchedUsers.get(0).getPassword());
     }
 
 
@@ -84,22 +84,41 @@ public class AuthService {
 
     // 注册用户
     public int register(String username, String password, String email) {
+        // 密码安全检查
+        if (!isPasswordStrong(password)) {
+            log.warn("Weak password attempt for user: {}", username);
+            return -2; // 密码强度不够
+        }
+
         long currentTimeMillis = System.currentTimeMillis();
         User user = new User();
 
         // 四个必填字段
         user.setUsername(username);
-        user.setPassword(password);
+        user.setPassword(passwordEncoder.encode(password)); // 使用BCrypt加密密码
         user.setEmail(email);
         user.setRegisterTime(currentTimeMillis);
 
         try{
             return userDao.insertUser(user);
         } catch (Exception e) {
-            log.error("Failed to register user", e);
+            log.error("Failed to register user: {}", username, e);
             return -1;
         }
+    }
 
+    private boolean isPasswordStrong(String password) {
+        if (password == null || password.length() < 8) {
+            return false;
+        }
+        // 检查是否包含至少一个大写字母、一个小写字母和一个数字
+        boolean hasUpper = false, hasLower = false, hasDigit = false;
+        for (char c : password.toCharArray()) {
+            if (Character.isUpperCase(c)) hasUpper = true;
+            else if (Character.isLowerCase(c)) hasLower = true;
+            else if (Character.isDigit(c)) hasDigit = true;
+        }
+        return hasUpper && hasLower && hasDigit;
     }
 
 }

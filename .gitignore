@@ -61,6 +61,11 @@ test-secrets.yml
 /.codex
 /.kilocode
 
-# Coding Agent Guides
+# Coding Agent Files
 
 /agent-guides
+/coding-agent-report
+
+# Project Milestones
+
+/milestones

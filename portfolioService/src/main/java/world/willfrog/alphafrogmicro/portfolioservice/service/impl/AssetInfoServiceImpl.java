@@ -57,7 +57,7 @@ public class AssetInfoServiceImpl implements AssetInfoService {
     public AssetInfo getAssetInfo(String assetIdentifier, AssetType assetType) {
         log.info("Fetching info for asset: {}, type: {}", assetIdentifier, assetType);
         if (assetType == AssetType.STOCK) {
-            List<StockInfo> stockInfos = stockInfoDao.getStockInfoByTsCode(assetIdentifier);
+            List<StockInfo> stockInfos = stockInfoDao.getStockInfoByTsCode(assetIdentifier, 10, 0);
             if (stockInfos != null && !stockInfos.isEmpty()) {
                 // 我们默认查询返回结果的第一个元素是匹配上的
                 StockInfo stockInfo = stockInfos.get(0);
@@ -69,7 +69,7 @@ public class AssetInfoServiceImpl implements AssetInfoService {
             log.warn("Stock info not found for ts_code: {}", assetIdentifier);
             return null;
         } else if (assetType == AssetType.FUND_ETF) {
-            List<FundInfo> fundInfos = fundInfoDao.getFundInfoByTsCode(assetIdentifier);
+            List<FundInfo> fundInfos = fundInfoDao.getFundInfoByTsCode(assetIdentifier, 10, 0);
             if (fundInfos != null && !fundInfos.isEmpty()) {
                 // 我们默认查询返回结果的第一个元素是匹配上的
                 FundInfo fundInfo = fundInfos.get(0);

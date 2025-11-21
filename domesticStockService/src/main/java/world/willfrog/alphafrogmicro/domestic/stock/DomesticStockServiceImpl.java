@@ -45,7 +45,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockInfoByTsCodeResponse getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest request) {
         String tsCode = request.getTsCode();
 
-        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
+        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode, 10, 0);
 
         if (stockInfoList == null || stockInfoList.isEmpty()) {
             log.warn("StockInfo not found for tsCode: {}", tsCode);
@@ -123,7 +123,7 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockSearchResponse searchStock(DomesticStockSearchRequest request) {
         String query = request.getQuery();
 
-        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByName(query);
+        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByName(query, 10, 0);
 
         DomesticStockSearchResponse.Builder responseBuilder = DomesticStockSearchResponse.newBuilder();
 

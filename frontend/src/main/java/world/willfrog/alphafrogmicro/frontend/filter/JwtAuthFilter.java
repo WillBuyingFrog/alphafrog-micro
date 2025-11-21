@@ -51,14 +51,13 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private boolean validateToken(String token) {
         try {
-//            log.info("parsing token {}", token);
             Jwts.parser()
                     .verifyWith(secretKey)
                     .build()
                     .parseSignedClaims(token);
             return true;
         } catch (Exception e) {
-            log.error("Error occurred while validating token: {}", e.getMessage());
+            log.error("JWT token validation failed: {}", e.getClass().getSimpleName());
             return false;
         }
     }

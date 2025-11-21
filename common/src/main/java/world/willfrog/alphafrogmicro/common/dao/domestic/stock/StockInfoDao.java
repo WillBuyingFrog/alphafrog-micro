@@ -9,14 +9,14 @@ import java.util.List;
 @Mapper
 public interface StockInfoDao {
 
-    @Select("INSERT INTO alphafrog_stock_info (ts_code, symbol, name, area, industry, fullname, enname, cnspell, market," +
+    @Insert("INSERT INTO alphafrog_stock_info (ts_code, symbol, name, area, industry, fullname, enname, cnspell, market," +
             " exchange, curr_type, list_status, list_date, delist_date, is_hs, act_name, act_ent_type) " +
             "VALUES (#{tsCode}, #{symbol}, #{name}, #{area}, #{industry}, #{fullName}, #{enName}, #{cnspell}, #{market}," +
             " #{exchange}, #{currType}, #{listStatus}, #{listDate}, #{delistDate}, #{isHs}, #{actName}, #{actEntType})" +
             "ON CONFLICT (ts_code, symbol) DO NOTHING")
     Integer insertStockInfo(StockInfo stockInfo);
 
-    @Select("SELECT * FROM alphafrog_stock_info WHERE ts_code like '%${tsCode}%'")
+    @Select("SELECT * FROM alphafrog_stock_info WHERE ts_code like CONCAT('%', #{tsCode}, '%') LIMIT #{limit} OFFSET #{offset}")
     @Results({
             @Result(column = "id", property = "stockInfoId"),
             @Result(column = "ts_code", property = "tsCode"),
@@ -37,14 +37,14 @@ public interface StockInfoDao {
             @Result(column = "act_name", property = "actName"),
             @Result(column = "act_ent_type", property = "actEntType")
     })
-    @Cacheable(value = "stockInfoCache", key = "'stock:info:' + #tsCode", cacheManager = "stockInfoCacheManager")
-    List<StockInfo> getStockInfoByTsCode(String tsCode);
+    @Cacheable(value = "stockInfoCache", key = "'stock:info:' + #tsCode + ':' + #limit + ':' + #offset", cacheManager = "stockInfoCacheManager")
+    List<StockInfo> getStockInfoByTsCode(@Param("tsCode") String tsCode, @Param("limit") int limit, @Param("offset") int offset);
 
-    @Select("SELECT * FROM alphafrog_stock_info WHERE fullname like '%${fullName}%'")
-    List<StockInfo> getStockInfoByFullName(String fullName);
+    @Select("SELECT * FROM alphafrog_stock_info WHERE fullname like CONCAT('%', #{fullName}, '%') LIMIT #{limit} OFFSET #{offset}")
+    List<StockInfo> getStockInfoByFullName(@Param("fullName") String fullName, @Param("limit") int limit, @Param("offset") int offset);
 
-    @Select("SELECT * FROM alphafrog_stock_info WHERE name like '%${name}%'")
-    List<StockInfo> getStockInfoByName(String Name);
+    @Select("SELECT * FROM alphafrog_stock_info WHERE name like CONCAT('%', #{name}, '%') LIMIT #{limit} OFFSET #{offset}")
+    List<StockInfo> getStockInfoByName(@Param("name") String name, @Param("limit") int limit, @Param("offset") int offset);
 
 
     @Select("SELECT ts_code FROM alphafrog_stock_info OFFSET #{offset} LIMIT #{limit}")

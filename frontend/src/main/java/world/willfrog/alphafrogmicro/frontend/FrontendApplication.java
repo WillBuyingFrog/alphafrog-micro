@@ -8,9 +8,6 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 @SpringBootApplication
 @EnableDubbo
 @MapperScan("world.willfrog.alphafrogmicro.common.dao")
-//@ComponentScan("world.willfrog.alphafrogmicro.frontend.controller.domestic")
-//@ComponentScan("world.willfrog.alphafrogmicro.frontend.controller")
-//@ComponentScan("world.willfrog.alphafrogmicro.frontend.filter")
 public class FrontendApplication {
 
     public static void main(String[] args) {

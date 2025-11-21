@@ -35,10 +35,20 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     @Override
     public DomesticIndexInfoByTsCodeResponse getDomesticIndexInfoByTsCode(DomesticIndexInfoByTsCodeRequest request) {
 
-        List<IndexInfo> indexInfoList = indexInfoDao.getIndexInfoByTsCode(request.getTsCode());
+        List<IndexInfo> indexInfoList;
+        try {
+            // 使用合理的分页参数，避免返回过多数据
+            indexInfoList = indexInfoDao.getIndexInfoByTsCode(request.getTsCode(), 10, 0);
+        } catch (Exception e) {
+            log.error("Error occurred while getting index info for tsCode: {}", request.getTsCode(), e);
+            // 数据库异常时返回空响应
+            return DomesticIndexInfoByTsCodeResponse.newBuilder().build();
+        }
 
         if (indexInfoList.isEmpty()){
-            return null;
+            log.warn("Index info not found for tsCode: {}", request.getTsCode());
+            // 数据未找到时返回空响应而不是null
+            return DomesticIndexInfoByTsCodeResponse.newBuilder().build();
         }
 
         DomesticIndexInfoByTsCodeResponse.Builder responseBuilder = DomesticIndexInfoByTsCodeResponse.newBuilder();
@@ -83,16 +93,22 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     public DomesticIndexSearchResponse searchDomesticIndex(DomesticIndexSearchRequest request) {
 
         String query = request.getQuery();
+        List<IndexInfo> indexInfoList;
 
-        List<IndexInfo> indexInfoList = indexInfoDao.getIndexInfoByTsCode(query);
+        try {
+            // 使用合理的分页参数，避免返回过多数据
+            indexInfoList = indexInfoDao.getIndexInfoByTsCode(query, 50, 0);
+            indexInfoList.addAll(indexInfoDao.getIndexInfoByFullName(query, 50, 0));
+            indexInfoList.addAll(indexInfoDao.getIndexInfoByName(query, 50, 0));
 
-        indexInfoList.addAll(indexInfoDao.getIndexInfoByFullName(query));
-
-        indexInfoList.addAll(indexInfoDao.getIndexInfoByName(query));
-
-        indexInfoList = indexInfoList.stream()
-                .distinct()
-                .toList();
+            indexInfoList = indexInfoList.stream()
+                    .distinct()
+                    .toList();
+        } catch (Exception e) {
+            log.error("Error occurred while searching index info with query: {}", query, e);
+            // 搜索异常时返回空响应
+            return DomesticIndexSearchResponse.newBuilder().build();
+        }
 
         DomesticIndexSearchResponse.Builder responseBuilder = DomesticIndexSearchResponse.newBuilder();
 
@@ -111,11 +127,21 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     public DomesticIndexDailyByTsCodeAndDateRangeResponse getDomesticIndexDailyByTsCodeAndDateRange(
             DomesticIndexDailyByTsCodeAndDateRangeRequest request) {
 
-        List<IndexDaily> indexDailyList = indexQuoteDao.getIndexDailiesByTsCodeAndDateRange(
-                request.getTsCode(), request.getStartDate(), request.getEndDate()
-        );
+        List<IndexDaily> indexDailyList;
+        try {
+            indexDailyList = indexQuoteDao.getIndexDailiesByTsCodeAndDateRange(
+                    request.getTsCode(), request.getStartDate(), request.getEndDate()
+            );
+        } catch (Exception e) {
+            log.error("Error occurred while getting index daily data for tsCode: {}, dateRange: {}-{}", 
+                     request.getTsCode(), request.getStartDate(), request.getEndDate(), e);
+            // 数据库异常时返回空响应
+            return DomesticIndexDailyByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
 
         if(indexDailyList.isEmpty()) {
+            log.warn("Index daily data not found for tsCode: {}, dateRange: {}-{}", 
+                    request.getTsCode(), request.getStartDate(), request.getEndDate());
             return DomesticIndexDailyByTsCodeAndDateRangeResponse.newBuilder().build();
         }
 
@@ -142,11 +168,21 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     public DomesticIndexWeightByTsCodeAndDateRangeResponse getDomesticIndexWeightByTsCodeAndDateRange(
             DomesticIndexWeightByTsCodeAndDateRangeRequest request) {
 
-        List<IndexWeight> indexWeightList = indexWeightDao.getIndexWeightsByTsCodeAndDateRange(
-                request.getTsCode(), request.getStartDate(), request.getEndDate()
-        );
+        List<IndexWeight> indexWeightList;
+        try {
+            indexWeightList = indexWeightDao.getIndexWeightsByTsCodeAndDateRange(
+                    request.getTsCode(), request.getStartDate(), request.getEndDate()
+            );
+        } catch (Exception e) {
+            log.error("Error occurred while getting index weight data for tsCode: {}, dateRange: {}-{}", 
+                     request.getTsCode(), request.getStartDate(), request.getEndDate(), e);
+            // 数据库异常时返回空响应
+            return DomesticIndexWeightByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
 
         if (indexWeightList.isEmpty()) {
+            log.warn("Index weight data not found for tsCode: {}, dateRange: {}-{}", 
+                    request.getTsCode(), request.getStartDate(), request.getEndDate());
             return DomesticIndexWeightByTsCodeAndDateRangeResponse.newBuilder().build();
         }
 
@@ -170,11 +206,21 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     public DomesticIndexWeightByConCodeAndDateRangeResponse getDomesticIndexWeightByConCodeAndDateRange(
             DomesticIndexWeightByConCodeAndDateRangeRequest request) {
         
-        List<IndexWeight> indexWeightList = indexWeightDao.getIndexWeightsByConCodeAndDateRange(
-                request.getConCode(), request.getStartDate(), request.getEndDate()
-        );
+        List<IndexWeight> indexWeightList;
+        try {
+            indexWeightList = indexWeightDao.getIndexWeightsByConCodeAndDateRange(
+                    request.getConCode(), request.getStartDate(), request.getEndDate()
+            );
+        } catch (Exception e) {
+            log.error("Error occurred while getting index weight data for conCode: {}, dateRange: {}-{}", 
+                     request.getConCode(), request.getStartDate(), request.getEndDate(), e);
+            // 数据库异常时返回空响应
+            return DomesticIndexWeightByConCodeAndDateRangeResponse.newBuilder().build();
+        }
 
         if (indexWeightList.isEmpty()) {
+            log.warn("Index weight data not found for conCode: {}, dateRange: {}-{}", 
+                    request.getConCode(), request.getStartDate(), request.getEndDate());
             return DomesticIndexWeightByConCodeAndDateRangeResponse.newBuilder().build();
         }
 

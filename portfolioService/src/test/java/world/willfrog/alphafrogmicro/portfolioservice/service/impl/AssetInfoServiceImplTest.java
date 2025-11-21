@@ -48,7 +48,7 @@ class AssetInfoServiceImplTest {
     @Test
     void getAssetInfo_forStock_whenExists_shouldReturnAssetInfo() {
         // Arrange
-        when(stockInfoDao.getStockInfoByTsCode("AAPL")).thenReturn(Collections.singletonList(stock1));
+        when(stockInfoDao.getStockInfoByTsCode("AAPL",10, 0)).thenReturn(Collections.singletonList(stock1));
 
         // Act
         AssetInfo info = assetInfoService.getAssetInfo("AAPL", AssetType.STOCK);
@@ -63,7 +63,7 @@ class AssetInfoServiceImplTest {
     @Test
     void getAssetInfo_forStock_whenNotExists_shouldReturnNull() {
         // Arrange
-        when(stockInfoDao.getStockInfoByTsCode("UNKNOWN")).thenReturn(Collections.emptyList());
+        when(stockInfoDao.getStockInfoByTsCode("UNKNOWN", 10, 0)).thenReturn(Collections.emptyList());
 
         // Act
         AssetInfo info = assetInfoService.getAssetInfo("UNKNOWN", AssetType.STOCK);
@@ -75,7 +75,7 @@ class AssetInfoServiceImplTest {
     @Test
     void getAssetInfo_forStock_whenDaoReturnsNullList_shouldReturnNull() {
         // Arrange
-        when(stockInfoDao.getStockInfoByTsCode("AAPL")).thenReturn(null);
+        when(stockInfoDao.getStockInfoByTsCode("AAPL", 10, 0)).thenReturn(null);
 
         // Act
         AssetInfo info = assetInfoService.getAssetInfo("AAPL", AssetType.STOCK);
@@ -87,7 +87,7 @@ class AssetInfoServiceImplTest {
     @Test
     void getAssetInfo_forFund_whenExists_shouldReturnAssetInfo() {
         // Arrange
-        when(fundInfoDao.getFundInfoByTsCode("FUND01")).thenReturn(Collections.singletonList(fund1));
+        when(fundInfoDao.getFundInfoByTsCode("FUND01", 10, 0)).thenReturn(Collections.singletonList(fund1));
 
         // Act
         AssetInfo info = assetInfoService.getAssetInfo("FUND01", AssetType.FUND_ETF);
@@ -102,7 +102,7 @@ class AssetInfoServiceImplTest {
     @Test
     void getAssetInfo_forFund_whenNotExists_shouldReturnNull() {
         // Arrange
-        when(fundInfoDao.getFundInfoByTsCode("UNKNOWN_FUND")).thenReturn(Collections.emptyList());
+        when(fundInfoDao.getFundInfoByTsCode("UNKNOWN_FUND", 10, 0)).thenReturn(Collections.emptyList());
 
         // Act
         AssetInfo info = assetInfoService.getAssetInfo("UNKNOWN_FUND", AssetType.FUND_ETF);
@@ -122,9 +122,9 @@ class AssetInfoServiceImplTest {
     @Test
     void getMultipleAssetInfo_shouldReturnMapWithAvailableInfo() {
         // Arrange
-        when(stockInfoDao.getStockInfoByTsCode("AAPL")).thenReturn(Collections.singletonList(stock1));
-        when(fundInfoDao.getFundInfoByTsCode("FUND01")).thenReturn(Collections.singletonList(fund1));
-        when(stockInfoDao.getStockInfoByTsCode("GOOG")).thenReturn(Collections.emptyList()); // GOOG info not found
+        when(stockInfoDao.getStockInfoByTsCode("AAPL", 10, 0)).thenReturn(Collections.singletonList(stock1));
+        when(fundInfoDao.getFundInfoByTsCode("FUND01", 10, 0)).thenReturn(Collections.singletonList(fund1));
+        when(stockInfoDao.getStockInfoByTsCode("GOOG", 10, 0    )).thenReturn(Collections.emptyList()); // GOOG info not found
 
         Map<String, AssetType> assets = new HashMap<>();
         assets.put("AAPL", AssetType.STOCK);

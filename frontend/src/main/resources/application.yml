@@ -35,6 +35,13 @@ jwt:
   header: Authorization
   token-prefix: Bearer
 
+security:
+  rate-limit:
+    login-attempts: 5
+    login-window-minutes: 10
+    task-creation-attempts: 10
+    task-creation-window-minutes: 60
+
 dubbo:
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
