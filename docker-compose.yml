@@ -1,0 +1,259 @@
+services:
+  # postgres:  <-- 用户使用的是宿主机 PG
+  #   image: postgres:16-alpine
+  #   container_name: alphafrog-postgres
+  #   environment:
+  #     POSTGRES_DB: ${AF_DB_MAIN_DATABASE:-alphafrog}
+  #     POSTGRES_USER: ${AF_DB_MAIN_USER:-alphafrog}
+  #     POSTGRES_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+  #   ports:
+  #     - "5432:5432"
+  #   volumes:
+  #     - alphafrog_pgdata:/var/lib/postgresql/data
+  #     - ./portfolio_schema.sql:/docker-entrypoint-initdb.d/10_portfolio_schema.sql:ro
+  #   healthcheck:
+  #     test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+  #     interval: 5s
+  #     timeout: 5s
+  #     retries: 20
+  #   networks:
+  #     - alphafrog-network
+
+  redis:
+    image: redis:7-alpine
+    container_name: alphafrog-redis
+    command: ["redis-server", "--appendonly", "yes", "--requirepass", "${AF_REDIS_PASSWORD:-Excited1s}"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - alphafrog_redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "${AF_REDIS_PASSWORD:-Excited1s}", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+    networks:
+      - alphafrog-network
+
+  # zookeeper: 已移除，使用 Kafka KRaft 模式
+
+  broker:
+    image: apache/kafka:latest
+    container_name: broker
+    environment:
+      KAFKA_NODE_ID: 1
+      KAFKA_PROCESS_ROLES: broker,controller
+      # 容器内监听:9092, controller:9093
+      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
+      # 外部访问地址 (Docker网络内用 broker:9092)
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
+      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
+      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
+      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
+      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
+      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
+      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
+      KAFKA_NUM_PARTITIONS: 3
+    ports:
+      - "9092:9092"
+    volumes:
+      - ./data/kafka/data:/var/lib/kafka/data
+    networks:
+      - alphafrog-network
+
+  nacos:
+    image: nacos/nacos-server:v2.3.2
+    container_name: alphafrog-nacos
+    environment:
+      MODE: standalone
+      PREFER_HOST_MODE: hostname
+      NACOS_AUTH_ENABLE: "false"
+    ports:
+      - "8848:8848"
+    volumes:
+      - ./data/nacos/logs:/home/nacos/logs
+      - ./data/nacos/data:/home/nacos/data
+    networks:
+      - alphafrog-network
+
+  domestic-stock-service:
+    image: alphafrog-micro-domestic-stock-service:latest
+    build: ./domesticStockService
+    container_name: alphafrog-domestic-stock-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_REDIS_HOST: redis
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      NACOS_ADDRESS: nacos
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+    ports:
+      - "50055:50055"
+    networks:
+      - alphafrog-network
+
+  domestic-index-service:
+    image: alphafrog-micro-domestic-index-service:latest
+    build: ./domesticIndexService
+    container_name: alphafrog-domestic-index-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      nacos:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_REDIS_HOST: redis
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      NACOS_ADDRESS: nacos
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+    ports:
+      - "50053:50053"
+    networks:
+      - alphafrog-network
+
+  domestic-fund-service:
+    image: alphafrog-micro-domestic-fund-service:latest
+    build: ./domesticFundService
+    container_name: alphafrog-domestic-fund-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker:
+        condition: service_started
+      nacos:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_REDIS_HOST: redis
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      NACOS_ADDRESS: nacos
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+    ports:
+      - "50052:50052"
+    networks:
+      - alphafrog-network
+
+  domestic-fetch-service:
+    image: alphafrog-micro-domestic-fetch-service:latest
+    build: ./domesticFetchService
+    container_name: alphafrog-domestic-fetch-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker:
+        condition: service_started
+      nacos:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_REDIS_HOST: redis
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      NACOS_ADDRESS: nacos
+      NACOS_USER: ${NACOS_USER:-nacos}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
+      TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+    ports:
+      - "20882:20882"
+    networks:
+      - alphafrog-network
+
+  portfolio-service:
+    image: alphafrog-micro-portfolio-service:latest
+    build: ./portfolioService
+    container_name: alphafrog-portfolio-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      NACOS_ADDRESS: nacos
+    ports:
+      - "8084:8084"
+      - "50056:50056"
+    networks:
+      - alphafrog-network
+
+  frontend:
+    image: alphafrog-micro-frontend:latest
+    build: ./frontend
+    container_name: alphafrog-frontend
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      redis:
+        condition: service_healthy
+      broker:
+        condition: service_started
+      nacos:
+        condition: service_started
+      domestic-stock-service:
+        condition: service_started
+      domestic-index-service:
+        condition: service_started
+      domestic-fund-service:
+        condition: service_started
+      portfolio-service:
+        condition: service_started
+    environment:
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_REDIS_HOST: redis
+      AF_REDIS_PORT: 6379
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      NACOS_ADDRESS: nacos
+      # 可选：覆盖 JWT 密钥（默认值在 frontend 的 application.yml 里）
+      # AF_JWT_SECRET: ${AF_JWT_SECRET}
+    ports:
+      - "8090:8090"
+    networks:
+      - alphafrog-network
+
+volumes:
+  alphafrog_pgdata:
+  alphafrog_redisdata:
+
+networks:
+  alphafrog-network:
+    driver: bridge
