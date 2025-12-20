@@ -52,9 +52,9 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
     }
 
     @Override
-    public com.google.protobuf.Empty archivePortfolio(ArchivePortfolioRequest request) {
+    public PortfolioEmpty archivePortfolio(ArchivePortfolioRequest request) {
         portfolioService.archive(request.getId(), request.getUserId());
-        return com.google.protobuf.Empty.newBuilder().build();
+        return PortfolioEmpty.newBuilder().build();
     }
 
     @Override
@@ -93,11 +93,11 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
     }
 
     @Override
-    public com.google.protobuf.Empty tradesCreate(TradesCreateRequest request) {
+    public PortfolioEmpty tradesCreate(TradesCreateRequest request) {
         TradeCreateRequest dto = new TradeCreateRequest();
         dto.setItems(request.getItemsList().stream().map(this::toTradeItem).collect(Collectors.toList()));
         tradeService.createTrades(request.getPortfolioId(), request.getUserId(), dto);
-        return com.google.protobuf.Empty.newBuilder().build();
+        return PortfolioEmpty.newBuilder().build();
     }
 
     @Override
@@ -120,10 +120,11 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
     }
 
     @Override
-    public ValuationResponse valuation(ValuationRequest request) {
+    public world.willfrog.alphafrogmicro.portfolio.idl.ValuationResponse valuation(ValuationRequest request) {
         List<HoldingResponse> holdings = holdingService.listHoldings(request.getPortfolioId(), request.getUserId());
         world.willfrog.alphafrogmicro.portfolioservice.dto.ValuationResponse dto = ValuationMapper.mockValuation(holdings);
-        ValuationResponse.Builder b = ValuationResponse.newBuilder()
+        world.willfrog.alphafrogmicro.portfolio.idl.ValuationResponse.Builder b =
+                world.willfrog.alphafrogmicro.portfolio.idl.ValuationResponse.newBuilder()
                 .setTotalValue(toStr(dto.getTotalValue()))
                 .setPnlAbs(toStr(dto.getPnlAbs()))
                 .setPnlPct(toStr(dto.getPnlPct()));
@@ -140,8 +141,9 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
     }
 
     @Override
-    public MetricsResponse metrics(MetricsRequest request) {
-        MetricsResponse.Builder b = MetricsResponse.newBuilder();
+    public world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse metrics(MetricsRequest request) {
+        world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse.Builder b =
+                world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse.newBuilder();
         b.setReturnPct("0").setVolatility("0").setMaxDrawdown("0").setNote("占位实现，后续接入行情计算");
         return b.build();
     }

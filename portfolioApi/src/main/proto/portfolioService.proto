@@ -2,11 +2,11 @@ syntax = "proto3";
 
 package world.willfrog.alphafrogmicro.portfolio.idl;
 
-import "google/protobuf/empty.proto";
-
 option java_multiple_files = true;
 option java_package = "world.willfrog.alphafrogmicro.portfolio.idl";
 option java_outer_classname = "PortfolioServiceProto";
+
+message PortfolioEmpty {}
 
 message PortfolioMessage {
   int64 id = 1;
@@ -163,12 +163,12 @@ message MetricsResponse {
 service PortfolioDubboService {
   rpc CreatePortfolio(CreatePortfolioRequest) returns (PortfolioMessage);
   rpc UpdatePortfolio(UpdatePortfolioRequest) returns (PortfolioMessage);
-  rpc ArchivePortfolio(ArchivePortfolioRequest) returns (google.protobuf.Empty);
+  rpc ArchivePortfolio(ArchivePortfolioRequest) returns (PortfolioEmpty);
   rpc GetPortfolio(GetPortfolioRequest) returns (PortfolioMessage);
   rpc ListPortfolio(ListPortfolioRequest) returns (ListPortfolioResponse);
   rpc HoldingsBulkUpsert(HoldingsBulkUpsertRequest) returns (HoldingsListResponse);
   rpc HoldingsList(HoldingsListRequest) returns (HoldingsListResponse);
-  rpc TradesCreate(TradesCreateRequest) returns (google.protobuf.Empty);
+  rpc TradesCreate(TradesCreateRequest) returns (PortfolioEmpty);
   rpc TradesList(TradesListRequest) returns (TradesListResponse);
   rpc Valuation(ValuationRequest) returns (ValuationResponse);
   rpc Metrics(MetricsRequest) returns (MetricsResponse);

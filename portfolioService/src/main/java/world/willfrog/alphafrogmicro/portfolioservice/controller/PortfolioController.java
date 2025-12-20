@@ -8,6 +8,7 @@ import world.willfrog.alphafrogmicro.portfolioservice.dto.*;
 import world.willfrog.alphafrogmicro.portfolioservice.service.HoldingService;
 import world.willfrog.alphafrogmicro.portfolioservice.service.PortfolioService;
 import world.willfrog.alphafrogmicro.portfolioservice.service.TradeService;
+import world.willfrog.alphafrogmicro.portfolioservice.util.ValuationMapper;
 
 import java.time.OffsetDateTime;
 import java.util.List;

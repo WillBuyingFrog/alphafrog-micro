@@ -3,6 +3,7 @@ package world.willfrog.alphafrogmicro.portfolioservice.service;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PageResult;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioCreateRequest;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioResponse;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioUpdateRequest;
 
 public interface PortfolioService {
 

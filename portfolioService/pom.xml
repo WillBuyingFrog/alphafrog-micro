@@ -35,7 +35,12 @@
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
-            <optional>true</optional>
+            <!-- 仅编译期使用，避免打入运行时产物 -->
+            <scope>provided</scope>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.commons</groupId>
+            <artifactId>commons-lang3</artifactId>
         </dependency>
         <dependency>
             <groupId>org.apache.dubbo</groupId>
@@ -44,7 +49,7 @@
         </dependency>
         <dependency>
             <groupId>world.willfrog</groupId>
-            <artifactId>interface</artifactId>
+            <artifactId>portfolioApi</artifactId>
             <version>1.0-SNAPSHOT</version>
         </dependency>
         <dependency>

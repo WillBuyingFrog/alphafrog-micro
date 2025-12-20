@@ -9,6 +9,8 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <!-- 用 release 代替 -source/-target，避免模块路径告警 -->
+        <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <dubbo.version>3.3.2</dubbo.version>
@@ -54,6 +56,18 @@
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- 确保 Lombok 等注解处理器在 Maven 编译期生效 -->
+                    <proc>full</proc>
+                    <release>${maven.compiler.release}</release>
+                    <!-- 显式声明注解处理器，帮助 IDE/Maven 一致识别 Lombok 生成代码 -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -70,5 +84,6 @@
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
         <module>portfolioSummaryApi</module>
+        <module>portfolioApi</module>
     </modules>
 </project>

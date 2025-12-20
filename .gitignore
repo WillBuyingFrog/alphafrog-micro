@@ -58,6 +58,7 @@ test-secrets.yml
 # Coding Agent configs
 
 /.qwen
+/.cursor
 /.codex
 /.kilocode
 
@@ -70,3 +71,7 @@ AGENTS.md
 # Project Milestones
 
 /milestones
+
+# Local test scripts
+
+/test_scripts
