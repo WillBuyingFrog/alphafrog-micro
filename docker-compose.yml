@@ -38,7 +38,7 @@ services:
   # zookeeper: 已移除，使用 Kafka KRaft 模式
 
   broker:
-    image: apache/kafka:latest
+    image: apache/kafka:3.7.2
     container_name: broker
     environment:
       KAFKA_NODE_ID: 1
@@ -74,6 +74,12 @@ services:
     volumes:
       - ./data/nacos/logs:/home/nacos/logs
       - ./data/nacos/data:/home/nacos/data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8848/nacos/v1/console/health/readiness"]
+      interval: 10s
+      timeout: 10s
+      retries: 20
+      start_period: 10s
     networks:
       - alphafrog-network
 
@@ -87,7 +93,7 @@ services:
       redis:
         condition: service_healthy
       nacos:
-        condition: service_started
+        condition: service_healthy
     environment:
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -113,7 +119,7 @@ services:
       redis:
         condition: service_healthy
       nacos:
-        condition: service_started
+        condition: service_healthy
     environment:
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -141,7 +147,7 @@ services:
       broker:
         condition: service_started
       nacos:
-        condition: service_started
+        condition: service_healthy
     environment:
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -170,7 +176,7 @@ services:
       broker:
         condition: service_started
       nacos:
-        condition: service_started
+        condition: service_healthy
     environment:
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -197,7 +203,7 @@ services:
       - "host.docker.internal:host-gateway"
     depends_on:
       nacos:
-        condition: service_started
+        condition: service_healthy
     environment:
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -223,7 +229,7 @@ services:
       broker:
         condition: service_started
       nacos:
-        condition: service_started
+        condition: service_healthy
       domestic-stock-service:
         condition: service_started
       domestic-index-service:

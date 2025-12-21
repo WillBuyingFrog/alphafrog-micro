@@ -67,6 +67,17 @@ public class FetchTopicConsumer {
                                         .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit).build();
                         result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        String tsCode = taskParams.getString("ts_code");
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest request =
+                                DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest.newBuilder()
+                                        .setTsCode(tsCode).setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                        .setOffset(offset).setLimit(limit).build();
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
