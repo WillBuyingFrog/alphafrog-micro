@@ -37,7 +37,9 @@ public class TuShareRequestUtils {
             jsonParams.put("token", tushareToken);
             jsonParams.putAll(params);
             String jsonParamsString = jsonParams.toString();
-//            log.info("[DEBUG] jsonParamsString: " + jsonParamsString);
+            if (log.isDebugEnabled()) {
+                log.debug("Sending raw request to TuShare: {}", jsonParamsString);
+            }
             StringEntity entity = new StringEntity(jsonParamsString, ContentType.APPLICATION_JSON);
             request.setEntity(entity);
 

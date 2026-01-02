@@ -99,11 +99,18 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
         params.put("params", queryParams);
 
+        log.debug("Sending Tushare request for Index Daily: {}", params);
+
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
         if (response == null) {
+            log.error("Tushare request returned null response. Params: {}", params);
             return DomesticIndexDailyFetchByDateRangeResponse.newBuilder().setStatus("failure")
                     .setFetchedItemsCount(-1).build();
+        }
+
+        if (log.isDebugEnabled()) {
+            log.debug("Received Tushare response: {}", response.toJSONString());
         }
 
         JSONArray data = response.getJSONObject("data").getJSONArray("items");

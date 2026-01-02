@@ -190,6 +190,7 @@ services:
       NACOS_USER: ${NACOS_USER:-nacos}
       NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      LOGGING_LEVEL_APP: ${LOGGING_LEVEL_APP:-INFO}
     ports:
       - "20882:20882"
     networks:
