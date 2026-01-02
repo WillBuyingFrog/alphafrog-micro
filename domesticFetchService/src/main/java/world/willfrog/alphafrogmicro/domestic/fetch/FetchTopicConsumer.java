@@ -27,7 +27,7 @@ public class FetchTopicConsumer {
 
     @KafkaListener(topics = "fetch_topic", groupId = "alphafrog-micro")
     public void listenFetchTask(String message, Acknowledgment acknowledgment){
-        log.info("Received fetch task: {}", message);
+        log.info("Received fetch task [V2-DEBUG]: {}", message);
         JSONObject rawMessageJSON;
         try{
             rawMessageJSON = JSONObject.parseObject(message);

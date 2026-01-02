@@ -119,6 +119,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         int result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
 
         if (result < 0) {
+            log.error("Store index daily data failed! Result code: {}, TS Code: {}", result, tsCode);
             return DomesticIndexDailyFetchByDateRangeResponse.newBuilder().setStatus("failure")
                     .setFetchedItemsCount(-1).build();
         } else {

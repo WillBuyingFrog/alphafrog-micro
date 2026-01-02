@@ -27,7 +27,7 @@ spring:
 logging:
   level:
     root: ${LOGGING_LEVEL_ROOT:INFO}
-    world.willfrog.alphafrogmicro: ${LOGGING_LEVEL_APP:INFO}
+    world.willfrog.alphafrogmicro: ${LOGGING_LEVEL_APP:DEBUG}
 
 mybatis:
   configuration:
