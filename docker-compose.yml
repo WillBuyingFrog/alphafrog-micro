@@ -63,7 +63,7 @@ services:
       - alphafrog-network
 
   nacos:
-    image: nacos/nacos-server:v2.3.2
+    image: nacos/nacos-server:v2.5.0
     container_name: alphafrog-nacos
     environment:
       MODE: standalone
