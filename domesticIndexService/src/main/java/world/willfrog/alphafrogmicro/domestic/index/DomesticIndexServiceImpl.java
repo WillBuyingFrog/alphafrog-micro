@@ -11,6 +11,7 @@ import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexServiceTriple.DomesticIndexServiceImplBase;
+import world.willfrog.alphafrogmicro.domestic.index.service.IndexDataCompletenessService;
 
 import java.util.List;
 
@@ -22,13 +23,17 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     private final IndexInfoDao indexInfoDao;
     private final IndexQuoteDao indexQuoteDao;
     private final IndexWeightDao indexWeightDao;
+    private final IndexDataCompletenessService indexDataCompletenessService;
 
 
     public DomesticIndexServiceImpl(IndexInfoDao indexInfoDao,
-                                    IndexQuoteDao indexQuoteDao, IndexWeightDao indexWeightDao) {
+                                    IndexQuoteDao indexQuoteDao,
+                                    IndexWeightDao indexWeightDao,
+                                    IndexDataCompletenessService indexDataCompletenessService) {
         this.indexInfoDao = indexInfoDao;
         this.indexQuoteDao = indexQuoteDao;
         this.indexWeightDao = indexWeightDao;
+        this.indexDataCompletenessService = indexDataCompletenessService;
     }
 
 
@@ -158,6 +163,23 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
                     .setAmount(indexDaily.getAmount());
 
             responseBuilder.addItems(itemBuilder.build());
+        }
+
+        IndexDataCompletenessService.IndexCompletenessResult completeness =
+                indexDataCompletenessService.evaluate(
+                        request.getTsCode(),
+                        request.getStartDate(),
+                        request.getEndDate()
+                );
+
+        responseBuilder.setComplete(completeness.isComplete())
+                .setExpectedTradingDays(completeness.getExpectedTradingDays())
+                .setActualTradingDays(completeness.getActualTradingDays())
+                .setMissingCount(completeness.getMissingCount())
+                .setUpstreamGap(completeness.isUpstreamGap());
+
+        if (completeness.getMissingDates() != null && !completeness.getMissingDates().isEmpty()) {
+            responseBuilder.addAllMissingDates(completeness.getMissingDates());
         }
 
         return responseBuilder.build();

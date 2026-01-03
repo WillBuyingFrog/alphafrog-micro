@@ -100,6 +100,12 @@ message DomesticIndexDailyByTsCodeAndDateRangeRequest {
 
 message DomesticIndexDailyByTsCodeAndDateRangeResponse {
   repeated DomesticIndexDailyItem items = 1;
+  bool complete = 2;
+  int32 expectedTradingDays = 3;
+  int32 actualTradingDays = 4;
+  int32 missingCount = 5;
+  repeated int64 missingDates = 6;
+  bool upstreamGap = 7;
 }
 
 /**
