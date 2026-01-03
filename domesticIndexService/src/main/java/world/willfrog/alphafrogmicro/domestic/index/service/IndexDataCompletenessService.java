@@ -7,7 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.domestic.calendar.TradeCalendarDao;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexQuoteDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.common.DataCompletenessDao;
 
 import java.io.Serializable;
 import java.time.Duration;
@@ -28,14 +28,14 @@ public class IndexDataCompletenessService {
     private static final Duration TTL_UPSTREAM_GAP = Duration.ofDays(1);
 
     private final TradeCalendarDao tradeCalendarDao;
-    private final IndexQuoteDao indexQuoteDao;
+    private final DataCompletenessDao dataCompletenessDao;
     private final RedisTemplate<String, Object> redisTemplate;
 
     public IndexDataCompletenessService(TradeCalendarDao tradeCalendarDao,
-                                        IndexQuoteDao indexQuoteDao,
+                                        DataCompletenessDao dataCompletenessDao,
                                         RedisTemplate<String, Object> redisTemplate) {
         this.tradeCalendarDao = tradeCalendarDao;
-        this.indexQuoteDao = indexQuoteDao;
+        this.dataCompletenessDao = dataCompletenessDao;
         this.redisTemplate = redisTemplate;
     }
 
@@ -54,7 +54,7 @@ public class IndexDataCompletenessService {
         // 计算交易日与已存数据
         List<Long> tradingDates = safeList(tradeCalendarDao.getTradingDatesByRange(EXCHANGE_SSE, startDateTimestamp, endDateTimestamp));
         Set<Long> tradingDateSet = new HashSet<>(tradingDates);
-        List<Long> existingDates = safeList(indexQuoteDao.getExistingTradeDates(tsCode, startDateTimestamp, endDateTimestamp));
+        List<Long> existingDates = safeList(dataCompletenessDao.getExistingDates("alphafrog_index_daily", "ts_code", "trade_date", tsCode, startDateTimestamp, endDateTimestamp));
         Set<Long> existingDateSet = new HashSet<>(existingDates);
 
         Set<Long> missing = new HashSet<>(tradingDateSet);
@@ -150,4 +150,3 @@ public class IndexDataCompletenessService {
         UPSTREAM_GAP
     }
 }
-

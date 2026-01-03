@@ -75,6 +75,7 @@ AGENTS.md
 # Local test scripts and test guide
 /test_scripts
 /test_guide
+/docs
 
 
 .env
