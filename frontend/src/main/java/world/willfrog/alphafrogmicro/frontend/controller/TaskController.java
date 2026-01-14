@@ -63,6 +63,10 @@ public class TaskController {
             taskUuid = UUID.randomUUID().toString();
             taskConfigJSON.put("task_uuid", taskUuid);
             fetchTaskStatusService.registerTask(taskUuid, taskName, taskSubType);
+            if (log.isDebugEnabled()) {
+                log.debug("Fetch task registered task_uuid={} task_name={} task_sub_type={}",
+                        taskUuid, taskName, taskSubType);
+            }
         }
         // 创建 final 副本以便在 lambda 中使用
         final String finalTaskUuid = taskUuid;

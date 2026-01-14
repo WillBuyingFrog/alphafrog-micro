@@ -90,9 +90,9 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         int offset = request.getOffset();
         int limit = request.getLimit();
 
-        if (log.isDebugEnabled()) {
-            log.debug("fund_nav request trade_date={} offset={} limit={}", tradeDate, offset, limit);
-        }
+//        if (log.isDebugEnabled()) {
+//            log.debug("fund_nav request trade_date={} offset={} limit={}", tradeDate, offset, limit);
+//        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -116,9 +116,9 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         }
 
         JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        if (log.isDebugEnabled()) {
-            log.debug("fund_nav response items={}", data == null ? 0 : data.size());
-        }
+//        if (log.isDebugEnabled()) {
+//            log.debug("fund_nav response items={}", data == null ? 0 : data.size());
+//        }
 
         int affectedRows = domesticFundStoreUtils.storeFundNavsByRawFullTuShareOutput(data);
 
@@ -128,9 +128,9 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                     .setFetchedItemsCount(affectedRows)
                     .build();
         } else {
-            if (log.isDebugEnabled()) {
-                log.debug("fund_nav stored_rows={}", affectedRows);
-            }
+//            if (log.isDebugEnabled()) {
+//                log.debug("fund_nav stored_rows={}", affectedRows);
+//            }
             return DomesticFundNavFetchByTradeDateResponse.newBuilder()
                     .setStatus("success")
                     .setFetchedItemsCount(affectedRows)

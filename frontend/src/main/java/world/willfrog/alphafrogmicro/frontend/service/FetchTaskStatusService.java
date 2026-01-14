@@ -28,6 +28,10 @@ public class FetchTaskStatusService {
         status.setStartedAt(now);
         status.setUpdatedAt(now);
         statusMap.put(taskUuid, status);
+        if (log.isDebugEnabled()) {
+            log.debug("Registered fetch task status task_uuid={} task_name={} task_sub_type={} status={}",
+                    taskUuid, taskName, taskSubType, status.getStatus());
+        }
         return status;
     }
 
@@ -38,7 +42,15 @@ public class FetchTaskStatusService {
                                         Integer fetchedItemsCount,
                                         String message) {
         long now = System.currentTimeMillis();
-        return statusMap.compute(taskUuid, (key, existing) -> {
+        FetchTaskStatus previous = statusMap.get(taskUuid);
+        if (log.isDebugEnabled()) {
+            log.debug("Update fetch task status before task_uuid={} prev_status={} prev_fetched={} prev_updated_at={}",
+                    taskUuid,
+                    previous == null ? null : previous.getStatus(),
+                    previous == null ? null : previous.getFetchedItemsCount(),
+                    previous == null ? null : previous.getUpdatedAt());
+        }
+        FetchTaskStatus updated = statusMap.compute(taskUuid, (key, existing) -> {
             FetchTaskStatus target = existing == null ? new FetchTaskStatus() : existing;
             target.setTaskUuid(taskUuid);
             if (taskName != null && !taskName.isBlank()) {
@@ -60,6 +72,11 @@ public class FetchTaskStatusService {
             }
             return target;
         });
+        if (log.isDebugEnabled()) {
+            log.debug("Update fetch task status after task_uuid={} status={} fetched_items={} updated_at={}",
+                    taskUuid, updated.getStatus(), updated.getFetchedItemsCount(), updated.getUpdatedAt());
+        }
+        return updated;
     }
 
     public FetchTaskStatus markSuccess(String taskUuid,
@@ -78,6 +95,10 @@ public class FetchTaskStatusService {
     }
 
     public Optional<FetchTaskStatus> getStatus(String taskUuid) {
-        return Optional.ofNullable(statusMap.get(taskUuid));
+        FetchTaskStatus status = statusMap.get(taskUuid);
+        if (log.isDebugEnabled()) {
+            log.debug("Get fetch task status task_uuid={} found={}", taskUuid, status != null);
+        }
+        return Optional.ofNullable(status);
     }
 }

@@ -14,12 +14,18 @@ import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 public class FetchTaskStatusListener {
 
     private static final String FETCH_TASK_RESULT_TOPIC = "fetch_task_result";
+    private static final int MAX_MESSAGE_LOG_LENGTH = 2000;
 
     private final FetchTaskStatusService fetchTaskStatusService;
 
     @KafkaListener(topics = FETCH_TASK_RESULT_TOPIC, groupId = "alphafrog-micro-frontend")
     public void listenFetchTaskStatus(String message, Acknowledgment acknowledgment) {
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Received fetch task status raw message len={} payload={}",
+                        message == null ? 0 : message.length(),
+                        trimMessage(message));
+            }
             JSONObject payload = JSONObject.parseObject(message);
             String taskUuid = payload.getString("task_uuid");
             if (taskUuid == null || taskUuid.isBlank()) {
@@ -31,6 +37,10 @@ public class FetchTaskStatusListener {
             String status = payload.getString("status");
             Integer fetchedItemsCount = payload.getInteger("fetched_items_count");
             String msg = payload.getString("message");
+            if (log.isDebugEnabled()) {
+                log.debug("Parsed fetch task status task_uuid={} task_name={} task_sub_type={} status={} fetched_items_count={} message={}",
+                        taskUuid, taskName, taskSubType, status, fetchedItemsCount, msg);
+            }
             if (FetchTaskStatusService.STATUS_SUCCESS.equalsIgnoreCase(status)) {
                 fetchTaskStatusService.markSuccess(taskUuid, taskName, taskSubType, fetchedItemsCount == null ? 0 : fetchedItemsCount);
             } else if (FetchTaskStatusService.STATUS_FAILURE.equalsIgnoreCase(status)) {
@@ -43,7 +53,21 @@ public class FetchTaskStatusListener {
         } finally {
             if (acknowledgment != null) {
                 acknowledgment.acknowledge();
+                if (log.isDebugEnabled()) {
+                    log.debug("Fetch task status message acknowledged");
+                }
             }
         }
+    }
+
+    private String trimMessage(String message) {
+        if (message == null) {
+            return "";
+        }
+        if (message.length() <= MAX_MESSAGE_LOG_LENGTH) {
+            return message;
+        }
+        return message.substring(0, MAX_MESSAGE_LOG_LENGTH) +
+                "...(truncated, total_len=" + message.length() + ")";
     }
 }

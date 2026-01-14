@@ -255,6 +255,9 @@ public class FetchTopicConsumer {
                                 int fetchedItemsCount,
                                 String message) {
         if (taskUuid == null || taskUuid.isBlank()) {
+            if (log.isDebugEnabled()) {
+                log.debug("Skip sending task result because task_uuid is blank");
+            }
             return;
         }
         JSONObject payload = new JSONObject();
@@ -268,6 +271,9 @@ public class FetchTopicConsumer {
         }
         payload.put("updated_at", System.currentTimeMillis());
         try {
+            if (log.isDebugEnabled()) {
+                log.debug("Sending fetch task result topic={} payload={}", FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
+            }
             kafkaTemplate.send(FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
         } catch (Exception e) {
             log.error("Failed to send fetch task result for {}", taskUuid, e);

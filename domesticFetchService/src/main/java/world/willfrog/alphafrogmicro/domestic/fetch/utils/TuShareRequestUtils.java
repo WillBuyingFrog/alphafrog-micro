@@ -39,15 +39,15 @@ public class TuShareRequestUtils {
             jsonParams.put("token", tushareToken);
             jsonParams.putAll(params);
             String jsonParamsString = jsonParams.toString();
-            if (log.isDebugEnabled()) {
-                JSONObject safeParams = new JSONObject(jsonParams);
-                safeParams.put("token", maskToken(tushareToken));
-                log.debug("TuShare raw request payload: {}", safeParams.toString());
-                log.debug("TuShare request payload length: {}", jsonParamsString.length());
-                if (tushareToken == null || tushareToken.isBlank()) {
-                    log.debug("TuShare token is empty");
-                }
-            }
+//            if (log.isDebugEnabled()) {
+//                JSONObject safeParams = new JSONObject(jsonParams);
+//                safeParams.put("token", maskToken(tushareToken));
+//                log.debug("TuShare raw request payload: {}", safeParams.toString());
+//                log.debug("TuShare request payload length: {}", jsonParamsString.length());
+//                if (tushareToken == null || tushareToken.isBlank()) {
+//                    log.debug("TuShare token is empty");
+//                }
+//            }
             StringEntity entity = new StringEntity(jsonParamsString, ContentType.APPLICATION_JSON);
             request.setEntity(entity);
 
@@ -57,14 +57,14 @@ public class TuShareRequestUtils {
                 if (responseEntity != null) {
                     String responseBody = EntityUtils.toString(responseEntity);
                     long costMs = System.currentTimeMillis() - startMs;
-                    if (log.isDebugEnabled()) {
-                        log.debug("TuShare response status={} cost_ms={} body_len={}",
-                                response.getCode(), costMs, responseBody.length());
-                        log.debug("TuShare raw response body: {}", trimBody(responseBody));
-                    }
-                    if (response.getCode() != 200) {
-                        log.warn("TuShare HTTP status not OK: {}", response.getCode());
-                    }
+//                    if (log.isDebugEnabled()) {
+//                        log.debug("TuShare response status={} cost_ms={} body_len={}",
+//                                response.getCode(), costMs, responseBody.length());
+//                        log.debug("TuShare raw response body: {}", trimBody(responseBody));
+//                    }
+//                    if (response.getCode() != 200) {
+//                        log.warn("TuShare HTTP status not OK: {}", response.getCode());
+//                    }
                     JSONObject responseJson = JSONObject.parseObject(responseBody);
                     if (responseJson == null) {
                         log.warn("TuShare response is not JSON");
@@ -78,13 +78,13 @@ public class TuShareRequestUtils {
                     JSONArray fetchedData = dataObject == null ? null : dataObject.getJSONArray("items");
                     int fieldsSize = fetchedFields == null ? 0 : fetchedFields.size();
                     int dataSize = fetchedData == null ? 0 : fetchedData.size();
-                    if (log.isDebugEnabled()) {
-                        log.debug("TuShare response parsed code={} msg={} fields_size={} items_size={}",
-                                code, msg, fieldsSize, dataSize);
-                    }
-                    if (code != null && code != 0) {
-                        log.warn("TuShare response code not zero: code={} msg={}", code, msg);
-                    }
+//                    if (log.isDebugEnabled()) {
+//                        log.debug("TuShare response parsed code={} msg={} fields_size={} items_size={}",
+//                                code, msg, fieldsSize, dataSize);
+//                    }
+//                    if (code != null && code != 0) {
+//                        log.warn("TuShare response code not zero: code={} msg={}", code, msg);
+//                    }
 
                     return responseJson;
                 } else {

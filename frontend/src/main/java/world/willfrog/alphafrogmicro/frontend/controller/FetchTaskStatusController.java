@@ -28,12 +28,22 @@ public class FetchTaskStatusController {
             return ResponseEntity.badRequest().body("{\"message\":\"task_uuid is required\"}");
         }
 
+        if (log.isDebugEnabled()) {
+            log.debug("Query fetch task status task_uuid={}", taskUuid);
+        }
         Optional<FetchTaskStatus> statusOptional = fetchTaskStatusService.getStatus(taskUuid);
         if (statusOptional.isEmpty()) {
+            if (log.isDebugEnabled()) {
+                log.debug("Fetch task status not found task_uuid={}", taskUuid);
+            }
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body("{\"message\":\"Task not found\"}");
         }
 
         FetchTaskStatus status = statusOptional.get();
+        if (log.isDebugEnabled()) {
+            log.debug("Fetch task status found task_uuid={} status={} fetched_items={}",
+                    taskUuid, status.getStatus(), status.getFetchedItemsCount());
+        }
         JSONObject res = new JSONObject();
         res.put("task_uuid", status.getTaskUuid());
         res.put("task_name", status.getTaskName());
