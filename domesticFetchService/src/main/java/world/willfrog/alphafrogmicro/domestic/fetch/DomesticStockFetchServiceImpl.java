@@ -43,6 +43,10 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
 
         String tradeDate = DateConvertUtils.convertTimestampToString(tradeDateTimestamp, "yyyyMMdd");
 
+        if (log.isDebugEnabled()) {
+            log.debug("stock_daily request trade_date={} offset={} limit={}", tradeDate, offset, limit);
+        }
+
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
@@ -63,6 +67,10 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
 
         JSONArray data = response.getJSONObject("data").getJSONArray("items");
         JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        if (log.isDebugEnabled()) {
+            log.debug("stock_daily response items={} fields={}", data == null ? 0 : data.size(),
+                    fields == null ? 0 : fields.size());
+        }
 
         int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
 
@@ -70,6 +78,9 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
             return DomesticStockDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
                     .setFetchedItemsCount(-1).build();
         } else {
+            if (log.isDebugEnabled()) {
+                log.debug("stock_daily stored_rows={}", result);
+            }
             return DomesticStockDailyFetchByTradeDateResponse.newBuilder().setStatus("success")
                     .setFetchedItemsCount(result).build();
         }

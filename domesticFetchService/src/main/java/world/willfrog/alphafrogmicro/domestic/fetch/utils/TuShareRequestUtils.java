@@ -28,6 +28,8 @@ public class TuShareRequestUtils {
     @Value("${tushare.token}")
     private String tushareToken;
 
+    private static final int MAX_LOG_BODY_LENGTH = 8000;
+
     public JSONObject createTusharePostRequest(Map<String, Object> params) {
         try ( CloseableHttpClient httpClient = HttpClients.createDefault() ) {
             HttpPost request = new HttpPost("http://api.tushare.pro");
@@ -38,24 +40,55 @@ public class TuShareRequestUtils {
             jsonParams.putAll(params);
             String jsonParamsString = jsonParams.toString();
             if (log.isDebugEnabled()) {
-                log.debug("Sending raw request to TuShare: {}", jsonParamsString);
+                JSONObject safeParams = new JSONObject(jsonParams);
+                safeParams.put("token", maskToken(tushareToken));
+                log.debug("TuShare raw request payload: {}", safeParams.toString());
+                log.debug("TuShare request payload length: {}", jsonParamsString.length());
+                if (tushareToken == null || tushareToken.isBlank()) {
+                    log.debug("TuShare token is empty");
+                }
             }
             StringEntity entity = new StringEntity(jsonParamsString, ContentType.APPLICATION_JSON);
             request.setEntity(entity);
 
+            long startMs = System.currentTimeMillis();
             try ( ClassicHttpResponse response = httpClient.execute(request) ) {
                 HttpEntity responseEntity = response.getEntity();
                 if (responseEntity != null) {
                     String responseBody = EntityUtils.toString(responseEntity);
+                    long costMs = System.currentTimeMillis() - startMs;
+                    if (log.isDebugEnabled()) {
+                        log.debug("TuShare response status={} cost_ms={} body_len={}",
+                                response.getCode(), costMs, responseBody.length());
+                        log.debug("TuShare raw response body: {}", trimBody(responseBody));
+                    }
+                    if (response.getCode() != 200) {
+                        log.warn("TuShare HTTP status not OK: {}", response.getCode());
+                    }
                     JSONObject responseJson = JSONObject.parseObject(responseBody);
-                    JSONArray fetchedFields = responseJson.getJSONObject("data").getJSONArray("fields");
-                    JSONArray fetchedData = responseJson.getJSONObject("data").getJSONArray("items");
+                    if (responseJson == null) {
+                        log.warn("TuShare response is not JSON");
+                        return null;
+                    }
 
-                    // System.out.println("Fields: " + fetchedFields);
-                    // System.out.println("Data[0]: " + fetchedData.get(0));
+                    Integer code = responseJson.getInteger("code");
+                    String msg = responseJson.getString("msg");
+                    JSONObject dataObject = responseJson.getJSONObject("data");
+                    JSONArray fetchedFields = dataObject == null ? null : dataObject.getJSONArray("fields");
+                    JSONArray fetchedData = dataObject == null ? null : dataObject.getJSONArray("items");
+                    int fieldsSize = fetchedFields == null ? 0 : fetchedFields.size();
+                    int dataSize = fetchedData == null ? 0 : fetchedData.size();
+                    if (log.isDebugEnabled()) {
+                        log.debug("TuShare response parsed code={} msg={} fields_size={} items_size={}",
+                                code, msg, fieldsSize, dataSize);
+                    }
+                    if (code != null && code != 0) {
+                        log.warn("TuShare response code not zero: code={} msg={}", code, msg);
+                    }
 
                     return responseJson;
                 } else {
+                    log.warn("TuShare response entity is empty, status={}", response.getCode());
                     return null;
                 }
             } catch (Exception e) {
@@ -71,5 +104,27 @@ public class TuShareRequestUtils {
             e.printStackTrace();
             return null;
         }
+    }
+
+    private String maskToken(String token) {
+        if (token == null || token.isBlank()) {
+            return "";
+        }
+        int length = token.length();
+        if (length <= 6) {
+            return "***";
+        }
+        return token.substring(0, 3) + "***" + token.substring(length - 3);
+    }
+
+    private String trimBody(String body) {
+        if (body == null) {
+            return "";
+        }
+        if (body.length() <= MAX_LOG_BODY_LENGTH) {
+            return body;
+        }
+        return body.substring(0, MAX_LOG_BODY_LENGTH) +
+                "...(truncated, total_len=" + body.length() + ")";
     }
 }
