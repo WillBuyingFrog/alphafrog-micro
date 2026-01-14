@@ -15,7 +15,6 @@ import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonFormatter;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFundService;
 
-import java.io.IOException;
 
 @Controller
 @RequestMapping("/domestic/fund")

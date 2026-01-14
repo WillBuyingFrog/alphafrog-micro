@@ -14,6 +14,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import world.willfrog.alphafrogmicro.frontend.filter.JwtAuthFilter;
+import world.willfrog.alphafrogmicro.frontend.filter.FetchAccessFilter;
 
 @Configuration
 @EnableWebSecurity
@@ -21,6 +22,7 @@ import world.willfrog.alphafrogmicro.frontend.filter.JwtAuthFilter;
 public class SecurityConfig{
 
     private final JwtAuthFilter jwtAuthFilter;
+    private final FetchAccessFilter fetchAccessFilter;
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http) throws Exception {
@@ -32,6 +34,7 @@ public class SecurityConfig{
                         .requestMatchers("/tasks/**").authenticated()
                         .anyRequest().authenticated())
                 .addFilterBefore(jwtAuthFilter, UsernamePasswordAuthenticationFilter.class)
+                .addFilterAfter(fetchAccessFilter, JwtAuthFilter.class)
                 .exceptionHandling((exceptionHandling) -> exceptionHandling
                         .authenticationEntryPoint((req, res, e) -> res.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Unauthorized")))
                 .headers(headers -> headers

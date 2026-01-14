@@ -6,14 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
