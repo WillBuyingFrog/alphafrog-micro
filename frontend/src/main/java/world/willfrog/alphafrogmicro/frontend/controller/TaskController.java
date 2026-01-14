@@ -64,6 +64,9 @@ public class TaskController {
             taskConfigJSON.put("task_uuid", taskUuid);
             fetchTaskStatusService.registerTask(taskUuid, taskName, taskSubType);
         }
+        // 创建 final 副本以便在 lambda 中使用
+        final String finalTaskUuid = taskUuid;
+        
         try {
             String message = taskConfigJSON.toString();
             log.info("Attempting to send message to topic {}: {}", topic, message);
@@ -75,8 +78,8 @@ public class TaskController {
                             topic, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
                 } else {
                     log.error("Failed to send message to topic {}", topic, ex);
-                    if (taskUuid != null) {
-                        fetchTaskStatusService.markFailure(taskUuid, taskName, taskSubType, -1, ex.getMessage());
+                    if (finalTaskUuid != null) {
+                        fetchTaskStatusService.markFailure(finalTaskUuid, taskName, taskSubType, -1, ex.getMessage());
                     }
                 }
             });
