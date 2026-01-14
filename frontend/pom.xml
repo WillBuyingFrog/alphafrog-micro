@@ -181,6 +181,17 @@
                             <goal>repackage</goal>
                         </goals>
                     </execution>
+                    <execution>
+                        <id>build-info</id>
+                        <goals>
+                            <goal>build-info</goal>
+                        </goals>
+                        <configuration>
+                            <additionalProperties>
+                                <alphafrog.version>${project.parent.version}</alphafrog.version>
+                            </additionalProperties>
+                        </configuration>
+                    </execution>
                 </executions>
             </plugin>
             <plugin>

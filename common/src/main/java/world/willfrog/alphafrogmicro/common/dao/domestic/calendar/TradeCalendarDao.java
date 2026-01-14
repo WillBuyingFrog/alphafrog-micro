@@ -2,6 +2,7 @@ package world.willfrog.alphafrogmicro.common.dao.domestic.calendar;
 
 import org.apache.ibatis.annotations.Insert;
 import org.apache.ibatis.annotations.Mapper;
+import org.apache.ibatis.annotations.Param;
 import org.apache.ibatis.annotations.Select;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.calendar.TradeCalendar;
 
@@ -17,18 +18,23 @@ public interface TradeCalendarDao {
 
     @Select("SELECT * FROM alphafrog_trade_calendar WHERE " +
             "cal_date_timestamp BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
-    List<TradeCalendar> getTradeCalendarByDateRange(long startDateTimestamp, long endDateTimestamp);
+    List<TradeCalendar> getTradeCalendarByDateRange(@Param("startDateTimestamp") long startDateTimestamp,
+                                                    @Param("endDateTimestamp") long endDateTimestamp);
 
     @Select("SELECT cal_date_timestamp FROM alphafrog_trade_calendar " +
             "WHERE exchange = #{exchange} AND is_open = 1 " +
             "AND cal_date_timestamp BETWEEN #{startDateTimestamp} AND #{endDateTimestamp} " +
             "ORDER BY cal_date_timestamp")
-    List<Long> getTradingDatesByRange(String exchange, long startDateTimestamp, long endDateTimestamp);
+    List<Long> getTradingDatesByRange(@Param("exchange") String exchange,
+                                      @Param("startDateTimestamp") long startDateTimestamp,
+                                      @Param("endDateTimestamp") long endDateTimestamp);
 
     @Select("SELECT COUNT(1) FROM alphafrog_trade_calendar " +
             "WHERE exchange = #{exchange} AND is_open = 1 " +
             "AND cal_date_timestamp BETWEEN #{startDateTimestamp} AND #{endDateTimestamp}")
-    int countTradingDaysByRange(String exchange, long startDateTimestamp, long endDateTimestamp);
+    int countTradingDaysByRange(@Param("exchange") String exchange,
+                                @Param("startDateTimestamp") long startDateTimestamp,
+                                @Param("endDateTimestamp") long endDateTimestamp);
 
     /**
      * Finds the latest actual trading day timestamp (YYYYMMDD long format)
@@ -42,6 +48,7 @@ public interface TradeCalendarDao {
     @Select("SELECT cal_date_timestamp FROM alphafrog_trade_calendar " +
             "WHERE exchange = #{exchange} AND cal_date_timestamp < #{currentCalDateTimestamp} AND is_open = 1 " +
             "ORDER BY cal_date_timestamp DESC LIMIT 1")
-    Long getActualPreviousTradingDayTimestamp(String exchange, long currentCalDateTimestamp);
+    Long getActualPreviousTradingDayTimestamp(@Param("exchange") String exchange,
+                                              @Param("currentCalDateTimestamp") long currentCalDateTimestamp);
 
 }
