@@ -4,7 +4,7 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-mvn -q -DskipTests compile install
+mvn -DskipTests compile install
 
 bash build_all_images.sh
 
