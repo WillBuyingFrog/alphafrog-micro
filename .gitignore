@@ -65,6 +65,7 @@ test-secrets.yml
 # Coding Agent Files
 
 /agent-communication
+/agent-working-docs
 /coding-agent-report
 AGENTS.md
 

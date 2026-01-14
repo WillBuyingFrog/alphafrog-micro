@@ -108,6 +108,20 @@ message DomesticIndexDailyByTsCodeAndDateRangeResponse {
   bool upstreamGap = 7;
 }
 
+// 交易日数量查询
+message DomesticTradingDaysCountRequest {
+  string exchange = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message DomesticTradingDaysCountResponse {
+  string exchange = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+  int32 tradingDaysCount = 4;
+}
+
 /**
   指数成分股--实体类消息
  */
@@ -246,6 +260,8 @@ service DomesticIndexService{
   rpc getDomesticIndexDailyByTsCodeAndDateRange(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
   // 根据交易日查询所有指数日线行情
   rpc getDomesticIndexDailyByTradeDate(DomesticIndexDailyByTsCodeAndDateRangeRequest) returns (DomesticIndexDailyByTsCodeAndDateRangeResponse);
+  // 根据日期范围查询交易日数量
+  rpc getTradingDaysCountByDateRange(DomesticTradingDaysCountRequest) returns (DomesticTradingDaysCountResponse);
   // 根据代码和时间范围查询指数成分股
   rpc getDomesticIndexWeightByTsCodeAndDateRange(DomesticIndexWeightByTsCodeAndDateRangeRequest) returns (DomesticIndexWeightByTsCodeAndDateRangeResponse);
   // 根据指定股票代码查询所有含有此股票的指数
