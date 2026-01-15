@@ -1,34 +1,19 @@
 package world.willfrog.alphafrogmicro.portfolioservice.service;
 
-import world.willfrog.alphafrogmicro.common.pojo.portfolio.Portfolio;
-import world.willfrog.alphafrogmicro.common.pojo.portfolio.PortfolioHolding;
-
-import java.util.List;
-import java.util.Optional;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PageResult;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioCreateRequest;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioResponse;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioUpdateRequest;
 
 public interface PortfolioService {
 
-    Portfolio createPortfolio(Portfolio portfolio);
+    PortfolioResponse create(String userId, PortfolioCreateRequest request);
 
-    Optional<Portfolio> getPortfolioById(Long portfolioId);
+    PageResult<PortfolioResponse> list(String userId, String status, String keyword, int page, int size);
 
-    // Optional: Method to get portfolio with all its holdings eagerly fetched
-    Optional<Portfolio> getPortfolioWithHoldingsById(Long portfolioId);
+    PortfolioResponse getById(Long id, String userId);
 
-    List<Portfolio> getPortfoliosByUserId(String userId);
+    PortfolioResponse update(Long id, String userId, PortfolioUpdateRequest request);
 
-    Portfolio updatePortfolio(Portfolio portfolio);
-
-    void deletePortfolio(Long portfolioId);
-
-    PortfolioHolding addHoldingToPortfolio(Long portfolioId, PortfolioHolding holding);
-
-    PortfolioHolding updateHoldingInPortfolio(Long portfolioId, PortfolioHolding holding);
-
-    void removeHoldingFromPortfolio(Long portfolioId, Long holdingId);
-
-    List<PortfolioHolding> getHoldingsByPortfolioId(Long portfolioId);
-
-    Optional<PortfolioHolding> getHoldingById(Long holdingId);
-
-} 
+    void archive(Long id, String userId);
+}

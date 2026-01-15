@@ -3,6 +3,7 @@ package world.willfrog.alphafrogmicro.domestic.index;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.common.dao.domestic.calendar.TradeCalendarDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexQuoteDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexWeightDao;
@@ -11,6 +12,7 @@ import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexServiceTriple.DomesticIndexServiceImplBase;
+import world.willfrog.alphafrogmicro.domestic.index.service.IndexDataCompletenessService;
 
 import java.util.List;
 
@@ -22,13 +24,20 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     private final IndexInfoDao indexInfoDao;
     private final IndexQuoteDao indexQuoteDao;
     private final IndexWeightDao indexWeightDao;
+    private final IndexDataCompletenessService indexDataCompletenessService;
+    private final TradeCalendarDao tradeCalendarDao;
 
 
     public DomesticIndexServiceImpl(IndexInfoDao indexInfoDao,
-                                    IndexQuoteDao indexQuoteDao, IndexWeightDao indexWeightDao) {
+                                    IndexQuoteDao indexQuoteDao,
+                                    IndexWeightDao indexWeightDao,
+                                    IndexDataCompletenessService indexDataCompletenessService,
+                                    TradeCalendarDao tradeCalendarDao) {
         this.indexInfoDao = indexInfoDao;
         this.indexQuoteDao = indexQuoteDao;
         this.indexWeightDao = indexWeightDao;
+        this.indexDataCompletenessService = indexDataCompletenessService;
+        this.tradeCalendarDao = tradeCalendarDao;
     }
 
 
@@ -160,7 +169,62 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
             responseBuilder.addItems(itemBuilder.build());
         }
 
+        IndexDataCompletenessService.IndexCompletenessResult completeness =
+                indexDataCompletenessService.evaluate(
+                        request.getTsCode(),
+                        request.getStartDate(),
+                        request.getEndDate()
+                );
+
+        responseBuilder.setComplete(completeness.isComplete())
+                .setExpectedTradingDays(completeness.getExpectedTradingDays())
+                .setActualTradingDays(completeness.getActualTradingDays())
+                .setMissingCount(completeness.getMissingCount())
+                .setUpstreamGap(completeness.isUpstreamGap());
+
+        if (completeness.getMissingDates() != null && !completeness.getMissingDates().isEmpty()) {
+            responseBuilder.addAllMissingDates(completeness.getMissingDates());
+        }
+
         return responseBuilder.build();
+    }
+
+    @Override
+    public DomesticTradingDaysCountResponse getTradingDaysCountByDateRange(
+            DomesticTradingDaysCountRequest request) {
+        String exchange = request.getExchange();
+        if (exchange == null || exchange.trim().isEmpty()) {
+            exchange = "SSE";
+        }
+
+        long startDate = request.getStartDate();
+        long endDate = request.getEndDate();
+        if (startDate > endDate) {
+            long tmp = startDate;
+            startDate = endDate;
+            endDate = tmp;
+        }
+
+        int count;
+        try {
+            count = tradeCalendarDao.countTradingDaysByRange(exchange, startDate, endDate);
+        } catch (Exception e) {
+            log.error("Error occurred while counting trading days: exchange={}, dateRange={}-{}",
+                    exchange, startDate, endDate, e);
+            return DomesticTradingDaysCountResponse.newBuilder()
+                    .setExchange(exchange)
+                    .setStartDate(startDate)
+                    .setEndDate(endDate)
+                    .setTradingDaysCount(0)
+                    .build();
+        }
+
+        return DomesticTradingDaysCountResponse.newBuilder()
+                .setExchange(exchange)
+                .setStartDate(startDate)
+                .setEndDate(endDate)
+                .setTradingDaysCount(count)
+                .build();
     }
 
 

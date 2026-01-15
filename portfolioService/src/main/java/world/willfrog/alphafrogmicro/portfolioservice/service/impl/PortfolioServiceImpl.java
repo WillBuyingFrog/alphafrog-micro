@@ -1,139 +1,153 @@
 package world.willfrog.alphafrogmicro.portfolioservice.service.impl;
 
-
+import com.fasterxml.jackson.databind.ObjectMapper;
+import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import lombok.extern.slf4j.Slf4j;
-import world.willfrog.alphafrogmicro.common.dao.portfolio.PortfolioHoldingDao; // Placeholder - replace with your actual DAO
-import world.willfrog.alphafrogmicro.common.dao.portfolio.PortfolioDao; // Placeholder - replace with your actual DAO
-import world.willfrog.alphafrogmicro.common.pojo.portfolio.Portfolio;
-import world.willfrog.alphafrogmicro.common.pojo.portfolio.PortfolioHolding;
+import world.willfrog.alphafrogmicro.common.dto.ResponseCode;
+import world.willfrog.alphafrogmicro.portfolioservice.constants.PortfolioConstants;
+import world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioPo;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PageResult;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioCreateRequest;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioResponse;
+import world.willfrog.alphafrogmicro.portfolioservice.dto.PortfolioUpdateRequest;
+import world.willfrog.alphafrogmicro.portfolioservice.exception.BizException;
+import world.willfrog.alphafrogmicro.portfolioservice.mapper.PortfolioMapper;
 import world.willfrog.alphafrogmicro.portfolioservice.service.PortfolioService;
+import world.willfrog.alphafrogmicro.portfolioservice.util.PortfolioConverter;
 
+import java.time.OffsetDateTime;
 import java.util.List;
-import java.util.Optional;
-
 
 @Service
-@Slf4j
 public class PortfolioServiceImpl implements PortfolioService {
 
-    private final PortfolioDao portfolioDao; // Placeholder
-    private final PortfolioHoldingDao portfolioHoldingDao; // Placeholder
+    private static final List<String> VISIBILITY_SET = List.of("private", "shared");
+    private static final List<String> STATUS_SET = List.of("active", "archived");
 
+    private final PortfolioMapper portfolioMapper;
+    private final ObjectMapper objectMapper;
 
-    public PortfolioServiceImpl(PortfolioDao portfolioDao, 
-                              PortfolioHoldingDao portfolioHoldingDao) {
-        this.portfolioDao = portfolioDao;
-        this.portfolioHoldingDao = portfolioHoldingDao;
+    public PortfolioServiceImpl(PortfolioMapper portfolioMapper, ObjectMapper objectMapper) {
+        this.portfolioMapper = portfolioMapper;
+        this.objectMapper = objectMapper;
     }
 
     @Override
     @Transactional
-    public Portfolio createPortfolio(Portfolio portfolio) {
-        // Assuming portfolio object passed here might not have an ID yet.
-        // The DAO's insert method should populate the ID if auto-generated.
-        portfolioDao.insert(portfolio);
-        log.info("Created portfolio with ID: {}", portfolio.getId());
-        return portfolio;
-    }
+    public PortfolioResponse create(String userId, PortfolioCreateRequest request) {
+        String visibility = defaultVisibility(request.getVisibility());
+        String timezone = defaultTimezone(request.getTimezone());
 
-    @Override
-    public Optional<Portfolio> getPortfolioById(Long portfolioId) {
-        Portfolio portfolio = portfolioDao.findById(portfolioId);
-        return Optional.ofNullable(portfolio);
-    }
-
-    @Override
-    public Optional<Portfolio> getPortfolioWithHoldingsById(Long portfolioId) {
-        Portfolio portfolio = portfolioDao.findById(portfolioId);
-        if (portfolio != null) {
-            List<PortfolioHolding> holdings = portfolioHoldingDao.findByPortfolioId(portfolioId);
-            portfolio.setHoldings(holdings); 
-            return Optional.of(portfolio);
+        if (portfolioMapper.countActiveName(userId, request.getName()) > 0) {
+            throw new BizException(ResponseCode.DATA_EXIST, "同名组合已存在");
         }
-        return Optional.empty();
+
+        PortfolioPo po = new PortfolioPo();
+        po.setUserId(userId);
+        po.setName(request.getName());
+        po.setVisibility(visibility);
+        po.setStatus(PortfolioConstants.DEFAULT_STATUS);
+        po.setTimezone(timezone);
+        po.setTagsJson(PortfolioConverter.toTagsJson(request.getTags(), objectMapper));
+        po.setExtJson("{}");
+
+        portfolioMapper.insert(po);
+        po.setCreatedAt(OffsetDateTime.now());
+        po.setUpdatedAt(po.getCreatedAt());
+        return PortfolioConverter.toResponse(po, objectMapper);
     }
 
     @Override
-    public List<Portfolio> getPortfoliosByUserId(String userId) {
-        return portfolioDao.findByUserId(userId);
+    public PageResult<PortfolioResponse> list(String userId, String status, String keyword, int page, int size) {
+        int pageNum = Math.max(page, PortfolioConstants.DEFAULT_PAGE);
+        int pageSize = Math.min(Math.max(size, 1), PortfolioConstants.MAX_PAGE_SIZE);
+        String normalizedStatus = normalizeStatus(status);
+
+        int offset = (pageNum - 1) * pageSize;
+        List<PortfolioPo> items = portfolioMapper.list(userId, normalizedStatus, keyword, offset, pageSize);
+        long total = portfolioMapper.count(userId, normalizedStatus, keyword);
+
+        List<PortfolioResponse> dtoList = items.stream()
+                .map(po -> PortfolioConverter.toResponse(po, objectMapper))
+                .toList();
+
+        return PageResult.<PortfolioResponse>builder()
+                .items(dtoList)
+                .total(total)
+                .page(pageNum)
+                .size(pageSize)
+                .build();
     }
 
     @Override
-    @Transactional
-    public Portfolio updatePortfolio(Portfolio portfolio) {
-        // Ensure portfolio has an ID for update
-        if (portfolio.getId() == null) {
-            log.error("Portfolio ID is null, cannot update.");
-            // Or throw IllegalArgumentException
-            return null; 
+    public PortfolioResponse getById(Long id, String userId) {
+        PortfolioPo po = portfolioMapper.findByIdAndUser(id, userId);
+        if (po == null) {
+            throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
         }
-        portfolioDao.update(portfolio);
-        return portfolio;
+        return PortfolioConverter.toResponse(po, objectMapper);
     }
 
-    @Override
-    @Transactional
-    public void deletePortfolio(Long portfolioId) {
-        // Consider business logic: what happens to holdings? 
-        // Current MyBatis DAOs would require separate calls to delete holdings first if there's a FK constraint
-        // or use cascade delete at DB level.
-        // For simplicity, assuming holdings are deleted separately or cascaded.
-        // If not, delete holdings first:
-        // portfolioHoldingRepository.deleteByPortfolioId(portfolioId);
-        portfolioDao.deleteById(portfolioId);
-        log.info("Deleted portfolio with ID: {}", portfolioId);
+    private String defaultVisibility(String visibility) {
+        String value = StringUtils.defaultIfBlank(visibility, PortfolioConstants.DEFAULT_VISIBILITY);
+        if (!VISIBILITY_SET.contains(value)) {
+            throw new BizException(ResponseCode.PARAM_ERROR, "visibility 仅支持 private/shared");
+        }
+        return value;
     }
 
-    @Override
-    @Transactional
-    public PortfolioHolding addHoldingToPortfolio(Long portfolioId, PortfolioHolding holding) {
-        Optional<Portfolio> portfolioOpt = getPortfolioById(portfolioId);
-        if (portfolioOpt.isPresent()) {
-            holding.setPortfolio(portfolioOpt.get()); // Set the portfolio reference
-            // Ensure the holding.portfolio.id is correctly used by MyBatis insert if needed
-            portfolioHoldingDao.insert(holding);
-            log.info("Added holding with ID: {} to portfolio ID: {}", holding.getId(), portfolioId);
-            return holding;
-        } else {
-            log.error("Portfolio with ID: {} not found. Cannot add holding.", portfolioId);
-            // Or throw exception
+    private String defaultTimezone(String timezone) {
+        return StringUtils.defaultIfBlank(timezone, PortfolioConstants.DEFAULT_TIMEZONE);
+    }
+
+    private String normalizeStatus(String status) {
+        if (StringUtils.isBlank(status)) {
             return null;
         }
-    }
-
-    @Override
-    @Transactional
-    public PortfolioHolding updateHoldingInPortfolio(Long portfolioId, PortfolioHolding holding) {
-        // Ensure portfolioId matches the one in holding if it's set, or that holding belongs to this portfolio.
-        // For simplicity, assuming holding object is self-contained for update by its ID.
-        if (holding.getId() == null) {
-            log.error("Holding ID is null, cannot update.");
-            return null;
+        if (!STATUS_SET.contains(status)) {
+            throw new BizException(ResponseCode.PARAM_ERROR, "status 仅支持 active/archived");
         }
-        // Optional: Check if holding actually belongs to portfolioId before updating
-        portfolioHoldingDao.update(holding);
-        return holding;
+        return status;
     }
 
     @Override
     @Transactional
-    public void removeHoldingFromPortfolio(Long portfolioId, Long holdingId) {
-        // Optional: Check if holdingId actually belongs to portfolioId before deleting
-        portfolioHoldingDao.deleteById(holdingId);
-        log.info("Removed holding ID: {} from portfolio ID: {}", holdingId, portfolioId);
+    public PortfolioResponse update(Long id, String userId, PortfolioUpdateRequest request) {
+        PortfolioPo po = portfolioMapper.findByIdAndUser(id, userId);
+        if (po == null) {
+            throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
+        }
+        if (StringUtils.isNotBlank(request.getName())
+                && !StringUtils.equals(request.getName(), po.getName())
+                && portfolioMapper.countActiveName(userId, request.getName()) > 0) {
+            throw new BizException(ResponseCode.DATA_EXIST, "同名组合已存在");
+        }
+        if (StringUtils.isNotBlank(request.getVisibility())) {
+            po.setVisibility(defaultVisibility(request.getVisibility()));
+        }
+        if (request.getTags() != null) {
+            po.setTagsJson(PortfolioConverter.toTagsJson(request.getTags(), objectMapper));
+        }
+        if (StringUtils.isNotBlank(request.getStatus())) {
+            po.setStatus(normalizeStatus(request.getStatus()));
+        }
+        if (StringUtils.isNotBlank(request.getName())) {
+            po.setName(request.getName());
+        }
+
+        portfolioMapper.update(po);
+        return PortfolioConverter.toResponse(po, objectMapper);
     }
 
     @Override
-    public List<PortfolioHolding> getHoldingsByPortfolioId(Long portfolioId) {
-        return portfolioHoldingDao.findByPortfolioId(portfolioId);
+    @Transactional
+    public void archive(Long id, String userId) {
+        PortfolioPo po = portfolioMapper.findByIdAndUser(id, userId);
+        if (po == null) {
+            throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
+        }
+        po.setStatus("archived");
+        portfolioMapper.update(po);
     }
-
-    @Override
-    public Optional<PortfolioHolding> getHoldingById(Long holdingId) {
-        PortfolioHolding holding = portfolioHoldingDao.findById(holdingId);
-        return Optional.ofNullable(holding);
-    }
-} 
+}

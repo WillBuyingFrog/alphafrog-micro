@@ -6,37 +6,29 @@ spring:
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
-  data:
-    redis:
-      host: ${AF_REDIS_HOST:127.0.0.1}
-      port: 6379
-      password: ${AF_REDIS_PASSWORD:default}
-  jpa:
-    hibernate:
-      ddl-auto: validate
-    show-sql: false
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
 
 server:
   port: 8084
 
 mybatis:
+  mapper-locations: classpath*:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
+
+logging:
+  level:
+    world.willfrog.alphafrogmicro.portfolioservice: INFO
 
 dubbo:
   application:
     name: portfolio-service
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
-  #    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848?username=${NACOS_USER:nacos}&password=${NACOS_PASSWORD:nacos}
   protocol:
-    port: 50054
     name: tri
+    port: 50056
   consumer:
     check: false
-
-# Portfolio service specific configuration
-portfolio:
-  calculation:
-    max-holding-age-days: 365
-    price-cache-ttl-minutes: 5

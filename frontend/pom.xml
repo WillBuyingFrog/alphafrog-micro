@@ -181,50 +181,15 @@
                             <goal>repackage</goal>
                         </goals>
                     </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.xolstice.maven.plugins</groupId>
-                <artifactId>protobuf-maven-plugin</artifactId>
-                <version>0.6.1</version>
-                <configuration>
-                    <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
-                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot>
-                    <protocPlugins>
-                        <protocPlugin>
-                            <id>dubbo</id>
-                            <groupId>org.apache.dubbo</groupId>
-                            <artifactId>dubbo-compiler</artifactId>
-                            <version>${dubbo.version}</version>
-                            <mainClass>org.apache.dubbo.gen.tri.Dubbo3TripleGenerator</mainClass>
-                        </protocPlugin>
-                    </protocPlugins>
-                </configuration>
-                <executions>
                     <execution>
-                        <id>compile-protobuf</id>
-                        <phase>generate-sources</phase>
+                        <id>build-info</id>
                         <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.3.0</version>
-                <executions>
-                    <execution>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
+                            <goal>build-info</goal>
                         </goals>
                         <configuration>
-                            <sources>
-                                <source>build/generated/source/proto/main/java</source>
-                            </sources>
+                            <additionalProperties>
+                                <alphafrog.version>${project.parent.version}</alphafrog.version>
+                            </additionalProperties>
                         </configuration>
                     </execution>
                 </executions>

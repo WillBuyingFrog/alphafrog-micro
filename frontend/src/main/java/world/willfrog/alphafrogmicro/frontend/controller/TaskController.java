@@ -11,9 +11,11 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 import world.willfrog.alphafrogmicro.frontend.service.RateLimitingService;
 
 import java.util.Map;
+import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
 
 @Controller
@@ -24,6 +26,7 @@ public class TaskController {
 
     private final KafkaTemplate<String, String> kafkaTemplate;
     private final RateLimitingService rateLimitingService;
+    private final FetchTaskStatusService fetchTaskStatusService;
 
     @PostMapping("/create")
     public ResponseEntity<String> createTask(@RequestBody Map<String, Object> taskConfig) {
@@ -53,6 +56,21 @@ public class TaskController {
         }
 
         String topic = getTopicForTaskType(taskType);
+        String taskUuid = null;
+        String taskName = taskConfigJSON.getString("task_name");
+        Integer taskSubType = taskConfigJSON.getInteger("task_sub_type");
+        if ("fetch".equals(taskType)) {
+            taskUuid = UUID.randomUUID().toString();
+            taskConfigJSON.put("task_uuid", taskUuid);
+            fetchTaskStatusService.registerTask(taskUuid, taskName, taskSubType);
+            if (log.isDebugEnabled()) {
+                log.debug("Fetch task registered task_uuid={} task_name={} task_sub_type={}",
+                        taskUuid, taskName, taskSubType);
+            }
+        }
+        // 创建 final 副本以便在 lambda 中使用
+        final String finalTaskUuid = taskUuid;
+        
         try {
             String message = taskConfigJSON.toString();
             log.info("Attempting to send message to topic {}: {}", topic, message);
@@ -64,6 +82,9 @@ public class TaskController {
                             topic, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
                 } else {
                     log.error("Failed to send message to topic {}", topic, ex);
+                    if (finalTaskUuid != null) {
+                        fetchTaskStatusService.markFailure(finalTaskUuid, taskName, taskSubType, -1, ex.getMessage());
+                    }
                 }
             });
 
@@ -74,6 +95,9 @@ public class TaskController {
         }
 
         res.put("message", "Task creation request received and is being processed.");
+        if (taskUuid != null) {
+            res.put("task_uuid", taskUuid);
+        }
         return ResponseEntity.ok(res.toString());
     }
 

@@ -3,10 +3,12 @@ package world.willfrog.alphafrogmicro.domestic.fetch;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock;
 
 @Service
 @Slf4j
@@ -15,19 +17,27 @@ public class FetchTopicConsumer {
     private final DomesticIndexFetchServiceImpl domesticIndexFetchService;
     private final DomesticFundFetchServiceImpl domesticFundFetchService;
     private final DomesticStockFetchServiceImpl domesticStockFetchService;
+    private final DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
+    private final KafkaTemplate<String, String> kafkaTemplate;
+
+    private static final String FETCH_TASK_RESULT_TOPIC = "fetch_task_result";
 
     public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
                               DomesticFundFetchServiceImpl domesticFundFetchService,
-                              DomesticStockFetchServiceImpl domesticStockFetchService) {
+                              DomesticStockFetchServiceImpl domesticStockFetchService,
+                              DomesticTradeCalendarFetchService domesticTradeCalendarFetchService,
+                              KafkaTemplate<String, String> kafkaTemplate) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
         this.domesticStockFetchService = domesticStockFetchService;
+        this.domesticTradeCalendarFetchService = domesticTradeCalendarFetchService;
+        this.kafkaTemplate = kafkaTemplate;
     }
 
 
     @KafkaListener(topics = "fetch_topic", groupId = "alphafrog-micro")
     public void listenFetchTask(String message, Acknowledgment acknowledgment){
-        log.info("Received fetch task: {}", message);
+        log.info("Received fetch task [V2-DEBUG]: {}", message);
         JSONObject rawMessageJSON;
         try{
             rawMessageJSON = JSONObject.parseObject(message);
@@ -37,16 +47,39 @@ public class FetchTopicConsumer {
             return;
         }
 
+        String taskUuid = rawMessageJSON.getString("task_uuid");
+        String taskName = rawMessageJSON.getString("task_name");
+        Integer taskSubTypeValue = rawMessageJSON.getInteger("task_sub_type");
+
         try{
-            String taskName = rawMessageJSON.getString("task_name");
             int taskSubType = rawMessageJSON.getIntValue("task_sub_type");
             JSONObject taskParams = rawMessageJSON.getJSONObject("task_params");
+            if (taskParams == null) {
+                taskParams = new JSONObject();
+            }
 
             int result;
 
+            if (taskName == null) {
+                result = -2;
+                acknowledgment.acknowledge();
+                sendTaskResult(taskUuid, null, taskSubTypeValue, result, "Missing task_name");
+                return;
+            }
+
             switch (taskName) {
                 case "index_info":
-                    result = -1;
+                    if (taskSubType == 1) {
+                        String market = taskParams.getString("market");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest request =
+                                DomesticIndex.DomesticIndexInfoFetchByMarketRequest.newBuilder()
+                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                        result = domesticIndexFetchService.fetchDomesticIndexInfoByMarket(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
                     break;
                 case "index_quote":
                     if (taskSubType == 1) {
@@ -67,6 +100,17 @@ public class FetchTopicConsumer {
                                         .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit).build();
                         result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        String tsCode = taskParams.getString("ts_code");
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest request =
+                                DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest.newBuilder()
+                                        .setTsCode(tsCode).setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                        .setOffset(offset).setLimit(limit).build();
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -84,6 +128,19 @@ public class FetchTopicConsumer {
                                         .setOffset(offset).setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchDomesticIndexWeightByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+                case "fund_info":
+                    if (taskSubType == 1) {
+                        String market = taskParams.getString("market");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticFund.DomesticFundInfoFetchByMarketRequest request =
+                                DomesticFund.DomesticFundInfoFetchByMarketRequest.newBuilder()
+                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                        result = domesticFundFetchService.fetchDomesticFundInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -122,6 +179,32 @@ public class FetchTopicConsumer {
                     }
                     break;
 
+                case "stock_info":
+                    if (taskSubType == 1) {
+                        String market = taskParams.getString("market");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStock.DomesticStockInfoFetchByMarketRequest request =
+                                DomesticStock.DomesticStockInfoFetchByMarketRequest.newBuilder()
+                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                        result = domesticStockFetchService.fetchStockInfoByMarket(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+                case "stock_daily":
+                    if (taskSubType == 1) {
+                        long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStock.DomesticStockDailyFetchByTradeDateRequest request =
+                                DomesticStock.DomesticStockDailyFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build();
+                        result = domesticStockFetchService.fetchStockDailyByTradeDate(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
                 case "stock_quote":
                     if (taskSubType == 1) {
                         long startDateTimestamp = taskParams.getLong("start_date_timestamp");
@@ -134,16 +217,66 @@ public class FetchTopicConsumer {
                         result = -1;
                     }
                     break;
+                case "trade_calendar":
+                    if (taskSubType == 1) {
+                        long startDateTimestamp = taskParams.getLong("start_date_timestamp");
+                        long endDateTimestamp = taskParams.getLong("end_date_timestamp");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest request =
+                                DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticTradeCalendarFetchService.fetchDomesticTradeCalendarByDateRange(request)
+                                .getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
                 default:
                     result = -2;
                     break;
             }
             acknowledgment.acknowledge();
             log.info("Task result : {}", result);
+            sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, null);
         } catch (Exception e){
             log.error("Failed to start task: {}", message);
             log.error("Stack trace", e);
             acknowledgment.acknowledge();
+            sendTaskResult(taskUuid, taskName, taskSubTypeValue, -1, e.getMessage());
+        }
+    }
+
+    private void sendTaskResult(String taskUuid,
+                                String taskName,
+                                Integer taskSubType,
+                                int fetchedItemsCount,
+                                String message) {
+        if (taskUuid == null || taskUuid.isBlank()) {
+            if (log.isDebugEnabled()) {
+                log.debug("Skip sending task result because task_uuid is blank");
+            }
+            return;
+        }
+        JSONObject payload = new JSONObject();
+        payload.put("task_uuid", taskUuid);
+        payload.put("task_name", taskName);
+        payload.put("task_sub_type", taskSubType);
+        payload.put("fetched_items_count", fetchedItemsCount);
+        payload.put("status", fetchedItemsCount >= 0 ? "success" : "failure");
+        if (message != null && !message.isBlank()) {
+            payload.put("message", message);
+        }
+        payload.put("updated_at", System.currentTimeMillis());
+        try {
+            if (log.isDebugEnabled()) {
+                log.debug("Sending fetch task result topic={} payload={}", FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
+            }
+            kafkaTemplate.send(FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
+        } catch (Exception e) {
+            log.error("Failed to send fetch task result for {}", taskUuid, e);
         }
     }
 }
