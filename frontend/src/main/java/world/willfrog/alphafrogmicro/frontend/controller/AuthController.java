@@ -3,13 +3,17 @@ package world.willfrog.alphafrogmicro.frontend.controller;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import world.willfrog.alphafrogmicro.common.pojo.user.User;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 import world.willfrog.alphafrogmicro.frontend.service.RateLimitingService;
 import world.willfrog.alphafrogmicro.frontend.service.LoginAttemptService;
+import world.willfrog.alphafrogmicro.frontend.model.AuthProfileResponse;
 
 import java.util.Map;
 
@@ -141,6 +145,31 @@ public class AuthController {
         } else {
             return ResponseEntity.badRequest().body("User not logged in");
         }
+    }
+
+    @GetMapping("/me")
+    public ResponseEntity<AuthProfileResponse> me(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return ResponseEntity.status(401).build();
+        }
+
+        String username = authentication.getName();
+        User user = authService.getUserByUsername(username);
+        if (user == null) {
+            return ResponseEntity.notFound().build();
+        }
+
+        AuthProfileResponse profile = new AuthProfileResponse(
+                user.getUserId(),
+                user.getUsername(),
+                user.getEmail(),
+                user.getUserType(),
+                user.getUserLevel(),
+                user.getCredit(),
+                user.getRegisterTime()
+        );
+
+        return ResponseEntity.ok(profile);
     }
 
 }

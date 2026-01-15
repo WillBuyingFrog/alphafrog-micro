@@ -17,6 +17,15 @@ public class PortfolioCreateRequest {
 
     private List<@Size(max = 64) String> tags;
 
+    @Size(max = 16)
+    private String portfolioType;
+
+    @Size(max = 16)
+    private String baseCurrency;
+
+    @Size(max = 64)
+    private String benchmarkSymbol;
+
     @Size(max = 64)
     private String timezone;
 }

@@ -48,6 +48,14 @@ public class AuthService {
         return passwordEncoder.matches(password, matchedUsers.get(0).getPassword());
     }
 
+    public User getUserByUsername(String username) {
+        List<User> matchedUsers = userDao.getUserByUsername(username);
+        if (matchedUsers.isEmpty()) {
+            return null;
+        }
+        return matchedUsers.get(0);
+    }
+
 
     // 标记、判断每个用户是否登录的工具函数
 

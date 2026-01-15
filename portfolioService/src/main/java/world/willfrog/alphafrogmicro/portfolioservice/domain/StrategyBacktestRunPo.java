@@ -2,21 +2,20 @@ package world.willfrog.alphafrogmicro.portfolioservice.domain;
 
 import lombok.Data;
 
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
 
 @Data
-public class PortfolioPo {
+public class StrategyBacktestRunPo {
     private Long id;
+    private Long strategyId;
     private String userId;
-    private String name;
-    private String visibility;
-    private String tagsJson;
-    private String portfolioType;
-    private String baseCurrency;
-    private String benchmarkSymbol;
+    private OffsetDateTime runTime;
+    private LocalDate startDate;
+    private LocalDate endDate;
+    private String paramsJson;
     private String status;
-    private String timezone;
-    private String extJson;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
+    private String extJson;
 }

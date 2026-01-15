@@ -24,6 +24,7 @@ public class PortfolioServiceImpl implements PortfolioService {
 
     private static final List<String> VISIBILITY_SET = List.of("private", "shared");
     private static final List<String> STATUS_SET = List.of("active", "archived");
+    private static final List<String> PORTFOLIO_TYPE_SET = List.of("REAL", "STRATEGY", "MODEL");
 
     private final PortfolioMapper portfolioMapper;
     private final ObjectMapper objectMapper;
@@ -38,6 +39,8 @@ public class PortfolioServiceImpl implements PortfolioService {
     public PortfolioResponse create(String userId, PortfolioCreateRequest request) {
         String visibility = defaultVisibility(request.getVisibility());
         String timezone = defaultTimezone(request.getTimezone());
+        String portfolioType = defaultPortfolioType(request.getPortfolioType());
+        String baseCurrency = defaultBaseCurrency(request.getBaseCurrency());
 
         if (portfolioMapper.countActiveName(userId, request.getName()) > 0) {
             throw new BizException(ResponseCode.DATA_EXIST, "同名组合已存在");
@@ -47,6 +50,9 @@ public class PortfolioServiceImpl implements PortfolioService {
         po.setUserId(userId);
         po.setName(request.getName());
         po.setVisibility(visibility);
+        po.setPortfolioType(portfolioType);
+        po.setBaseCurrency(baseCurrency);
+        po.setBenchmarkSymbol(request.getBenchmarkSymbol());
         po.setStatus(PortfolioConstants.DEFAULT_STATUS);
         po.setTimezone(timezone);
         po.setTagsJson(PortfolioConverter.toTagsJson(request.getTags(), objectMapper));
@@ -101,6 +107,20 @@ public class PortfolioServiceImpl implements PortfolioService {
         return StringUtils.defaultIfBlank(timezone, PortfolioConstants.DEFAULT_TIMEZONE);
     }
 
+    private String defaultPortfolioType(String portfolioType) {
+        String value = StringUtils.defaultIfBlank(portfolioType, PortfolioConstants.DEFAULT_PORTFOLIO_TYPE);
+        String normalized = value.toUpperCase();
+        if (!PORTFOLIO_TYPE_SET.contains(normalized)) {
+            throw new BizException(ResponseCode.PARAM_ERROR, "portfolioType 仅支持 REAL/STRATEGY/MODEL");
+        }
+        return normalized;
+    }
+
+    private String defaultBaseCurrency(String baseCurrency) {
+        String value = StringUtils.defaultIfBlank(baseCurrency, PortfolioConstants.DEFAULT_BASE_CURRENCY);
+        return value.toUpperCase();
+    }
+
     private String normalizeStatus(String status) {
         if (StringUtils.isBlank(status)) {
             return null;
@@ -128,6 +148,15 @@ public class PortfolioServiceImpl implements PortfolioService {
         }
         if (request.getTags() != null) {
             po.setTagsJson(PortfolioConverter.toTagsJson(request.getTags(), objectMapper));
+        }
+        if (StringUtils.isNotBlank(request.getPortfolioType())) {
+            po.setPortfolioType(defaultPortfolioType(request.getPortfolioType()));
+        }
+        if (StringUtils.isNotBlank(request.getBaseCurrency())) {
+            po.setBaseCurrency(defaultBaseCurrency(request.getBaseCurrency()));
+        }
+        if (StringUtils.isNotBlank(request.getBenchmarkSymbol())) {
+            po.setBenchmarkSymbol(request.getBenchmarkSymbol());
         }
         if (StringUtils.isNotBlank(request.getStatus())) {
             po.setStatus(normalizeStatus(request.getStatus()));

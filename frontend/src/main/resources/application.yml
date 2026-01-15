@@ -35,6 +35,9 @@ jwt:
   header: Authorization
   token-prefix: Bearer
 
+cors:
+  allowed-origins: ${AF_CORS_ALLOWED_ORIGINS:http://localhost:31127}
+
 security:
   rate-limit:
     login-attempts: 5

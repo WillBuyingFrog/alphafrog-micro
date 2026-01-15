@@ -1,0 +1,65 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyNavMapper">
+
+    <resultMap id="StrategyNavResultMap"
+               type="world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyNavPo">
+        <id property="id" column="id"/>
+        <result property="runId" column="run_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="tradeDate" column="trade_date"/>
+        <result property="nav" column="nav"/>
+        <result property="returnPct" column="return_pct"/>
+        <result property="benchmarkNav" column="benchmark_nav"/>
+        <result property="drawdown" column="drawdown"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO alphafrog_strategy_nav
+        (run_id, user_id, trade_date, nav, return_pct, benchmark_nav, drawdown)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.runId}, #{item.userId}, #{item.tradeDate}, #{item.nav},
+             #{item.returnPct}, #{item.benchmarkNav}, #{item.drawdown})
+        </foreach>
+    </insert>
+
+    <select id="listByRun" resultMap="StrategyNavResultMap">
+        SELECT id,
+               run_id,
+               user_id,
+               trade_date,
+               nav,
+               return_pct,
+               benchmark_nav,
+               drawdown,
+               created_at
+        FROM alphafrog_strategy_nav
+        WHERE run_id = #{runId}
+          AND user_id = #{userId}
+        <if test="from != null">
+            AND trade_date &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND trade_date &lt;= #{to}
+        </if>
+        ORDER BY trade_date ASC, id ASC
+        OFFSET #{offset}
+        LIMIT #{limit}
+    </select>
+
+    <select id="countByRun" resultType="long">
+        SELECT COUNT(1)
+        FROM alphafrog_strategy_nav
+        WHERE run_id = #{runId}
+          AND user_id = #{userId}
+        <if test="from != null">
+            AND trade_date &gt;= #{from}
+        </if>
+        <if test="to != null">
+            AND trade_date &lt;= #{to}
+        </if>
+    </select>
+</mapper>

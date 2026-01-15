@@ -1,33 +1,12 @@
 package world.willfrog;
 
-import junit.framework.Test;
-import junit.framework.TestCase;
-import junit.framework.TestSuite;
+import org.junit.Test;
 
-/**
- * Unit test for simple App.
- */
-public class DomesticFundServiceImplApplicationTest
-        extends TestCase {
-    /**
-     * Create the test case
-     *
-     * @param testName name of the test case
-     */
-    public DomesticFundServiceImplApplicationTest(String testName) {
-        super(testName);
-    }
+import static org.junit.Assert.assertTrue;
 
-    /**
-     * @return the suite of tests being tested
-     */
-    public static Test suite() {
-        return new TestSuite(DomesticFundServiceImplApplicationTest.class);
-    }
+public class DomesticFundServiceImplApplicationTest {
 
-    /**
-     * Rigourous Test :-)
-     */
+    @Test
     public void testApp() {
         assertTrue(true);
     }
