@@ -1,6 +1,6 @@
 spring:
   application:
-    name: domestic-fetch-service
+    name: domestic-fund-service
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}

@@ -6,14 +6,12 @@ import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
-import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -99,11 +97,18 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
         params.put("params", queryParams);
 
+        log.debug("Sending Tushare request for Index Daily: {}", params);
+
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
         if (response == null) {
+            log.error("Tushare request returned null response. Params: {}", params);
             return DomesticIndexDailyFetchByDateRangeResponse.newBuilder().setStatus("failure")
                     .setFetchedItemsCount(-1).build();
+        }
+
+        if (log.isDebugEnabled()) {
+            log.debug("Received Tushare response: {}", response.toJSONString());
         }
 
         JSONArray data = response.getJSONObject("data").getJSONArray("items");
@@ -112,6 +117,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         int result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
 
         if (result < 0) {
+            log.error("Store index daily data failed! Result code: {}, TS Code: {}", result, tsCode);
             return DomesticIndexDailyFetchByDateRangeResponse.newBuilder().setStatus("failure")
                     .setFetchedItemsCount(-1).build();
         } else {

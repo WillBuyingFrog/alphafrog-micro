@@ -1,0 +1,389 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AlphaFrog 紧凑JSON工具函数测试</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+            background-color: #f5f5f5;
+        }
+        .container {
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            margin-bottom: 20px;
+        }
+        h1, h2 {
+            color: #333;
+        }
+        .test-section {
+            margin: 20px 0;
+            padding: 15px;
+            background-color: #f8f9fa;
+            border-left: 4px solid #007bff;
+            border-radius: 4px;
+        }
+        .result {
+            background-color: #e9ecef;
+            padding: 10px;
+            border-radius: 4px;
+            margin-top: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+            white-space: pre-wrap;
+        }
+        .success {
+            color: #28a745;
+            font-weight: bold;
+        }
+        .error {
+            color: #dc3545;
+            font-weight: bold;
+        }
+        .code-block {
+            background-color: #f8f9fa;
+            border: 1px solid #e9ecef;
+            border-radius: 4px;
+            padding: 10px;
+            margin: 10px 0;
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        button {
+            background-color: #007bff;
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 4px;
+            cursor: pointer;
+            margin: 5px;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>AlphaFrog 紧凑JSON工具函数测试页面</h1>
+        <p>本页面演示前端紧凑JSON工具函数的各种功能和使用场景。</p>
+    </div>
+
+    <div class="container">
+        <h2>1. 基本紧凑JSON解析</h2>
+        <div class="test-section">
+            <h3>测试数据</h3>
+            <div class="code-block">const response = {
+    format: "compact",
+    fields: ["ts_code", "trade_date", "close", "open", "high", "low", "vol"],
+    rows: [
+        ["000001.SZ", "20240101", 15.68, 15.45, 15.89, 15.32, 1234567],
+        ["000002.SZ", "20240101", 28.45, 28.12, 28.67, 28.05, 2345678]
+    ]
+};</div>
+            <button onclick="testBasicParsing()">运行测试</button>
+            <div id="basicResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>2. 带元数据的解析</h2>
+        <div class="test-section">
+            <h3>测试数据</h3>
+            <div class="code-block">const response = {
+    format: "compact",
+    fields: ["ts_code", "nav_date", "unit_nav", "accum_nav"],
+    rows: [
+        ["000001.OF", 1672531200000, 1.2345, 1.3456],
+        ["000001.OF", 1672444800000, 1.2334, 1.3445]
+    ],
+    meta: {
+        tsCode: "000001.OF",
+        complete: true,
+        actualTradingDays: 2
+    }
+};</div>
+            <button onclick="testMetaParsing()">运行测试</button>
+            <div id="metaResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>3. 股票数据专用解析</h2>
+        <div class="test-section">
+            <h3>测试数据</h3>
+            <div class="code-block">const stockResponse = {
+    format: "compact",
+    fields: ["ts_code", "trade_date", "close", "open", "high", "low", "pre_close", "change", "pct_chg", "vol", "amount"],
+    rows: [
+        ["000001.SZ", "20240101", 15.68, 15.45, 15.89, 15.32, 15.23, 0.45, 2.96, 1234567, 18945678.90]
+    ]
+};</div>
+            <button onclick="testStockParsing()">运行测试</button>
+            <div id="stockResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>4. 基金数据专用解析</h2>
+        <div class="test-section">
+            <h3>测试数据</h3>
+            <div class="code-block">const fundResponse = {
+    format: "compact",
+    fields: ["ts_code", "nav_date", "unit_nav", "accum_nav", "adj_nav", "net_asset", "total_net_asset"],
+    rows: [
+        ["000001.OF", 1672531200000, 1.2345, 1.3456, 1.2345, 1234567890, 12345678900]
+    ]
+};</div>
+            <button onclick="testFundParsing()">运行测试</button>
+            <div id="fundResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>5. 格式验证</h2>
+        <div class="test-section">
+            <button onclick="testValidation()">运行验证测试</button>
+            <div id="validationResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>6. 性能测试</h2>
+        <div class="test-section">
+            <button onclick="testPerformance()">运行性能测试</button>
+            <div id="performanceResult" class="result"></div>
+        </div>
+    </div>
+
+    <div class="container">
+        <h2>7. 缓存统计</h2>
+        <div class="test-section">
+            <button onclick="showCacheStats()">显示缓存统计</button>
+            <button onclick="clearCache()">清空缓存</button>
+            <div id="cacheResult" class="result"></div>
+        </div>
+    </div>
+
+    <!-- 引入紧凑JSON工具函数 -->
+    <script src="compactJsonUtils.js"></script>
+
+    <script>
+        // 测试基本解析
+        function testBasicParsing() {
+            try {
+                const response = {
+                    format: "compact",
+                    fields: ["ts_code", "trade_date", "close", "open", "high", "low", "vol"],
+                    rows: [
+                        ["000001.SZ", "20240101", 15.68, 15.45, 15.89, 15.32, 1234567],
+                        ["000002.SZ", "20240101", 28.45, 28.12, 28.67, 28.05, 2345678]
+                    ]
+                };
+
+                const data = parseCompactJson(response);
+                document.getElementById('basicResult').innerHTML = 
+                    '<span class="success">✓ 解析成功</span>\n' + 
+                    JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('basicResult').innerHTML = 
+                    '<span class="error">✗ 解析失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 测试元数据解析
+        function testMetaParsing() {
+            try {
+                const response = {
+                    format: "compact",
+                    fields: ["ts_code", "nav_date", "unit_nav", "accum_nav"],
+                    rows: [
+                        ["000001.OF", 1672531200000, 1.2345, 1.3456],
+                        ["000001.OF", 1672444800000, 1.2334, 1.3445]
+                    ],
+                    meta: {
+                        tsCode: "000001.OF",
+                        complete: true,
+                        actualTradingDays: 2
+                    }
+                };
+
+                const result = parseCompactJsonWithMeta(response);
+                document.getElementById('metaResult').innerHTML = 
+                    '<span class="success">✓ 解析成功</span>\n' + 
+                    '数据: ' + JSON.stringify(result.data, null, 2) + '\n\n' +
+                    '元数据: ' + JSON.stringify(result.meta, null, 2);
+            } catch (error) {
+                document.getElementById('metaResult').innerHTML = 
+                    '<span class="error">✗ 解析失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 测试股票数据解析
+        function testStockParsing() {
+            try {
+                const stockResponse = {
+                    format: "compact",
+                    fields: ["ts_code", "trade_date", "close", "open", "high", "low", "pre_close", "change", "pct_chg", "vol", "amount"],
+                    rows: [
+                        ["000001.SZ", "20240101", 15.68, 15.45, 15.89, 15.32, 15.23, 0.45, 2.96, 1234567, 18945678.90]
+                    ]
+                };
+
+                const data = parseStockData(stockResponse);
+                document.getElementById('stockResult').innerHTML = 
+                    '<span class="success">✓ 股票数据解析成功</span>\n' + 
+                    JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('stockResult').innerHTML = 
+                    '<span class="error">✗ 股票数据解析失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 测试基金数据解析
+        function testFundParsing() {
+            try {
+                const fundResponse = {
+                    format: "compact",
+                    fields: ["ts_code", "nav_date", "unit_nav", "accum_nav", "adj_nav", "net_asset", "total_net_asset"],
+                    rows: [
+                        ["000001.OF", 1672531200000, 1.2345, 1.3456, 1.2345, 1234567890, 12345678900]
+                    ]
+                };
+
+                const data = parseFundData(fundResponse);
+                document.getElementById('fundResult').innerHTML = 
+                    '<span class="success">✓ 基金数据解析成功</span>\n' + 
+                    JSON.stringify(data, null, 2);
+            } catch (error) {
+                document.getElementById('fundResult').innerHTML = 
+                    '<span class="error">✗ 基金数据解析失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 测试格式验证
+        function testValidation() {
+            const testCases = [
+                {
+                    name: "有效格式",
+                    data: {
+                        format: "compact",
+                        fields: ["ts_code", "close"],
+                        rows: [["000001.SZ", 15.68]]
+                    },
+                    expected: true
+                },
+                {
+                    name: "无效格式",
+                    data: {
+                        format: "standard",
+                        fields: ["ts_code", "close"],
+                        rows: [["000001.SZ", 15.68]]
+                    },
+                    expected: false
+                },
+                {
+                    name: "空数据",
+                    data: {
+                        format: "compact",
+                        fields: [],
+                        rows: []
+                    },
+                    expected: true
+                },
+                {
+                    name: "字段与行不匹配",
+                    data: {
+                        format: "compact",
+                        fields: ["ts_code"],
+                        rows: [["000001.SZ", 15.68]]
+                    },
+                    expected: false
+                }
+            ];
+
+            let results = '<span class="success">✓ 验证测试完成</span>\n\n';
+            testCases.forEach(testCase => {
+                const actual = validateCompactJson(testCase.data);
+                const status = actual === testCase.expected ? '✓' : '✗';
+                const cssClass = actual === testCase.expected ? 'success' : 'error';
+                results += `<span class="${cssClass}">${status} ${testCase.name}: ${actual}</span>\n`;
+            });
+
+            document.getElementById('validationResult').innerHTML = results;
+        }
+
+        // 性能测试
+        function testPerformance() {
+            try {
+                // 创建大量测试数据
+                const fields = ["ts_code", "trade_date", "close", "open", "high", "low", "vol", "amount"];
+                const rows = [];
+                
+                for (let i = 0; i < 5000; i++) {
+                    rows.push([
+                        `00000${i % 1000}.SZ`,
+                        `202401${(i % 31) + 1}`,
+                        10 + Math.random() * 90,
+                        10 + Math.random() * 90,
+                        10 + Math.random() * 90,
+                        10 + Math.random() * 90,
+                        Math.floor(Math.random() * 1000000),
+                        Math.floor(Math.random() * 10000000)
+                    ]);
+                }
+
+                const startTime = performance.now();
+                const data = compactToObjects(fields, rows);
+                const endTime = performance.now();
+
+                document.getElementById('performanceResult').innerHTML = 
+                    `<span class="success">✓ 性能测试完成</span>\n` +
+                    `处理 ${data.length} 条记录耗时: ${(endTime - startTime).toFixed(2)} ms\n` +
+                    `平均每条记录处理时间: ${((endTime - startTime) / data.length).toFixed(4)} ms`;
+            } catch (error) {
+                document.getElementById('performanceResult').innerHTML = 
+                    '<span class="error">✗ 性能测试失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 显示缓存统计
+        function showCacheStats() {
+            try {
+                const stats = getCacheStats();
+                document.getElementById('cacheResult').innerHTML = 
+                    '<span class="success">✓ 缓存统计</span>\n' +
+                    `字段映射器缓存大小: ${stats.fieldMapperCacheSize}\n` +
+                    `类型转换器缓存大小: ${stats.typeConverterCacheSize}`;
+            } catch (error) {
+                document.getElementById('cacheResult').innerHTML = 
+                    '<span class="error">✗ 获取缓存统计失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 清空缓存
+        function clearCache() {
+            try {
+                clearCache();
+                document.getElementById('cacheResult').innerHTML = 
+                    '<span class="success">✓ 缓存已清空</span>';
+            } catch (error) {
+                document.getElementById('cacheResult').innerHTML = 
+                    '<span class="error">✗ 清空缓存失败: ' + error.message + '</span>';
+            }
+        }
+
+        // 页面加载完成后自动运行基本测试
+        window.onload = function() {
+            console.log('AlphaFrog 紧凑JSON工具函数测试页面已加载');
+            console.log('可用的函数:', Object.keys(window.CompactJsonUtils || {}));
+        };
+    </script>
+</body>
+</html>

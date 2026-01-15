@@ -15,11 +15,18 @@
         <java.version>17</java.version>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
         <project.reporting.outputEncoding>UTF-8</project.reporting.outputEncoding>
+        <protobuf-java.version>3.22.3</protobuf-java.version>
+        <protoc.version>3.22.3</protoc.version>
     </properties>
     <dependencies>
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>
+        </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-security</artifactId>
+            <version>3.4.2</version>
         </dependency>
         <dependency>
             <groupId>com.alibaba.nacos</groupId>
@@ -43,6 +50,16 @@
             <groupId>org.springframework.kafka</groupId>
             <artifactId>spring-kafka</artifactId>
         </dependency>
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-data-redis</artifactId>
+            <version>3.4.2</version>
+        </dependency>
+        <dependency>
+            <groupId>org.mybatis.spring.boot</groupId>
+            <artifactId>mybatis-spring-boot-starter</artifactId>
+            <version>3.0.3</version>
+        </dependency>
 
         <dependency>
             <groupId>org.springframework.kafka</groupId>
@@ -51,25 +68,68 @@
         </dependency>
 
 
-<!--        idl-->
+<!--        限流-->
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-spring-boot3</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+        <dependency>
+            <groupId>io.github.resilience4j</groupId>
+            <artifactId>resilience4j-ratelimiter</artifactId>
+            <version>2.1.0</version>
+        </dependency>
+
+<!--        数据源连接-->
+
+        <dependency>
+            <groupId>io.lettuce</groupId>
+            <artifactId>lettuce-core</artifactId>
+            <version>6.2.7.RELEASE</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.postgresql</groupId>
+            <artifactId>postgresql</artifactId>
+            <version>42.7.4</version>
+        </dependency>
+
+<!--        认证用-->
+
+        <dependency>
+            <groupId>io.jsonwebtoken</groupId>
+            <artifactId>jjwt</artifactId>
+            <version>0.12.6</version>
+        </dependency>
+
+        <!--        common-->
         <dependency>
             <groupId>world.willfrog</groupId>
-            <artifactId>interface</artifactId>
+            <artifactId>common</artifactId>
             <version>1.0-SNAPSHOT</version>
-            <scope>compile</scope>
+        </dependency>
+
+        <!--        idl-->
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>domestic-stock-api</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>domestic-fund-api</artifactId>
+            <version>1.0-SNAPSHOT</version>
+        </dependency>
+        <dependency>
+            <groupId>world.willfrog</groupId>
+            <artifactId>domestic-index-api</artifactId>
+            <version>1.0-SNAPSHOT</version>
         </dependency>
         <dependency>
             <groupId>com.google.protobuf</groupId>
             <artifactId>protobuf-java</artifactId>
             <version>${protobuf-java.version}</version>
         </dependency>
-        <dependency>
-            <groupId>com.google.protobuf</groupId>
-            <artifactId>protobuf-java-util</artifactId>
-            <version>${protobuf-java.version}</version>
-        </dependency>
-
-
 
     </dependencies>
     <dependencyManagement>
@@ -101,6 +161,18 @@
         </extensions>
         <plugins>
             <plugin>
+                <groupId>kr.motd.maven</groupId>
+                <artifactId>os-maven-plugin</artifactId>
+                <executions>
+                    <execution>
+                        <phase>initialize</phase>
+                        <goals>
+                            <goal>detect</goal>
+                        </goals>
+                    </execution>
+                </executions>
+            </plugin>
+            <plugin>
                 <groupId>org.springframework.boot</groupId>
                 <artifactId>spring-boot-maven-plugin</artifactId>
                 <executions>
@@ -109,48 +181,15 @@
                             <goal>repackage</goal>
                         </goals>
                     </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.xolstice.maven.plugins</groupId>
-                <artifactId>protobuf-maven-plugin</artifactId>
-                <version>0.6.1</version>
-                <configuration>
-                    <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
-                    <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
-                    <protoSourceRoot>${project.basedir}/../interface/src/main/proto</protoSourceRoot>
-                    <protocPlugins>
-                        <protocPlugin>
-                            <id>dubbo</id>
-                            <groupId>org.apache.dubbo</groupId>
-                            <artifactId>dubbo-compiler</artifactId>
-                            <version>${dubbo.version}</version>
-                            <mainClass>org.apache.dubbo.gen.tri.Dubbo3TripleGenerator</mainClass>
-                        </protocPlugin>
-                    </protocPlugins>
-                </configuration>
-                <executions>
                     <execution>
+                        <id>build-info</id>
                         <goals>
-                            <goal>compile</goal>
-                        </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.3.0</version>
-                <executions>
-                    <execution>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
+                            <goal>build-info</goal>
                         </goals>
                         <configuration>
-                            <sources>
-                                <source>build/generated/source/proto/main/java</source>
-                            </sources>
+                            <additionalProperties>
+                                <alphafrog.version>${project.parent.version}</alphafrog.version>
+                            </additionalProperties>
                         </configuration>
                     </execution>
                 </executions>

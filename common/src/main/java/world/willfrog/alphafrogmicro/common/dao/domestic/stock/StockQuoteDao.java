@@ -1,6 +1,7 @@
 package world.willfrog.alphafrogmicro.common.dao.domestic.stock;
 
 import org.apache.ibatis.annotations.*;
+import org.springframework.cache.annotation.Cacheable;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 
 import java.util.List;
@@ -31,6 +32,7 @@ public interface StockQuoteDao {
             @Result(property = "vol", column = "vol"),
             @Result(property = "amount", column = "amount")
     })
+    @Cacheable(value = "stockDailyCache", key = "'domestic:stock_daily:' + #tsCode + ':' + #startDate + ':' + #endDate", cacheManager = "stockDailyCacheManager")
     List<StockDaily> getStockDailyByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                        @Param("startDate") long startDate, @Param("endDate") long endDate);
 

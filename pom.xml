@@ -9,10 +9,13 @@
     <properties>
         <maven.compiler.source>17</maven.compiler.source>
         <maven.compiler.target>17</maven.compiler.target>
+        <!-- 用 release 代替 -source/-target，避免模块路径告警 -->
+        <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
 
         <dubbo.version>3.3.2</dubbo.version>
         <spring-boot.version>3.2.3</spring-boot.version>
+        <spring-cloud.version>2022.0.4</spring-cloud.version>
         <protobuf-java.version>3.22.3</protobuf-java.version>
         <protoc.version>3.22.3</protoc.version>
     </properties>
@@ -25,13 +28,46 @@
                 <type>pom</type>
                 <scope>import</scope>
             </dependency>
+            <dependency>
+                <groupId>org.springframework.cloud</groupId>
+                <artifactId>spring-cloud-dependencies</artifactId>
+                <version>${spring-cloud.version}</version>
+                <type>pom</type>
+                <scope>import</scope>
+            </dependency>
         </dependencies>
     </dependencyManagement>
     <build>
+        <pluginManagement>
+            <plugins>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <version>3.13.0</version>
+                </plugin>
+                <plugin>
+                    <groupId>org.springframework.boot</groupId>
+                    <artifactId>spring-boot-maven-plugin</artifactId>
+                    <version>${spring-boot.version}</version>
+                </plugin>
+            </plugins>
+        </pluginManagement>
         <plugins>
             <plugin>
                 <groupId>org.apache.maven.plugins</groupId>
                 <artifactId>maven-compiler-plugin</artifactId>
+                <configuration>
+                    <!-- 确保 Lombok 等注解处理器在 Maven 编译期生效 -->
+                    <proc>full</proc>
+                    <release>${maven.compiler.release}</release>
+                    <!-- 显式声明注解处理器，帮助 IDE/Maven 一致识别 Lombok 生成代码 -->
+                    <annotationProcessorPaths>
+                        <path>
+                            <groupId>org.projectlombok</groupId>
+                            <artifactId>lombok</artifactId>
+                        </path>
+                    </annotationProcessorPaths>
+                </configuration>
             </plugin>
         </plugins>
     </build>
@@ -43,5 +79,11 @@
         <module>common</module>
         <module>interface</module>
         <module>frontend</module>
+        <module>portfolioService</module>
+        <module>domesticStockApi</module>
+        <module>domesticFundApi</module>
+        <module>domesticIndexApi</module>
+        <module>portfolioSummaryApi</module>
+        <module>portfolioApi</module>
     </modules>
 </project>

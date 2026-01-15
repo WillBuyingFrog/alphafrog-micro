@@ -2,6 +2,13 @@ server:
   port: 8090
 
 spring:
+  application:
+    name: alphafrog-frontend
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
   kafka:
     bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
     admin:
@@ -14,6 +21,26 @@ spring:
       max-poll-records: 20
       max-poll-interval-ms: 100000
       session-timeout-ms: 300000
+
+  data:
+    redis:
+      host: ${AF_REDIS_HOST:127.0.0.1}
+      port: ${AF_REDIS_PORT:6379}
+      password: ${AF_REDIS_PASSWORD:Excited1s}
+      timeout: 30000
+
+jwt:
+  secret: ${AF_JWT_SECRET:Secret01234567890123456789012345678901234567890123456789}
+  expiration: ${AF_JWT_EXPIRATION:86400000}
+  header: Authorization
+  token-prefix: Bearer
+
+security:
+  rate-limit:
+    login-attempts: 5
+    login-window-minutes: 10
+    task-creation-attempts: 10
+    task-creation-window-minutes: 60
 
 dubbo:
   registry:

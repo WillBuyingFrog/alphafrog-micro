@@ -11,6 +11,13 @@ public interface IndexQuoteDao {
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertIndexDaily(IndexDaily indexDaily);
 
+    @Select("SELECT trade_date FROM alphafrog_index_daily " +
+            "WHERE ts_code = #{tsCode} AND trade_date BETWEEN #{startDate} AND #{endDate} " +
+            "ORDER BY trade_date")
+    List<Long> getExistingTradeDates(@Param("tsCode") String tsCode,
+                                     @Param("startDate") Long startDate,
+                                     @Param("endDate") Long endDate);
+
     @Select("SELECT * FROM alphafrog_index_daily WHERE ts_code = #{tsCode} AND trade_date BETWEEN #{startDate} AND #{endDate}")
     @Results({
             @Result(column = "ts_code", property = "tsCode"),

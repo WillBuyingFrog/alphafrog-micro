@@ -2,14 +2,19 @@ package world.willfrog.alphafrogmicro.domestic.stock;
 
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.elasticsearch.core.ElasticsearchOperations;
+import org.springframework.data.elasticsearch.core.SearchHits;
+import org.springframework.data.elasticsearch.core.query.StringQuery;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockQuoteDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
+import world.willfrog.alphafrogmicro.domestic.stock.doc.StockInfoES;
 
 import java.util.List;
 
@@ -21,17 +26,31 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
 
+    @Autowired(required = false)
+    private final ElasticsearchOperations elasticsearchOperations;
+
+    @Value("${advanced.es-enabled}")
+    private boolean elasticsearchEnabled;
+
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
-                                    StockQuoteDao stockQuoteDao) {
+                                    StockQuoteDao stockQuoteDao,
+                                    ElasticsearchOperations elasticsearchOperations) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
+
+        this.elasticsearchOperations = elasticsearchOperations;
     }
 
     @Override
     public DomesticStockInfoByTsCodeResponse getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest request) {
         String tsCode = request.getTsCode();
 
-        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode);
+        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByTsCode(tsCode, 10, 0);
+
+        if (stockInfoList == null || stockInfoList.isEmpty()) {
+            log.warn("StockInfo not found for tsCode: {}", tsCode);
+            return DomesticStockInfoByTsCodeResponse.newBuilder().build();
+        }
 
         StockInfo stockInfo = stockInfoList.get(0);
         DomesticStockInfoFullItem.Builder builder = DomesticStockInfoFullItem.newBuilder();
@@ -104,13 +123,10 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     public DomesticStockSearchResponse searchStock(DomesticStockSearchRequest request) {
         String query = request.getQuery();
 
-        // 根据关键词查询股票信息
-        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByName(query);
+        List<StockInfo> stockInfoList = stockInfoDao.getStockInfoByName(query, 10, 0);
 
-        // 构建响应对象
         DomesticStockSearchResponse.Builder responseBuilder = DomesticStockSearchResponse.newBuilder();
 
-        // 将查询结果转换为简单信息对象
         for (StockInfo stockInfo : stockInfoList) {
             DomesticStockInfoSimpleItem.Builder itemBuilder = DomesticStockInfoSimpleItem.newBuilder();
             itemBuilder.setTsCode(stockInfo.getTsCode())
@@ -125,21 +141,75 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
         return responseBuilder.build();
     }
 
+
+    @Override
+    public DomesticStockSearchESResponse searchStockES(DomesticStockSearchESRequest request) {
+
+        if (elasticsearchOperations == null || !elasticsearchEnabled) {
+            return DomesticStockSearchESResponse.newBuilder().build();
+        }
+
+        String query = request.getQuery();
+
+        String queryString = String.format("{\"bool\": {\"should\": [{\"match\": {\"ts_code\": \"%s\"}}, {\"match\": {\"name\": \"%s\"}}, {\"match\": {\"fullname\": \"%s\"}}]}}", query, query, query);
+
+        StringQuery stringQuery = new StringQuery(queryString);
+
+        SearchHits<StockInfoES> searchHits = elasticsearchOperations.search(stringQuery, StockInfoES.class);
+
+        DomesticStockSearchESResponse.Builder responseBuilder = DomesticStockSearchESResponse.newBuilder();
+
+        searchHits.forEach(searchHit -> {
+            StockInfoES stockInfoES = searchHit.getContent();
+
+            DomesticStockInfoESItem.Builder itemBuilder = DomesticStockInfoESItem.newBuilder();
+            itemBuilder.setTsCode(stockInfoES.getTsCode())
+                    .setSymbol(stockInfoES.getSymbol())
+                    .setName(stockInfoES.getName())
+                    .setArea(stockInfoES.getArea() != null ? stockInfoES.getArea() : "")
+                    .setIndustry(stockInfoES.getIndustry() != null ? stockInfoES.getIndustry() : "");
+
+            responseBuilder.addItems(itemBuilder.build());
+        });
+
+        return responseBuilder.build();
+    }
+
+
+    @Override
+    public DomesticStockTsCodeResponse getStockTsCode(DomesticStockTsCodeRequest request) {
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        List<String> stockTsCodeList = stockInfoDao.getStockTsCode(offset, limit);
+
+        DomesticStockTsCodeResponse.Builder responseBuilder = DomesticStockTsCodeResponse.newBuilder();
+
+        for (String tsCode : stockTsCodeList) {
+            responseBuilder.addTsCodes(tsCode);
+        }
+
+        return responseBuilder.build();
+    }
+
+
+
     @Override
     public DomesticStockDailyByTsCodeAndDateRangeResponse getStockDailyByTsCodeAndDateRange(DomesticStockDailyByTsCodeAndDateRangeRequest request) {
         String tsCode = request.getTsCode();
         long startDate = request.getStartDate();
         long endDate = request.getEndDate();
 
-        // 根据时间范围和股票代码查询股票日线行情
         List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTsCodeAndDateRange(tsCode, startDate, endDate);
 
-        // 构建响应对象
+        if (stockDailyList == null) {
+            log.warn("StockDaily list is null for tsCode: {}, startDate: {}, endDate: {}", tsCode, startDate, endDate);
+            return DomesticStockDailyByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
+
         DomesticStockDailyByTsCodeAndDateRangeResponse.Builder responseBuilder = DomesticStockDailyByTsCodeAndDateRangeResponse.newBuilder();
 
-        // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
-            log.info("stockDaily: {}", stockDaily);
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
             itemBuilder.setStockDailyId(-1)
                     .setTsCode(stockDaily.getTsCode())
@@ -163,16 +233,11 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
     @Override
     public DomesticStockDailyByTradeDateResponse getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest request) {
         long tradeDate = request.getTradeDate();
-        int offset = request.getOffset();
-        int limit = request.getLimit();
 
-        // 根据交易日查询股票日线行情
         List<StockDaily> stockDailyList = stockQuoteDao.getStockDailyByTradeDate(tradeDate);
 
-        // 构建响应对象
         DomesticStockDailyByTradeDateResponse.Builder responseBuilder = DomesticStockDailyByTradeDateResponse.newBuilder();
 
-        // 将查询结果转换为日线行情对象
         for (StockDaily stockDaily : stockDailyList) {
             DomesticStockDailyItem.Builder itemBuilder = DomesticStockDailyItem.newBuilder();
             itemBuilder.setStockDailyId(-1)

@@ -45,7 +45,10 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
             fundNavList = fundNavDao.getFundNavsByTsCodeAndDateRange(tsCode,
                                             startDateTimestamp, endDateTimestamp);
         } catch (Exception e) {
-            log.error("Error occurred while getting fund navs", e);
+            log.error("Error occurred while getting fund navs for tsCode: {}, dateRange: {}-{}", 
+                     tsCode, startDateTimestamp, endDateTimestamp, e);
+            // 返回空响应而不是null，避免客户端NPE
+            return DomesticFundNavsByTsCodeAndDateRangeResponse.newBuilder().build();
         }
 
         // 创建响应对象
@@ -76,11 +79,15 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                 }
                 return responseBuilder.build();
             } catch (Exception e) {
-                log.error("Error occurred while converting DAO response object to protobuf object", e);
-                return null;
+                log.error("Error occurred while converting fund nav data to protobuf for tsCode: {}", tsCode, e);
+                // 转换错误时返回空响应
+                return DomesticFundNavsByTsCodeAndDateRangeResponse.newBuilder().build();
             }
         } else {
-            return null;
+            // 数据为空时记录日志并返回空响应
+            log.warn("Fund nav data not found for tsCode: {}, dateRange: {}-{}", 
+                    tsCode, startDateTimestamp, endDateTimestamp);
+            return DomesticFundNavsByTsCodeAndDateRangeResponse.newBuilder().build();
         }
     }
 
@@ -92,10 +99,11 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
         List<DomesticFundInfoFullItem> items = new ArrayList<>();
 
         try {
-            fundInfoList = fundInfoDao.getFundInfoByTsCode(tsCode);
+            // 使用合理的分页参数，避免返回过多数据
+            fundInfoList = fundInfoDao.getFundInfoByTsCode(tsCode, 100, 0);
 
             for(FundInfo fundInfo : fundInfoList) {
-                log.info("FundInfo: {}", fundInfo);
+                log.debug("FundInfo: {}", fundInfo);
                 DomesticFundInfoFullItem.Builder itemBuilder = DomesticFundInfoFullItem.newBuilder()
                         .setTsCode(fundInfo.getTsCode()).setName(fundInfo.getName());
 
@@ -177,9 +185,10 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                     .addAllItems(items).build();
 
         } catch (Exception e) {
-            log.error("Error occurred while getting fund info", e);
+            log.error("Error occurred while getting fund info for tsCode: {}", tsCode, e);
+            // 返回空响应而不是null，避免客户端NPE
+            return DomesticFundInfoByTsCodeResponse.newBuilder().build();
         }
-        return null;
     }
 
     @Override
@@ -191,15 +200,17 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
         List<DomesticFundInfoSimpleItem> items = new ArrayList<>();
 
         try{
-            fundInfoList = fundInfoDao.getFundInfoByTsCode(query);
-            fundInfoList.addAll(fundInfoDao.getFundInfoByName(query));
+            // 使用合理的分页参数，避免返回过多数据
+            fundInfoList = fundInfoDao.getFundInfoByTsCode(query, 50, 0);
+            fundInfoList.addAll(fundInfoDao.getFundInfoByName(query, 50, 0));
             // 去重
             fundInfoList = fundInfoList.stream()
                     .distinct()
                     .toList();
         } catch (Exception e) {
-            log.error("Error occurred while searching fund info", e);
-            return null;
+            log.error("Error occurred while searching fund info with query: {}", query, e);
+            // 搜索异常时返回空响应而不是null
+            return DomesticFundSearchResponse.newBuilder().build();
         }
         
 
@@ -232,8 +243,9 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                     .addAllItems(items)
                     .build();
         } catch (Exception e) {
-            log.error("Error occurred while converting DAO response object to protobuf object", e);
-            return null;
+            log.error("Error occurred while converting fund search data to protobuf for query: {}", query, e);
+            // 转换错误时返回空响应
+            return DomesticFundSearchResponse.newBuilder().build();
         }
     }
 
@@ -250,7 +262,10 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
             fundPortfolioList = fundPortfolioDao.getFundPortfolioByTsCodeAndDateRange(tsCode,
                     startDateTimestamp, endDateTimestamp);
         } catch (Exception e) {
-            log.error("Error occurred while getting fund portfolio", e);
+            log.error("Error occurred while getting fund portfolio for tsCode: {}, dateRange: {}-{}", 
+                     tsCode, startDateTimestamp, endDateTimestamp, e);
+            // 返回空响应而不是null
+            return DomesticFundPortfolioByTsCodeAndDateRangeResponse.newBuilder().build();
         }
 
         // 创建响应对象
@@ -278,11 +293,15 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                 }
                 return responseBuilder.build();
             } catch (Exception e) {
-                log.error("Error occurred while converting DAO response object to protobuf object", e);
-                return null;
+                log.error("Error occurred while converting fund portfolio data to protobuf for tsCode: {}", tsCode, e);
+                // 转换错误时返回空响应
+                return DomesticFundPortfolioByTsCodeAndDateRangeResponse.newBuilder().build();
             }
         } else {
-            return null;
+            // 数据为空时记录日志并返回空响应
+            log.warn("Fund portfolio data not found for tsCode: {}, dateRange: {}-{}", 
+                    tsCode, startDateTimestamp, endDateTimestamp);
+            return DomesticFundPortfolioByTsCodeAndDateRangeResponse.newBuilder().build();
         }
     }
 
@@ -300,7 +319,10 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
             fundPortfolioList = fundPortfolioDao.getFundPortfolioBySymbolAndDateRange(symbol,
                     startDateTimestamp, endDateTimestamp);
         } catch (Exception e) {
-            log.error("Error occurred while getting fund portfolio", e);
+            log.error("Error occurred while getting fund portfolio for symbol: {}, dateRange: {}-{}", 
+                     symbol, startDateTimestamp, endDateTimestamp, e);
+            // 返回空响应而不是null
+            return DomesticFundPortfolioBySymbolAndDateRangeResponse.newBuilder().build();
         }
 
         // 创建响应对象
@@ -327,11 +349,15 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                 }
                 return responseBuilder.build();
             } catch (Exception e) {
-                log.error("Error occurred while converting DAO response object to protobuf object", e);
-                return null;
+                log.error("Error occurred while converting fund portfolio data to protobuf for symbol: {}", symbol, e);
+                // 转换错误时返回空响应
+                return DomesticFundPortfolioBySymbolAndDateRangeResponse.newBuilder().build();
             }
         } else {
-            return null;
+            // 数据为空时记录日志并返回空响应
+            log.warn("Fund portfolio data not found for symbol: {}, dateRange: {}-{}", 
+                    symbol, startDateTimestamp, endDateTimestamp);
+            return DomesticFundPortfolioBySymbolAndDateRangeResponse.newBuilder().build();
         }
     }
 

@@ -1,0 +1,34 @@
+spring:
+  application:
+    name: portfolio-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+
+server:
+  port: 8084
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+logging:
+  level:
+    world.willfrog.alphafrogmicro.portfolioservice: INFO
+
+dubbo:
+  application:
+    name: portfolio-service
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  protocol:
+    name: tri
+    port: 50056
+  consumer:
+    check: false

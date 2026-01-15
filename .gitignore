@@ -45,3 +45,41 @@ __pycache__/
 db.sqlite3
 start_regular.sh
 start_regular_celery.sh
+
+
+### ElasticSearch Certs ###
+http_ca.crt
+
+
+### Test Secrets ###
+test-secrets.yml
+
+
+# Coding Agent configs
+
+/.qwen
+/.cursor
+/.codex
+/.kilocode
+
+# Coding Agent Files
+
+/agent-communication
+/agent-working-docs
+/coding-agent-report
+AGENTS.md
+
+# Project Milestones
+
+/milestones
+
+# Local test scripts and test guide
+/test_scripts
+/test_guide
+/docs
+
+
+.env
+
+# container runtime data
+/data

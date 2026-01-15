@@ -1,0 +1,74 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.domestic.idl;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.domestic.idl.portfolio";
+option java_outer_classname = "PortfolioSummaryServiceProto"; // Changed to reflect service name
+
+// Corresponds to AssetType.java enum
+// It's often better to use strings for enums in proto if they are already strings in Java
+// or ensure integer values match if that's how they are used.
+// However, for simplicity with Dubbo and direct mapping, defining it here.
+// If AssetType is already well-defined and used as string elsewhere, consider "string asset_type = 3;"
+// and handle mapping in service layer. For now, mirroring as an enum.
+enum AssetTypeProto {
+    STOCK = 0;
+    FUND_ETF = 1;
+}
+
+message HoldingPerformanceDtoMessage {
+    string asset_identifier = 1;
+    string asset_name = 2;
+    AssetTypeProto asset_type = 3;
+    string quantity = 4; // BigDecimal as string to preserve precision
+    string average_cost_price = 5; // BigDecimal as string
+    string initial_cost = 6; // BigDecimal as string
+    string current_price = 7; // BigDecimal as string
+    string current_market_value = 8; // BigDecimal as string
+    string daily_return = 9; // BigDecimal as string
+    string daily_return_rate = 10; // BigDecimal as string (e.g., "0.05" for 5%)
+    string total_profit_and_loss = 11; // BigDecimal as string
+    string total_profit_and_loss_rate = 12; // BigDecimal as string
+}
+
+message PortfolioPerformanceRelativeToDateDtoMessage {
+    string reference_date = 1; // LocalDate as string "YYYY-MM-DD"
+    string market_value_at_reference_date = 2; // BigDecimal as string
+    string return_amount_since_reference_date = 3; // BigDecimal as string
+    string return_rate_since_reference_date = 4; // BigDecimal as string
+}
+
+message PortfolioDailySummaryDtoMessage {
+    int64 portfolio_id = 1;
+    string portfolio_name = 2;
+    string date = 3; // LocalDate as string "YYYY-MM-DD"
+    string total_market_value = 4; // BigDecimal as string
+    string previous_total_market_value = 5; // BigDecimal as string
+    string initial_cost = 6; // BigDecimal as string
+    string daily_return = 7; // BigDecimal as string
+    string daily_return_rate = 8; // BigDecimal as string
+    string cumulative_return_rate = 9; // BigDecimal as string
+    repeated HoldingPerformanceDtoMessage holding_performances = 10;
+    repeated HoldingPerformanceDtoMessage top_gainers = 11;
+    repeated HoldingPerformanceDtoMessage top_losers = 12;
+    repeated string alerts = 13;
+    repeated PortfolioPerformanceRelativeToDateDtoMessage performance_relative_to_dates = 14;
+    //currency_code from previous example seems missing in DTO, add if needed
+}
+
+message GenerateDailySummaryRequest {
+    int64 portfolio_id = 1;
+    string date = 2; // Date string "YYYY-MM-DD"
+    repeated string comparison_dates = 3; // Optional list of comparison dates "YYYY-MM-DD"
+}
+
+message GenerateDailySummaryResponse {
+    PortfolioDailySummaryDtoMessage summary = 1;
+    // Consider adding an error field for service-level errors if necessary
+    // ErrorInfo error = 2;
+}
+
+service PortfolioSummaryDubboService {
+    rpc GenerateDailySummary(GenerateDailySummaryRequest) returns (GenerateDailySummaryResponse);
+} 

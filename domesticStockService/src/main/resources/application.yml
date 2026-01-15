@@ -1,6 +1,6 @@
 spring:
   application:
-    name: domestic-fetch-service
+    name: domestic-stock-service
   datasource:
     driver-class-name: org.postgresql.Driver
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
@@ -11,6 +11,12 @@ spring:
       host: ${AF_REDIS_HOST:127.0.0.1}
       port: 6379
       password: ${AF_REDIS_PASSWORD:default}
+  elasticsearch:
+    uris: ${AF_ES_HOST:localhost}:${AF_ES_PORT:9200}
+    username: ${AF_ES_USER:elastic}
+    password: ${AF_ES_PASSWORD:elastic}
+
+
 
 mybatis:
   configuration:
@@ -30,3 +36,7 @@ dubbo:
 
 tushare:
   token: ${TUSHARE_TOKEN}
+
+
+advanced:
+  es-enabled: false
