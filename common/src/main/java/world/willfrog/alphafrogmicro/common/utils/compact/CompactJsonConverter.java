@@ -242,16 +242,36 @@ public class CompactJsonConverter {
         
         try {
             // 提取常见字段
-            extractStringField(message, "tsCode", metaBuilder::tsCode);
-            extractLongField(message, "startDate", metaBuilder::startDate);
-            extractLongField(message, "endDate", metaBuilder::endDate);
-            extractIntegerField(message, "expectedTradingDays", metaBuilder::expectedTradingDays);
-            extractIntegerField(message, "actualTradingDays", metaBuilder::actualTradingDays);
-            extractIntegerField(message, "missingCount", metaBuilder::missingCount);
-            extractBooleanField(message, "complete", metaBuilder::complete);
-            extractBooleanField(message, "upstreamGap", metaBuilder::upstreamGap);
-            extractBooleanField(message, "fromCache", metaBuilder::fromCache);
-            extractStringField(message, "status", metaBuilder::status);
+            if (hasField(message, "tsCode")) {
+                extractStringField(message, "tsCode", metaBuilder::tsCode);
+            }
+            if (hasField(message, "startDate")) {
+                extractLongField(message, "startDate", metaBuilder::startDate);
+            }
+            if (hasField(message, "endDate")) {
+                extractLongField(message, "endDate", metaBuilder::endDate);
+            }
+            if (hasField(message, "expectedTradingDays")) {
+                extractIntegerField(message, "expectedTradingDays", metaBuilder::expectedTradingDays);
+            }
+            if (hasField(message, "actualTradingDays")) {
+                extractIntegerField(message, "actualTradingDays", metaBuilder::actualTradingDays);
+            }
+            if (hasField(message, "missingCount")) {
+                extractIntegerField(message, "missingCount", metaBuilder::missingCount);
+            }
+            if (hasField(message, "complete")) {
+                extractBooleanField(message, "complete", metaBuilder::complete);
+            }
+            if (hasField(message, "upstreamGap")) {
+                extractBooleanField(message, "upstreamGap", metaBuilder::upstreamGap);
+            }
+            if (hasField(message, "fromCache")) {
+                extractBooleanField(message, "fromCache", metaBuilder::fromCache);
+            }
+            if (hasField(message, "status")) {
+                extractStringField(message, "status", metaBuilder::status);
+            }
             
         } catch (Exception e) {
             log.warn("Error extracting meta from response", e);
@@ -275,15 +295,23 @@ public class CompactJsonConverter {
         
         // 尝试从响应中提取总记录数
         try {
-            Object totalValue = ProtoFieldExtractor.getFieldValue(message, "total");
-            if (totalValue instanceof Number) {
-                meta.setTotal(((Number) totalValue).longValue());
+            if (hasField(message, "total")) {
+                Object totalValue = ProtoFieldExtractor.getFieldValue(message, "total");
+                if (totalValue instanceof Number) {
+                    meta.setTotal(((Number) totalValue).longValue());
+                }
             }
         } catch (Exception e) {
             log.debug("Could not extract total count from response");
         }
         
         return meta;
+    }
+
+    private static boolean hasField(Message message, String fieldName) {
+        return message != null
+                && fieldName != null
+                && message.getDescriptorForType().findFieldByName(fieldName) != null;
     }
     
     private static void extractStringField(Message message, String fieldName, java.util.function.Consumer<String> setter) {
