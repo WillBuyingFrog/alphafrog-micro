@@ -4,6 +4,7 @@
 - 统一请求头: `X-User-Id` (必填)
 - 统一响应: `ResponseWrapper`，结构为 `{ code, message, data, timestamp }`
 - `page/size` 分页默认 `page=1`、`size=20`
+- frontend 收口后的列表类 GET 默认 `format=compact`，可传 `format=standard` 返回原 DTO 结构
 
 ResponseWrapper 响应示例:
 ```json
@@ -73,9 +74,10 @@ ResponseWrapper 响应示例:
 - `keyword`: 名称关键字模糊搜索，可选
 - `page`: 页码
 - `size`: 每页条数
+- `format`: `compact`/`standard`，默认 `compact`
 
 返回内容解释:
-分页返回组合列表。
+分页返回组合列表。`format=compact` 时，`data` 为 `CompactApiResponse`（fields/rows/meta）。
 
 返回内容示例:
 ```json
@@ -204,8 +206,11 @@ ResponseWrapper 响应示例:
 
 请求地址:`{{baseUrl}}/api/portfolios/{id}/holdings`
 
+请求参数:
+- `format`: `compact`/`standard`，默认 `compact`
+
 返回内容解释:
-返回当前组合的持仓快照。
+返回当前组合的持仓快照。`format=compact` 时，`data` 为 `CompactApiResponse`（fields/rows）。
 
 ---
 
@@ -257,9 +262,10 @@ ResponseWrapper 响应示例:
 - `event_type`: 事件类型过滤，可选
 - `page`: 页码
 - `size`: 每页条数
+- `format`: `compact`/`standard`，默认 `compact`
 
 返回内容解释:
-按时间与事件类型分页返回交易流水。
+按时间与事件类型分页返回交易流水。`format=compact` 时，`data` 为 `CompactApiResponse`（fields/rows/meta）。
 
 返回内容示例:
 ```json
@@ -396,6 +402,7 @@ ResponseWrapper 响应示例:
 - `keyword`: 名称关键字
 - `page`: 页码
 - `size`: 每页条数
+- `format`: `compact`/`standard`，默认 `compact`
 
 ---
 
@@ -444,6 +451,9 @@ ResponseWrapper 响应示例:
 
 请求地址:`{{baseUrl}}/api/strategies/{id}/targets`
 
+请求参数:
+- `format`: `compact`/`standard`，默认 `compact`
+
 ---
 
 ### 回测执行与净值接口
@@ -491,6 +501,7 @@ ResponseWrapper 响应示例:
 - `status`: 任务状态，可选
 - `page`: 页码
 - `size`: 每页条数
+- `format`: `compact`/`standard`，默认 `compact`
 
 ---
 
@@ -505,6 +516,7 @@ ResponseWrapper 响应示例:
 - `to`: 结束日期（YYYY-MM-DD，可选）
 - `page`: 页码
 - `size`: 每页条数
+- `format`: `compact`/`standard`，默认 `compact`
 
 返回内容解释:
 返回回测净值时间序列。`nav/returnPct/drawdown` 的含义：

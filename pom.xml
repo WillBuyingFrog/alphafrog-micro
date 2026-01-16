@@ -81,17 +81,17 @@
         </plugins>
     </build>
     <modules>
+        <module>common</module>
+        <module>domesticStockApi</module>
+        <module>domesticFundApi</module>
+        <module>domesticIndexApi</module>
+        <module>portfolioApi</module>
+        <module>portfolioSummaryApi</module>
         <module>domesticIndexService</module>
         <module>domesticFundService</module>
         <module>domesticStockService</module>
         <module>domesticFetchService</module>
-        <module>common</module>
-        <module>frontend</module>
         <module>portfolioService</module>
-        <module>domesticStockApi</module>
-        <module>domesticFundApi</module>
-        <module>domesticIndexApi</module>
-        <module>portfolioSummaryApi</module>
-        <module>portfolioApi</module>
+        <module>frontend</module>
     </modules>
 </project>

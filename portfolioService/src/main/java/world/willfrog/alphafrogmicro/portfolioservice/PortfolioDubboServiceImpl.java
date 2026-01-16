@@ -38,6 +38,9 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
         dto.setVisibility(request.getVisibility());
         dto.setTags(request.getTagsList());
         dto.setTimezone(request.getTimezone());
+        dto.setPortfolioType(request.getPortfolioType());
+        dto.setBaseCurrency(request.getBaseCurrency());
+        dto.setBenchmarkSymbol(request.getBenchmarkSymbol());
         return toProto(portfolioService.create(request.getUserId(), dto));
     }
 
@@ -46,8 +49,13 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
         PortfolioUpdateRequest dto = new PortfolioUpdateRequest();
         dto.setName(request.getName());
         dto.setVisibility(request.getVisibility());
-        dto.setTags(request.getTagsList());
+        if (request.getTagsPresent()) {
+            dto.setTags(request.getTagsList());
+        }
         dto.setStatus(request.getStatus());
+        dto.setPortfolioType(request.getPortfolioType());
+        dto.setBaseCurrency(request.getBaseCurrency());
+        dto.setBenchmarkSymbol(request.getBenchmarkSymbol());
         return toProto(portfolioService.update(request.getId(), request.getUserId(), dto));
     }
 
@@ -144,7 +152,12 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
     public world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse metrics(MetricsRequest request) {
         world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse.Builder b =
                 world.willfrog.alphafrogmicro.portfolio.idl.MetricsResponse.newBuilder();
-        b.setReturnPct("0").setVolatility("0").setMaxDrawdown("0").setNote("占位实现，后续接入行情计算");
+        b.setReturnPct("0")
+                .setVolatility("0")
+                .setMaxDrawdown("0")
+                .setNote("占位实现，后续接入行情计算")
+                .setFrom(nvl(request.getFrom()))
+                .setTo(nvl(request.getTo()));
         return b.build();
     }
 
@@ -156,6 +169,9 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
                 .setVisibility(nvl(resp.getVisibility()))
                 .setStatus(nvl(resp.getStatus()))
                 .setTimezone(nvl(resp.getTimezone()))
+                .setPortfolioType(nvl(resp.getPortfolioType()))
+                .setBaseCurrency(nvl(resp.getBaseCurrency()))
+                .setBenchmarkSymbol(nvl(resp.getBenchmarkSymbol()))
                 .setCreatedAt(resp.getCreatedAt() != null ? resp.getCreatedAt().toString() : "")
                 .setUpdatedAt(resp.getUpdatedAt() != null ? resp.getUpdatedAt().toString() : "");
         if (resp.getTags() != null) {
@@ -204,7 +220,7 @@ public class PortfolioDubboServiceImpl extends DubboPortfolioDubboServiceTriple.
         item.setTradeTime(parseTime(msg.getTradeTime()));
         item.setSettleDate(parseTime(msg.getSettleDate()));
         item.setNote(msg.getNote());
-        item.setPayloadJson("");
+        item.setPayloadJson(msg.getPayloadJson());
         return item;
     }
 

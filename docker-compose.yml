@@ -218,7 +218,6 @@ services:
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       NACOS_ADDRESS: nacos
     ports:
-      - "8084:8084"
       - "50056:50056"
     networks:
       - alphafrog-network

@@ -48,6 +48,11 @@
             <version>${dubbo.version}</version>
         </dependency>
         <dependency>
+            <groupId>org.apache.dubbo</groupId>
+            <artifactId>dubbo-nacos-spring-boot-starter</artifactId>
+            <version>${dubbo.version}</version>
+        </dependency>
+        <dependency>
             <groupId>world.willfrog</groupId>
             <artifactId>portfolioApi</artifactId>
             <version>1.0-SNAPSHOT</version>
