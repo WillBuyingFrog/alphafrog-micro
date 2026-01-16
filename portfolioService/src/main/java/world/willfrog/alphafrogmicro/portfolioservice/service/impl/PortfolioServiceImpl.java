@@ -176,7 +176,22 @@ public class PortfolioServiceImpl implements PortfolioService {
         if (po == null) {
             throw new BizException(ResponseCode.DATA_NOT_FOUND, "组合不存在");
         }
+        po.setName(buildArchivedName(po.getName(), po.getId()));
         po.setStatus("archived");
         portfolioMapper.update(po);
+    }
+
+    private String buildArchivedName(String name, Long id) {
+        String base = StringUtils.defaultString(name, "portfolio");
+        String suffix = " [archived-" + (id == null ? "unknown" : id) + "]";
+        int maxLen = 255;
+        if (suffix.length() >= maxLen) {
+            return suffix.substring(0, maxLen);
+        }
+        int available = maxLen - suffix.length();
+        if (base.length() > available) {
+            base = base.substring(0, available);
+        }
+        return base + suffix;
     }
 }

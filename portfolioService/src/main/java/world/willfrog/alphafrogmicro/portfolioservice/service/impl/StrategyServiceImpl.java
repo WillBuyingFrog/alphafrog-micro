@@ -179,7 +179,14 @@ public class StrategyServiceImpl implements StrategyService {
             throw new BizException(ResponseCode.DATA_NOT_FOUND, "策略不存在");
         }
         strategyDefinitionMapper.archive(id, userId);
-        portfolioMapper.archive(po.getPortfolioId(), userId);
+        PortfolioPo portfolio = portfolioMapper.findByIdAndUser(po.getPortfolioId(), userId);
+        if (portfolio != null) {
+            portfolio.setName(buildArchivedName(portfolio.getName(), portfolio.getId()));
+            portfolio.setStatus("archived");
+            portfolioMapper.update(portfolio);
+        } else {
+            portfolioMapper.archive(po.getPortfolioId(), userId);
+        }
     }
 
     @Override
@@ -336,6 +343,20 @@ public class StrategyServiceImpl implements StrategyService {
         if (item.getTargetWeight().compareTo(BigDecimal.ZERO) < 0) {
             throw new BizException(ResponseCode.PARAM_ERROR, "targetWeight 不能为负数");
         }
+    }
+
+    private String buildArchivedName(String name, Long id) {
+        String base = StringUtils.defaultString(name, "portfolio");
+        String suffix = " [archived-" + (id == null ? "unknown" : id) + "]";
+        int maxLen = 255;
+        if (suffix.length() >= maxLen) {
+            return suffix.substring(0, maxLen);
+        }
+        int available = maxLen - suffix.length();
+        if (base.length() > available) {
+            base = base.substring(0, available);
+        }
+        return base + suffix;
     }
 
     private PortfolioPo requireStrategyPortfolio(Long portfolioId, String userId) {
