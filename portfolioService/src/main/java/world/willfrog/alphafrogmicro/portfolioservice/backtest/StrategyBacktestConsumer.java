@@ -25,6 +25,7 @@ public class StrategyBacktestConsumer {
     )
     public void onMessage(String message) {
         try {
+            // 消费到回测事件后交给执行器完成具体计算
             StrategyBacktestRunEvent event = objectMapper.readValue(message, StrategyBacktestRunEvent.class);
             executor.execute(event);
         } catch (Exception e) {

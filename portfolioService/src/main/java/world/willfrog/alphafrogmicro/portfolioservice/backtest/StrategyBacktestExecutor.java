@@ -67,6 +67,7 @@ public class StrategyBacktestExecutor {
     @Transactional
     public void execute(StrategyBacktestRunEvent event) {
         OffsetDateTime startedAt = OffsetDateTime.now();
+        // 只允许 pending 的任务进入执行，避免重复消费
         int updated = runMapper.markRunning(event.runId(), event.userId(), startedAt);
         if (updated == 0) {
             log.info("Backtest run already handled, skip runId={}", event.runId());
@@ -109,6 +110,7 @@ public class StrategyBacktestExecutor {
         if (startDate == null || endDate == null) {
             throw new IllegalStateException("回测时间范围缺失");
         }
+        // 读取目标权重与行情数据，生成交易日序列
         List<StrategyTargetPo> targets = targetMapper.listByStrategy(strategy.getId(), run.getUserId());
         if (targets == null || targets.isEmpty()) {
             throw new IllegalStateException("策略未配置目标权重");
@@ -132,6 +134,7 @@ public class StrategyBacktestExecutor {
 
         PortfolioPo portfolio = portfolioMapper.findByIdAndUser(strategy.getPortfolioId(), run.getUserId());
         String benchmarkSymbol = portfolio != null ? portfolio.getBenchmarkSymbol() : null;
+        // 基准净值按同区间行情计算，缺失时返回 null
         BenchmarkTracker benchmarkTracker = buildBenchmarkTracker(benchmarkSymbol, startDate, endDate);
         Map<String, BigDecimal> lastPrices = new HashMap<>();
         Map<String, BigDecimal> holdings = new HashMap<>();
@@ -154,6 +157,7 @@ public class StrategyBacktestExecutor {
                 shouldRebalance = true;
             }
             if (shouldRebalance) {
+                // 按目标权重在再平衡日重新计算持仓数量
                 holdings = allocateHoldings(weights, lastPrices, currentPortfolioValue(holdings, lastPrices, capitalBase, initialized));
                 initialized = true;
             }

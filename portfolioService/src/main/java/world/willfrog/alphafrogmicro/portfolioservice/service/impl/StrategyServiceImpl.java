@@ -237,6 +237,7 @@ public class StrategyServiceImpl implements StrategyService {
         }
 
         OffsetDateTime now = OffsetDateTime.now();
+        // 写入回测任务（pending），随后由 Kafka 消费端执行回测
         StrategyBacktestRunPo run = new StrategyBacktestRunPo();
         run.setStrategyId(strategyId);
         run.setUserId(userId);
@@ -249,6 +250,7 @@ public class StrategyServiceImpl implements StrategyService {
         run.setExtJson("{}");
         strategyBacktestRunMapper.insert(run);
         try {
+            // 发布回测事件，失败则将任务标记为 failed
             backtestPublisher.publish(
                     new world.willfrog.alphafrogmicro.portfolioservice.backtest.StrategyBacktestRunEvent(
                             run.getId(),

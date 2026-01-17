@@ -22,11 +22,13 @@ public class StrategyBacktestPublisher {
     }
 
     public void publish(StrategyBacktestRunEvent event) throws Exception {
+        // 允许在配置中关闭回测事件的发送
         if (!properties.isProducerEnabled()) {
             log.info("Backtest producer disabled, skip publish runId={}", event.runId());
             return;
         }
         String payload = objectMapper.writeValueAsString(event);
+        // 仅发送 runId/strategyId/userId 供消费端拉取明细
         kafkaTemplate.send(properties.getTopic(), payload);
     }
 }
