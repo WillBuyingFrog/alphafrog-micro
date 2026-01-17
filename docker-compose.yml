@@ -216,7 +216,11 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
       NACOS_ADDRESS: nacos
+      NACOS_USER: ${NACOS_USER:-nacos}
+      NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
+
     ports:
       - "50056:50056"
     networks:
