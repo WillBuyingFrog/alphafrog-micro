@@ -5,11 +5,13 @@ import org.apache.commons.lang3.StringUtils;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
+import world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioPo;
 import world.willfrog.alphafrogmicro.portfolioservice.domain.PricePoint;
 import world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyBacktestRunPo;
 import world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyDefinitionPo;
 import world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyNavPo;
 import world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyTargetPo;
+import world.willfrog.alphafrogmicro.portfolioservice.mapper.PortfolioMapper;
 import world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyBacktestRunMapper;
 import world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyDefinitionMapper;
 import world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyNavMapper;
@@ -46,17 +48,20 @@ public class StrategyBacktestExecutor {
     private final StrategyTargetMapper targetMapper;
     private final StrategyNavMapper navMapper;
     private final StrategyPriceMapper priceMapper;
+    private final PortfolioMapper portfolioMapper;
 
     public StrategyBacktestExecutor(StrategyBacktestRunMapper runMapper,
                                     StrategyDefinitionMapper strategyDefinitionMapper,
                                     StrategyTargetMapper targetMapper,
                                     StrategyNavMapper navMapper,
-                                    StrategyPriceMapper priceMapper) {
+                                    StrategyPriceMapper priceMapper,
+                                    PortfolioMapper portfolioMapper) {
         this.runMapper = runMapper;
         this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.targetMapper = targetMapper;
         this.navMapper = navMapper;
         this.priceMapper = priceMapper;
+        this.portfolioMapper = portfolioMapper;
     }
 
     @Transactional
@@ -125,7 +130,9 @@ public class StrategyBacktestExecutor {
                 ? ONE
                 : strategy.getCapitalBase();
 
-        BenchmarkTracker benchmarkTracker = buildBenchmarkTracker(strategy.getBenchmarkSymbol(), startDate, endDate);
+        PortfolioPo portfolio = portfolioMapper.findByIdAndUser(strategy.getPortfolioId(), run.getUserId());
+        String benchmarkSymbol = portfolio != null ? portfolio.getBenchmarkSymbol() : null;
+        BenchmarkTracker benchmarkTracker = buildBenchmarkTracker(benchmarkSymbol, startDate, endDate);
         Map<String, BigDecimal> lastPrices = new HashMap<>();
         Map<String, BigDecimal> holdings = new HashMap<>();
         boolean initialized = false;
@@ -367,7 +374,7 @@ public class StrategyBacktestExecutor {
 
     private BenchmarkTracker buildBenchmarkTracker(String benchmarkSymbol, LocalDate start, LocalDate end) {
         if (StringUtils.isBlank(benchmarkSymbol)) {
-            return BenchmarkTracker.empty();
+            return new BenchmarkTracker(Map.of());
         }
         long startTs = DateConvertUtils.convertLocalDateToMsTimestamp(start);
         long endTs = DateConvertUtils.convertLocalDateToMsTimestamp(end);
@@ -389,10 +396,6 @@ public class StrategyBacktestExecutor {
 
         BenchmarkTracker(Map<LocalDate, BigDecimal> series) {
             this.series = series;
-        }
-
-        static BenchmarkTracker empty() {
-            return new BenchmarkTracker(Map.of());
         }
 
         BigDecimal resolve(LocalDate tradeDate) {
