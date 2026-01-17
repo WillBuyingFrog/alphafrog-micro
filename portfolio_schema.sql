@@ -105,6 +105,10 @@ CREATE TABLE IF NOT EXISTS alphafrog_strategy_backtest_run (
     end_date DATE,
     params_json JSONB NOT NULL DEFAULT '{}'::jsonb,
     status VARCHAR(32) NOT NULL DEFAULT 'pending',
+    queued_at TIMESTAMPTZ,
+    started_at TIMESTAMPTZ,
+    finished_at TIMESTAMPTZ,
+    error_message TEXT,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     ext JSONB NOT NULL DEFAULT '{}'::jsonb

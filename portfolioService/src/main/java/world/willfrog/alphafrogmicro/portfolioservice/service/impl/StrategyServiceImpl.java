@@ -29,17 +29,20 @@ public class StrategyServiceImpl implements StrategyService {
     private final StrategyBacktestRunMapper strategyBacktestRunMapper;
     private final StrategyNavMapper strategyNavMapper;
     private final PortfolioMapper portfolioMapper;
+    private final world.willfrog.alphafrogmicro.portfolioservice.backtest.StrategyBacktestPublisher backtestPublisher;
 
     public StrategyServiceImpl(StrategyDefinitionMapper strategyDefinitionMapper,
                                StrategyTargetMapper strategyTargetMapper,
                                StrategyBacktestRunMapper strategyBacktestRunMapper,
                                StrategyNavMapper strategyNavMapper,
-                               PortfolioMapper portfolioMapper) {
+                               PortfolioMapper portfolioMapper,
+                               world.willfrog.alphafrogmicro.portfolioservice.backtest.StrategyBacktestPublisher backtestPublisher) {
         this.strategyDefinitionMapper = strategyDefinitionMapper;
         this.strategyTargetMapper = strategyTargetMapper;
         this.strategyBacktestRunMapper = strategyBacktestRunMapper;
         this.strategyNavMapper = strategyNavMapper;
         this.portfolioMapper = portfolioMapper;
+        this.backtestPublisher = backtestPublisher;
     }
 
     @Override
@@ -233,16 +236,30 @@ public class StrategyServiceImpl implements StrategyService {
             throw new BizException(ResponseCode.DATA_NOT_FOUND, "策略不存在或已归档");
         }
 
+        OffsetDateTime now = OffsetDateTime.now();
         StrategyBacktestRunPo run = new StrategyBacktestRunPo();
         run.setStrategyId(strategyId);
         run.setUserId(userId);
-        run.setRunTime(OffsetDateTime.now());
+        run.setRunTime(now);
         run.setStartDate(request.getStartDate());
         run.setEndDate(request.getEndDate());
         run.setParamsJson(defaultJson(request.getParamsJson()));
         run.setStatus("pending");
+        run.setQueuedAt(now);
         run.setExtJson("{}");
         strategyBacktestRunMapper.insert(run);
+        try {
+            backtestPublisher.publish(
+                    new world.willfrog.alphafrogmicro.portfolioservice.backtest.StrategyBacktestRunEvent(
+                            run.getId(),
+                            strategyId,
+                            userId
+                    )
+            );
+        } catch (Exception e) {
+            String message = StringUtils.abbreviate(e.getMessage(), 500);
+            strategyBacktestRunMapper.markFinished(run.getId(), userId, "failed", OffsetDateTime.now(), message);
+        }
 
         return toRunResponse(run);
     }

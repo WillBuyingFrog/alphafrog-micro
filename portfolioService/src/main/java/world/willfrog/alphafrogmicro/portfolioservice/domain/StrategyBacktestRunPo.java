@@ -15,6 +15,10 @@ public class StrategyBacktestRunPo {
     private LocalDate endDate;
     private String paramsJson;
     private String status;
+    private OffsetDateTime queuedAt;
+    private OffsetDateTime startedAt;
+    private OffsetDateTime finishedAt;
+    private String errorMessage;
     private OffsetDateTime createdAt;
     private OffsetDateTime updatedAt;
     private String extJson;

@@ -9,6 +9,17 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
+  kafka:
+    bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
+    admin:
+      auto-create: true
+    consumer:
+      auto-offset-reset: earliest
+      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
+    producer:
+      key-serializer: org.apache.kafka.common.serialization.StringSerializer
+      value-serializer: org.apache.kafka.common.serialization.StringSerializer
 
 server:
   port: 8084
@@ -21,6 +32,13 @@ mybatis:
 logging:
   level:
     world.willfrog.alphafrogmicro.portfolioservice: INFO
+
+portfolio:
+  backtest:
+    topic: ${AF_BACKTEST_TOPIC:strategy_backtest_run}
+    consumer-group: ${AF_BACKTEST_GROUP:portfolio-backtest-consumer}
+    producer-enabled: true
+    consumer-enabled: true
 
 dubbo:
   application:

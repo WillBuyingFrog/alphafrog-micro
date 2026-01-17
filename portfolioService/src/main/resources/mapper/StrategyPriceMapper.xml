@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyPriceMapper">
+
+    <resultMap id="PricePointResultMap" type="world.willfrog.alphafrogmicro.portfolioservice.domain.PricePoint">
+        <result property="tradeDate" column="trade_date"/>
+        <result property="close" column="close"/>
+    </resultMap>
+
+    <select id="listStockDaily" resultMap="PricePointResultMap">
+        SELECT trade_date,
+               close
+        FROM alphafrog_stock_daily
+        WHERE ts_code = #{tsCode}
+          AND trade_date &gt;= #{startDate}
+          AND trade_date &lt;= #{endDate}
+        ORDER BY trade_date ASC
+    </select>
+
+    <select id="listIndexDaily" resultMap="PricePointResultMap">
+        SELECT trade_date,
+               close
+        FROM alphafrog_index_daily
+        WHERE ts_code = #{tsCode}
+          AND trade_date &gt;= #{startDate}
+          AND trade_date &lt;= #{endDate}
+        ORDER BY trade_date ASC
+    </select>
+
+    <select id="listFundNav" resultMap="PricePointResultMap">
+        SELECT nav_date AS trade_date,
+               unit_nav AS close
+        FROM alphafrog_fund_nav
+        WHERE ts_code = #{tsCode}
+          AND nav_date &gt;= #{startDate}
+          AND nav_date &lt;= #{endDate}
+        ORDER BY nav_date ASC
+    </select>
+</mapper>

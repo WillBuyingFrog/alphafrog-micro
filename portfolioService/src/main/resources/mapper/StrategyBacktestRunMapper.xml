@@ -13,6 +13,10 @@
         <result property="endDate" column="end_date"/>
         <result property="paramsJson" column="params_json"/>
         <result property="status" column="status"/>
+        <result property="queuedAt" column="queued_at"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="finishedAt" column="finished_at"/>
+        <result property="errorMessage" column="error_message"/>
         <result property="createdAt" column="created_at"/>
         <result property="updatedAt" column="updated_at"/>
         <result property="extJson" column="ext_json"/>
@@ -21,10 +25,10 @@
     <insert id="insert" parameterType="world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyBacktestRunPo"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
         INSERT INTO alphafrog_strategy_backtest_run
-        (strategy_id, user_id, run_time, start_date, end_date, params_json, status, ext)
+        (strategy_id, user_id, run_time, start_date, end_date, params_json, status, queued_at, ext)
         VALUES
         (#{strategyId}, #{userId}, #{runTime}, #{startDate}, #{endDate},
-         CAST(#{paramsJson} AS jsonb), #{status}, CAST(#{extJson} AS jsonb))
+         CAST(#{paramsJson} AS jsonb), #{status}, #{queuedAt}, CAST(#{extJson} AS jsonb))
     </insert>
 
     <select id="findByIdAndUser" resultMap="StrategyBacktestRunResultMap">
@@ -36,6 +40,10 @@
                end_date,
                params_json::text AS params_json,
                status,
+               queued_at,
+               started_at,
+               finished_at,
+               error_message,
                created_at,
                updated_at,
                ext::text AS ext_json
@@ -54,6 +62,10 @@
                end_date,
                params_json::text AS params_json,
                status,
+               queued_at,
+               started_at,
+               finished_at,
+               error_message,
                created_at,
                updated_at,
                ext::text AS ext_json
@@ -78,6 +90,26 @@
         </if>
     </select>
 
+    <update id="markRunning">
+        UPDATE alphafrog_strategy_backtest_run
+        SET status = 'running',
+            started_at = #{startedAt},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+          AND status = 'pending'
+    </update>
+
+    <update id="markFinished">
+        UPDATE alphafrog_strategy_backtest_run
+        SET status = #{status},
+            finished_at = #{finishedAt},
+            error_message = #{errorMessage},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
     <update id="update" parameterType="world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyBacktestRunPo">
         UPDATE alphafrog_strategy_backtest_run
         SET run_time = #{runTime},
@@ -85,6 +117,10 @@
             end_date = #{endDate},
             params_json = CAST(#{paramsJson} AS jsonb),
             status = #{status},
+            queued_at = #{queuedAt},
+            started_at = #{startedAt},
+            finished_at = #{finishedAt},
+            error_message = #{errorMessage},
             ext = CAST(#{extJson} AS jsonb),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}

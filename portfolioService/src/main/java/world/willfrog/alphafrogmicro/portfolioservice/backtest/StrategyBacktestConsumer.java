@@ -1,0 +1,34 @@
+package world.willfrog.alphafrogmicro.portfolioservice.backtest;
+
+import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import org.springframework.kafka.annotation.KafkaListener;
+import org.springframework.stereotype.Component;
+
+@Slf4j
+@Component
+@ConditionalOnProperty(name = "portfolio.backtest.consumer-enabled", havingValue = "true", matchIfMissing = true)
+public class StrategyBacktestConsumer {
+
+    private final ObjectMapper objectMapper;
+    private final StrategyBacktestExecutor executor;
+
+    public StrategyBacktestConsumer(ObjectMapper objectMapper, StrategyBacktestExecutor executor) {
+        this.objectMapper = objectMapper;
+        this.executor = executor;
+    }
+
+    @KafkaListener(
+            topics = "${portfolio.backtest.topic}",
+            groupId = "${portfolio.backtest.consumer-group}"
+    )
+    public void onMessage(String message) {
+        try {
+            StrategyBacktestRunEvent event = objectMapper.readValue(message, StrategyBacktestRunEvent.class);
+            executor.execute(event);
+        } catch (Exception e) {
+            log.error("Failed to consume backtest message: {}", message, e);
+        }
+    }
+}

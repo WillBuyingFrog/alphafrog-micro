@@ -23,5 +23,15 @@ public interface StrategyBacktestRunMapper {
                          @Param("userId") String userId,
                          @Param("status") String status);
 
+    int markRunning(@Param("id") Long id,
+                    @Param("userId") String userId,
+                    @Param("startedAt") java.time.OffsetDateTime startedAt);
+
+    int markFinished(@Param("id") Long id,
+                     @Param("userId") String userId,
+                     @Param("status") String status,
+                     @Param("finishedAt") java.time.OffsetDateTime finishedAt,
+                     @Param("errorMessage") String errorMessage);
+
     int update(StrategyBacktestRunPo po);
 }
