@@ -73,9 +73,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest request =
+                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest.Builder builder =
                                 DomesticIndex.DomesticIndexInfoFetchByMarketRequest.newBuilder()
-                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                                        .setOffset(offset).setLimit(limit);
+                        if (market != null && !market.isBlank()) {
+                            builder.setMarket(market);
+                        }
+                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest request = builder.build();
                         result = domesticIndexFetchService.fetchDomesticIndexInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -137,9 +141,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFund.DomesticFundInfoFetchByMarketRequest request =
+                        DomesticFund.DomesticFundInfoFetchByMarketRequest.Builder builder =
                                 DomesticFund.DomesticFundInfoFetchByMarketRequest.newBuilder()
-                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                                        .setOffset(offset).setLimit(limit);
+                        if (market != null && !market.isBlank()) {
+                            builder.setMarket(market);
+                        }
+                        DomesticFund.DomesticFundInfoFetchByMarketRequest request = builder.build();
                         result = domesticFundFetchService.fetchDomesticFundInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -184,9 +192,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticStock.DomesticStockInfoFetchByMarketRequest request =
+                        DomesticStock.DomesticStockInfoFetchByMarketRequest.Builder builder =
                                 DomesticStock.DomesticStockInfoFetchByMarketRequest.newBuilder()
-                                        .setMarket(market).setOffset(offset).setLimit(limit).build();
+                                        .setOffset(offset).setLimit(limit);
+                        if (market != null && !market.isBlank()) {
+                            builder.setMarket(market);
+                        }
+                        DomesticStock.DomesticStockInfoFetchByMarketRequest request = builder.build();
                         result = domesticStockFetchService.fetchStockInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;

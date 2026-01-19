@@ -46,7 +46,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "index_basic");
-        queryParams.put("market", market);
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
         queryParams.put("limit", limit);
         queryParams.put("offset", offset);
         params.put("fields", "ts_code,name,fullname,market,publisher,index_type," +

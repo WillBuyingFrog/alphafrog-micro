@@ -4,9 +4,103 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
+usage() {
+  cat <<'EOF'
+Usage:
+  ./deploy_latest.sh                  # rebuild all services
+  ./deploy_latest.sh serviceA serviceB
+  ./deploy_latest.sh --services serviceA,serviceB
+
+Services:
+  domestic-stock-service
+  domestic-index-service
+  domestic-fund-service
+  domestic-fetch-service
+  portfolio-service
+  frontend
+EOF
+}
+
+ALL_SERVICES=(
+  domestic-stock-service
+  domestic-index-service
+  domestic-fund-service
+  domestic-fetch-service
+  portfolio-service
+  frontend
+)
+
+declare -A SERVICE_BUILD=(
+  [domestic-stock-service]="domesticStockService/docker_build.sh"
+  [domestic-index-service]="domesticIndexService/docker_build.sh"
+  [domestic-fund-service]="domesticFundService/docker_build.sh"
+  [domestic-fetch-service]="domesticFetchService/docker_build.sh"
+  [portfolio-service]="portfolioService/docker_build.sh"
+  [frontend]="frontend/docker_build.sh"
+)
+
+RAW_SERVICES=()
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    -h|--help)
+      usage
+      exit 0
+      ;;
+    -s|--services)
+      shift
+      if [[ $# -eq 0 ]]; then
+        echo "Missing value for --services" >&2
+        usage
+        exit 1
+      fi
+      RAW_SERVICES+=("$1")
+      shift
+      ;;
+    *)
+      RAW_SERVICES+=("$1")
+      shift
+      ;;
+  esac
+done
+
+SERVICES=()
+if [[ ${#RAW_SERVICES[@]} -gt 0 ]]; then
+  for item in "${RAW_SERVICES[@]}"; do
+    IFS=',' read -r -a parts <<< "$item"
+    for part in "${parts[@]}"; do
+      name="${part// /}"
+      if [[ -n "$name" ]]; then
+        SERVICES+=("$name")
+      fi
+    done
+  done
+fi
+
+SELECTED=()
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
+  SELECTED=("${ALL_SERVICES[@]}")
+else
+  declare -A seen=()
+  for svc in "${SERVICES[@]}"; do
+    if [[ -z "${SERVICE_BUILD[$svc]:-}" ]]; then
+      echo "Unknown service: $svc" >&2
+      usage
+      exit 1
+    fi
+    seen["$svc"]=1
+  done
+  for svc in "${ALL_SERVICES[@]}"; do
+    if [[ -n "${seen[$svc]:-}" ]]; then
+      SELECTED+=("$svc")
+    fi
+  done
+fi
+
 mvn -DskipTests compile install
 
-bash build_all_images.sh
+for svc in "${SELECTED[@]}"; do
+  bash "${SERVICE_BUILD[$svc]}"
+done
 
 if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
@@ -20,9 +114,4 @@ else
 fi
 
 $DOCKER_COMPOSE up -d --no-deps --force-recreate \
-  domestic-stock-service \
-  domestic-index-service \
-  domestic-fund-service \
-  domestic-fetch-service \
-  portfolio-service \
-  frontend
+  "${SELECTED[@]}"

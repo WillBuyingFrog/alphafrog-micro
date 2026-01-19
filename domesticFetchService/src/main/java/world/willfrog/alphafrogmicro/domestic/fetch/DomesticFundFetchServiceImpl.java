@@ -47,7 +47,9 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "fund_basic");
-        queryParams.put("market", market);
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
         queryParams.put("offset", offset);
         queryParams.put("limit", limit);
         params.put("params", queryParams);
