@@ -13,6 +13,9 @@ spring:
     bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
     admin:
       auto-create: true
+    producer:
+      properties:
+        partitioner.class: org.apache.kafka.clients.producer.RoundRobinPartitioner
     consumer:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
