@@ -1,0 +1,63 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.admin.idl;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.admin.idl";
+option java_outer_classname = "AdminServiceProto";
+
+message AdminProfile {
+  int64 user_id = 1;
+  string username = 2;
+  string email = 3;
+  int32 user_type = 4;
+  int32 user_level = 5;
+  int32 credit = 6;
+  int64 register_time = 7;
+}
+
+message AdminLoginRequest {
+  string username = 1;
+  string password = 2;
+}
+
+message AdminLoginResponse {
+  bool valid = 1;
+  string message = 2;
+  AdminProfile profile = 3;
+}
+
+message AdminCreateRequest {
+  string username = 1;
+  string password = 2;
+  string email = 3;
+  string magic_password = 4;
+}
+
+message AdminDeleteRequest {
+  string username = 1;
+  string magic_password = 2;
+}
+
+message AdminActionResponse {
+  bool success = 1;
+  string message = 2;
+}
+
+message AdminOverallRequest {}
+
+message AdminOverallResponse {
+  int64 fund_count = 1;
+  int64 index_count = 2;
+  int64 stock_count = 3;
+  int64 fund_nav_count = 4;
+  int64 index_daily_count = 5;
+  int64 stock_daily_count = 6;
+}
+
+service AdminService {
+  rpc validateAdminLogin(AdminLoginRequest) returns (AdminLoginResponse);
+  rpc createAdmin(AdminCreateRequest) returns (AdminActionResponse);
+  rpc deleteAdmin(AdminDeleteRequest) returns (AdminActionResponse);
+  rpc getAdminOverall(AdminOverallRequest) returns (AdminOverallResponse);
+}

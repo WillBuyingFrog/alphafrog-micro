@@ -30,4 +30,7 @@ public interface UserDao {
     })
     List<User> getUserByUsername(@Param("username") String username);
 
+    @Delete("DELETE FROM alphafrog_user WHERE username = #{username} AND user_type = #{userType}")
+    int deleteUserByUsernameAndType(@Param("username") String username, @Param("userType") int userType);
+
 }

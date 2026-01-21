@@ -201,6 +201,26 @@ services:
     networks:
       - alphafrog-network
 
+  admin-service:
+    image: alphafrog-micro-admin-service:latest
+    build: ./adminService
+    container_name: alphafrog-admin-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      NACOS_ADDRESS: nacos
+    networks:
+      - alphafrog-network
+
   portfolio-service:
     image: alphafrog-micro-portfolio-service:latest
     build: ./portfolioService
@@ -245,6 +265,8 @@ services:
       domestic-index-service:
         condition: service_started
       domestic-fund-service:
+        condition: service_started
+      admin-service:
         condition: service_started
       portfolio-service:
         condition: service_started

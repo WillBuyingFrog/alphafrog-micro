@@ -85,12 +85,14 @@
         <module>domesticStockApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
+        <module>adminApi</module>
         <module>portfolioApi</module>
         <module>portfolioSummaryApi</module>
         <module>domesticIndexService</module>
         <module>domesticFundService</module>
         <module>domesticStockService</module>
         <module>domesticFetchService</module>
+        <module>adminService</module>
         <module>portfolioService</module>
         <module>frontend</module>
     </modules>
