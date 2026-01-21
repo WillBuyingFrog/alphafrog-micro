@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticFundStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundFetchServiceTriple.DomesticFundFetchServiceImplBase;
 
 import java.util.HashMap;

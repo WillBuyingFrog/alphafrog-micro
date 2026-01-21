@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
 import java.util.HashMap;

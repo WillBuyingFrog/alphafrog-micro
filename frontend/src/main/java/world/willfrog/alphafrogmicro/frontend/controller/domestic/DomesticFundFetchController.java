@@ -9,7 +9,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFundFetchService;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
@@ -35,8 +35,8 @@ public class DomesticFundFetchController {
         String taskUuid = UUID.randomUUID().toString();
         fetchTaskStatusService.registerTask(taskUuid, "fund_info", 1);
 
-        CompletableFuture<DomesticFund.DomesticFundInfoFetchByMarketResponse> futureResponse = domesticFundFetchService.fetchDomesticFundInfoByMarketAsync(
-                DomesticFund.DomesticFundInfoFetchByMarketRequest.newBuilder()
+        CompletableFuture<DomesticFundInfoFetchByMarketResponse> futureResponse = domesticFundFetchService.fetchDomesticFundInfoByMarketAsync(
+                DomesticFundInfoFetchByMarketRequest.newBuilder()
                         .setMarket(market).setOffset(offset).setLimit(limit).build()
         );
 
@@ -68,8 +68,8 @@ public class DomesticFundFetchController {
         String taskUuid = UUID.randomUUID().toString();
         fetchTaskStatusService.registerTask(taskUuid, "fund_nav", 1);
 
-        CompletableFuture<DomesticFund.DomesticFundNavFetchByTradeDateResponse> futureResponse = domesticFundFetchService.fetchDomesticFundNavByTradeDateAsync(
-                DomesticFund.DomesticFundNavFetchByTradeDateRequest.newBuilder()
+        CompletableFuture<DomesticFundNavFetchByTradeDateResponse> futureResponse = domesticFundFetchService.fetchDomesticFundNavByTradeDateAsync(
+                DomesticFundNavFetchByTradeDateRequest.newBuilder()
                         .setTradeDateTimestamp(tradeDateTimestamp).setOffset(offset).setLimit(limit).build()
         );
 

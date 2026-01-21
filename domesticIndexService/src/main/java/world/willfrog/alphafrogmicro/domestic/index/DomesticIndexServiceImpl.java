@@ -10,7 +10,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexWeightDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexServiceTriple.DomesticIndexServiceImplBase;
 import world.willfrog.alphafrogmicro.domestic.index.service.IndexDataCompletenessService;
 

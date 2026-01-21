@@ -13,7 +13,7 @@ import world.willfrog.alphafrogmicro.common.dto.compact.CompactMeta;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonConverter;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonFormatter;
 import world.willfrog.alphafrogmicro.common.utils.compact.ProtoFieldExtractor;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndexService;
 
 @Slf4j

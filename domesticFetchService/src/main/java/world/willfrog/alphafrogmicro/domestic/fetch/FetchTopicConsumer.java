@@ -6,9 +6,7 @@ import org.springframework.kafka.annotation.KafkaListener;
 import org.springframework.kafka.core.KafkaTemplate;
 import org.springframework.kafka.support.Acknowledgment;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 
 @Service
 @Slf4j
@@ -73,13 +71,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest.Builder builder =
-                                DomesticIndex.DomesticIndexInfoFetchByMarketRequest.newBuilder()
+                        DomesticIndexInfoFetchByMarketRequest.Builder builder =
+                                DomesticIndexInfoFetchByMarketRequest.newBuilder()
                                         .setOffset(offset).setLimit(limit);
                         if (market != null && !market.isBlank()) {
                             builder.setMarket(market);
                         }
-                        DomesticIndex.DomesticIndexInfoFetchByMarketRequest request = builder.build();
+                        DomesticIndexInfoFetchByMarketRequest request = builder.build();
                         result = domesticIndexFetchService.fetchDomesticIndexInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -90,8 +88,8 @@ public class FetchTopicConsumer {
                         long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticIndexDailyFetchByTradeDateRequest request =
-                                DomesticIndex.DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
+                        DomesticIndexDailyFetchByTradeDateRequest request =
+                                DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build();
                         result = domesticIndexFetchService.fetchDomesticIndexDailyByTradeDate(request).getFetchedItemsCount();
                     } else if (taskSubType == 2){
@@ -99,8 +97,8 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticindexDailyFetchAllByDateRangeRequest request =
-                                DomesticIndex.DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
+                        DomesticindexDailyFetchAllByDateRangeRequest request =
+                                DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
                                         .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit).build();
                         result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(request).getFetchedItemsCount();
@@ -110,8 +108,8 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest request =
-                                DomesticIndex.DomesticIndexDailyFetchByDateRangeRequest.newBuilder()
+                        DomesticIndexDailyFetchByDateRangeRequest request =
+                                DomesticIndexDailyFetchByDateRangeRequest.newBuilder()
                                         .setTsCode(tsCode).setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit).build();
                         result = domesticIndexFetchService.fetchDomesticIndexDailyByDateRange(request).getFetchedItemsCount();
@@ -126,8 +124,8 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticIndexWeightFetchByDateRangeRequest request =
-                                DomesticIndex.DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
+                        DomesticIndexWeightFetchByDateRangeRequest request =
+                                DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
                                         .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit)
                                         .build();
@@ -141,13 +139,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFund.DomesticFundInfoFetchByMarketRequest.Builder builder =
-                                DomesticFund.DomesticFundInfoFetchByMarketRequest.newBuilder()
+                        DomesticFundInfoFetchByMarketRequest.Builder builder =
+                                DomesticFundInfoFetchByMarketRequest.newBuilder()
                                         .setOffset(offset).setLimit(limit);
                         if (market != null && !market.isBlank()) {
                             builder.setMarket(market);
                         }
-                        DomesticFund.DomesticFundInfoFetchByMarketRequest request = builder.build();
+                        DomesticFundInfoFetchByMarketRequest request = builder.build();
                         result = domesticFundFetchService.fetchDomesticFundInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -159,8 +157,8 @@ public class FetchTopicConsumer {
                         long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFund.DomesticFundNavFetchByTradeDateRequest request =
-                                DomesticFund.DomesticFundNavFetchByTradeDateRequest.newBuilder()
+                        DomesticFundNavFetchByTradeDateRequest request =
+                                DomesticFundNavFetchByTradeDateRequest.newBuilder()
                                         .setTradeDateTimestamp(tradeDateTimestamp)
                                         .setOffset(offset).setLimit(limit)
                                         .build();
@@ -176,8 +174,8 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFund.DomesticFundPortfolioFetchByDateRangeRequest request =
-                                DomesticFund.DomesticFundPortfolioFetchByDateRangeRequest.newBuilder()
+                        DomesticFundPortfolioFetchByDateRangeRequest request =
+                                DomesticFundPortfolioFetchByDateRangeRequest.newBuilder()
                                         .setStartDateTimestamp(startDateTimestamp).setEndDateTimestamp(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit)
                                         .build();
@@ -192,13 +190,13 @@ public class FetchTopicConsumer {
                         String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticStock.DomesticStockInfoFetchByMarketRequest.Builder builder =
-                                DomesticStock.DomesticStockInfoFetchByMarketRequest.newBuilder()
+                        DomesticStockInfoFetchByMarketRequest.Builder builder =
+                                DomesticStockInfoFetchByMarketRequest.newBuilder()
                                         .setOffset(offset).setLimit(limit);
                         if (market != null && !market.isBlank()) {
                             builder.setMarket(market);
                         }
-                        DomesticStock.DomesticStockInfoFetchByMarketRequest request = builder.build();
+                        DomesticStockInfoFetchByMarketRequest request = builder.build();
                         result = domesticStockFetchService.fetchStockInfoByMarket(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -209,8 +207,8 @@ public class FetchTopicConsumer {
                         long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticStock.DomesticStockDailyFetchByTradeDateRequest request =
-                                DomesticStock.DomesticStockDailyFetchByTradeDateRequest.newBuilder()
+                        DomesticStockDailyFetchByTradeDateRequest request =
+                                DomesticStockDailyFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build();
                         result = domesticStockFetchService.fetchStockDailyByTradeDate(request).getFetchedItemsCount();
                     } else {
@@ -235,8 +233,8 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest request =
-                                DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest.newBuilder()
+                        DomesticTradeCalendarFetchByDateRangeRequest request =
+                                DomesticTradeCalendarFetchByDateRangeRequest.newBuilder()
                                         .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
                                         .setOffset(offset).setLimit(limit)
                                         .build();

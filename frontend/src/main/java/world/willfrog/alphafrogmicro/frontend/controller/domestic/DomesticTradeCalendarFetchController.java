@@ -9,8 +9,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticTradeCalendarFetchService;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
 import java.util.UUID;
@@ -32,9 +31,9 @@ public class DomesticTradeCalendarFetchController {
                                                              @RequestParam(name = "end_date") long endDateTimestamp) {
         String taskUuid = UUID.randomUUID().toString();
         fetchTaskStatusService.registerTask(taskUuid, "trade_calendar", 1);
-        CompletableFuture<DomesticIndex.DomesticTradeCalendarFetchByDateRangeResponse> responseCompletableFuture =
+        CompletableFuture<DomesticTradeCalendarFetchByDateRangeResponse> responseCompletableFuture =
                 domesticTradeCalendarFetchService.fetchDomesticTradeCalendarByDateRangeAsync(
-                        DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest.newBuilder()
+                        DomesticTradeCalendarFetchByDateRangeRequest.newBuilder()
                                 .setStartDate(startDateTimestamp)
                                 .setEndDate(endDateTimestamp)
                                 .build()

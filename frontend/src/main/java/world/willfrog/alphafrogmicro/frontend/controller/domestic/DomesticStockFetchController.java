@@ -9,7 +9,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStockFetchService;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
@@ -33,8 +33,8 @@ public class DomesticStockFetchController {
                                                                  @RequestParam(name = "limit") int limit) {
         String taskUuid = UUID.randomUUID().toString();
         fetchTaskStatusService.registerTask(taskUuid, "stock_info", 1);
-        CompletableFuture<DomesticStock.DomesticStockInfoFetchByMarketResponse> futureResponse = domesticStockFetchService.fetchStockInfoByMarketAsync(
-                DomesticStock.DomesticStockInfoFetchByMarketRequest.newBuilder()
+        CompletableFuture<DomesticStockInfoFetchByMarketResponse> futureResponse = domesticStockFetchService.fetchStockInfoByMarketAsync(
+                DomesticStockInfoFetchByMarketRequest.newBuilder()
                         .setMarket(market).setOffset(offset).setLimit(limit).build()
         );
 
@@ -66,8 +66,8 @@ public class DomesticStockFetchController {
                                                            @RequestParam(name = "limit") int limit) {
         String taskUuid = UUID.randomUUID().toString();
         fetchTaskStatusService.registerTask(taskUuid, "stock_daily", 1);
-        CompletableFuture<DomesticStock.DomesticStockDailyFetchByTradeDateResponse> futureResponse = domesticStockFetchService.fetchStockDailyByTradeDateAsync(
-                DomesticStock.DomesticStockDailyFetchByTradeDateRequest.newBuilder()
+        CompletableFuture<DomesticStockDailyFetchByTradeDateResponse> futureResponse = domesticStockFetchService.fetchStockDailyByTradeDateAsync(
+                DomesticStockDailyFetchByTradeDateRequest.newBuilder()
                         .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build()
         );
 

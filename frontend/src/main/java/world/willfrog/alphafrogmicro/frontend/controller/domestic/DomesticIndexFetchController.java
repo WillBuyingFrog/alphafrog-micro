@@ -10,7 +10,7 @@ import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndexFetchService;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 

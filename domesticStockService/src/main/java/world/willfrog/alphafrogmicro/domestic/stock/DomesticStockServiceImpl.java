@@ -12,7 +12,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockQuoteDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
 import world.willfrog.alphafrogmicro.domestic.stock.doc.StockInfoES;
 

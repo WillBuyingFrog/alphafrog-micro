@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import world.willfrog.alphafrogmicro.common.dto.compact.CompactMeta;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonConverter;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonFormatter;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticFundService;
 
 
@@ -30,8 +30,8 @@ public class DomesticFundController {
         try {
             log.info("Getting fund info for tsCode: {}, format: {}", tsCode, format);
             
-            DomesticFund.DomesticFundInfoByTsCodeResponse response = domesticFundService.getDomesticFundInfoByTsCode(
-                    DomesticFund.DomesticFundInfoByTsCodeRequest.newBuilder().setTsCode(tsCode).build()
+            DomesticFundInfoByTsCodeResponse response = domesticFundService.getDomesticFundInfoByTsCode(
+                    DomesticFundInfoByTsCodeRequest.newBuilder().setTsCode(tsCode).build()
             );
 
             String jsonResponse;
@@ -67,8 +67,8 @@ public class DomesticFundController {
         try {
             log.info("Searching fund info for query: {}, format: {}", query, format);
             
-            DomesticFund.DomesticFundSearchResponse response = domesticFundService.searchDomesticFundInfo(
-                    DomesticFund.DomesticFundSearchRequest.newBuilder().setQuery(query).build()
+            DomesticFundSearchResponse response = domesticFundService.searchDomesticFundInfo(
+                    DomesticFundSearchRequest.newBuilder().setQuery(query).build()
             );
 
             String jsonResponse;
@@ -108,8 +108,8 @@ public class DomesticFundController {
             log.info("Getting fund nav data for tsCode: {}, startDate: {}, endDate: {}, format: {}", 
                     tsCode, startDateTimestamp, endDateTimestamp, format);
             
-            DomesticFund.DomesticFundNavsByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundNavsByTsCodeAndDateRange(
-                    DomesticFund.DomesticFundNavsByTsCodeAndDateRangeRequest.newBuilder()
+            DomesticFundNavsByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundNavsByTsCodeAndDateRange(
+                    DomesticFundNavsByTsCodeAndDateRangeRequest.newBuilder()
                             .setTsCode(tsCode)
                             .setStartDateTimestamp(startDateTimestamp)
                             .setEndDateTimestamp(endDateTimestamp)
@@ -159,8 +159,8 @@ public class DomesticFundController {
             log.info("Getting fund portfolio data for tsCode: {}, startDate: {}, endDate: {}, format: {}", 
                     tsCode, startDateTimestamp, endDateTimestamp, format);
             
-            DomesticFund.DomesticFundPortfolioByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioByTsCodeAndDateRange(
-                    DomesticFund.DomesticFundPortfolioByTsCodeAndDateRangeRequest.newBuilder()
+            DomesticFundPortfolioByTsCodeAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioByTsCodeAndDateRange(
+                    DomesticFundPortfolioByTsCodeAndDateRangeRequest.newBuilder()
                             .setTsCode(tsCode)
                             .setStartDateTimestamp(startDateTimestamp)
                             .setEndDateTimestamp(endDateTimestamp)
@@ -211,8 +211,8 @@ public class DomesticFundController {
             log.info("Getting fund portfolio data for symbol: {}, startDate: {}, endDate: {}, format: {}", 
                     symbol, startDateTimestamp, endDateTimestamp, format);
             
-            DomesticFund.DomesticFundPortfolioBySymbolAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioBySymbolAndDateRange(
-                    DomesticFund.DomesticFundPortfolioBySymbolAndDateRangeRequest.newBuilder()
+            DomesticFundPortfolioBySymbolAndDateRangeResponse response = domesticFundService.getDomesticFundPortfolioBySymbolAndDateRange(
+                    DomesticFundPortfolioBySymbolAndDateRangeRequest.newBuilder()
                             .setSymbol(symbol)
                             .setStartDateTimestamp(startDateTimestamp)
                             .setEndDateTimestamp(endDateTimestamp)

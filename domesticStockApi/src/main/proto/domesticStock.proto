@@ -2,6 +2,8 @@ syntax = "proto3";
 
 package world.willfrog.alphafrogmicro.domestic.idl;
 
+option java_multiple_files = true;
+
 /**
   股票基本信息
  */

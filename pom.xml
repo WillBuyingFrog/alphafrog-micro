@@ -95,5 +95,6 @@
         <module>adminService</module>
         <module>portfolioService</module>
         <module>frontend</module>
+        <module>agentService</module>
     </modules>
 </project>
