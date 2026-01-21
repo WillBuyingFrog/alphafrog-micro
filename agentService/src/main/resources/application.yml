@@ -1,13 +1,13 @@
 server:
-  port: 50057
+  port: 50058
 
 spring:
   application:
     name: agent-service
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:alphafrog}
-    username: ${DB_USERNAME:postgres}
-    password: ${DB_PASSWORD:postgres}
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST:localhost}:${AF_DB_MAIN_PORT:5432}/${AF_DB_MAIN_DATABASE:alphafrog}
+    username: ${AF_DB_MAIN_USER:postgres}
+    password: ${AF_DB_MAIN_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
 
 mybatis:
@@ -19,12 +19,33 @@ dubbo:
   application:
     name: agent-service
   protocol:
-    name: dubbo
-    port: -1
+    name: tri
+    port: 50058
   registry:
-    address: zookeeper://${ZOOKEEPER_ADDRESS:localhost:2181}
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  consumer:
+    check: false
 
 langchain4j:
   open-ai:
-    api-key: ${OPENAI_API_KEY:demo}
-    base-url: ${OPENAI_BASE_URL:https://api.openai.com/v1}
+    api-key: ${AF_AGENT_API_KEY:demo}
+    base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
+    model-name: ${AF_AGENT_MODEL_NAME:openai/gpt-4o}
+    max-tokens: ${AF_AGENT_MAX_TOKENS:4096}
+    temperature: ${AF_AGENT_TEMPERATURE:0.7}
+    # Reasoning 配置 (OpenRouter 兼容)
+    # 参考: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+    reasoning:
+      # effort: xhigh, high, medium, low, minimal, none (用于 OpenAI o系列, Grok)
+      effort: ${AF_AGENT_REASONING_EFFORT:#{null}}
+      # max-tokens: 直接指定 reasoning token 数 (用于 Anthropic Claude, Gemini)
+      max-tokens: ${AF_AGENT_REASONING_MAX_TOKENS:#{null}}
+      # exclude: 是否在响应中排除 reasoning 内容
+      exclude: ${AF_AGENT_REASONING_EXCLUDE:false}
+      # enabled: 显式启用 reasoning (用于 DeepSeek)
+      enabled: ${AF_AGENT_REASONING_ENABLED:#{null}}
+
+logging:
+  level:
+    world.willfrog.agent: ${LOGGING_LEVEL_AGENT:INFO}
+    dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}

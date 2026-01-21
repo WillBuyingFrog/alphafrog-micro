@@ -247,6 +247,39 @@ services:
     networks:
       - alphafrog-network
 
+  agent-service:
+    image: alphafrog-micro-agent-service:latest
+    build: ./agentService
+    container_name: alphafrog-agent-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      NACOS_ADDRESS: nacos
+      # Agent Service LLM 配置 (OpenRouter/OpenAI)
+      AF_AGENT_API_KEY: ${AF_AGENT_API_KEY:-demo}
+      AF_AGENT_BASE_URL: ${AF_AGENT_BASE_URL:-https://openrouter.ai/api/v1}
+      AF_AGENT_MODEL_NAME: ${AF_AGENT_MODEL_NAME:-openai/gpt-4o}
+      AF_AGENT_MAX_TOKENS: ${AF_AGENT_MAX_TOKENS:-4096}
+      AF_AGENT_TEMPERATURE: ${AF_AGENT_TEMPERATURE:-0.7}
+      # Reasoning 配置 (OpenRouter)
+      AF_AGENT_REASONING_EFFORT: ${AF_AGENT_REASONING_EFFORT:-}
+      AF_AGENT_REASONING_MAX_TOKENS: ${AF_AGENT_REASONING_MAX_TOKENS:-}
+      AF_AGENT_REASONING_ENABLED: ${AF_AGENT_REASONING_ENABLED:-}
+      AF_AGENT_REASONING_EXCLUDE: ${AF_AGENT_REASONING_EXCLUDE:-false}
+    ports:
+      - "50058:50058"
+    networks:
+      - alphafrog-network
+
   frontend:
     image: alphafrog-micro-frontend:latest
     build: ./frontend
@@ -269,6 +302,8 @@ services:
       admin-service:
         condition: service_started
       portfolio-service:
+        condition: service_started
+      agent-service:
         condition: service_started
     environment:
       TZ: Asia/Shanghai
