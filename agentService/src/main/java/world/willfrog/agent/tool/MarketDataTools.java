@@ -4,6 +4,7 @@ import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
+import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 
 import java.util.stream.Collectors;
 
@@ -52,10 +53,12 @@ public class MarketDataTools {
      */
     @Tool("Get daily stock market data for a specific stock within a date range")
     public String getStockDaily(String tsCode, String startDateStr, String endDateStr) {
-        // Simple date parsing assuming YYYYMMDD format for simplicity in this MVP
         try {
-            long startDate = Long.parseLong(startDateStr);
-            long endDate = Long.parseLong(endDateStr);
+            long startDate = convertToMsTimestamp(startDateStr);
+            long endDate = convertToMsTimestamp(endDateStr);
+            if (startDate <= 0 || endDate <= 0) {
+                return "Invalid date range, please use YYYYMMDD format (Asia/Shanghai).";
+            }
 
             DomesticStockDailyByTsCodeAndDateRangeRequest request = DomesticStockDailyByTsCodeAndDateRangeRequest.newBuilder()
                     .setTsCode(tsCode)
@@ -163,8 +166,11 @@ public class MarketDataTools {
     @Tool("Get daily index market data for a specific index within a date range")
     public String getIndexDaily(String tsCode, String startDateStr, String endDateStr) {
         try {
-            long startDate = Long.parseLong(startDateStr);
-            long endDate = Long.parseLong(endDateStr);
+            long startDate = convertToMsTimestamp(startDateStr);
+            long endDate = convertToMsTimestamp(endDateStr);
+            if (startDate <= 0 || endDate <= 0) {
+                return "Invalid date range, please use YYYYMMDD format (Asia/Shanghai).";
+            }
 
             DomesticIndexDailyByTsCodeAndDateRangeRequest request = DomesticIndexDailyByTsCodeAndDateRangeRequest.newBuilder()
                     .setTsCode(tsCode)
@@ -210,5 +216,27 @@ public class MarketDataTools {
         } catch (Exception e) {
             return "Error searching index: " + e.getMessage();
         }
+    }
+
+    private long convertToMsTimestamp(String dateStr) {
+        if (dateStr == null) {
+            return -1;
+        }
+        String raw = dateStr.trim();
+        if (raw.isEmpty()) {
+            return -1;
+        }
+        if (raw.matches("\\d{13}")) {
+            try {
+                return Long.parseLong(raw);
+            } catch (NumberFormatException e) {
+                return -1;
+            }
+        }
+        Long converted = DateConvertUtils.convertDateStrToLong(raw, "yyyyMMdd");
+        if (converted == null || converted <= 0) {
+            return -1;
+        }
+        return converted;
     }
 }
