@@ -78,6 +78,32 @@ public class MarketDataTools {
     }
 
     /**
+     * 搜索股票信息。
+     *
+     * @param keyword 搜索关键词
+     * @return 搜索结果字符串（失败时返回错误描述）
+     */
+    @Tool("Search for a stock by keyword")
+    public String searchStock(String keyword) {
+        try {
+            DomesticStockSearchRequest request = DomesticStockSearchRequest.newBuilder()
+                    .setQuery(keyword)
+                    .build();
+            DomesticStockSearchResponse response = domesticStockService.searchStock(request);
+            if (response.getItemsCount() > 0) {
+                return response.getItemsList().stream()
+                        .limit(5)
+                        .map(item -> String.format("Code: %s, Name: %s, Industry: %s", item.getTsCode(), item.getName(), item.getIndustry()))
+                        .collect(Collectors.joining("\n"));
+            } else {
+                return "No stocks found for keyword: " + keyword;
+            }
+        } catch (Exception e) {
+            return "Error searching stock: " + e.getMessage();
+        }
+    }
+
+    /**
      * 搜索基金信息。
      *
      * @param keyword 搜索关键词

@@ -88,7 +88,13 @@ public class AgentRunExecutor {
 
             // 2. Prepare Conversation
             List<ChatMessage> messages = new ArrayList<>();
-            messages.add(new SystemMessage("You are an expert financial agent. Use the provided tools to retrieve market data and answer the user's question accurately. If you cannot find the exact data, try searching with relevant keywords."));
+            messages.add(new SystemMessage("""
+                You are an expert financial agent. Use the provided tools to retrieve market data and answer the user's question accurately.
+                
+                IMPORTANT: You typically do NOT know the exact TS codes (e.g., 000300.SH) in the database. 
+                You MUST always use 'searchStock', 'searchFund', or 'searchIndex' to find the correct ts_code BEFORE calling 'getStockDaily', 'getIndexDaily', or other code-based tools. 
+                Never guess the code.
+                """));
             messages.add(new UserMessage(userGoal));
 
             // 3. Execution Loop
@@ -168,6 +174,7 @@ public class AgentRunExecutor {
                         str(params.get("startDateStr"), params.get("start_date")),
                         str(params.get("endDateStr"), params.get("end_date"))
                 );
+                case "searchStock" -> marketDataTools.searchStock(str(params.get("keyword"), params.get("query")));
                 case "searchFund" -> marketDataTools.searchFund(str(params.get("keyword"), params.get("query")));
                 case "getIndexInfo" -> marketDataTools.getIndexInfo(str(params.get("tsCode"), params.get("ts_code")));
                 case "getIndexDaily" -> marketDataTools.getIndexDaily(
