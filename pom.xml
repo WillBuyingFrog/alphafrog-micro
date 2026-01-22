@@ -69,6 +69,7 @@
                         <proc>full</proc>
                         <release>${maven.compiler.release}</release>
                         <encoding>${project.build.sourceEncoding}</encoding>
+                        <parameters>true</parameters>
                         <!-- 显式声明注解处理器，帮助 IDE/Maven 一致识别 Lombok 生成代码 -->
                         <annotationProcessorPaths>
                             <path>

@@ -168,21 +168,31 @@ public class AgentRunExecutor {
     private String invokeTool(String toolName, Map<String, Object> params) {
         try {
             return switch (toolName) {
-                case "getStockInfo" -> marketDataTools.getStockInfo(str(params.get("tsCode"), params.get("ts_code"))); 
+                case "getStockInfo" -> marketDataTools.getStockInfo(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
+                ); 
                 case "getStockDaily" -> marketDataTools.getStockDaily(
-                        str(params.get("tsCode"), params.get("ts_code")),
-                        str(params.get("startDateStr"), params.get("start_date")),
-                        str(params.get("endDateStr"), params.get("end_date"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
+                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
+                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
                 );
-                case "searchStock" -> marketDataTools.searchStock(str(params.get("keyword"), params.get("query")));
-                case "searchFund" -> marketDataTools.searchFund(str(params.get("keyword"), params.get("query")));
-                case "getIndexInfo" -> marketDataTools.getIndexInfo(str(params.get("tsCode"), params.get("ts_code")));
+                case "searchStock" -> marketDataTools.searchStock(
+                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
+                case "searchFund" -> marketDataTools.searchFund(
+                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
+                case "getIndexInfo" -> marketDataTools.getIndexInfo(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
+                );
                 case "getIndexDaily" -> marketDataTools.getIndexDaily(
-                        str(params.get("tsCode"), params.get("ts_code")),
-                        str(params.get("startDateStr"), params.get("start_date")),
-                        str(params.get("endDateStr"), params.get("end_date"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
+                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
+                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
                 );
-                case "searchIndex" -> marketDataTools.searchIndex(str(params.get("keyword"), params.get("query")));
+                case "searchIndex" -> marketDataTools.searchIndex(
+                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
                 default -> "Unsupported tool: " + toolName;
             };
         } catch (Exception e) {

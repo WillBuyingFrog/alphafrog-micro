@@ -40,6 +40,10 @@ agent:
         base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
       openai:
         base-url: https://api.openai.com/v1
+    openrouter:
+      # OpenRouter 推荐的可选请求头
+      http-referer: ${AF_OPENROUTER_HTTP_REFERER:}
+      title: ${AF_OPENROUTER_TITLE:}
 
 langchain4j:
   open-ai:
@@ -64,3 +68,4 @@ logging:
   level:
     world.willfrog.agent: ${LOGGING_LEVEL_AGENT:INFO}
     dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}
+    dev.ai4j.openai4j: ${LOGGING_LEVEL_OPENAI4J:${LOGGING_LEVEL_AGENT:INFO}}
