@@ -45,6 +45,17 @@ declare -A SERVICE_BUILD=(
   [frontend]="frontend/docker_build.sh"
 )
 
+declare -A SERVICE_MODULE=(
+  [domestic-stock-service]="domesticStockService"
+  [domestic-index-service]="domesticIndexService"
+  [domestic-fund-service]="domesticFundService"
+  [domestic-fetch-service]="domesticFetchService"
+  [admin-service]="adminService"
+  [portfolio-service]="portfolioService"
+  [agent-service]="agentService"
+  [frontend]="frontend"
+)
+
 RAW_SERVICES=()
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -102,7 +113,16 @@ else
   done
 fi
 
-mvn -DskipTests compile install
+if [[ ${#SERVICES[@]} -eq 0 ]]; then
+  mvn -DskipTests compile install
+else
+  MODULES=()
+  for svc in "${SELECTED[@]}"; do
+    MODULES+=("${SERVICE_MODULE[$svc]}")
+  done
+  MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
+  mvn -DskipTests -pl "$MODULE_LIST" -am compile install
+fi
 
 for svc in "${SELECTED[@]}"; do
   bash "${SERVICE_BUILD[$svc]}"
