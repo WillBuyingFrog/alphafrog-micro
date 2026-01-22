@@ -16,5 +16,6 @@ public interface AgentRunEventMapper {
                                            @Param("limit") int limit);
 
     Integer findMaxSeq(@Param("runId") String runId);
-}
 
+    AgentRunEvent findLatestByRunId(@Param("runId") String runId);
+}

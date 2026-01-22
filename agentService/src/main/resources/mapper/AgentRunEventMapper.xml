@@ -37,5 +37,17 @@
         WHERE run_id = #{runId}
     </select>
 
-</mapper>
+    <select id="findLatestByRunId" resultMap="AgentRunEventResultMap">
+        SELECT id,
+               run_id,
+               seq,
+               event_type,
+               payload_json::text AS payload_json,
+               created_at
+        FROM alphafrog_agent_run_event
+        WHERE run_id = #{runId}
+        ORDER BY seq DESC
+        LIMIT 1
+    </select>
 
+</mapper>

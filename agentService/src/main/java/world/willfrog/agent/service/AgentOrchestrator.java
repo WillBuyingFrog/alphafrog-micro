@@ -2,31 +2,32 @@ package world.willfrog.agent.service;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.ai.PlanningAgent;
-import world.willfrog.agent.ai.SummarizingAgent;
 import world.willfrog.agent.tool.MarketDataTools;
 
 @Service
 @Slf4j
 public class AgentOrchestrator {
 
-    private final PlanningAgent planningAgent;
-    private final SummarizingAgent summarizingAgent;
+    private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
 
-    public AgentOrchestrator(PlanningAgent planningAgent, 
-                             SummarizingAgent summarizingAgent,
+    public AgentOrchestrator(AgentAiServiceFactory aiServiceFactory,
                              MarketDataTools marketDataTools) {
-        this.planningAgent = planningAgent;
-        this.summarizingAgent = summarizingAgent;
+        this.aiServiceFactory = aiServiceFactory;
         this.marketDataTools = marketDataTools;
     }
 
+    /**
+     * 最简 Agent 执行流程（规划 -> 执行 -> 总结）。
+     *
+     * @param userGoal 用户目标
+     * @return 总结结果
+     */
     public String execute(String userGoal) {
         log.info("Receiving user goal: {}", userGoal);
 
         // 1. Plan
-        String planJson = planningAgent.plan(userGoal);
+        String planJson = aiServiceFactory.createPlanningAgent(null, null).plan(userGoal);
         log.info("Generated Plan: {}", planJson);
 
         // 2. Execute (Mock execution for now)
@@ -39,7 +40,7 @@ public class AgentOrchestrator {
         executionLogs.append("Execution: Simulated execution of plan.\n");
 
         // 3. Summarize
-        String summary = summarizingAgent.summarize(executionLogs.toString());
+        String summary = aiServiceFactory.createSummarizingAgent(null, null).summarize(executionLogs.toString());
         log.info("Summary: {}", summary);
 
         return summary;

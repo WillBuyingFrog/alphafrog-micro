@@ -11,9 +11,11 @@ import org.springframework.web.bind.annotation.*;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
@@ -35,6 +37,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunEventResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunEventsPageResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import java.util.ArrayList;
@@ -70,6 +73,8 @@ public class AgentController {
                             .setMessage(request.message())
                             .setContextJson(contextJson)
                             .setIdempotencyKey(nvl(request.idempotencyKey()))
+                            .setModelName(nvl(request.modelName()))
+                            .setEndpointName(nvl(request.endpointName()))
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));
@@ -196,6 +201,36 @@ public class AgentController {
             return ResponseEntity.ok(handleRpcError(e, "获取 agent result"));
         } catch (Exception e) {
             return ResponseEntity.ok(handleError(e, "获取 agent result"));
+        }
+    }
+
+    @GetMapping("/{runId}/status")
+    public ResponseWrapper<AgentRunStatusResponse> status(Authentication authentication,
+                                                          @PathVariable("runId") String runId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunStatusMessage status = agentDubboService.getStatus(
+                    GetAgentRunStatusRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .build()
+            );
+            return ResponseWrapper.success(new AgentRunStatusResponse(
+                    status.getId(),
+                    emptyToNull(status.getStatus()),
+                    emptyToNull(status.getPhase()),
+                    emptyToNull(status.getCurrentTool()),
+                    emptyToNull(status.getLastEventType()),
+                    emptyToNull(status.getLastEventAt()),
+                    emptyToNull(status.getLastEventPayloadJson())
+            ));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 agent status");
+        } catch (Exception e) {
+            return handleError(e, "查询 agent status");
         }
     }
 

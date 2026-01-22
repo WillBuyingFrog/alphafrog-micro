@@ -27,13 +27,31 @@ public class AgentEventService {
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
 
-    public AgentRun createRun(String userId, String message, String contextJson, String idempotencyKey) {
+    /**
+     * 创建新的 run 记录并写入初始事件。
+     *
+     * @param userId         用户 ID
+     * @param message        用户输入
+     * @param contextJson    上下文 JSON
+     * @param idempotencyKey 幂等键
+     * @param modelName      模型名（可为空，后续会用默认）
+     * @param endpointName   端点名（可为空，后续会用默认）
+     * @return 创建后的 run
+     */
+    public AgentRun createRun(String userId,
+                              String message,
+                              String contextJson,
+                              String idempotencyKey,
+                              String modelName,
+                              String endpointName) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
         ext.put("user_goal", message);
         ext.put("context_json", contextJson == null ? "" : contextJson);
         ext.put("idempotency_key", idempotencyKey == null ? "" : idempotencyKey);
+        ext.put("model_name", modelName == null ? "" : modelName);
+        ext.put("endpoint_name", endpointName == null ? "" : endpointName);
 
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -52,6 +70,13 @@ public class AgentEventService {
         return runMapper.findByIdAndUser(runId, userId);
     }
 
+    /**
+     * 判断当前 run 是否还可继续执行。
+     *
+     * @param runId  任务 ID
+     * @param userId 用户 ID
+     * @return 可执行返回 true，否则返回 false
+     */
     public boolean isRunnable(String runId, String userId) {
         AgentRun run = runMapper.findByIdAndUser(runId, userId);
         if (run == null) {
@@ -68,6 +93,14 @@ public class AgentEventService {
         return true;
     }
 
+    /**
+     * 追加事件到 run 的事件流中。
+     *
+     * @param runId     任务 ID
+     * @param userId    用户 ID
+     * @param eventType 事件类型
+     * @param payload   事件负载（对象会序列化为 JSON）
+     */
     public void append(String runId, String userId, String eventType, Object payload) {
         AgentRun run = runMapper.findByIdAndUser(runId, userId);
         if (run == null) {
@@ -84,6 +117,12 @@ public class AgentEventService {
         eventMapper.insert(event);
     }
 
+    /**
+     * 从 ext JSON 中提取用户目标。
+     *
+     * @param extJson ext 字段 JSON
+     * @return user_goal 字段值
+     */
     public String extractUserGoal(String extJson) {
         if (extJson == null || extJson.isBlank()) {
             return "";
@@ -97,15 +136,59 @@ public class AgentEventService {
         }
     }
 
+    /**
+     * 从 ext JSON 中提取模型名。
+     *
+     * @param extJson ext 字段 JSON
+     * @return model_name 字段值
+     */
+    public String extractModelName(String extJson) {
+        return extractField(extJson, "model_name");
+    }
+
+    /**
+     * 从 ext JSON 中提取端点名。
+     *
+     * @param extJson ext 字段 JSON
+     * @return endpoint_name 字段值
+     */
+    public String extractEndpointName(String extJson) {
+        return extractField(extJson, "endpoint_name");
+    }
+
+    /**
+     * 计算下一次 TTL 过期时间。
+     *
+     * @return OffsetDateTime
+     */
     public OffsetDateTime nextTtlExpiresAt() {
         return OffsetDateTime.now().plusMinutes(ttlMinutes);
     }
 
+    /**
+     * 对象转 JSON 字符串。
+     *
+     * @param obj 任意对象
+     * @return JSON 字符串（失败时返回 {}）
+     */
     private String writeJson(Object obj) {
         try {
             return objectMapper.writeValueAsString(obj);
         } catch (Exception e) {
             return "{}";
+        }
+    }
+
+    private String extractField(String extJson, String field) {
+        if (extJson == null || extJson.isBlank()) {
+            return "";
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object v = map.get(field);
+            return v == null ? "" : String.valueOf(v);
+        } catch (Exception e) {
+            return "";
         }
     }
 }

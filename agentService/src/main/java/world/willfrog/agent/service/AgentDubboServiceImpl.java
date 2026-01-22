@@ -12,6 +12,7 @@ import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunEventMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
@@ -21,6 +22,7 @@ import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
@@ -42,8 +44,15 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentRunEventMapper eventMapper;
     private final AgentEventService eventService;
     private final AgentRunExecutor executor;
+    private final AgentLlmResolver llmResolver;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 创建 run 并触发异步执行。
+     *
+     * @param request 创建请求
+     * @return run 信息
+     */
     @Override
     public AgentRunMessage createRun(CreateAgentRunRequest request) {
         String userId = request.getUserId();
@@ -54,17 +63,37 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (message == null || message.isBlank()) {
             throw new IllegalArgumentException("message is required");
         }
-        var run = eventService.createRun(userId, message, request.getContextJson(), request.getIdempotencyKey());
+        llmResolver.resolve(request.getEndpointName(), request.getModelName());
+        var run = eventService.createRun(
+                userId,
+                message,
+                request.getContextJson(),
+                request.getIdempotencyKey(),
+                request.getModelName(),
+                request.getEndpointName()
+        );
         executor.executeAsync(run.getId());
         return toRunMessage(run);
     }
 
+    /**
+     * 获取 run 基本信息。
+     *
+     * @param request 查询请求
+     * @return run 信息
+     */
     @Override
     public AgentRunMessage getRun(GetAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         return toRunMessage(run);
     }
 
+    /**
+     * 列出 run 事件流（分页）。
+     *
+     * @param request 查询请求
+     * @return 事件分页结果
+     */
     @Override
     public ListAgentRunEventsResponse listEvents(ListAgentRunEventsRequest request) {
         requireRun(request.getId(), request.getUserId());
@@ -88,6 +117,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return builder.build();
     }
 
+    /**
+     * 取消 run 执行。
+     *
+     * @param request 取消请求
+     * @return 取消后的 run 信息
+     */
     @Override
     public AgentRunMessage cancelRun(CancelAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
@@ -99,6 +134,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
 
+    /**
+     * 续做已失败或已取消的 run。
+     *
+     * @param request 续做请求
+     * @return 续做后的 run 信息
+     */
     @Override
     public AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
@@ -111,6 +152,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
 
+    /**
+     * 获取 run 的最终结果（若已完成）。
+     *
+     * @param request 查询请求
+     * @return 结果信息
+     */
     @Override
     public AgentRunResultMessage getResult(GetAgentRunResultRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
@@ -133,6 +180,25 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .build();
     }
 
+    /**
+     * 获取 run 当前执行状态（基于最新事件）。
+     *
+     * @param request 查询请求
+     * @return 当前状态
+     */
+    @Override
+    public AgentRunStatusMessage getStatus(GetAgentRunStatusRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        AgentRunEvent latestEvent = eventMapper.findLatestByRunId(run.getId());
+        return toStatusMessage(run, latestEvent);
+    }
+
+    /**
+     * 获取可用工具列表。
+     *
+     * @param request 查询请求
+     * @return 工具列表
+     */
     @Override
     public ListAgentToolsResponse listTools(ListAgentToolsRequest request) {
         if (request.getUserId() == null || request.getUserId().isBlank()) {
@@ -154,15 +220,42 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                         .setDescription("Search for a fund by keyword")
                         .setParametersJson("{\"keyword\":\"string\"}")
                         .build())
+                .addItems(AgentToolMessage.newBuilder()
+                        .setName("getIndexInfo")
+                        .setDescription("Get basic information about an index by its TS code (e.g., 000300.SH)")
+                        .setParametersJson("{\"tsCode\":\"string\"}")
+                        .build())
+                .addItems(AgentToolMessage.newBuilder()
+                        .setName("getIndexDaily")
+                        .setDescription("Get daily index market data for a specific index within a date range")
+                        .setParametersJson("{\"tsCode\":\"string\",\"startDateStr\":\"YYYYMMDD\",\"endDateStr\":\"YYYYMMDD\"}")
+                        .build())
+                .addItems(AgentToolMessage.newBuilder()
+                        .setName("searchIndex")
+                        .setDescription("Search for an index by keyword")
+                        .setParametersJson("{\"keyword\":\"string\"}")
+                        .build())
                 .build();
     }
 
+    /**
+     * 列出 run 的产物列表（当前为 MVP 空实现）。
+     *
+     * @param request 查询请求
+     * @return 产物列表
+     */
     @Override
     public ListAgentArtifactsResponse listArtifacts(ListAgentArtifactsRequest request) {
         requireRun(request.getId(), request.getUserId());
         return ListAgentArtifactsResponse.newBuilder().build();
     }
 
+    /**
+     * 提交用户反馈。
+     *
+     * @param request 反馈请求
+     * @return 空响应
+     */
     @Override
     public AgentEmpty submitFeedback(SubmitAgentFeedbackRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
@@ -175,6 +268,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return AgentEmpty.newBuilder().build();
     }
 
+    /**
+     * 导出 run 结果（当前为 MVP stub）。
+     *
+     * @param request 导出请求
+     * @return 导出响应
+     */
     @Override
     public ExportAgentRunResponse exportRun(ExportAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
@@ -236,6 +335,65 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPayloadJson(nvl(e.getPayloadJson()))
                 .setCreatedAt(e.getCreatedAt() == null ? "" : e.getCreatedAt().toString())
                 .build();
+    }
+
+    private AgentRunStatusMessage toStatusMessage(AgentRun run, AgentRunEvent lastEvent) {
+        String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
+        String currentTool = "";
+        if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
+            currentTool = readToolName(lastEvent.getPayloadJson());
+        }
+        String phase = resolvePhase(run.getStatus(), lastEventType);
+        return AgentRunStatusMessage.newBuilder()
+                .setId(nvl(run.getId()))
+                .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
+                .setPhase(phase)
+                .setCurrentTool(nvl(currentTool))
+                .setLastEventType(lastEventType)
+                .setLastEventAt(lastEvent == null || lastEvent.getCreatedAt() == null ? "" : lastEvent.getCreatedAt().toString())
+                .setLastEventPayloadJson(lastEvent == null ? "" : nvl(lastEvent.getPayloadJson()))
+                .build();
+    }
+
+    private String resolvePhase(AgentRunStatus status, String lastEventType) {
+        if (status == null) {
+            return "";
+        }
+        if (status == AgentRunStatus.COMPLETED) {
+            return "COMPLETED";
+        }
+        if (status == AgentRunStatus.FAILED) {
+            return "FAILED";
+        }
+        if (status == AgentRunStatus.CANCELED) {
+            return "CANCELED";
+        }
+        if ("PLANNING_STARTED".equals(lastEventType)) {
+            return "PLANNING";
+        }
+        if ("TOOL_CALL_STARTED".equals(lastEventType)) {
+            return "EXECUTING_TOOL";
+        }
+        if ("SUMMARIZING_STARTED".equals(lastEventType)) {
+            return "SUMMARIZING";
+        }
+        if ("EXECUTION_STARTED".equals(lastEventType) || "EXECUTION_FINISHED".equals(lastEventType)) {
+            return "EXECUTING";
+        }
+        return status.name();
+    }
+
+    private String readToolName(String payloadJson) {
+        if (payloadJson == null || payloadJson.isBlank()) {
+            return "";
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(payloadJson, Map.class);
+            Object v = map.get("tool_name");
+            return v == null ? "" : String.valueOf(v);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private String nvl(String v) {

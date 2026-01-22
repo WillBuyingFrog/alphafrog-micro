@@ -2,19 +2,29 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
+import dev.langchain4j.agent.tool.ToolSpecifications;
+import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.ToolExecutionResultMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.output.Response;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.ai.PlanningAgent;
-import world.willfrog.agent.ai.SummarizingAgent;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 
+import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.Iterator;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -24,11 +34,15 @@ public class AgentRunExecutor {
 
     private final AgentRunMapper runMapper;
     private final AgentEventService eventService;
-    private final PlanningAgent planningAgent;
-    private final SummarizingAgent summarizingAgent;
+    private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
     private final ObjectMapper objectMapper;
 
+    /**
+     * 异步执行入口，避免阻塞 RPC 请求线程。
+     *
+     * @param runId 任务 ID
+     */
     @Async
     public void executeAsync(String runId) {
         try {
@@ -38,6 +52,11 @@ public class AgentRunExecutor {
         }
     }
 
+    /**
+     * 执行单个 Agent run，使用 OpenRouter Native Tool Calling 循环。
+     *
+     * @param runId 任务 ID
+     */
     public void execute(String runId) {
         AgentRun run = runMapper.findById(runId);
         if (run == null) {
@@ -55,94 +74,108 @@ public class AgentRunExecutor {
                 return;
             }
 
-            runMapper.updateStatus(runId, userId, AgentRunStatus.PLANNING);
-            eventService.append(runId, userId, "PLANNING_STARTED", mapOf("run_id", runId));
+            runMapper.updateStatus(runId, userId, AgentRunStatus.EXECUTING);
+            eventService.append(runId, userId, "EXECUTION_STARTED", mapOf("run_id", runId));
+
+            String endpointName = eventService.extractEndpointName(run.getExt());
+            String modelName = eventService.extractModelName(run.getExt());
+            ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(endpointName, modelName);
 
             String userGoal = eventService.extractUserGoal(run.getExt());
-            String planJson = planningAgent.plan(userGoal);
-            runMapper.updatePlan(runId, userId, AgentRunStatus.EXECUTING, planJson);
-            eventService.append(runId, userId, "PLAN_CREATED", mapOf("plan_json", planJson));
+            
+            // 1. Prepare Tools
+            List<ToolSpecification> toolSpecifications = ToolSpecifications.toolSpecificationsFrom(marketDataTools);
 
-            String executionLog = executePlan(planJson);
-            eventService.append(runId, userId, "EXECUTION_FINISHED", mapOf("log", executionLog));
+            // 2. Prepare Conversation
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage("You are an expert financial agent. Use the provided tools to retrieve market data and answer the user's question accurately. If you cannot find the exact data, try searching with relevant keywords."));
+            messages.add(new UserMessage(userGoal));
 
-            if (!eventService.isRunnable(runId, userId)) {
-                return;
+            // 3. Execution Loop
+            int maxSteps = 15;
+            String finalAnswer = "";
+            String executionLog = "";
+
+            for (int i = 0; i < maxSteps; i++) {
+                if (!eventService.isRunnable(runId, userId)) {
+                    return;
+                }
+
+                // Call LLM
+                Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
+                AiMessage aiMessage = response.content();
+                messages.add(aiMessage);
+
+                if (aiMessage.hasToolExecutionRequests()) {
+                    for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
+                         String toolName = toolRequest.name();
+                         String argsJson = toolRequest.arguments();
+                         
+                         Map<String, Object> startPayload = new HashMap<>();
+                         startPayload.put("tool_name", toolName);
+                         startPayload.put("parameters", safeJson(argsJson));
+                         eventService.append(runId, userId, "TOOL_CALL_STARTED", startPayload);
+                         
+                         Map<String, Object> params = jsonToMap(argsJson);
+                         String result = invokeTool(toolName, params);
+                         
+                         Map<String, Object> finishPayload = new HashMap<>();
+                         finishPayload.put("tool_name", toolName);
+                         finishPayload.put("success", !result.startsWith("Tool invocation error"));
+                         finishPayload.put("result_preview", result);
+                         eventService.append(runId, userId, "TOOL_CALL_FINISHED", finishPayload);
+
+                         messages.add(ToolExecutionResultMessage.from(toolRequest, result));
+                         executionLog += "Tool: " + toolName + "\nResult: " + result + "\n\n";
+                    }
+                } else {
+                    finalAnswer = aiMessage.text();
+                    break;
+                }
+            }
+            
+            if (finalAnswer == null || finalAnswer.isBlank()) {
+                finalAnswer = "Agent stopped after reaching max steps without final answer.";
             }
 
-            runMapper.updateStatus(runId, userId, AgentRunStatus.SUMMARIZING);
-            eventService.append(runId, userId, "SUMMARIZING_STARTED", mapOf("run_id", runId));
-
-            String summarizeInput = "UserGoal: " + userGoal + "\n\nPlan:\n" + planJson + "\n\nExecutionLog:\n" + executionLog;
-            String answer = summarizingAgent.summarize(summarizeInput);
-
+            // 4. Complete
             Map<String, Object> snapshot = new HashMap<>();
             snapshot.put("user_goal", userGoal);
-            snapshot.put("plan_json", safeJson(planJson));
             snapshot.put("execution_log", executionLog);
-            snapshot.put("answer", answer);
+            snapshot.put("answer", finalAnswer);
             String snapshotJson = objectMapper.writeValueAsString(snapshot);
 
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
-            eventService.append(runId, userId, "COMPLETED", mapOf("answer", answer));
+            eventService.append(runId, userId, "COMPLETED", mapOf("answer", finalAnswer));
+
         } catch (Exception e) {
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            log.error("Execution error", e);
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, run.getSnapshotJson(), true, err);
             eventService.append(runId, userId, "FAILED", mapOf("error", err));
         }
     }
 
-    private String executePlan(String planJson) {
-        StringBuilder logBuilder = new StringBuilder();
-        logBuilder.append("Simulated plan execution.\n");
-        if (planJson == null || planJson.isBlank()) {
-            return logBuilder.toString();
-        }
-        try {
-            JsonNode root = objectMapper.readTree(planJson);
-            JsonNode steps = root.get("steps");
-            if (steps == null || !steps.isArray()) {
-                logBuilder.append("No steps field.\n");
-                return logBuilder.toString();
-            }
-
-            int toolCalls = 0;
-            for (JsonNode step : steps) {
-                String stepId = step.has("step_id") ? step.get("step_id").asText() : step.path("stepId").asText("");
-                String desc = step.path("description").asText("");
-                String toolName = step.path("tool_name").asText(step.path("toolName").asText(""));
-                JsonNode paramsNode = step.get("parameters");
-                logBuilder.append("- step ").append(stepId).append(": ").append(desc).append("\n");
-                if (toolName == null || toolName.isBlank()) {
-                    continue;
-                }
-
-                if (toolCalls >= 10) {
-                    logBuilder.append("  tool calls reached limit, skip remaining.\n");
-                    break;
-                }
-
-                Map<String, Object> params = jsonNodeToMap(paramsNode);
-                String toolResult = invokeTool(toolName.trim(), params);
-                toolCalls += 1;
-                logBuilder.append("  tool ").append(toolName).append(" => ").append(toolResult).append("\n");
-            }
-        } catch (Exception e) {
-            logBuilder.append("Plan parse/execute failed: ").append(e.getMessage()).append("\n");
-        }
-        return logBuilder.toString();
-    }
-
+    /**
+     * 工具调用分发（按 tool_name 路由到具体实现）。
+     */
     private String invokeTool(String toolName, Map<String, Object> params) {
         try {
             return switch (toolName) {
-                case "getStockInfo" -> marketDataTools.getStockInfo(str(params.get("tsCode"), params.get("ts_code")));
+                case "getStockInfo" -> marketDataTools.getStockInfo(str(params.get("tsCode"), params.get("ts_code"))); 
                 case "getStockDaily" -> marketDataTools.getStockDaily(
                         str(params.get("tsCode"), params.get("ts_code")),
                         str(params.get("startDateStr"), params.get("start_date")),
                         str(params.get("endDateStr"), params.get("end_date"))
                 );
                 case "searchFund" -> marketDataTools.searchFund(str(params.get("keyword"), params.get("query")));
+                case "getIndexInfo" -> marketDataTools.getIndexInfo(str(params.get("tsCode"), params.get("ts_code")));
+                case "getIndexDaily" -> marketDataTools.getIndexDaily(
+                        str(params.get("tsCode"), params.get("ts_code")),
+                        str(params.get("startDateStr"), params.get("start_date")),
+                        str(params.get("endDateStr"), params.get("end_date"))
+                );
+                case "searchIndex" -> marketDataTools.searchIndex(str(params.get("keyword"), params.get("query")));
                 default -> "Unsupported tool: " + toolName;
             };
         } catch (Exception e) {
@@ -161,6 +194,15 @@ public class AgentRunExecutor {
             }
         }
         return "";
+    }
+
+    private Map<String, Object> jsonToMap(String json) {
+        try {
+             JsonNode node = objectMapper.readTree(json);
+             return jsonNodeToMap(node);
+        } catch (Exception e) {
+            return Map.of();
+        }
     }
 
     private Map<String, Object> jsonNodeToMap(JsonNode node) {
@@ -207,4 +249,3 @@ public class AgentRunExecutor {
         return map;
     }
 }
-
