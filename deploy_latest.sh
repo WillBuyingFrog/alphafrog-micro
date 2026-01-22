@@ -18,6 +18,7 @@ Services:
   domestic-fetch-service
   admin-service
   portfolio-service
+  agent-service
   frontend
 EOF
 }
@@ -29,6 +30,7 @@ ALL_SERVICES=(
   domestic-fetch-service
   admin-service
   portfolio-service
+  agent-service
   frontend
 )
 
@@ -39,6 +41,7 @@ declare -A SERVICE_BUILD=(
   [domestic-fetch-service]="domesticFetchService/docker_build.sh"
   [admin-service]="adminService/docker_build.sh"
   [portfolio-service]="portfolioService/docker_build.sh"
+  [agent-service]="agentService/docker_build.sh"
   [frontend]="frontend/docker_build.sh"
 )
 
