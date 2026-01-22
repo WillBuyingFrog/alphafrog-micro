@@ -61,12 +61,6 @@ public class AiConfig {
                 .logRequests(true)
                 .logResponses(true);
 
-        // 构建 reasoning 自定义参数 (OpenRouter 兼容)
-        Map<String, Object> customParameters = buildReasoningParameters();
-        if (!customParameters.isEmpty()) {
-            builder.customParameters(customParameters);
-        }
-
         return builder.build();
     }
 

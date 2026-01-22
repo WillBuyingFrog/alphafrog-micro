@@ -2,7 +2,7 @@ package world.willfrog.agent.entity;
 
 import lombok.Data;
 import world.willfrog.agent.model.AgentRunStatus;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 public class AgentRun {
@@ -17,9 +17,9 @@ public class AgentRun {
     private String snapshotJson;
     
     private String lastError;
-    private LocalDateTime ttlExpiresAt;
-    private LocalDateTime startedAt;
-    private LocalDateTime updatedAt;
-    private LocalDateTime completedAt;
+    private OffsetDateTime ttlExpiresAt;
+    private OffsetDateTime startedAt;
+    private OffsetDateTime updatedAt;
+    private OffsetDateTime completedAt;
     private String ext; // JSON string
 }

@@ -1,7 +1,7 @@
 package world.willfrog.agent.entity;
 
 import lombok.Data;
-import java.time.LocalDateTime;
+import java.time.OffsetDateTime;
 
 @Data
 public class AgentRunEvent {
@@ -10,5 +10,5 @@ public class AgentRunEvent {
     private Integer seq;
     private String eventType;
     private String payloadJson; // JSON string
-    private LocalDateTime createdAt;
+    private OffsetDateTime createdAt;
 }

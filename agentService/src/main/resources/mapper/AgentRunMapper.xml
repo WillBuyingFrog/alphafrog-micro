@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.agent.mapper.AgentRunMapper">
+
+    <resultMap id="AgentRunResultMap" type="world.willfrog.agent.entity.AgentRun">
+        <id property="id" column="id"/>
+        <result property="userId" column="user_id"/>
+        <result property="status" column="status"/>
+        <result property="currentStep" column="current_step"/>
+        <result property="maxSteps" column="max_steps"/>
+        <result property="planJson" column="plan_json"/>
+        <result property="snapshotJson" column="snapshot_json"/>
+        <result property="lastError" column="last_error"/>
+        <result property="ttlExpiresAt" column="ttl_expires_at"/>
+        <result property="startedAt" column="started_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="completedAt" column="completed_at"/>
+        <result property="ext" column="ext"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="world.willfrog.agent.entity.AgentRun">
+        INSERT INTO alphafrog_agent_run
+        (id, user_id, status, current_step, max_steps, plan_json, snapshot_json, last_error, ttl_expires_at, ext)
+        VALUES
+        (#{id}, #{userId}, #{status}, #{currentStep}, #{maxSteps},
+         CAST(#{planJson} AS jsonb), CAST(#{snapshotJson} AS jsonb), #{lastError}, #{ttlExpiresAt}, CAST(#{ext} AS jsonb))
+    </insert>
+
+    <select id="findById" resultMap="AgentRunResultMap">
+        SELECT id,
+               user_id,
+               status,
+               current_step,
+               max_steps,
+               plan_json::text AS plan_json,
+               snapshot_json::text AS snapshot_json,
+               last_error,
+               ttl_expires_at,
+               started_at,
+               updated_at,
+               completed_at,
+               ext::text AS ext
+        FROM alphafrog_agent_run
+        WHERE id = #{id}
+        LIMIT 1
+    </select>
+
+    <select id="findByIdAndUser" resultMap="AgentRunResultMap">
+        SELECT id,
+               user_id,
+               status,
+               current_step,
+               max_steps,
+               plan_json::text AS plan_json,
+               snapshot_json::text AS snapshot_json,
+               last_error,
+               ttl_expires_at,
+               started_at,
+               updated_at,
+               completed_at,
+               ext::text AS ext
+        FROM alphafrog_agent_run
+        WHERE id = #{id}
+          AND user_id = #{userId}
+        LIMIT 1
+    </select>
+
+    <update id="updateStatus">
+        UPDATE alphafrog_agent_run
+        SET status = #{status},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updatePlan">
+        UPDATE alphafrog_agent_run
+        SET status = #{status},
+            plan_json = CAST(#{planJson} AS jsonb),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updateSnapshot">
+        UPDATE alphafrog_agent_run
+        SET status = #{status},
+            snapshot_json = CAST(#{snapshotJson} AS jsonb),
+            last_error = #{lastError},
+            updated_at = CURRENT_TIMESTAMP
+            <if test="completed">
+                , completed_at = CURRENT_TIMESTAMP
+            </if>
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="resetForResume">
+        UPDATE alphafrog_agent_run
+        SET status = 'RECEIVED',
+            current_step = 0,
+            ttl_expires_at = #{ttlExpiresAt},
+            last_error = NULL,
+            completed_at = NULL,
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+</mapper>

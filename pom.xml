@@ -82,6 +82,7 @@
     </build>
     <modules>
         <module>common</module>
+        <module>agentApi</module>
         <module>domesticStockApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
