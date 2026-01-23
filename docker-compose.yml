@@ -32,6 +32,10 @@ services:
       interval: 5s
       timeout: 3s
       retries: 20
+    deploy:
+      resources:
+        limits:
+          memory: 256M
     networks:
       - alphafrog-network
 
@@ -55,10 +59,16 @@ services:
       KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
       KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
       KAFKA_NUM_PARTITIONS: 3
+      # Memory Optimization
+      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
     ports:
       - "9092:9092"
     volumes:
       - ./data/kafka/data:/var/lib/kafka/data
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
     networks:
       - alphafrog-network
 
@@ -69,6 +79,9 @@ services:
       MODE: standalone
       PREFER_HOST_MODE: hostname
       NACOS_AUTH_ENABLE: "false"
+      # Memory Optimization
+      JVM_XMS: 512m
+      JVM_XMX: 512m
     ports:
       - "8848:8848"
     volumes:
@@ -80,6 +93,10 @@ services:
       timeout: 10s
       retries: 20
       start_period: 10s
+    deploy:
+      resources:
+        limits:
+          memory: 1G
     networks:
       - alphafrog-network
 
@@ -105,8 +122,14 @@ services:
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      # Memory Optimization (Medium)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "50055:50055"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -132,8 +155,14 @@ services:
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      # Memory Optimization (Medium)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "50053:50053"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -162,8 +191,14 @@ services:
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
+      # Memory Optimization (Medium)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "50052:50052"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -196,8 +231,14 @@ services:
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       LOGGING_LEVEL_APP: ${LOGGING_LEVEL_APP:-INFO}
       AF_FETCH_CONCURRENCY: ${AF_FETCH_CONCURRENCY:-3}
+      # Memory Optimization (Medium - Adjusted)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "20882:20882"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -218,6 +259,12 @@ services:
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       NACOS_ADDRESS: nacos
+      # Memory Optimization (Light)
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx256m"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - alphafrog-network
 
@@ -241,9 +288,14 @@ services:
       NACOS_ADDRESS: nacos
       NACOS_USER: ${NACOS_USER:-nacos}
       NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
-
+      # Memory Optimization (Medium)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "50056:50056"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -276,8 +328,14 @@ services:
       AF_AGENT_REASONING_ENABLED: ${AF_AGENT_REASONING_ENABLED:-}
       AF_AGENT_REASONING_EXCLUDE: ${AF_AGENT_REASONING_EXCLUDE:-false}
       LOGGING_LEVEL_AGENT: ${LOGGING_LEVEL_AGENT:-INFO}
+      # Memory Optimization (Heavy)
+      JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1g"
     ports:
       - "50058:50058"
+    deploy:
+      resources:
+        limits:
+          memory: 1.5G
     networks:
       - alphafrog-network
 
@@ -295,6 +353,10 @@ services:
       - /var/run/docker.sock:/var/run/docker.sock
     expose:
       - "8095"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
@@ -313,8 +375,14 @@ services:
       TZ: Asia/Shanghai
       NACOS_ADDRESS: nacos
       AF_SANDBOX_SERVICE_URL: http://python-sandbox-service:8095
+      # Memory Optimization (Light)
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx256m"
     ports:
       - "50060:50060"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
     networks:
       - alphafrog-network
 
@@ -357,8 +425,14 @@ services:
       NACOS_ADDRESS: nacos
       # 可选：覆盖 JWT 密钥（默认值在 frontend 的 application.yml 里）
       # AF_JWT_SECRET: ${AF_JWT_SECRET}
+      # Memory Optimization (Medium)
+      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
       - "8090:8090"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
     networks:
       - alphafrog-network
 
