@@ -281,6 +281,43 @@ services:
     networks:
       - alphafrog-network
 
+  python-sandbox-service:
+    image: alphafrog-python-sandbox:latest
+    build: ./pythonSandboxService
+    container_name: alphafrog-python-sandbox-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    environment:
+      AF_SANDBOX_DATA_DIR: /data/agent_datasets
+      AF_SANDBOX_DEBUG: ${AF_SANDBOX_DEBUG:-false}
+    volumes:
+      - ./data/agent_datasets:/data/agent_datasets
+      - /var/run/docker.sock:/var/run/docker.sock
+    expose:
+      - "8095"
+    networks:
+      - alphafrog-network
+
+  python-sandbox-gateway-service:
+    image: alphafrog-micro-python-sandbox-gateway-service:latest
+    build: ./pythonSandboxGatewayService
+    container_name: alphafrog-python-sandbox-gateway-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_healthy
+      python-sandbox-service:
+        condition: service_started
+    environment:
+      TZ: Asia/Shanghai
+      NACOS_ADDRESS: nacos
+      AF_SANDBOX_SERVICE_URL: http://python-sandbox-service:8095
+    ports:
+      - "50060:50060"
+    networks:
+      - alphafrog-network
+
   frontend:
     image: alphafrog-micro-frontend:latest
     build: ./frontend

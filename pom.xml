@@ -98,5 +98,7 @@
         <module>portfolioService</module>
         <module>frontend</module>
         <module>agentService</module>
+        <module>pythonSandboxApi</module>
+        <module>pythonSandboxGatewayService</module>
     </modules>
 </project>

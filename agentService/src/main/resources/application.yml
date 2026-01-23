@@ -44,6 +44,11 @@ agent:
       # OpenRouter 推荐的可选请求头
       http-referer: ${AF_OPENROUTER_HTTP_REFERER:}
       title: ${AF_OPENROUTER_TITLE:}
+  tools:
+    market-data:
+      dataset:
+        enabled: ${AF_AGENT_MARKET_DATA_DATASET_ENABLED:true}
+        path: ${AF_AGENT_MARKET_DATA_DATASET_PATH:/data/agent_datasets}
 
 langchain4j:
   open-ai:

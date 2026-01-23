@@ -15,6 +15,7 @@ class SandboxConfig:
     docker_backend: str
     workdir: str
     log_level: str
+    sandbox_image: str
 
 
 def load_config() -> SandboxConfig:
@@ -26,6 +27,7 @@ def load_config() -> SandboxConfig:
     docker_backend = os.getenv("AF_SANDBOX_BACKEND", "docker")
     workdir = os.getenv("AF_SANDBOX_WORKDIR", "/sandbox")
     log_level = os.getenv("AF_SANDBOX_LOG_LEVEL", "INFO")
+    sandbox_image = os.getenv("AF_SANDBOX_IMAGE", "alphafrog-sandbox-runtime:latest")
     return SandboxConfig(
         data_dir=data_dir,
         max_concurrency=max_concurrency,
@@ -35,4 +37,5 @@ def load_config() -> SandboxConfig:
         docker_backend=docker_backend,
         workdir=workdir,
         log_level=log_level,
+        sandbox_image=sandbox_image,
     )

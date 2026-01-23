@@ -6,6 +6,9 @@ import org.springframework.stereotype.Component;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 
+import world.willfrog.agent.context.AgentContext;
+import java.util.Arrays;
+import java.util.List;
 import java.util.stream.Collectors;
 
 @Component
@@ -19,6 +22,12 @@ public class MarketDataTools {
 
     @DubboReference
     private DomesticIndexService domesticIndexService;
+
+    private final DatasetWriter datasetWriter;
+
+    public MarketDataTools(DatasetWriter datasetWriter) {
+        this.datasetWriter = datasetWriter;
+    }
 
     /**
      * 查询股票基本信息。
@@ -68,6 +77,20 @@ public class MarketDataTools {
             DomesticStockDailyByTsCodeAndDateRangeResponse response = domesticStockService.getStockDailyByTsCodeAndDateRange(request);
             
             if (response.getItemsCount() > 0) {
+                if (datasetWriter.isEnabled()) {
+                    String runId = AgentContext.getRunId();
+                    String prefix = (runId != null ? runId : "unknown") + "-stock";
+                    List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
+                    
+                    String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
+                            item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(), 
+                            item.getPreClose(), item.getChange(), item.getPctChg(), item.getVol(), item.getAmount()
+                    ));
+                    
+                    return String.format("DATASET_CREATED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)", 
+                            datasetId, response.getItemsCount(), startDateStr, endDateStr, String.join(", ", headers));
+                }
+
                  return response.getItemsList().stream()
                          .limit(10) // Limit to avoid blowing up context
                          .map(item -> String.format("Date: %d, Close: %.2f", item.getTradeDate(), item.getClose()))
@@ -180,6 +203,20 @@ public class MarketDataTools {
             DomesticIndexDailyByTsCodeAndDateRangeResponse response = domesticIndexService.getDomesticIndexDailyByTsCodeAndDateRange(request);
 
             if (response.getItemsCount() > 0) {
+                if (datasetWriter.isEnabled()) {
+                    String runId = AgentContext.getRunId();
+                    String prefix = (runId != null ? runId : "unknown") + "-index";
+                    List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
+
+                    String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
+                            item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(),
+                            item.getPreClose(), item.getChange(), item.getPctChg(), item.getVol(), item.getAmount()
+                    ));
+
+                    return String.format("DATASET_CREATED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)",
+                            datasetId, response.getItemsCount(), startDateStr, endDateStr, String.join(", ", headers));
+                }
+
                 return response.getItemsList().stream()
                         .limit(10)
                         .map(item -> String.format("Date: %d, Close: %.2f", item.getTradeDate(), item.getClose()))

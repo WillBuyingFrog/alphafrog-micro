@@ -58,6 +58,7 @@ def run_in_sandbox(
 
     with SandboxSession(
         lang="python",
+        image=config.sandbox_image,
         backend=config.docker_backend,
         runtime_configs=runtime_configs,
         workdir=config.workdir,

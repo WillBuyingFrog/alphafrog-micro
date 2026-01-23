@@ -1,0 +1,4 @@
+services:
+  python-sandbox-service:
+    ports:
+      - "8095:8095"

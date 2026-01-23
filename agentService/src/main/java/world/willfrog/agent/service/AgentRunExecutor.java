@@ -20,6 +20,8 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
+import world.willfrog.agent.tool.PythonSandboxTools;
+import world.willfrog.agent.context.AgentContext;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -36,6 +38,7 @@ public class AgentRunExecutor {
     private final AgentEventService eventService;
     private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
+    private final PythonSandboxTools pythonSandboxTools;
     private final ObjectMapper objectMapper;
 
     /**
@@ -70,6 +73,8 @@ public class AgentRunExecutor {
 
         String userId = run.getUserId();
         try {
+            AgentContext.setRunId(runId); // Set Context
+
             if (!eventService.isRunnable(runId, userId)) {
                 return;
             }
@@ -84,7 +89,9 @@ public class AgentRunExecutor {
             String userGoal = eventService.extractUserGoal(run.getExt());
             
             // 1. Prepare Tools
-            List<ToolSpecification> toolSpecifications = ToolSpecifications.toolSpecificationsFrom(marketDataTools);
+            List<ToolSpecification> toolSpecifications = new ArrayList<>();
+            toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
+            toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
 
             // 2. Prepare Conversation
             List<ChatMessage> messages = new ArrayList<>();
@@ -94,6 +101,9 @@ public class AgentRunExecutor {
                 IMPORTANT: You typically do NOT know the exact TS codes (e.g., 000300.SH) in the database. 
                 You MUST always use 'searchStock', 'searchFund', or 'searchIndex' to find the correct ts_code BEFORE calling 'getStockDaily', 'getIndexDaily', or other code-based tools. 
                 Never guess the code.
+                
+                When you get a 'dataset_id' from a market data tool, you MUST use the 'executePython' tool to analyze it.
+                The python environment has 'numpy', 'pandas', 'matplotlib', and 'scipy' pre-installed. Please prioritize using these libraries for data processing and calculation.
                 """));
             messages.add(new UserMessage(userGoal));
 
@@ -159,6 +169,8 @@ public class AgentRunExecutor {
             log.error("Execution error", e);
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, run.getSnapshotJson(), true, err);
             eventService.append(runId, userId, "FAILED", mapOf("error", err));
+        } finally {
+            AgentContext.clear(); // Clear Context
         }
     }
 
@@ -192,6 +204,12 @@ public class AgentRunExecutor {
                 );
                 case "searchIndex" -> marketDataTools.searchIndex(
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
+                case "executePython" -> pythonSandboxTools.executePython(
+                        str(params.get("code"), params.get("arg0")),
+                        str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
+                        str(params.get("libraries"), params.get("arg2")),
+                        params.get("timeout_seconds") != null ? Integer.parseInt(str(params.get("timeout_seconds"), params.get("arg3"))) : null
                 );
                 default -> "Unsupported tool: " + toolName;
             };
