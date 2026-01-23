@@ -57,7 +57,6 @@ declare -A SERVICE_MODULE=(
   [admin-service]="adminService"
   [portfolio-service]="portfolioService"
   [agent-service]="agentService"
-  [python-sandbox-service]="pythonSandboxService" 
   [python-sandbox-gateway-service]="pythonSandboxGatewayService"
   [frontend]="frontend"
 )
@@ -124,10 +123,15 @@ if [[ ${#SERVICES[@]} -eq 0 ]]; then
 else
   MODULES=()
   for svc in "${SELECTED[@]}"; do
-    MODULES+=("${SERVICE_MODULE[$svc]}")
+    mod="${SERVICE_MODULE[$svc]:-}"
+    if [[ -n "$mod" ]]; then
+      MODULES+=("$mod")
+    fi
   done
-  MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
-  mvn -DskipTests -pl "$MODULE_LIST" -am compile install
+  if [[ ${#MODULES[@]} -gt 0 ]]; then
+    MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
+    mvn -DskipTests -pl "$MODULE_LIST" -am compile install
+  fi
 fi
 
 for svc in "${SELECTED[@]}"; do
