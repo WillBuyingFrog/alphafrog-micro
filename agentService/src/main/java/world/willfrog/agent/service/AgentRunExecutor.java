@@ -208,8 +208,9 @@ public class AgentRunExecutor {
                 case "executePython" -> pythonSandboxTools.executePython(
                         str(params.get("code"), params.get("arg0")),
                         str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
-                        str(params.get("libraries"), params.get("arg2")),
-                        params.get("timeout_seconds") != null ? Integer.parseInt(str(params.get("timeout_seconds"), params.get("arg3"))) : null
+                        str(params.get("dataset_ids"), params.get("datasetIds"), params.get("arg2")),
+                        str(params.get("libraries"), params.get("arg3")),
+                        params.get("timeout_seconds") != null ? Integer.parseInt(str(params.get("timeout_seconds"), params.get("arg4"))) : null
                 );
                 default -> "Unsupported tool: " + toolName;
             };

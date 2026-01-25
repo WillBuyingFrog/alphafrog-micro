@@ -17,6 +17,9 @@ class TaskStatus(str, Enum):
 
 class ExecuteRequest(BaseModel):
     dataset_id: str = Field(..., description="Dataset identifier")
+    dataset_ids: Optional[List[str]] = Field(
+        default=None, description="Additional dataset identifiers to mount"
+    )
     code: str = Field(..., description="Python code to execute")
     files: Optional[List[str]] = Field(
         default=None, description="Files under dataset_id to copy into sandbox"

@@ -15,14 +15,18 @@ public class PythonSandboxTools {
     @DubboReference
     private PythonSandboxService pythonSandboxService;
 
-    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
-    public String executePython(String code, String dataset_id, String libraries, Integer timeout_seconds) {
+    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: dataset_ids (comma-separated extra dataset ids), libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Dataset files are mounted under /sandbox/input/<dataset_id>/ (default: <dataset_id>.csv and <dataset_id>.meta.json). Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
+    public String executePython(String code, String dataset_id, String dataset_ids, String libraries, Integer timeout_seconds) {
         try {
             log.info("Executing python task for dataset: {}", dataset_id);
             
             ExecuteRequest.Builder requestBuilder = ExecuteRequest.newBuilder()
                     .setCode(code)
                     .setDatasetId(dataset_id);
+
+            for (String extraId : parseDatasetIds(dataset_ids)) {
+                requestBuilder.addDatasetIds(extraId);
+            }
 
             if (libraries != null && !libraries.isBlank()) {
                 for (String lib : libraries.split(",")) {
@@ -76,6 +80,24 @@ public class PythonSandboxTools {
             log.error("Execute python tool error", e);
             return "Tool Execution Error: " + e.getMessage();
         }
+    }
+
+    private String[] parseDatasetIds(String datasetIds) {
+        if (datasetIds == null) {
+            return new String[0];
+        }
+        String trimmed = datasetIds.trim();
+        if (trimmed.isEmpty()) {
+            return new String[0];
+        }
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            trimmed = trimmed.substring(1, trimmed.length() - 1);
+        }
+        return java.util.Arrays.stream(trimmed.split(","))
+                .map(String::trim)
+                .filter(s -> !s.isEmpty())
+                .distinct()
+                .toArray(String[]::new);
     }
 
     private String formatResult(TaskResultResponse result) {

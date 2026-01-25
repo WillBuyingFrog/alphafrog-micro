@@ -36,25 +36,38 @@ def _list_files(dataset_dir: Path, files: List[str] | None) -> List[Path]:
     return [path for path in dataset_dir.iterdir() if path.is_file()]
 
 
+def _normalize_dataset_ids(primary: str, extra: List[str] | None) -> List[str]:
+    ids: List[str] = []
+    for ds_id in [primary, *(extra or [])]:
+        if not ds_id:
+            continue
+        cleaned = ds_id.strip()
+        if not cleaned or cleaned in ids:
+            continue
+        ids.append(cleaned)
+    return ids
+
+
 def run_in_sandbox(
     config: SandboxConfig,
     dataset_id: str,
+    dataset_ids: List[str] | None,
     code: str,
     files: List[str] | None,
     libraries: List[str] | None,
     timeout_seconds: float | None,
 ) -> dict:
-    dataset_dir = _resolve_dataset_dir(config, dataset_id)
-    files_to_copy = _list_files(dataset_dir, files)
+    dataset_id_list = _normalize_dataset_ids(dataset_id, dataset_ids)
 
     runtime_configs = {
         "mem_limit": config.memory_limit,
         "memswap_limit": config.memswap_limit,
     }
 
-    dataset_mount = f"{config.workdir}/input/{dataset_id}"
     timeout = timeout_seconds or config.execution_timeout_seconds
     libraries = libraries or ["numpy"]
+
+    primary_mount = f"{config.workdir}/input/{dataset_id}"
 
     with SandboxSession(
         lang="python",
@@ -64,10 +77,14 @@ def run_in_sandbox(
         workdir=config.workdir,
         execution_timeout=timeout,
     ) as session:
-        session.execute_command(f"mkdir -p {dataset_mount}")
-        for file_path in files_to_copy:
-            dest = f"{dataset_mount}/{file_path.name}"
-            session.copy_to_runtime(str(file_path), dest)
+        for ds_id in dataset_id_list:
+            dataset_dir = _resolve_dataset_dir(config, ds_id)
+            files_to_copy = _list_files(dataset_dir, files)
+            dataset_mount = f"{config.workdir}/input/{ds_id}"
+            session.execute_command(f"mkdir -p {dataset_mount}")
+            for file_path in files_to_copy:
+                dest = f"{dataset_mount}/{file_path.name}"
+                session.copy_to_runtime(str(file_path), dest)
 
         result = session.run(code, libraries=libraries, timeout=timeout)
 
@@ -75,5 +92,5 @@ def run_in_sandbox(
         "exit_code": result.exit_code,
         "stdout": result.stdout or "",
         "stderr": result.stderr or "",
-        "dataset_dir": dataset_mount,
+        "dataset_dir": primary_mount,
     }

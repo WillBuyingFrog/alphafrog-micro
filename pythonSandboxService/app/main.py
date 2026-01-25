@@ -51,6 +51,7 @@ async def process_task(task: Task):
             run_in_sandbox,
             config,
             task.request.dataset_id,
+            task.request.dataset_ids,
             task.request.code,
             task.request.files,
             task.request.libraries,

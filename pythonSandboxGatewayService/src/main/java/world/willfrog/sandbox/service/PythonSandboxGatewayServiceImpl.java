@@ -30,6 +30,7 @@ public class PythonSandboxGatewayServiceImpl extends DubboPythonSandboxServiceTr
         try {
             HttpExecuteRequest httpRequest = new HttpExecuteRequest();
             httpRequest.setDataset_id(request.getDatasetId());
+            httpRequest.setDataset_ids(request.getDatasetIdsList());
             httpRequest.setCode(request.getCode());
             httpRequest.setFiles(request.getFilesList());
             httpRequest.setLibraries(request.getLibrariesList());
@@ -123,6 +124,7 @@ public class PythonSandboxGatewayServiceImpl extends DubboPythonSandboxServiceTr
     @Data
     static class HttpExecuteRequest {
         private String dataset_id;
+        private List<String> dataset_ids;
         private String code;
         private List<String> files;
         private List<String> libraries;

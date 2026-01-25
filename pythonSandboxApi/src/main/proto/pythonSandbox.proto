@@ -12,6 +12,7 @@ message ExecuteRequest {
   repeated string files = 3;
   repeated string libraries = 4;
   double timeoutSeconds = 5;
+  repeated string datasetIds = 6;
 }
 
 message ExecuteResponse {
