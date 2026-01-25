@@ -48,7 +48,7 @@ def run_in_sandbox(
     files_to_copy = _list_files(dataset_dir, files)
 
     runtime_configs = {
-        "memory": config.memory_limit,
+        "mem_limit": config.memory_limit,
         "memswap_limit": config.memswap_limit,
     }
 
