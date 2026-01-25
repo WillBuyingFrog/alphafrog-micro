@@ -9,8 +9,6 @@ from typing import Dict
 
 from fastapi import FastAPI, HTTPException
 
-from llm_sandbox.exceptions import SandboxTimeoutError
-
 from .config import load_config
 from .models import CreateTaskResponse, ExecuteRequest, ExecuteResult, Task, TaskStatus
 from .sandbox_runner import run_in_sandbox

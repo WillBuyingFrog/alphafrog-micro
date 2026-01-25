@@ -15,7 +15,7 @@ public class PythonSandboxTools {
     @DubboReference
     private PythonSandboxService pythonSandboxService;
 
-    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. NOTE: Only 'numpy', 'pandas', 'matplotlib', and 'scipy' are pre-installed and supported for efficient data calculation and analysis. Please prioritize using these libraries.")
+    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
     public String executePython(String code, String dataset_id, String libraries, Integer timeout_seconds) {
         try {
             log.info("Executing python task for dataset: {}", dataset_id);
