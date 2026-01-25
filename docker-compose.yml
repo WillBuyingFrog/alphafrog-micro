@@ -330,6 +330,8 @@ services:
       LOGGING_LEVEL_AGENT: ${LOGGING_LEVEL_AGENT:-INFO}
       # Memory Optimization (Heavy)
       JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1g"
+    volumes:
+      - ./data/agent_datasets:/data/agent_datasets
     ports:
       - "50058:50058"
     deploy:
