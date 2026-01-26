@@ -16,8 +16,8 @@
         <dubbo.version>3.3.2</dubbo.version>
         <spring-boot.version>3.2.3</spring-boot.version>
         <spring-cloud.version>2022.0.4</spring-cloud.version>
-        <protobuf-java.version>3.22.3</protobuf-java.version>
-        <protoc.version>3.22.3</protoc.version>
+        <protobuf-java.version>3.25.3</protobuf-java.version>
+        <protoc.version>3.25.3</protoc.version>
     </properties>
     <dependencyManagement>
         <dependencies>
@@ -46,6 +46,14 @@
                     <version>3.13.0</version>
                 </plugin>
                 <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-surefire-plugin</artifactId>
+                    <version>3.2.5</version>
+                    <configuration>
+                        <useModulePath>false</useModulePath>
+                    </configuration>
+                </plugin>
+                <plugin>
                     <groupId>org.springframework.boot</groupId>
                     <artifactId>spring-boot-maven-plugin</artifactId>
                     <version>${spring-boot.version}</version>
@@ -53,17 +61,19 @@
             </plugins>
         </pluginManagement>
         <plugins>
-            <plugin>
-                <groupId>org.apache.maven.plugins</groupId>
-                <artifactId>maven-compiler-plugin</artifactId>
-                <configuration>
-                    <!-- 确保 Lombok 等注解处理器在 Maven 编译期生效 -->
-                    <proc>full</proc>
-                    <release>${maven.compiler.release}</release>
-                    <!-- 显式声明注解处理器，帮助 IDE/Maven 一致识别 Lombok 生成代码 -->
-                    <annotationProcessorPaths>
-                        <path>
-                            <groupId>org.projectlombok</groupId>
+                <plugin>
+                    <groupId>org.apache.maven.plugins</groupId>
+                    <artifactId>maven-compiler-plugin</artifactId>
+                    <configuration>
+                        <!-- 确保 Lombok 等注解处理器在 Maven 编译期生效 -->
+                        <proc>full</proc>
+                        <release>${maven.compiler.release}</release>
+                        <encoding>${project.build.sourceEncoding}</encoding>
+                        <parameters>true</parameters>
+                        <!-- 显式声明注解处理器，帮助 IDE/Maven 一致识别 Lombok 生成代码 -->
+                        <annotationProcessorPaths>
+                            <path>
+                                <groupId>org.projectlombok</groupId>
                             <artifactId>lombok</artifactId>
                         </path>
                     </annotationProcessorPaths>
@@ -72,18 +82,23 @@
         </plugins>
     </build>
     <modules>
+        <module>common</module>
+        <module>agentApi</module>
+        <module>domesticStockApi</module>
+        <module>domesticFundApi</module>
+        <module>domesticIndexApi</module>
+        <module>adminApi</module>
+        <module>portfolioApi</module>
+        <module>portfolioSummaryApi</module>
         <module>domesticIndexService</module>
         <module>domesticFundService</module>
         <module>domesticStockService</module>
         <module>domesticFetchService</module>
-        <module>common</module>
-        <module>interface</module>
-        <module>frontend</module>
+        <module>adminService</module>
         <module>portfolioService</module>
-        <module>domesticStockApi</module>
-        <module>domesticFundApi</module>
-        <module>domesticIndexApi</module>
-        <module>portfolioSummaryApi</module>
-        <module>portfolioApi</module>
+        <module>frontend</module>
+        <module>agentService</module>
+        <module>pythonSandboxApi</module>
+        <module>pythonSandboxGatewayService</module>
     </modules>
 </project>

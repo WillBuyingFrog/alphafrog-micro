@@ -1,0 +1,19 @@
+server:
+  port: 18095
+
+spring:
+  application:
+    name: python-sandbox-gateway-service
+
+dubbo:
+  application:
+    name: python-sandbox-gateway-service
+  protocol:
+    name: tri
+    port: 50060
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+
+sandbox:
+  service:
+    url: ${AF_SANDBOX_SERVICE_URL:http://localhost:8095} 

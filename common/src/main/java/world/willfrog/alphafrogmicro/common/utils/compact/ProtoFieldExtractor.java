@@ -85,6 +85,7 @@ public class ProtoFieldExtractor {
         if (message == null) {
             return Collections.emptyList();
         }
+        FieldMapping safeMapping = mapping == null ? new FieldMapping() : mapping;
         
         Descriptors.Descriptor descriptor = message.getDescriptorForType();
         List<Descriptors.FieldDescriptor> fieldDescriptors = descriptor.getFields();
@@ -95,12 +96,12 @@ public class ProtoFieldExtractor {
             String fieldName = fieldDescriptor.getName();
             
             // 检查是否需要排除该字段
-            if (mapping.getExcludes().contains(fieldName)) {
+            if (safeMapping.getExcludes().contains(fieldName)) {
                 continue;
             }
             
             // 获取字段别名
-            String alias = mapping.getAliases().getOrDefault(fieldName, fieldName);
+            String alias = safeMapping.getAliases().getOrDefault(fieldName, fieldName);
             
             FieldInfo fieldInfo = new FieldInfo(
                 fieldName,
@@ -115,10 +116,10 @@ public class ProtoFieldExtractor {
         }
         
         // 根据指定的顺序排序
-        if (!mapping.getOrders().isEmpty()) {
+        if (!safeMapping.getOrders().isEmpty()) {
             fieldInfos.sort((a, b) -> {
-                int indexA = mapping.getOrders().indexOf(a.getName());
-                int indexB = mapping.getOrders().indexOf(b.getName());
+                int indexA = safeMapping.getOrders().indexOf(a.getName());
+                int indexB = safeMapping.getOrders().indexOf(b.getName());
                 
                 // 如果都在排序列表中，按列表顺序
                 if (indexA >= 0 && indexB >= 0) {
@@ -207,8 +208,17 @@ public class ProtoFieldExtractor {
         if (message == null || repeatedFieldName == null) {
             return Collections.emptyList();
         }
-        
-        Object fieldValue = getFieldValue(message, repeatedFieldName);
+
+        Descriptors.FieldDescriptor fieldDescriptor = message.getDescriptorForType().findFieldByName(repeatedFieldName);
+        if (fieldDescriptor == null) {
+            return Collections.emptyList();
+        }
+        if (!fieldDescriptor.isRepeated()) {
+            log.debug("Field {} is not a repeated field", repeatedFieldName);
+            return Collections.emptyList();
+        }
+
+        Object fieldValue = message.getField(fieldDescriptor);
         if (fieldValue == null) {
             return Collections.emptyList();
         }

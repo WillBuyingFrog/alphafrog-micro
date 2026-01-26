@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.agent.mapper.AgentRunEventMapper">
+
+    <resultMap id="AgentRunEventResultMap" type="world.willfrog.agent.entity.AgentRunEvent">
+        <id property="id" column="id"/>
+        <result property="runId" column="run_id"/>
+        <result property="seq" column="seq"/>
+        <result property="eventType" column="event_type"/>
+        <result property="payloadJson" column="payload_json"/>
+        <result property="createdAt" column="created_at"/>
+    </resultMap>
+
+    <insert id="insert" parameterType="world.willfrog.agent.entity.AgentRunEvent" useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO alphafrog_agent_run_event (run_id, seq, event_type, payload_json)
+        VALUES (#{runId}, #{seq}, #{eventType}, CAST(#{payloadJson} AS jsonb))
+    </insert>
+
+    <select id="listByRunIdAfterSeq" resultMap="AgentRunEventResultMap">
+        SELECT id,
+               run_id,
+               seq,
+               event_type,
+               payload_json::text AS payload_json,
+               created_at
+        FROM alphafrog_agent_run_event
+        WHERE run_id = #{runId}
+          AND seq &gt; #{afterSeq}
+        ORDER BY seq ASC
+        LIMIT #{limit}
+    </select>
+
+    <select id="findMaxSeq" resultType="int">
+        SELECT COALESCE(MAX(seq), 0)
+        FROM alphafrog_agent_run_event
+        WHERE run_id = #{runId}
+    </select>
+
+    <select id="findLatestByRunId" resultMap="AgentRunEventResultMap">
+        SELECT id,
+               run_id,
+               seq,
+               event_type,
+               payload_json::text AS payload_json,
+               created_at
+        FROM alphafrog_agent_run_event
+        WHERE run_id = #{runId}
+        ORDER BY seq DESC
+        LIMIT 1
+    </select>
+
+</mapper>

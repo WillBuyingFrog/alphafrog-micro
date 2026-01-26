@@ -1,0 +1,76 @@
+spring:
+  application:
+    name: agent-service
+  datasource:
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST:localhost}:${AF_DB_MAIN_PORT:5432}/${AF_DB_MAIN_DATABASE:alphafrog}
+    username: ${AF_DB_MAIN_USER:postgres}
+    password: ${AF_DB_MAIN_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+
+mybatis:
+  mapper-locations: classpath:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+dubbo:
+  application:
+    name: agent-service
+  protocol:
+    name: tri
+    port: 50058
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  consumer:
+    check: false
+
+agent:
+  llm:
+    # 默认模型与端点（用于未指定 model/endpoint 的请求）
+    default-endpoint: openrouter
+    default-model: openai/gpt-5.2 
+    # 允许使用的模型列表（请求不在此列表内将被拒绝）
+    models:
+      - openai/gpt-5.2
+      - openai/gpt-5.1
+      - google/gemini-3-pro-preview
+      - qwen/qwen3-max
+    # 端点名到 base_url 的显式映射
+    endpoints:
+      openrouter:
+        base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
+      openai:
+        base-url: https://api.openai.com/v1
+    openrouter:
+      # OpenRouter 推荐的可选请求头
+      http-referer: ${AF_OPENROUTER_HTTP_REFERER:}
+      title: ${AF_OPENROUTER_TITLE:}
+  tools:
+    market-data:
+      dataset:
+        enabled: ${AF_AGENT_MARKET_DATA_DATASET_ENABLED:true}
+        path: ${AF_AGENT_MARKET_DATA_DATASET_PATH:/data/agent_datasets}
+
+langchain4j:
+  open-ai:
+    api-key: ${AF_AGENT_API_KEY:demo}
+    base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
+    model-name: ${AF_AGENT_MODEL_NAME:openai/gpt-4o}
+    max-tokens: ${AF_AGENT_MAX_TOKENS:4096}
+    temperature: ${AF_AGENT_TEMPERATURE:0.7}
+    # Reasoning 配置 (OpenRouter 兼容)
+    # 参考: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens
+    reasoning:
+      # effort: xhigh, high, medium, low, minimal, none (用于 OpenAI o系列, Grok)
+      effort: ${AF_AGENT_REASONING_EFFORT:#{null}}
+      # max-tokens: 直接指定 reasoning token 数 (用于 Anthropic Claude, Gemini)
+      max-tokens: ${AF_AGENT_REASONING_MAX_TOKENS:#{null}}
+      # exclude: 是否在响应中排除 reasoning 内容
+      exclude: ${AF_AGENT_REASONING_EXCLUDE:false}
+      # enabled: 显式启用 reasoning (用于 DeepSeek)
+      enabled: ${AF_AGENT_REASONING_ENABLED:#{null}}
+
+logging:
+  level:
+    world.willfrog.agent: ${LOGGING_LEVEL_AGENT:INFO}
+    dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:DEBUG}
+    dev.ai4j.openai4j: ${LOGGING_LEVEL_OPENAI4J:${LOGGING_LEVEL_AGENT:INFO}}

@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticFundStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundFetchServiceTriple.DomesticFundFetchServiceImplBase;
 
 import java.util.HashMap;
@@ -47,7 +47,9 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "fund_basic");
-        queryParams.put("market", market);
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
         queryParams.put("offset", offset);
         queryParams.put("limit", limit);
         params.put("params", queryParams);

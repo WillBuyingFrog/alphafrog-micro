@@ -8,7 +8,7 @@ import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticTradeCalendarStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticTradeCalendarFetchServiceTriple.*;
 
 import java.util.HashMap;
@@ -29,8 +29,8 @@ public class DomesticTradeCalendarFetchService extends DomesticTradeCalendarFetc
     }
 
     @Override
-    public DomesticIndex.DomesticTradeCalendarFetchByDateRangeResponse fetchDomesticTradeCalendarByDateRange(
-            DomesticIndex.DomesticTradeCalendarFetchByDateRangeRequest request
+    public DomesticTradeCalendarFetchByDateRangeResponse fetchDomesticTradeCalendarByDateRange(
+            DomesticTradeCalendarFetchByDateRangeRequest request
     ) {
         long startDateTimestamp = request.getStartDate();
         long endDateTimestamp = request.getEndDate();
@@ -55,7 +55,7 @@ public class DomesticTradeCalendarFetchService extends DomesticTradeCalendarFetc
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
         if (response == null) {
-            return DomesticIndex.DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
+            return DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
                     .setStatus("failure")
                     .setFetchedItemsCount(-1)
                     .build();
@@ -67,12 +67,12 @@ public class DomesticTradeCalendarFetchService extends DomesticTradeCalendarFetc
         int result = domesticTradeCalendarStoreUtils.storeDomesticTradeCalendarByRawTuShareOutput(data, fields);
 
         if (result < 0) {
-            return DomesticIndex.DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
+            return DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
                     .setStatus("failure")
                     .setFetchedItemsCount(-1)
                     .build();
         } else {
-            return DomesticIndex.DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
+            return DomesticTradeCalendarFetchByDateRangeResponse.newBuilder()
                     .setStatus("success")
                     .setFetchedItemsCount(result)
                     .build();

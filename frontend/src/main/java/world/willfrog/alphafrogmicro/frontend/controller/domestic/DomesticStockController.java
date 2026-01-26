@@ -12,7 +12,7 @@ import org.springframework.web.bind.annotation.RequestParam;
 import world.willfrog.alphafrogmicro.common.dto.compact.CompactMeta;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonConverter;
 import world.willfrog.alphafrogmicro.common.utils.compact.CompactJsonFormatter;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticStockService;
 
 @Controller

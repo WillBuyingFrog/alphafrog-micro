@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundPortfolioDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundNav;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundPortfolio;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticFund.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundServiceTriple.DomesticFundServiceImplBase;
 
 import java.util.List;

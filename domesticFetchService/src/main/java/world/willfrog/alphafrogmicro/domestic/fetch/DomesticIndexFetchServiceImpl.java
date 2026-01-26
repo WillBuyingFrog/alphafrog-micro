@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticIndex.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
 import java.util.HashMap;
@@ -46,7 +46,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "index_basic");
-        queryParams.put("market", market);
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
         queryParams.put("limit", limit);
         queryParams.put("offset", offset);
         params.put("fields", "ts_code,name,fullname,market,publisher,index_type," +

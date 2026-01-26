@@ -1,0 +1,5 @@
+ALTER TABLE alphafrog_strategy_backtest_run
+    ADD COLUMN IF NOT EXISTS queued_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS started_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS finished_at TIMESTAMPTZ,
+    ADD COLUMN IF NOT EXISTS error_message TEXT;

@@ -9,7 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticStockStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
-import world.willfrog.alphafrogmicro.domestic.idl.DomesticStock.*;
+import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockFetchServiceTriple.*;
 
 import java.util.HashMap;
@@ -98,7 +98,9 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "stock_basic");
-        queryParams.put("exchange", market);
+        if (market != null && !market.isBlank()) {
+            queryParams.put("exchange", market);
+        }
         queryParams.put("limit", limit);
         queryParams.put("offset", offset);
         params.put("fields", "ts_code,symbol,name,area,industry,fullname,enname,cnspell,market,exchange,curr_type," +

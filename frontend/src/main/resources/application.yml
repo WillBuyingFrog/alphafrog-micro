@@ -13,6 +13,9 @@ spring:
     bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
     admin:
       auto-create: true
+    producer:
+      properties:
+        partitioner.class: org.apache.kafka.clients.producer.RoundRobinPartitioner
     consumer:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
@@ -34,6 +37,9 @@ jwt:
   expiration: ${AF_JWT_EXPIRATION:86400000}
   header: Authorization
   token-prefix: Bearer
+
+cors:
+  allowed-origins: ${AF_CORS_ALLOWED_ORIGINS:http://localhost:31127}
 
 security:
   rate-limit:

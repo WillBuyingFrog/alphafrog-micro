@@ -16,7 +16,7 @@
         <dependency>
             <groupId>junit</groupId>
             <artifactId>junit</artifactId>
-            <version>3.8.1</version>
+            <version>4.13.2</version>
             <scope>test</scope>
         </dependency>
 
@@ -123,6 +123,7 @@
                 <artifactId>protobuf-maven-plugin</artifactId>
                 <version>0.6.1</version>
                 <configuration>
+                    <skip>true</skip>
                     <protocArtifact>com.google.protobuf:protoc:${protoc.version}:exe:${os.detected.classifier}</protocArtifact>
                     <outputDirectory>build/generated/source/proto/main/java</outputDirectory>
                     <protoSourceRoot>${project.basedir}/../domesticFundApi/src/main/proto</protoSourceRoot>
@@ -143,24 +144,6 @@
                         <goals>
                             <goal>compile</goal>
                         </goals>
-                    </execution>
-                </executions>
-            </plugin>
-            <plugin>
-                <groupId>org.codehaus.mojo</groupId>
-                <artifactId>build-helper-maven-plugin</artifactId>
-                <version>3.3.0</version>
-                <executions>
-                    <execution>
-                        <phase>generate-sources</phase>
-                        <goals>
-                            <goal>add-source</goal>
-                        </goals>
-                        <configuration>
-                            <sources>
-                                <source>build/generated/source/proto/main/java</source>
-                            </sources>
-                        </configuration>
                     </execution>
                 </executions>
             </plugin>

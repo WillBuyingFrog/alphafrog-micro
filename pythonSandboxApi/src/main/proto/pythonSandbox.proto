@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.sandbox.idl;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.sandbox.idl";
+option java_outer_classname = "PythonSandboxProto";
+
+message ExecuteRequest {
+  string datasetId = 1;
+  string code = 2;
+  repeated string files = 3;
+  repeated string libraries = 4;
+  double timeoutSeconds = 5;
+  repeated string datasetIds = 6;
+}
+
+message ExecuteResponse {
+  string taskId = 1;
+  string status = 2;
+  string error = 3;
+}
+
+message GetTaskStatusRequest {
+  string taskId = 1;
+}
+
+message TaskStatusResponse {
+  string taskId = 1;
+  string status = 2; // QUEUED, RUNNING, SUCCEEDED, FAILED, CANCELED
+  string startedAt = 3;
+  string finishedAt = 4;
+  string error = 5;
+}
+
+message GetTaskResultRequest {
+  string taskId = 1;
+}
+
+message TaskResultResponse {
+  string taskId = 1;
+  string status = 2;
+  int32 exitCode = 3;
+  string stdout = 4;
+  string stderr = 5;
+  string datasetDir = 6;
+  string error = 7;
+}
+
+service PythonSandboxService {
+  rpc createTask(ExecuteRequest) returns (ExecuteResponse);
+  rpc getTaskStatus(GetTaskStatusRequest) returns (TaskStatusResponse);
+  rpc getTaskResult(GetTaskResultRequest) returns (TaskResultResponse);
+}

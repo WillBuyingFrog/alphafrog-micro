@@ -1,0 +1,23 @@
+spring:
+  application:
+    name: admin-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+dubbo:
+  application:
+    name: admin-service
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+  protocol:
+    port: 50057
+    name: tri
+  consumer:
+    check: false

@@ -10,6 +10,8 @@ spring:
     bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
     admin:
       auto-create: true
+    listener:
+      concurrency: ${AF_FETCH_CONCURRENCY:3}
     consumer:
       auto-offset-reset: earliest
       key-deserializer: org.apache.kafka.common.serialization.StringDeserializer

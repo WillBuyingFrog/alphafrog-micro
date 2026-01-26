@@ -27,10 +27,22 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 | **domesticFetchService** | 数据爬取服务 | 支持同步/异步爬取股票、基金、指数数据，基于 Kafka 的任务调度 |
 | **portfolioService** | 投资组合服务 | 组合管理、持仓 CRUD、交易记录管理 |
 | **frontend** | API 网关 | 统一对外暴露 RESTful API，路由请求至各微服务 |
+| **agentService** | Agent 服务 | 自然语言任务执行、工具调用、事件流与结果管理 |
+| **pythonSandboxService** | Python 沙箱服务 | 安全执行 Python 计算任务，返回标准输出与文件产物 |
+| **pythonSandboxGatewayService** | 沙箱网关服务 | Dubbo → HTTP 转发，屏蔽协议差异 |
 
 ---
 
-## v0.2 版本功能 (当前版本)
+## v0.3-phase1 版本功能 (当前版本)
+
+### Agent 能力
+- **Agent Run**: 创建/查询/取消/续做/状态/事件流/结果
+- **工具调用**: Search + MarketData + PythonSandbox
+- **数据集落盘**: 日线数据落盘并通过 dataset_id 传递
+- **Python 沙箱**: 安全运行计算脚本并返回结果
+- **多数据集挂载**: 支持 dataset_ids 同步挂载
+
+## v0.2 版本功能（数据服务基础能力）
 
 ### 数据服务
 - **股票**: 股票信息查询、关键词搜索、日线行情数据
@@ -44,10 +56,13 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 - **任务管理**: 支持任务 UUID 查询、状态追踪、结果回传
 
 ### 投资组合服务 (v0.2-portfolio 新增)
-- **组合管理**: 创建、查询、更新、删除投资组合
-- **持仓管理**: 添加、修改、移除持仓
-- **交易记录**: 记录买入/卖出交易历史
-- **Dubbo 接口**: 提供 gRPC/Proto 定义的内部调用接口
+- **投资组合管理**: 创建、查询、更新、归档投资组合；支持多种组合类型（实盘、策略、模型）
+- **持仓管理**: 批量更新持仓、查询持仓明细；支持多市场、多空方向
+- **交易记录**: 记录买入/卖出/分红/费用等多种交易类型，支持分页查询和时间段筛选
+- **估值与指标**: 实时估值查询、组合业绩指标计算（收益、波动率、最大回撤等）
+- **策略投资组合**: 策略定义管理、目标权重配置、回测运行管理、策略净值跟踪（20260116新增）
+- **完整 API**: 提供 RESTful HTTP API 和 Dubbo gRPC 双接口
+- **权限控制**: 基于用户 ID 的数据隔离与访问控制
 
 ### 基础设施
 - **Docker 部署**: 支持 Docker Compose 一键部署 (Kafka KRaft 模式)
@@ -56,20 +71,12 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ---
 
-## v0.3 版本规划 (Agent 功能)
+## v0.3 后续规划（Agent 进阶能力）
 
-
-v0.3 将引入 **AI Agent 能力**。具体而言， Portfolio 服务将成为具备理解用户意图、主动规划任务、调用工具并等能力，并根据用户需求生成不同复杂度分析报告的智能体。
-
-### 期望目标
-
-- 支持高并发下的自然语言查询（"我的组合今天表现如何？"）
-- 支持专业用户的复杂分析指令（"分析我的组合在过去一个月相对于沪深300的超额收益"）
-
-### 技术选型
-- **Spring AI**: 底层模型接入、统一配置管理
-- **LangChain4j**: Agent 编排、ReAct Loop、任务规划器
-- **向量数据库**: PostgreSQL (pgvector) 用于 RAG 知识库
+- 并行/图编排执行（如 DAG / 子任务 fan-out）
+- 断点恢复与中间结果缓存
+- 工具搜索与上下文压缩
+- 指标库与预定义分析能力
 
 
 ---
@@ -112,6 +119,7 @@ docker-compose up -d
 | [deploy_guide.md](./deploy_guide.md) | 完整部署指南（构建、Docker 打包、服务上线） |
 | [api_guide.md](./api_guide.md) | API 接口文档 |
 | [portfolio_schema.sql](./portfolio_schema.sql) | Portfolio 服务数据库 Schema |
+| [alphafrog-wiki/agent-api-guide.md](./alphafrog-wiki/agent-api-guide.md) | Agent 对外 API 文档 |
 
 ---
 
@@ -130,6 +138,11 @@ alphafrog-micro/
 ├── domesticFetchService/      # 数据爬取服务
 ├── portfolioService/          # 投资组合服务
 ├── portfolioApi/              # 投资组合服务 Proto 定义
+├── agentService/              # Agent 服务
+├── agentApi/                  # Agent Dubbo Proto
+├── pythonSandboxService/      # Python 沙箱服务
+├── pythonSandboxGatewayService/ # 沙箱网关服务
+├── pythonSandboxApi/          # 沙箱 Dubbo Proto
 ├── frontend/                  # API 网关
 ├── analysisService/           # 分析服务 (Python Django)
 └── docker-compose.yml         # Docker Compose 配置

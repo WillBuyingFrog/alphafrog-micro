@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN"
+        "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+<mapper namespace="world.willfrog.alphafrogmicro.portfolioservice.mapper.StrategyTargetMapper">
+
+    <resultMap id="StrategyTargetResultMap"
+               type="world.willfrog.alphafrogmicro.portfolioservice.domain.StrategyTargetPo">
+        <id property="id" column="id"/>
+        <result property="strategyId" column="strategy_id"/>
+        <result property="userId" column="user_id"/>
+        <result property="symbol" column="symbol"/>
+        <result property="symbolType" column="symbol_type"/>
+        <result property="targetWeight" column="target_weight"/>
+        <result property="effectiveDate" column="effective_date"/>
+        <result property="createdAt" column="created_at"/>
+        <result property="updatedAt" column="updated_at"/>
+        <result property="extJson" column="ext_json"/>
+    </resultMap>
+
+    <delete id="deleteByStrategyId">
+        DELETE FROM alphafrog_strategy_target
+        WHERE strategy_id = #{strategyId}
+          AND user_id = #{userId}
+    </delete>
+
+    <insert id="insertBatch" parameterType="java.util.List">
+        INSERT INTO alphafrog_strategy_target
+        (strategy_id, user_id, symbol, symbol_type, target_weight, effective_date, ext)
+        VALUES
+        <foreach collection="list" item="item" separator=",">
+            (#{item.strategyId}, #{item.userId}, #{item.symbol}, #{item.symbolType},
+             #{item.targetWeight}, #{item.effectiveDate}, CAST(#{item.extJson} AS jsonb))
+        </foreach>
+    </insert>
+
+    <select id="listByStrategy" resultMap="StrategyTargetResultMap">
+        SELECT id,
+               strategy_id,
+               user_id,
+               symbol,
+               symbol_type,
+               target_weight,
+               effective_date,
+               created_at,
+               updated_at,
+               ext::text AS ext_json
+        FROM alphafrog_strategy_target
+        WHERE strategy_id = #{strategyId}
+          AND user_id = #{userId}
+        ORDER BY updated_at DESC, id DESC
+    </select>
+</mapper>

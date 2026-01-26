@@ -9,6 +9,9 @@
         <result property="name" column="name"/>
         <result property="visibility" column="visibility"/>
         <result property="tagsJson" column="tags_json"/>
+        <result property="portfolioType" column="portfolio_type"/>
+        <result property="baseCurrency" column="base_currency"/>
+        <result property="benchmarkSymbol" column="benchmark_symbol"/>
         <result property="status" column="status"/>
         <result property="timezone" column="timezone"/>
         <result property="extJson" column="ext_json"/>
@@ -18,8 +21,9 @@
 
     <insert id="insert" parameterType="world.willfrog.alphafrogmicro.portfolioservice.domain.PortfolioPo"
             useGeneratedKeys="true" keyProperty="id" keyColumn="id">
-        INSERT INTO alphafrog_portfolio (user_id, name, visibility, tags, status, timezone, ext)
-        VALUES (#{userId}, #{name}, #{visibility}, CAST(#{tagsJson} AS jsonb), #{status}, #{timezone}, CAST(#{extJson} AS jsonb))
+        INSERT INTO alphafrog_portfolio (user_id, name, visibility, tags, portfolio_type, base_currency, benchmark_symbol, status, timezone, ext)
+        VALUES (#{userId}, #{name}, #{visibility}, CAST(#{tagsJson} AS jsonb), #{portfolioType}, #{baseCurrency}, #{benchmarkSymbol},
+                #{status}, #{timezone}, CAST(#{extJson} AS jsonb))
     </insert>
 
     <select id="findByIdAndUser" resultMap="PortfolioResultMap">
@@ -28,6 +32,9 @@
                name,
                visibility,
                tags::text AS tags_json,
+               portfolio_type,
+               base_currency,
+               benchmark_symbol,
                status,
                timezone,
                ext::text AS ext_json,
@@ -46,6 +53,9 @@
                name,
                visibility,
                tags::text AS tags_json,
+               portfolio_type,
+               base_currency,
+               benchmark_symbol,
                status,
                timezone,
                ext::text AS ext_json,
@@ -89,6 +99,9 @@
         SET name = #{name},
             visibility = #{visibility},
             tags = CAST(#{tagsJson} AS jsonb),
+            portfolio_type = #{portfolioType},
+            base_currency = #{baseCurrency},
+            benchmark_symbol = #{benchmarkSymbol},
             status = #{status},
             timezone = #{timezone},
             ext = CAST(#{extJson} AS jsonb),

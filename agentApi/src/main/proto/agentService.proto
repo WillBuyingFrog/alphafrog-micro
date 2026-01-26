@@ -1,0 +1,167 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.agent.idl;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.agent.idl";
+option java_outer_classname = "AgentServiceProto";
+
+message AgentEmpty {}
+
+message AgentRunMessage {
+  string id = 1;
+  string user_id = 2;
+  string status = 3;
+  int32 current_step = 4;
+  int32 max_steps = 5;
+  string plan_json = 6;
+  string snapshot_json = 7;
+  string last_error = 8;
+  string ttl_expires_at = 9;
+  string started_at = 10;
+  string updated_at = 11;
+  string completed_at = 12;
+  string ext = 13;
+}
+
+message CreateAgentRunRequest {
+  string user_id = 1;
+  string message = 2;
+  string context_json = 3;
+  string idempotency_key = 4;
+  string model_name = 5;
+  string endpoint_name = 6;
+}
+
+message GetAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message CancelAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message ResumeAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message AgentRunEventMessage {
+  int64 id = 1;
+  string run_id = 2;
+  int32 seq = 3;
+  string event_type = 4;
+  string payload_json = 5;
+  string created_at = 6;
+}
+
+message ListAgentRunEventsRequest {
+  string user_id = 1;
+  string id = 2;
+  int32 after_seq = 3;
+  int32 limit = 4;
+}
+
+message ListAgentRunEventsResponse {
+  repeated AgentRunEventMessage items = 1;
+  int32 next_after_seq = 2;
+  bool has_more = 3;
+}
+
+message GetAgentRunResultRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message GetAgentRunStatusRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message AgentRunResultMessage {
+  string id = 1;
+  string status = 2;
+  string answer = 3;
+  string payload_json = 4;
+}
+
+message AgentRunStatusMessage {
+  string id = 1;
+  string status = 2;
+  string phase = 3;
+  string current_tool = 4;
+  string last_event_type = 5;
+  string last_event_at = 6;
+  string last_event_payload_json = 7;
+}
+
+message AgentToolMessage {
+  string name = 1;
+  string description = 2;
+  string parameters_json = 3;
+}
+
+message ListAgentToolsRequest {
+  string user_id = 1;
+}
+
+message ListAgentToolsResponse {
+  repeated AgentToolMessage items = 1;
+}
+
+message AgentArtifactMessage {
+  string artifact_id = 1;
+  string type = 2;
+  string name = 3;
+  string content_type = 4;
+  string url = 5;
+  string meta_json = 6;
+  string created_at = 7;
+}
+
+message ListAgentArtifactsRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message ListAgentArtifactsResponse {
+  repeated AgentArtifactMessage items = 1;
+}
+
+message SubmitAgentFeedbackRequest {
+  string user_id = 1;
+  string id = 2;
+  int32 rating = 3;
+  string comment = 4;
+  string tags_json = 5;
+  string payload_json = 6;
+}
+
+message ExportAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+  string format = 3;
+}
+
+message ExportAgentRunResponse {
+  string export_id = 1;
+  string status = 2;
+  string url = 3;
+  string message = 4;
+}
+
+service AgentDubboService {
+  rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
+  rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
+  rpc ListEvents(ListAgentRunEventsRequest) returns (ListAgentRunEventsResponse);
+  rpc CancelRun(CancelAgentRunRequest) returns (AgentRunMessage);
+  rpc ResumeRun(ResumeAgentRunRequest) returns (AgentRunMessage);
+  rpc GetResult(GetAgentRunResultRequest) returns (AgentRunResultMessage);
+  rpc GetStatus(GetAgentRunStatusRequest) returns (AgentRunStatusMessage);
+  rpc ListTools(ListAgentToolsRequest) returns (ListAgentToolsResponse);
+  rpc ListArtifacts(ListAgentArtifactsRequest) returns (ListAgentArtifactsResponse);
+  rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
+  rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
+}

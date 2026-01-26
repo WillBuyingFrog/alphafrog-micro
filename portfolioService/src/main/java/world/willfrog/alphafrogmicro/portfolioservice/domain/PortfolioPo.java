@@ -11,6 +11,9 @@ public class PortfolioPo {
     private String name;
     private String visibility;
     private String tagsJson;
+    private String portfolioType;
+    private String baseCurrency;
+    private String benchmarkSymbol;
     private String status;
     private String timezone;
     private String extJson;

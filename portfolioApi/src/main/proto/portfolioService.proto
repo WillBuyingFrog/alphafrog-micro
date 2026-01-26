@@ -18,6 +18,9 @@ message PortfolioMessage {
   string timezone = 7;
   string created_at = 8;
   string updated_at = 9;
+  string portfolio_type = 10;
+  string base_currency = 11;
+  string benchmark_symbol = 12;
 }
 
 message CreatePortfolioRequest {
@@ -26,6 +29,9 @@ message CreatePortfolioRequest {
   string visibility = 3;
   repeated string tags = 4;
   string timezone = 5;
+  string portfolio_type = 6;
+  string base_currency = 7;
+  string benchmark_symbol = 8;
 }
 
 message UpdatePortfolioRequest {
@@ -35,6 +41,10 @@ message UpdatePortfolioRequest {
   string visibility = 4;
   repeated string tags = 5;
   string status = 6;
+  bool tags_present = 7;
+  string portfolio_type = 8;
+  string base_currency = 9;
+  string benchmark_symbol = 10;
 }
 
 message ArchivePortfolioRequest {
@@ -101,6 +111,7 @@ message TradeMessage {
   string trade_time = 9;   // ISO-8601 string
   string settle_date = 10; // ISO-8601 string
   string note = 11;
+  string payload_json = 12;
 }
 
 message TradesCreateRequest {
@@ -158,6 +169,163 @@ message MetricsResponse {
   string volatility = 2;
   string max_drawdown = 3;
   string note = 4;
+  string from = 5;
+  string to = 6;
+}
+
+message StrategyMessage {
+  int64 id = 1;
+  int64 portfolio_id = 2;
+  string user_id = 3;
+  string name = 4;
+  string description = 5;
+  string rule_json = 6;
+  string rebalance_rule = 7;
+  string capital_base = 8;
+  string start_date = 9;
+  string end_date = 10;
+  string status = 11;
+  string base_currency = 12;
+  string benchmark_symbol = 13;
+  string created_at = 14;
+  string updated_at = 15;
+}
+
+message StrategyCreateRequest {
+  string user_id = 1;
+  string name = 2;
+  string description = 3;
+  string rule_json = 4;
+  string rebalance_rule = 5;
+  string capital_base = 6;
+  string start_date = 7;
+  string end_date = 8;
+  string base_currency = 9;
+  string benchmark_symbol = 10;
+}
+
+message StrategyUpdateRequest {
+  string user_id = 1;
+  int64 id = 2;
+  string name = 3;
+  string description = 4;
+  string rule_json = 5;
+  string rebalance_rule = 6;
+  string capital_base = 7;
+  string start_date = 8;
+  string end_date = 9;
+  string status = 10;
+  string base_currency = 11;
+  string benchmark_symbol = 12;
+}
+
+message StrategyArchiveRequest {
+  string user_id = 1;
+  int64 id = 2;
+}
+
+message StrategyGetRequest {
+  string user_id = 1;
+  int64 id = 2;
+}
+
+message StrategyListRequest {
+  string user_id = 1;
+  string status = 2;
+  string keyword = 3;
+  int32 page = 4;
+  int32 size = 5;
+}
+
+message StrategyListResponse {
+  repeated StrategyMessage items = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message StrategyTargetMessage {
+  int64 id = 1;
+  int64 strategy_id = 2;
+  string symbol = 3;
+  string symbol_type = 4;
+  string target_weight = 5;
+  string effective_date = 6;
+  string updated_at = 7;
+}
+
+message StrategyTargetUpsertRequest {
+  string user_id = 1;
+  int64 strategy_id = 2;
+  repeated StrategyTargetMessage items = 3;
+}
+
+message StrategyTargetListRequest {
+  string user_id = 1;
+  int64 strategy_id = 2;
+}
+
+message StrategyTargetListResponse {
+  repeated StrategyTargetMessage items = 1;
+}
+
+message StrategyBacktestRunMessage {
+  int64 id = 1;
+  int64 strategy_id = 2;
+  string run_time = 3;
+  string start_date = 4;
+  string end_date = 5;
+  string status = 6;
+}
+
+message StrategyBacktestRunCreateRequest {
+  string user_id = 1;
+  int64 strategy_id = 2;
+  string start_date = 3;
+  string end_date = 4;
+  string params_json = 5;
+}
+
+message StrategyBacktestRunListRequest {
+  string user_id = 1;
+  int64 strategy_id = 2;
+  string status = 3;
+  int32 page = 4;
+  int32 size = 5;
+}
+
+message StrategyBacktestRunListResponse {
+  repeated StrategyBacktestRunMessage items = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 size = 4;
+}
+
+message StrategyNavMessage {
+  int64 id = 1;
+  int64 run_id = 2;
+  string trade_date = 3;
+  string nav = 4;
+  string return_pct = 5;
+  string benchmark_nav = 6;
+  string drawdown = 7;
+}
+
+message StrategyNavListRequest {
+  string user_id = 1;
+  int64 strategy_id = 2;
+  int64 run_id = 3;
+  string from = 4;
+  string to = 5;
+  int32 page = 6;
+  int32 size = 7;
+}
+
+message StrategyNavListResponse {
+  repeated StrategyNavMessage items = 1;
+  int64 total = 2;
+  int32 page = 3;
+  int32 size = 4;
 }
 
 service PortfolioDubboService {
@@ -172,4 +340,17 @@ service PortfolioDubboService {
   rpc TradesList(TradesListRequest) returns (TradesListResponse);
   rpc Valuation(ValuationRequest) returns (ValuationResponse);
   rpc Metrics(MetricsRequest) returns (MetricsResponse);
+}
+
+service StrategyDubboService {
+  rpc CreateStrategy(StrategyCreateRequest) returns (StrategyMessage);
+  rpc UpdateStrategy(StrategyUpdateRequest) returns (StrategyMessage);
+  rpc ArchiveStrategy(StrategyArchiveRequest) returns (PortfolioEmpty);
+  rpc GetStrategy(StrategyGetRequest) returns (StrategyMessage);
+  rpc ListStrategy(StrategyListRequest) returns (StrategyListResponse);
+  rpc TargetsBulkUpsert(StrategyTargetUpsertRequest) returns (StrategyTargetListResponse);
+  rpc TargetsList(StrategyTargetListRequest) returns (StrategyTargetListResponse);
+  rpc BacktestRunCreate(StrategyBacktestRunCreateRequest) returns (StrategyBacktestRunMessage);
+  rpc BacktestRunList(StrategyBacktestRunListRequest) returns (StrategyBacktestRunListResponse);
+  rpc NavList(StrategyNavListRequest) returns (StrategyNavListResponse);
 }
