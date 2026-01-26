@@ -86,6 +86,10 @@ public class AgentEventService {
             log.info("Run canceled, stop: {}", runId);
             return false;
         }
+        if (run.getStatus() == AgentRunStatus.WAITING) {
+            log.info("Run paused (waiting), stop: {}", runId);
+            return false;
+        }
         if (run.getTtlExpiresAt() != null && OffsetDateTime.now().isAfter(run.getTtlExpiresAt())) {
             log.info("Run expired (ttl), stop: {}", runId);
             return false;

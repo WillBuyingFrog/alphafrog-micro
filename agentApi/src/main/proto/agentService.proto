@@ -43,9 +43,15 @@ message CancelAgentRunRequest {
   string id = 2;
 }
 
+message PauseAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
 message ResumeAgentRunRequest {
   string user_id = 1;
   string id = 2;
+  string plan_override_json = 3;
 }
 
 message AgentRunEventMessage {
@@ -95,6 +101,8 @@ message AgentRunStatusMessage {
   string last_event_type = 5;
   string last_event_at = 6;
   string last_event_payload_json = 7;
+  string plan_json = 8;
+  string progress_json = 9;
 }
 
 message AgentToolMessage {
@@ -157,6 +165,7 @@ service AgentDubboService {
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
   rpc ListEvents(ListAgentRunEventsRequest) returns (ListAgentRunEventsResponse);
   rpc CancelRun(CancelAgentRunRequest) returns (AgentRunMessage);
+  rpc PauseRun(PauseAgentRunRequest) returns (AgentRunMessage);
   rpc ResumeRun(ResumeAgentRunRequest) returns (AgentRunMessage);
   rpc GetResult(GetAgentRunResultRequest) returns (AgentRunResultMessage);
   rpc GetStatus(GetAgentRunStatusRequest) returns (AgentRunStatusMessage);

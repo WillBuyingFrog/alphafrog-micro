@@ -6,6 +6,11 @@ spring:
     username: ${AF_DB_MAIN_USER:postgres}
     password: ${AF_DB_MAIN_PASSWORD:postgres}
     driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${AF_REDIS_HOST:127.0.0.1}
+      port: ${AF_REDIS_PORT:6379}
+      password: ${AF_REDIS_PASSWORD:}
 
 mybatis:
   mapper-locations: classpath:mapper/*.xml
@@ -49,6 +54,18 @@ agent:
       dataset:
         enabled: ${AF_AGENT_MARKET_DATA_DATASET_ENABLED:true}
         path: ${AF_AGENT_MARKET_DATA_DATASET_PATH:/data/agent_datasets}
+        cache-ttl-seconds: ${AF_AGENT_MARKET_DATA_DATASET_TTL_SECONDS:604800}
+        allow-range-reuse: ${AF_AGENT_MARKET_DATA_DATASET_ALLOW_RANGE_REUSE:true}
+        cleanup-interval-ms: ${AF_AGENT_MARKET_DATA_DATASET_CLEANUP_INTERVAL_MS:600000}
+        cleanup-scan-count: ${AF_AGENT_MARKET_DATA_DATASET_CLEANUP_SCAN_COUNT:500}
+  flow:
+    parallel:
+      enabled: ${AF_AGENT_FLOW_PARALLEL_ENABLED:true}
+      max-concurrency: ${AF_AGENT_FLOW_PARALLEL_MAX_CONCURRENCY:4}
+      max-tasks: ${AF_AGENT_FLOW_PARALLEL_MAX_TASKS:6}
+      sub-agent-max-steps: ${AF_AGENT_FLOW_PARALLEL_SUB_AGENT_MAX_STEPS:6}
+    hitl:
+      state-ttl-seconds: ${AF_AGENT_FLOW_HITL_STATE_TTL_SECONDS:3600}
 
 langchain4j:
   open-ai:

@@ -45,7 +45,7 @@ Notes:
 Build:
 
 ```bash
-docker build -t alphafrog-debug-mcp .
+docker build -t frog:alphafrog-debug-mcp .
 ```
 
 Run with a mounted SSH config and keys (read-only). For local usage, directly mount `~/.ssh`:

@@ -7,6 +7,8 @@ public record AgentRunStatusResponse(
         String currentTool,
         String lastEventType,
         String lastEventAt,
-        String lastEventPayloadJson
+        String lastEventPayloadJson,
+        String planJson,
+        String progressJson
 ) {
 }

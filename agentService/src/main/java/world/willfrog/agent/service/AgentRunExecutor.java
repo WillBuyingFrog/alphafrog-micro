@@ -39,6 +39,9 @@ public class AgentRunExecutor {
     private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
     private final PythonSandboxTools pythonSandboxTools;
+    private final world.willfrog.agent.tool.ToolRouter toolRouter;
+    private final world.willfrog.agent.graph.ParallelGraphExecutor parallelGraphExecutor;
+    private final AgentRunStateStore stateStore;
     private final ObjectMapper objectMapper;
 
     /**
@@ -81,6 +84,7 @@ public class AgentRunExecutor {
 
             runMapper.updateStatus(runId, userId, AgentRunStatus.EXECUTING);
             eventService.append(runId, userId, "EXECUTION_STARTED", mapOf("run_id", runId));
+            stateStore.markRunStatus(runId, AgentRunStatus.EXECUTING.name());
 
             String endpointName = eventService.extractEndpointName(run.getExt());
             String modelName = eventService.extractModelName(run.getExt());
@@ -92,6 +96,14 @@ public class AgentRunExecutor {
             List<ToolSpecification> toolSpecifications = new ArrayList<>();
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
+
+            // 1.5 Try parallel graph execution (LangGraph4j)
+            if (parallelGraphExecutor.isEnabled()) {
+                boolean handled = parallelGraphExecutor.execute(run, userId, userGoal, chatModel, toolSpecifications);
+                if (handled) {
+                    return;
+                }
+            }
 
             // 2. Prepare Conversation
             List<ChatMessage> messages = new ArrayList<>();
@@ -133,7 +145,7 @@ public class AgentRunExecutor {
                          eventService.append(runId, userId, "TOOL_CALL_STARTED", startPayload);
                          
                          Map<String, Object> params = jsonToMap(argsJson);
-                         String result = invokeTool(toolName, params);
+                         String result = toolRouter.invoke(toolName, params);
                          
                          Map<String, Object> finishPayload = new HashMap<>();
                          finishPayload.put("tool_name", toolName);
@@ -163,12 +175,14 @@ public class AgentRunExecutor {
 
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
             eventService.append(runId, userId, "COMPLETED", mapOf("answer", finalAnswer));
+            stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
 
         } catch (Exception e) {
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.error("Execution error", e);
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, run.getSnapshotJson(), true, err);
             eventService.append(runId, userId, "FAILED", mapOf("error", err));
+            stateStore.markRunStatus(runId, AgentRunStatus.FAILED.name());
         } finally {
             AgentContext.clear(); // Clear Context
         }
@@ -177,61 +191,6 @@ public class AgentRunExecutor {
     /**
      * 工具调用分发（按 tool_name 路由到具体实现）。
      */
-    private String invokeTool(String toolName, Map<String, Object> params) {
-        try {
-            return switch (toolName) {
-                case "getStockInfo" -> marketDataTools.getStockInfo(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
-                ); 
-                case "getStockDaily" -> marketDataTools.getStockDaily(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
-                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
-                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
-                );
-                case "searchStock" -> marketDataTools.searchStock(
-                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
-                );
-                case "searchFund" -> marketDataTools.searchFund(
-                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
-                );
-                case "getIndexInfo" -> marketDataTools.getIndexInfo(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
-                );
-                case "getIndexDaily" -> marketDataTools.getIndexDaily(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
-                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
-                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
-                );
-                case "searchIndex" -> marketDataTools.searchIndex(
-                        str(params.get("keyword"), params.get("query"), params.get("arg0"))
-                );
-                case "executePython" -> pythonSandboxTools.executePython(
-                        str(params.get("code"), params.get("arg0")),
-                        str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
-                        str(params.get("dataset_ids"), params.get("datasetIds"), params.get("arg2")),
-                        str(params.get("libraries"), params.get("arg3")),
-                        params.get("timeout_seconds") != null ? Integer.parseInt(str(params.get("timeout_seconds"), params.get("arg4"))) : null
-                );
-                default -> "Unsupported tool: " + toolName;
-            };
-        } catch (Exception e) {
-            return "Tool invocation error: " + e.getMessage();
-        }
-    }
-
-    private String str(Object... candidates) {
-        for (Object c : candidates) {
-            if (c == null) {
-                continue;
-            }
-            String s = String.valueOf(c).trim();
-            if (!s.isEmpty()) {
-                return s;
-            }
-        }
-        return "";
-    }
-
     private Map<String, Object> jsonToMap(String json) {
         try {
              JsonNode node = objectMapper.readTree(json);

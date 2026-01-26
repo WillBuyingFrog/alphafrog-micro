@@ -24,9 +24,11 @@ public class MarketDataTools {
     private DomesticIndexService domesticIndexService;
 
     private final DatasetWriter datasetWriter;
+    private final DatasetRegistry datasetRegistry;
 
-    public MarketDataTools(DatasetWriter datasetWriter) {
+    public MarketDataTools(DatasetWriter datasetWriter, DatasetRegistry datasetRegistry) {
         this.datasetWriter = datasetWriter;
+        this.datasetRegistry = datasetRegistry;
     }
 
     /**
@@ -69,6 +71,26 @@ public class MarketDataTools {
                 return "Invalid date range, please use YYYYMMDD format (Asia/Shanghai).";
             }
 
+            List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
+            if (datasetWriter.isEnabled() && datasetRegistry.isEnabled()) {
+                return datasetRegistry.findReusable("stock_daily", tsCode, startDateStr, endDateStr, headers)
+                        .map(meta -> String.format(
+                                "DATASET_REUSED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)",
+                                meta.getDatasetId(), meta.getRowCount(), meta.getStartDate(), meta.getEndDate(), String.join(", ", headers)))
+                        .orElseGet(() -> fetchStockDailyAndCreateDataset(tsCode, startDateStr, endDateStr, headers));
+            }
+
+            return fetchStockDailyAndCreateDataset(tsCode, startDateStr, endDateStr, headers);
+        } catch (Exception e) {
+            return "Error fetching stock daily data: " + e.getMessage();
+        }
+    }
+
+    private String fetchStockDailyAndCreateDataset(String tsCode, String startDateStr, String endDateStr, List<String> headers) {
+        try {
+            long startDate = convertToMsTimestamp(startDateStr);
+            long endDate = convertToMsTimestamp(endDateStr);
+
             DomesticStockDailyByTsCodeAndDateRangeRequest request = DomesticStockDailyByTsCodeAndDateRangeRequest.newBuilder()
                     .setTsCode(tsCode)
                     .setStartDate(startDate)
@@ -80,13 +102,16 @@ public class MarketDataTools {
                 if (datasetWriter.isEnabled()) {
                     String runId = AgentContext.getRunId();
                     String prefix = (runId != null ? runId : "unknown") + "-stock";
-                    List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
                     
                     String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
                             item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(), 
                             item.getPreClose(), item.getChange(), item.getPctChg(), item.getVol(), item.getAmount()
                     ));
-                    
+
+                    if (datasetRegistry.isEnabled()) {
+                        datasetRegistry.registerDataset("stock_daily", tsCode, startDateStr, endDateStr, headers, datasetId, response.getItemsCount());
+                    }
+
                     return String.format("DATASET_CREATED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)", 
                             datasetId, response.getItemsCount(), startDateStr, endDateStr, String.join(", ", headers));
                 }
@@ -98,7 +123,8 @@ public class MarketDataTools {
             } else {
                 return "No daily data found for " + tsCode + " in range " + startDate + "-" + endDate;
             }
-        } catch (Exception e) {
+        }
+        catch (Exception e) {
             return "Error fetching stock daily data: " + e.getMessage();
         }
     }
@@ -195,6 +221,26 @@ public class MarketDataTools {
                 return "Invalid date range, please use YYYYMMDD format (Asia/Shanghai).";
             }
 
+            List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
+            if (datasetWriter.isEnabled() && datasetRegistry.isEnabled()) {
+                return datasetRegistry.findReusable("index_daily", tsCode, startDateStr, endDateStr, headers)
+                        .map(meta -> String.format(
+                                "DATASET_REUSED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)",
+                                meta.getDatasetId(), meta.getRowCount(), meta.getStartDate(), meta.getEndDate(), String.join(", ", headers)))
+                        .orElseGet(() -> fetchIndexDailyAndCreateDataset(tsCode, startDateStr, endDateStr, headers));
+            }
+
+            return fetchIndexDailyAndCreateDataset(tsCode, startDateStr, endDateStr, headers);
+        } catch (Exception e) {
+            return "Error fetching index daily data: " + e.getMessage();
+        }
+    }
+
+    private String fetchIndexDailyAndCreateDataset(String tsCode, String startDateStr, String endDateStr, List<String> headers) {
+        try {
+            long startDate = convertToMsTimestamp(startDateStr);
+            long endDate = convertToMsTimestamp(endDateStr);
+
             DomesticIndexDailyByTsCodeAndDateRangeRequest request = DomesticIndexDailyByTsCodeAndDateRangeRequest.newBuilder()
                     .setTsCode(tsCode)
                     .setStartDate(startDate)
@@ -206,12 +252,15 @@ public class MarketDataTools {
                 if (datasetWriter.isEnabled()) {
                     String runId = AgentContext.getRunId();
                     String prefix = (runId != null ? runId : "unknown") + "-index";
-                    List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
 
                     String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
                             item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(),
                             item.getPreClose(), item.getChange(), item.getPctChg(), item.getVol(), item.getAmount()
                     ));
+
+                    if (datasetRegistry.isEnabled()) {
+                        datasetRegistry.registerDataset("index_daily", tsCode, startDateStr, endDateStr, headers, datasetId, response.getItemsCount());
+                    }
 
                     return String.format("DATASET_CREATED: %s\nRows: %d\nRange: %s to %s\nFields: %s\n\n(Use 'execute_python' with this dataset_id to analyze data.)",
                             datasetId, response.getItemsCount(), startDateStr, endDateStr, String.join(", ", headers));
