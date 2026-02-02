@@ -103,6 +103,9 @@ public class ParallelTaskExecutor {
         }
         if (type.equals("sub_agent")) {
             SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
+                    .runId(runId)
+                    .userId(userId)
+                    .taskId(task.getId())
                     .goal(task.getGoal())
                     .context(context)
                     .toolWhitelist(toolWhitelist)
