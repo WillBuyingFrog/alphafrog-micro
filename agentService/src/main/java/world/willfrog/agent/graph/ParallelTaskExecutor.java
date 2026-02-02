@@ -70,7 +70,7 @@ public class ParallelTaskExecutor {
                     ));
                     stateStore.markTaskStarted(runId, task);
                     String taskContext = buildContext(task, context, results);
-                    ParallelTaskResult result = executeTask(task, toolWhitelist, subAgentMaxSteps, taskContext, model);
+                    ParallelTaskResult result = executeTask(task, runId, userId, toolWhitelist, subAgentMaxSteps, taskContext, model);
                     results.put(task.getId(), result);
                     stateStore.saveTaskResult(runId, task.getId(), result);
                     eventService.append(runId, userId, "PARALLEL_TASK_FINISHED", Map.of(
@@ -87,6 +87,8 @@ public class ParallelTaskExecutor {
     }
 
     private ParallelTaskResult executeTask(ParallelPlan.PlanTask task,
+                                           String runId,
+                                           String userId,
                                            Set<String> toolWhitelist,
                                            int subAgentMaxSteps,
                                            String context,
