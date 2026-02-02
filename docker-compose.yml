@@ -308,6 +308,8 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -315,6 +317,9 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_REDIS_HOST: redis
+      AF_REDIS_PORT: 6379
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
       # Agent Service LLM 配置 (OpenRouter/OpenAI)
       AF_AGENT_API_KEY: ${AF_AGENT_API_KEY:-demo}
