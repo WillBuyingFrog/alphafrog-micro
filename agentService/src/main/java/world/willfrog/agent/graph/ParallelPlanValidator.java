@@ -16,7 +16,12 @@ public class ParallelPlanValidator {
         private String reason;
     }
 
-    public Result validate(ParallelPlan plan, Set<String> toolWhitelist, int maxTasks, int maxSubSteps) {
+    public Result validate(ParallelPlan plan,
+                           Set<String> toolWhitelist,
+                           int maxTasks,
+                           int maxSubSteps,
+                           int maxParallelTasks,
+                           int maxSubAgents) {
         if (plan == null) {
             return Result.builder().valid(false).reason("plan is null").build();
         }
@@ -27,6 +32,8 @@ public class ParallelPlanValidator {
             return Result.builder().valid(false).reason("plan exceeds max tasks").build();
         }
         Set<String> ids = new HashSet<>();
+        int parallelCount = 0;
+        int subAgentCount = 0;
         for (ParallelPlan.PlanTask task : plan.getTasks()) {
             if (task.getId() == null || task.getId().isBlank()) {
                 return Result.builder().valid(false).reason("task id missing").build();
@@ -37,6 +44,9 @@ public class ParallelPlanValidator {
             String type = task.getType() == null ? "" : task.getType().trim().toLowerCase();
             if (!type.equals("tool") && !type.equals("sub_agent")) {
                 return Result.builder().valid(false).reason("unsupported task type: " + task.getType()).build();
+            }
+            if (task.getDependsOn() == null || task.getDependsOn().isEmpty()) {
+                parallelCount += 1;
             }
             if (type.equals("tool")) {
                 if (task.getTool() == null || task.getTool().isBlank()) {
@@ -53,11 +63,22 @@ public class ParallelPlanValidator {
                 if (task.getMaxSteps() != null && task.getMaxSteps() > maxSubSteps) {
                     return Result.builder().valid(false).reason("sub_agent max_steps exceeds limit").build();
                 }
+                subAgentCount += 1;
             }
             List<String> deps = task.getDependsOn();
             if (deps != null && deps.contains(task.getId())) {
                 return Result.builder().valid(false).reason("task depends on itself").build();
             }
+        }
+        if (maxParallelTasks > 0 && parallelCount > maxParallelTasks) {
+            return Result.builder().valid(false)
+                    .reason("parallel tasks exceed limit: " + parallelCount + " > " + maxParallelTasks)
+                    .build();
+        }
+        if (maxSubAgents > 0 && subAgentCount > maxSubAgents) {
+            return Result.builder().valid(false)
+                    .reason("sub_agent tasks exceed limit: " + subAgentCount + " > " + maxSubAgents)
+                    .build();
         }
         for (ParallelPlan.PlanTask task : plan.getTasks()) {
             List<String> deps = task.getDependsOn();

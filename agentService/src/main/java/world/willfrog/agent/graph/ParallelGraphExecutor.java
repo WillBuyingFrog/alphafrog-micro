@@ -50,6 +50,12 @@ public class ParallelGraphExecutor {
     @Value("${agent.flow.parallel.sub-agent-max-steps:6}")
     private int subAgentMaxSteps;
 
+    @Value("${agent.flow.parallel.max-parallel-tasks:-1}")
+    private int maxParallelTasks;
+
+    @Value("${agent.flow.parallel.max-sub-agents:-1}")
+    private int maxSubAgents;
+
     public boolean isEnabled() {
         return enabled;
     }
@@ -163,7 +169,14 @@ public class ParallelGraphExecutor {
         }
 
         ParallelPlan plan = parsePlan(planJson);
-        ParallelPlanValidator.Result validation = planValidator.validate(plan, toolWhitelist, maxTasks, subAgentMaxSteps);
+        ParallelPlanValidator.Result validation = planValidator.validate(
+                plan,
+                toolWhitelist,
+                maxTasks,
+                subAgentMaxSteps,
+                maxParallelTasks,
+                maxSubAgents
+        );
 
         boolean valid = validation.isValid();
         planJson = safeWrite(plan);
@@ -285,11 +298,21 @@ public class ParallelGraphExecutor {
     }
 
     private String buildPlannerPrompt(Set<String> toolWhitelist, int maxTasks, int maxSubSteps) {
-        return "你是并行任务规划器。只输出 JSON。" +
-                "必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。" +
-                "任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。" +
-                "约束：任务数 <= " + maxTasks + ", sub_agent 步数 <= " + maxSubSteps + "." +
-                "仅允许使用以下工具：" + String.join(", ", toolWhitelist) + "." +
-                "可并行的任务应设置为空依赖；有依赖的任务使用 dependsOn。";
+        StringBuilder sb = new StringBuilder();
+        sb.append("你是并行任务规划器。只输出 JSON。");
+        sb.append("必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。");
+        sb.append("任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。");
+        sb.append("请优先拆分为可并行的任务，但不要牺牲正确性。");
+        sb.append("约束：任务数 <= ").append(maxTasks)
+                .append(", sub_agent 步数 <= ").append(maxSubSteps).append("。");
+        if (maxParallelTasks > 0) {
+            sb.append("并行任务数 <= ").append(maxParallelTasks).append("。");
+        }
+        if (maxSubAgents > 0) {
+            sb.append("sub_agent 任务数 <= ").append(maxSubAgents).append("。");
+        }
+        sb.append("仅允许使用以下工具：").append(String.join(", ", toolWhitelist)).append("。");
+        sb.append("可并行的任务应设置为空依赖；有依赖的任务使用 dependsOn。");
+        return sb.toString();
     }
 }
