@@ -3,7 +3,9 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
@@ -12,6 +14,7 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
@@ -20,9 +23,12 @@ import java.util.Map;
 @Slf4j
 public class AgentEventService {
 
+    private static final String EVENT_SEQ_KEY_PREFIX = "agent:run:event_seq:";
+
     private final AgentRunMapper runMapper;
     private final AgentRunEventMapper eventMapper;
     private final ObjectMapper objectMapper;
+    private final StringRedisTemplate redisTemplate;
 
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
@@ -110,15 +116,21 @@ public class AgentEventService {
         if (run == null) {
             return;
         }
-        Integer maxSeq = eventMapper.findMaxSeq(runId);
-        int nextSeq = (maxSeq == null ? 0 : maxSeq) + 1;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            int nextSeq = nextSeq(runId);
 
-        AgentRunEvent event = new AgentRunEvent();
-        event.setRunId(runId);
-        event.setSeq(nextSeq);
-        event.setEventType(eventType);
-        event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
-        eventMapper.insert(event);
+            AgentRunEvent event = new AgentRunEvent();
+            event.setRunId(runId);
+            event.setSeq(nextSeq);
+            event.setEventType(eventType);
+            event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
+            try {
+                eventMapper.insert(event);
+                return;
+            } catch (DuplicateKeyException e) {
+                log.warn("Duplicate seq on append, retrying: runId={}, eventType={}, seq={}", runId, eventType, nextSeq);
+            }
+        }
     }
 
     /**
@@ -181,6 +193,43 @@ public class AgentEventService {
         } catch (Exception e) {
             return "{}";
         }
+    }
+
+    private int nextSeq(String runId) {
+        String key = eventSeqKey(runId);
+        try {
+            Boolean exists = redisTemplate.hasKey(key);
+            if (exists == null || !exists) {
+                Integer maxSeq = eventMapper.findMaxSeq(runId);
+                long base = maxSeq == null ? 0 : maxSeq;
+                redisTemplate.opsForValue().setIfAbsent(key, String.valueOf(base), Duration.ofMinutes(ttlMinutes));
+            }
+        } catch (Exception e) {
+            log.warn("Init event seq from Redis failed, fallback to DB: runId={}", runId, e);
+        }
+
+        Long next = null;
+        try {
+            next = redisTemplate.opsForValue().increment(key);
+            if (next != null) {
+                redisTemplate.expire(key, Duration.ofMinutes(ttlMinutes));
+            }
+        } catch (Exception e) {
+            log.warn("Increment event seq from Redis failed, fallback to DB: runId={}", runId, e);
+        }
+
+        if (next == null) {
+            Integer maxSeq = eventMapper.findMaxSeq(runId);
+            return (maxSeq == null ? 0 : maxSeq) + 1;
+        }
+        if (next > Integer.MAX_VALUE) {
+            log.warn("Event seq overflow risk: runId={}, seq={}", runId, next);
+        }
+        return next.intValue();
+    }
+
+    private String eventSeqKey(String runId) {
+        return EVENT_SEQ_KEY_PREFIX + runId;
     }
 
     private String extractField(String extJson, String field) {
