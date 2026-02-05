@@ -1,0 +1,23 @@
+{
+  "defaultEndpoint": "fireworks",
+  "defaultModel": "accounts/fireworks/models/kimi-k2p5",
+  "models": [
+    "accounts/fireworks/models/kimi-k2p5",
+    "openai/gpt-5.2",
+    "openai/gpt-5.1"
+  ],
+  "endpoints": {
+    "fireworks": {
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "apiKey": "replace-with-your-fireworks-api-key"
+    },
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "replace-with-your-openrouter-api-key"
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "replace-with-your-openai-api-key"
+    }
+  }
+}

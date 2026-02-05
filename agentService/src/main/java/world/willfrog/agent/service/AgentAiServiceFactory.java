@@ -66,8 +66,12 @@ public class AgentAiServiceFactory {
     public ChatLanguageModel buildChatModel(String endpointName, String modelName) {
         AgentLlmResolver.ResolvedLlm resolved = llmResolver.resolve(endpointName, modelName);
         boolean debugEnabled = log.isDebugEnabled();
+        String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
+        if (isBlank(apiKey)) {
+            throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
+        }
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
-                .apiKey(openAiApiKey)
+                .apiKey(apiKey)
                 .baseUrl(resolved.baseUrl())
                 .modelName(resolved.modelName())
                 .maxTokens(maxTokens)
@@ -94,5 +98,9 @@ public class AgentAiServiceFactory {
             headers.put("X-Title", openRouterTitle);
         }
         return headers;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

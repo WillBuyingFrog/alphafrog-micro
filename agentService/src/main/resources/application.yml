@@ -30,6 +30,8 @@ dubbo:
 
 agent:
   llm:
+    # 本地 JSON 配置文件（可选，不存在则回退到当前 yml/env 配置）
+    config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
     # 默认模型与端点（用于未指定 model/endpoint 的请求）
     default-endpoint: ${AF_AGENT_DEFAULT_ENDPOINT:openrouter}
     default-model: ${AF_AGENT_DEFAULT_MODEL:openai/gpt-5.2}
@@ -40,10 +42,13 @@ agent:
     endpoints:
       openrouter:
         base-url: ${AF_AGENT_ENDPOINT_OPENROUTER:https://openrouter.ai/api/v1}
+        api-key: ${AF_AGENT_ENDPOINT_OPENROUTER_API_KEY:}
       openai:
         base-url: ${AF_AGENT_ENDPOINT_OPENAI:https://api.openai.com/v1}
+        api-key: ${AF_AGENT_ENDPOINT_OPENAI_API_KEY:}
       fireworks:
         base-url: ${AF_AGENT_ENDPOINT_FIREWORKS:https://api.fireworks.ai/inference/v1}
+        api-key: ${AF_AGENT_ENDPOINT_FIREWORKS_API_KEY:}
     openrouter:
       # OpenRouter 推荐的可选请求头
       http-referer: ${AF_OPENROUTER_HTTP_REFERER:}
