@@ -15,10 +15,12 @@ import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.ArrayList;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
@@ -32,6 +34,8 @@ import java.util.Set;
  * 3. 产出可供主流程合并的局部结论。
  */
 public class SubAgentRunner {
+    /** 子代理规划最大重试次数（用于修正无效工具/格式问题）。 */
+    private static final int MAX_PLAN_ATTEMPTS = 3;
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
@@ -89,37 +93,71 @@ public class SubAgentRunner {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
-        String tools = String.join(", ", request.getToolWhitelist());
-        String systemPrompt = "你是一个子任务代理。必须先输出线性计划 JSON，不超过 " + request.getMaxSteps() + " 步。" +
-                "仅能使用下列工具名称：" + tools + "。" +
-                "输出格式:\n" +
-                "{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}";
+        Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
+        String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
+        String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
 
         List<Map<String, Object>> executedSteps = new ArrayList<>();
         try {
-            // 第一步：让模型先生成“可执行的线性步骤 JSON”。
-            Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
-                    new SystemMessage(systemPrompt),
-                    new UserMessage("目标: " + request.getGoal() + "\n上下文: " + (request.getContext() == null ? "" : request.getContext()))
-            ));
+            // 第一步：生成“可执行的线性步骤 JSON”。若出现无效工具，自动要求模型重规划。
+            JsonNode stepsNode = null;
+            String lastPlanError = "sub_agent plan generation failed";
+            String retryHint = "";
+            for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
+                        new SystemMessage(systemPrompt),
+                        new UserMessage("目标: " + request.getGoal()
+                                + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
+                                + "\n" + retryHint)
+                ));
+                String planText = planResp.content().text();
+                String json = extractJson(planText);
+                JsonNode root = objectMapper.readTree(json);
+                JsonNode candidate = root.path("steps");
 
-            String planText = planResp.content().text();
-            String json = extractJson(planText);
-            JsonNode root = objectMapper.readTree(json);
-            JsonNode stepsNode = root.path("steps");
-            if (!stepsNode.isArray()) {
-                emitEvent(request, "SUB_AGENT_FAILED", Map.of(
-                        "task_id", nvl(request.getTaskId()),
-                        "error", "sub_agent plan missing steps"
-                ));
-                return SubAgentResult.builder().success(false).error("sub_agent plan missing steps").build();
+                if (!candidate.isArray()) {
+                    lastPlanError = "sub_agent plan missing steps";
+                    retryHint = "上一次输出缺少 steps 数组。请严格按 JSON 格式输出 steps。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", lastPlanError
+                    ));
+                    continue;
+                }
+                if (candidate.size() > request.getMaxSteps()) {
+                    lastPlanError = "sub_agent steps exceed max";
+                    retryHint = "上一次步骤数超过上限。请将 steps 控制在 " + request.getMaxSteps() + " 步以内。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", lastPlanError,
+                            "steps_count", candidate.size()
+                    ));
+                    continue;
+                }
+                List<String> invalidTools = collectInvalidTools(candidate, whitelist);
+                if (!invalidTools.isEmpty()) {
+                    lastPlanError = "sub_agent tool not allowed: " + invalidTools.get(0);
+                    retryHint = "上一次包含未允许的工具名: " + String.join(", ", invalidTools)
+                            + "。禁止使用 sub_agent/workflow/tool 等伪工具名，只能使用允许列表中的真实工具。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", "invalid_tool",
+                            "invalid_tools", invalidTools
+                    ));
+                    continue;
+                }
+                stepsNode = candidate;
+                break;
             }
-            if (stepsNode.size() > request.getMaxSteps()) {
+            if (stepsNode == null) {
                 emitEvent(request, "SUB_AGENT_FAILED", Map.of(
                         "task_id", nvl(request.getTaskId()),
-                        "error", "sub_agent steps exceed max"
+                        "error", lastPlanError
                 ));
-                return SubAgentResult.builder().success(false).error("sub_agent steps exceed max").build();
+                return SubAgentResult.builder().success(false).error(lastPlanError).build();
             }
 
             emitEvent(request, "SUB_AGENT_PLAN_CREATED", Map.of(
@@ -131,7 +169,7 @@ public class SubAgentRunner {
             // 第二步：按计划逐步执行工具。
             for (JsonNode stepNode : stepsNode) {
                 String tool = stepNode.path("tool").asText();
-                if (!request.getToolWhitelist().contains(tool)) {
+                if (!whitelist.contains(tool)) {
                     emitEvent(request, "SUB_AGENT_FAILED", Map.of(
                             "task_id", nvl(request.getTaskId()),
                             "error", "sub_agent tool not allowed: " + tool
@@ -186,10 +224,43 @@ public class SubAgentRunner {
             log.warn("Sub-agent failed", e);
             emitEvent(request, "SUB_AGENT_FAILED", Map.of(
                     "task_id", nvl(request.getTaskId()),
-                    "error", e.getMessage()
+                    "error", nvl(e.getMessage())
             ));
-            return SubAgentResult.builder().success(false).error(e.getMessage()).steps(executedSteps).build();
+            return SubAgentResult.builder().success(false).error(nvl(e.getMessage())).steps(executedSteps).build();
         }
+    }
+
+    /**
+     * 构建子代理规划提示词。
+     *
+     * @param tools    可用工具列表（逗号拼接）
+     * @param maxSteps 最大步骤数
+     * @return 系统提示词
+     */
+    private String buildPlannerPrompt(String tools, int maxSteps) {
+        return "你是一个子任务代理。必须先输出线性计划 JSON，不超过 " + maxSteps + " 步。"
+                + "仅能使用下列工具名称：" + tools + "。"
+                + "严禁把 sub_agent、workflow、tool、agent 作为步骤工具名。"
+                + "输出格式:\n"
+                + "{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}";
+    }
+
+    /**
+     * 收集计划中不在白名单的工具名。
+     *
+     * @param stepsNode      步骤数组
+     * @param toolWhitelist  工具白名单
+     * @return 非法工具名列表（去重后）
+     */
+    private List<String> collectInvalidTools(JsonNode stepsNode, Set<String> toolWhitelist) {
+        List<String> invalid = new ArrayList<>();
+        for (JsonNode node : stepsNode) {
+            String tool = node.path("tool").asText();
+            if (!toolWhitelist.contains(tool) && !invalid.contains(tool)) {
+                invalid.add(tool);
+            }
+        }
+        return invalid;
     }
 
     /**
