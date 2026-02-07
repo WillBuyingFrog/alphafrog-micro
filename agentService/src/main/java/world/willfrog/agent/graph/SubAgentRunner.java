@@ -201,7 +201,9 @@ public class SubAgentRunner {
                             PythonCodeRefinementNode.Request.builder()
                                     .goal(request.getGoal())
                                     .context(request.getContext())
+                                    .codingContext(buildCodingContext(args, executedSteps, request.getContext()))
                                     .initialCode(firstNonBlank(args.get("code"), args.get("arg0")))
+                                    .initialRunArgs(extractInitialPythonRunArgs(args))
                                     .datasetId(firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1")))
                                     .datasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2")))
                                     .libraries(firstNonBlank(args.get("libraries"), args.get("arg3")))
@@ -292,7 +294,8 @@ public class SubAgentRunner {
                 + "工具参数必须严格匹配真实签名："
                 + "searchIndex/searchStock/searchFund 使用 keyword；"
                 + "getIndexDaily/getStockDaily 使用 tsCode,startDateStr,endDateStr（日期格式必须为YYYYMMDD）；"
-                + "executePython 使用 code,dataset_id（dataset_id必须来自前一步 DATASET_CREATED/REUSED 输出）。"
+                + "executePython 使用 code,dataset_id；"
+                + "可选传 coding_context（由你自行挑选与编码最相关的上下文）。"
                 + "输出格式:\n"
                 + "{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}";
     }
@@ -379,13 +382,10 @@ public class SubAgentRunner {
             if (!datasetId.isBlank()) {
                 args.put("dataset_id", datasetId);
             }
-            if (args.get("dataset_ids") == null && discoveredDatasetIds.size() > 1) {
-                final String selectedDatasetId = datasetId;
-                String extra = discoveredDatasetIds.stream()
-                        .filter(id -> !id.equals(selectedDatasetId))
-                        .collect(Collectors.joining(","));
-                if (!extra.isBlank()) {
-                    args.put("dataset_ids", extra);
+            if (args.get("dataset_ids") == null && !discoveredDatasetIds.isEmpty()) {
+                String all = discoveredDatasetIds.stream().collect(Collectors.joining(","));
+                if (!all.isBlank()) {
+                    args.put("dataset_ids", all);
                 }
             }
             String code = firstNonBlank(args.get("code"), args.get("arg0"));
@@ -465,10 +465,104 @@ public class SubAgentRunner {
             item.put("attempt", trace.getAttempt());
             item.put("success", trace.isSuccess());
             item.put("code_preview", preview(trace.getCode()));
+            item.put("run_args_preview", trace.getRunArgs());
             item.put("output_preview", preview(trace.getOutput()));
             summary.add(item);
         }
         return summary;
+    }
+
+    private Map<String, Object> extractInitialPythonRunArgs(Map<String, Object> args) {
+        Map<String, Object> runArgs = new HashMap<>();
+        if (args == null) {
+            return runArgs;
+        }
+        Map<String, Object> rawRunArgs = toMap(args.get("run_args"));
+        if (!rawRunArgs.isEmpty()) {
+            runArgs.putAll(rawRunArgs);
+        }
+
+        String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+        if (!datasetId.isBlank()) {
+            runArgs.put("dataset_id", datasetId);
+        }
+        String datasetIds = firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2"));
+        if (!datasetIds.isBlank()) {
+            runArgs.put("dataset_ids", datasetIds);
+        }
+        String libraries = firstNonBlank(args.get("libraries"), args.get("arg3"));
+        if (!libraries.isBlank()) {
+            runArgs.put("libraries", libraries);
+        }
+        Integer timeout = toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4"));
+        if (timeout != null && timeout > 0) {
+            runArgs.put("timeout_seconds", timeout);
+        }
+        return runArgs;
+    }
+
+    private String buildCodingContext(Map<String, Object> args,
+                                      List<Map<String, Object>> executedSteps,
+                                      String fallbackContext) {
+        String modelSelectedContext = firstNonBlank(
+                args.get("coding_context"),
+                args.get("codingContext"),
+                args.get("analysis_context"),
+                args.get("analysisContext"),
+                args.get("related_context"),
+                args.get("relatedContext"),
+                args.get("input_context"),
+                args.get("inputContext"),
+                args.get("context")
+        );
+
+        StringBuilder sb = new StringBuilder();
+        if (!modelSelectedContext.isBlank()) {
+            sb.append("模型指定相关上下文:\n").append(modelSelectedContext.trim()).append("\n");
+        } else if (fallbackContext != null && !fallbackContext.isBlank()) {
+            sb.append("任务上下文:\n").append(fallbackContext.trim()).append("\n");
+        }
+
+        String datasetHints = buildDatasetHints(executedSteps);
+        if (!datasetHints.isBlank()) {
+            sb.append("最近工具输出中的数据线索:\n").append(datasetHints);
+        }
+        return sb.toString().trim();
+    }
+
+    private String buildDatasetHints(List<Map<String, Object>> executedSteps) {
+        if (executedSteps == null || executedSteps.isEmpty()) {
+            return "";
+        }
+        List<String> hints = new ArrayList<>();
+        for (Map<String, Object> step : executedSteps) {
+            String output = firstNonBlank(step.get("output"));
+            if (output.isBlank()) {
+                continue;
+            }
+            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
+            while (matcher.find()) {
+                String id = matcher.group(1);
+                String tool = firstNonBlank(step.get("tool"));
+                Map<String, Object> stepArgs = toMap(step.get("args"));
+                String tsCode = firstNonBlank(stepArgs.get("tsCode"), stepArgs.get("ts_code"), stepArgs.get("code"));
+                String line = "- dataset_id=" + id
+                        + (tool.isBlank() ? "" : " (tool=" + tool + ")")
+                        + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")");
+                if (!hints.contains(line)) {
+                    hints.add(line);
+                }
+            }
+        }
+        return String.join("\n", hints);
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return Collections.emptyMap();
     }
 
     private Integer toNullableInt(Object... values) {
