@@ -84,6 +84,7 @@ public class ParallelGraphExecutor {
                 finalState = event.state();
             }
             if (finalState == null) {
+                emitParallelDecision(run.getId(), userId, false, false, false, true, false, "final_state_missing");
                 return false;
             }
             boolean planValid = finalState.planValid().orElse(false);
@@ -91,12 +92,25 @@ public class ParallelGraphExecutor {
             boolean paused = finalState.paused().orElse(false);
             String finalAnswer = finalState.finalAnswer().orElse("");
             if (!planValid) {
+                emitParallelDecision(run.getId(), userId, false, allDone, paused, finalAnswer.isBlank(), false, "plan_invalid");
                 return false;
             }
             if (!allDone) {
+                boolean handled = paused;
+                emitParallelDecision(
+                        run.getId(),
+                        userId,
+                        true,
+                        false,
+                        paused,
+                        finalAnswer.isBlank(),
+                        handled,
+                        paused ? "run_paused" : "tasks_not_all_done"
+                );
                 return paused;
             }
             if (finalAnswer.isBlank()) {
+                emitParallelDecision(run.getId(), userId, true, true, paused, true, false, "final_answer_blank");
                 return false;
             }
 
@@ -110,11 +124,35 @@ public class ParallelGraphExecutor {
             runMapper.updateSnapshot(run.getId(), userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
             eventService.append(run.getId(), userId, "COMPLETED", Map.of("answer", finalAnswer));
             stateStore.markRunStatus(run.getId(), AgentRunStatus.COMPLETED.name());
+            emitParallelDecision(run.getId(), userId, true, true, paused, false, true, "completed");
             return true;
         } catch (Exception e) {
+            try {
+                emitParallelDecision(run.getId(), userId, false, false, false, true, false, "exception:" + e.getClass().getSimpleName());
+            } catch (Exception eventEx) {
+                log.warn("Failed to append PARALLEL_GRAPH_DECISION in exception path: runId={}", run.getId(), eventEx);
+            }
             log.warn("Parallel graph execution failed", e);
             return false;
         }
+    }
+
+    private void emitParallelDecision(String runId,
+                                      String userId,
+                                      boolean planValid,
+                                      boolean allDone,
+                                      boolean paused,
+                                      boolean finalAnswerBlank,
+                                      boolean handled,
+                                      String reason) {
+        eventService.append(runId, userId, "PARALLEL_GRAPH_DECISION", Map.of(
+                "plan_valid", planValid,
+                "all_done", allDone,
+                "paused", paused,
+                "final_answer_blank", finalAnswerBlank,
+                "handled", handled,
+                "reason", reason
+        ));
     }
 
     private CompiledGraph<ParallelGraphState> buildGraph(AgentRun run,

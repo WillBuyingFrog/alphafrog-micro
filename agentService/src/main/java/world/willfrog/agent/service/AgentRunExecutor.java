@@ -103,6 +103,11 @@ public class AgentRunExecutor {
                 if (handled) {
                     return;
                 }
+                eventService.append(runId, userId, "PARALLEL_FALLBACK_TO_SERIAL", Map.of(
+                        "reason", "parallel_executor_returned_false",
+                        "plan_valid_hint", stateStore.loadPlanValid(runId).map(String::valueOf).orElse("unknown"),
+                        "state_status_hint", stateStore.loadRunStatus(runId).orElse("unknown")
+                ));
             }
 
             // 2. Prepare Conversation

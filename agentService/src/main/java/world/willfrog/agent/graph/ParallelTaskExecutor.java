@@ -56,6 +56,11 @@ public class ParallelTaskExecutor {
                     .collect(Collectors.toList());
 
             if (ready.isEmpty()) {
+                eventService.append(runId, userId, "PARALLEL_EXECUTION_BLOCKED", Map.of(
+                        "reason", "no_ready_tasks_possible_cycle",
+                        "pending_task_ids", pending.stream().map(ParallelPlan.PlanTask::getId).collect(Collectors.toList()),
+                        "finished_task_ids", new ArrayList<>(results.keySet())
+                ));
                 log.warn("No ready tasks found, possible cyclic deps.");
                 break;
             }

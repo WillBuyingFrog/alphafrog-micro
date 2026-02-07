@@ -3,7 +3,6 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.dao.DuplicateKeyException;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
@@ -116,20 +115,21 @@ public class AgentEventService {
         if (run == null) {
             return;
         }
-        for (int attempt = 0; attempt < 3; attempt++) {
-            int nextSeq = nextSeq(runId);
-
-            AgentRunEvent event = new AgentRunEvent();
-            event.setRunId(runId);
-            event.setSeq(nextSeq);
-            event.setEventType(eventType);
-            event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
-            try {
-                eventMapper.insert(event);
-                return;
-            } catch (DuplicateKeyException e) {
-                log.warn("Duplicate seq on append, retrying: runId={}, eventType={}, seq={}", runId, eventType, nextSeq);
-            }
+        int nextSeq = nextSeq(runId);
+        AgentRunEvent event = new AgentRunEvent();
+        event.setRunId(runId);
+        event.setSeq(nextSeq);
+        event.setEventType(eventType);
+        event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
+        try {
+            eventMapper.insert(event);
+        } catch (Exception e) {
+            String msg = String.format(
+                    "Append event failed (fail-fast): runId=%s, eventType=%s, seq=%d",
+                    runId, eventType, nextSeq
+            );
+            log.error(msg, e);
+            throw new IllegalStateException(msg, e);
         }
     }
 
@@ -198,34 +198,21 @@ public class AgentEventService {
     private int nextSeq(String runId) {
         String key = eventSeqKey(runId);
         try {
-            Boolean exists = redisTemplate.hasKey(key);
-            if (exists == null || !exists) {
-                Integer maxSeq = eventMapper.findMaxSeq(runId);
-                long base = maxSeq == null ? 0 : maxSeq;
-                redisTemplate.opsForValue().setIfAbsent(key, String.valueOf(base), Duration.ofMinutes(ttlMinutes));
+            redisTemplate.opsForValue().setIfAbsent(key, "0", Duration.ofMinutes(ttlMinutes));
+            Long next = redisTemplate.opsForValue().increment(key);
+            if (next == null) {
+                throw new IllegalStateException("Redis INCR returned null");
             }
-        } catch (Exception e) {
-            log.warn("Init event seq from Redis failed, fallback to DB: runId={}", runId, e);
-        }
-
-        Long next = null;
-        try {
-            next = redisTemplate.opsForValue().increment(key);
-            if (next != null) {
-                redisTemplate.expire(key, Duration.ofMinutes(ttlMinutes));
+            redisTemplate.expire(key, Duration.ofMinutes(ttlMinutes));
+            if (next > Integer.MAX_VALUE) {
+                throw new IllegalStateException("Event seq overflow: " + next);
             }
+            return next.intValue();
         } catch (Exception e) {
-            log.warn("Increment event seq from Redis failed, fallback to DB: runId={}", runId, e);
+            String msg = String.format("Next seq generation failed (Redis only): runId=%s", runId);
+            log.error(msg, e);
+            throw new IllegalStateException(msg, e);
         }
-
-        if (next == null) {
-            Integer maxSeq = eventMapper.findMaxSeq(runId);
-            return (maxSeq == null ? 0 : maxSeq) + 1;
-        }
-        if (next > Integer.MAX_VALUE) {
-            log.warn("Event seq overflow risk: runId={}, seq={}", runId, next);
-        }
-        return next.intValue();
     }
 
     private String eventSeqKey(String runId) {
@@ -244,4 +231,5 @@ public class AgentEventService {
             return "";
         }
     }
+
 }
