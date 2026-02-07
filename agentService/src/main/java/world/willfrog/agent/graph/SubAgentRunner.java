@@ -44,6 +44,8 @@ public class SubAgentRunner {
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
+    /** Python 代码执行重试节点。 */
+    private final PythonCodeRefinementNode pythonCodeRefinementNode;
     /** JSON 序列化/反序列化工具。 */
     private final ObjectMapper objectMapper;
     /** 事件服务（记录子代理过程）。 */
@@ -183,7 +185,7 @@ public class SubAgentRunner {
                 }
                 JsonNode argsNode = stepNode.path("args");
                 Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
-                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps, request.getGoal());
+                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps);
 
                 int stepIndex = executedSteps.size();
                 emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
@@ -192,8 +194,34 @@ public class SubAgentRunner {
                         "tool", tool,
                         "args", args
                 ));
-                String output = toolRouter.invoke(tool, args);
-                boolean stepSuccess = isStepSuccessful(tool, output);
+                String output;
+                boolean stepSuccess;
+                if ("executePython".equals(tool)) {
+                    PythonCodeRefinementNode.Result refineResult = pythonCodeRefinementNode.execute(
+                            PythonCodeRefinementNode.Request.builder()
+                                    .goal(request.getGoal())
+                                    .context(request.getContext())
+                                    .initialCode(firstNonBlank(args.get("code"), args.get("arg0")))
+                                    .datasetId(firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1")))
+                                    .datasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2")))
+                                    .libraries(firstNonBlank(args.get("libraries"), args.get("arg3")))
+                                    .timeoutSeconds(toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4")))
+                                    .build(),
+                            model
+                    );
+                    output = refineResult.getOutput();
+                    stepSuccess = refineResult.isSuccess();
+                    emitEvent(request, "SUB_AGENT_PYTHON_REFINED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "step_index", stepIndex,
+                            "success", stepSuccess,
+                            "attempts_used", refineResult.getAttemptsUsed(),
+                            "traces", summarizePythonTraces(refineResult.getTraces())
+                    ));
+                } else {
+                    output = toolRouter.invoke(tool, args);
+                    stepSuccess = isStepSuccessful(tool, output);
+                }
 
                 Map<String, Object> stepResult = new HashMap<>();
                 stepResult.put("tool", tool);
@@ -293,13 +321,11 @@ public class SubAgentRunner {
      * @param tool          工具名
      * @param rawArgs       模型原始参数
      * @param executedSteps 已执行步骤（用于回填 dataset_id）
-     * @param goal          子任务目标（用于选择 fallback 逻辑）
      * @return 归一化参数
      */
     private Map<String, Object> normalizeStepArgs(String tool,
                                                   Map<String, Object> rawArgs,
-                                                  List<Map<String, Object>> executedSteps,
-                                                  String goal) {
+                                                  List<Map<String, Object>> executedSteps) {
         Map<String, Object> args = new HashMap<>();
         if (rawArgs != null) {
             args.putAll(rawArgs);
@@ -345,11 +371,10 @@ public class SubAgentRunner {
         }
 
         if ("executePython".equals(tool)) {
-            String code = firstNonBlank(args.get("code"), args.get("arg0"));
             String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
             List<String> discoveredDatasetIds = extractDatasetIds(executedSteps);
             if (datasetId.isBlank()) {
-                datasetId = selectDatasetIdForGoal(goal, executedSteps, discoveredDatasetIds);
+                datasetId = discoveredDatasetIds.isEmpty() ? "" : discoveredDatasetIds.get(0);
             }
             if (!datasetId.isBlank()) {
                 args.put("dataset_id", datasetId);
@@ -363,9 +388,8 @@ public class SubAgentRunner {
                     args.put("dataset_ids", extra);
                 }
             }
-            if (shouldUseFallbackPythonCode(code) && !datasetId.isBlank()) {
-                args.put("code", buildFallbackPythonCode(goal, datasetId, discoveredDatasetIds));
-            } else if (!code.isBlank()) {
+            String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            if (!code.isBlank()) {
                 args.put("code", code);
             }
         }
@@ -426,99 +450,37 @@ public class SubAgentRunner {
     }
 
     /**
-     * 根据目标文本，优先选择最匹配的 dataset_id。
+     * 生成 Python 重试节点的 trace 摘要，避免在事件中存放过大文本。
      *
-     * @param goal          子任务目标
-     * @param executedSteps 已执行步骤
-     * @param fallbackIds   回退 ID 列表
-     * @return 选中的 dataset_id
+     * @param traces 原始 trace 列表
+     * @return 摘要列表
      */
-    private String selectDatasetIdForGoal(String goal, List<Map<String, Object>> executedSteps, List<String> fallbackIds) {
-        String goalText = goal == null ? "" : goal;
-        String preferCode = "";
-        if (goalText.contains("沪深300") || goalText.contains("000300")) {
-            preferCode = "000300";
-        } else if (goalText.contains("中证500") || goalText.contains("000905")) {
-            preferCode = "000905";
+    private List<Map<String, Object>> summarizePythonTraces(List<PythonCodeRefinementNode.AttemptTrace> traces) {
+        if (traces == null || traces.isEmpty()) {
+            return List.of();
         }
-        if (!preferCode.isBlank()) {
-            for (Map<String, Object> step : executedSteps) {
-                String output = firstNonBlank(step.get("output"));
-                Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-                if (!matcher.find()) {
-                    continue;
-                }
-                String id = matcher.group(1);
-                Map<String, Object> args = castMap(step.get("args"));
-                String tsCode = firstNonBlank(args.get("tsCode"), args.get("ts_code"), args.get("code"));
-                if (tsCode.contains(preferCode)) {
-                    return id;
-                }
-            }
+        List<Map<String, Object>> summary = new ArrayList<>();
+        for (PythonCodeRefinementNode.AttemptTrace trace : traces) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("attempt", trace.getAttempt());
+            item.put("success", trace.isSuccess());
+            item.put("code_preview", preview(trace.getCode()));
+            item.put("output_preview", preview(trace.getOutput()));
+            summary.add(item);
         }
-        return fallbackIds.isEmpty() ? "" : fallbackIds.get(0);
+        return summary;
     }
 
-    /**
-     * 判断是否应使用内置 fallback Python 代码。
-     *
-     * @param code 模型给出的代码
-     * @return true 表示应替换
-     */
-    private boolean shouldUseFallbackPythonCode(String code) {
-        if (code == null || code.isBlank()) {
-            return true;
+    private Integer toNullableInt(Object... values) {
+        String raw = firstNonBlank(values);
+        if (raw.isBlank()) {
+            return null;
         }
-        String lower = code.toLowerCase();
-        return lower.contains("steps[") || lower.contains("待计算") || lower.contains("假设") || lower.contains("placeholder");
-    }
-
-    /**
-     * 构建 fallback Python 代码：优先产出可解析的 JSON 结果。
-     *
-     * @param goal       子任务目标
-     * @param datasetId  主 dataset_id
-     * @param datasetIds 已发现 dataset 列表
-     * @return Python 代码
-     */
-    private String buildFallbackPythonCode(String goal, String datasetId, List<String> datasetIds) {
-        String goalText = goal == null ? "" : goal;
-        boolean compare = (goalText.contains("对比") || goalText.contains("比较")) && datasetIds.size() >= 2;
-        if (!compare) {
-            return ""
-                    + "import json, pandas as pd\n"
-                    + "dataset_id = \"" + datasetId + "\"\n"
-                    + "path = f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\"\n"
-                    + "df = pd.read_csv(path)\n"
-                    + "df = df.sort_values('trade_date')\n"
-                    + "start_close = float(df.iloc[0]['close'])\n"
-                    + "end_close = float(df.iloc[-1]['close'])\n"
-                    + "pct = (end_close - start_close) / start_close * 100\n"
-                    + "print(json.dumps({'dataset_id': dataset_id, 'start_close': start_close, 'end_close': end_close, 'pct_chg': pct}, ensure_ascii=False))\n";
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            return null;
         }
-        String a = datasetIds.get(0);
-        String b = datasetIds.get(1);
-        return ""
-                + "import json, pandas as pd\n"
-                + "ids = ['" + a + "', '" + b + "']\n"
-                + "def calc(dataset_id):\n"
-                + "    path = f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\"\n"
-                + "    df = pd.read_csv(path).sort_values('trade_date')\n"
-                + "    s = float(df.iloc[0]['close'])\n"
-                + "    e = float(df.iloc[-1]['close'])\n"
-                + "    return {'dataset_id': dataset_id, 'start_close': s, 'end_close': e, 'pct_chg': (e - s) / s * 100}\n"
-                + "r1 = calc(ids[0])\n"
-                + "r2 = calc(ids[1])\n"
-                + "diff = r1['pct_chg'] - r2['pct_chg']\n"
-                + "print(json.dumps({'left': r1, 'right': r2, 'diff_pct': diff}, ensure_ascii=False))\n";
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> castMap(Object value) {
-        if (value instanceof Map<?, ?> m) {
-            return (Map<String, Object>) m;
-        }
-        return Collections.emptyMap();
     }
 
     private String compactDate(String raw) {

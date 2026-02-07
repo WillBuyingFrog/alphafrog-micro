@@ -70,6 +70,9 @@ agent:
       max-parallel-tasks: ${AF_AGENT_FLOW_PARALLEL_MAX_PARALLEL_TASKS:-1}
       max-sub-agents: ${AF_AGENT_FLOW_PARALLEL_MAX_SUB_AGENTS:-1}
       sub-agent-max-steps: ${AF_AGENT_FLOW_PARALLEL_SUB_AGENT_MAX_STEPS:6}
+    code-refine:
+      config-file: ${AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE:}
+      max-attempts: ${AF_AGENT_FLOW_CODE_REFINE_MAX_ATTEMPTS:3}
     hitl:
       state-ttl-seconds: ${AF_AGENT_FLOW_HITL_STATE_TTL_SECONDS:3600}
 
