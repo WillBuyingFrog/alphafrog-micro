@@ -32,16 +32,34 @@ import java.util.Map;
 @Service
 @RequiredArgsConstructor
 @Slf4j
+/**
+ * Agent run 执行器。
+ * <p>
+ * 执行流程：
+ * 1. 进入 EXECUTING 并写入事件；
+ * 2. 优先尝试并行图执行；
+ * 3. 并行未接管时回退到串行 Tool Calling 循环；
+ * 4. 落库最终结果并更新状态。
+ */
 public class AgentRunExecutor {
 
+    /** run 主表读写。 */
     private final AgentRunMapper runMapper;
+    /** 事件服务。 */
     private final AgentEventService eventService;
+    /** 模型构建工厂（根据 endpoint/model 动态选型）。 */
     private final AgentAiServiceFactory aiServiceFactory;
+    /** 行情工具集合。 */
     private final MarketDataTools marketDataTools;
+    /** Python 沙箱工具集合。 */
     private final PythonSandboxTools pythonSandboxTools;
+    /** 工具统一路由。 */
     private final world.willfrog.agent.tool.ToolRouter toolRouter;
+    /** 并行图执行器。 */
     private final world.willfrog.agent.graph.ParallelGraphExecutor parallelGraphExecutor;
+    /** 运行态缓存。 */
     private final AgentRunStateStore stateStore;
+    /** JSON 工具。 */
     private final ObjectMapper objectMapper;
 
     /**
@@ -86,6 +104,7 @@ public class AgentRunExecutor {
             eventService.append(runId, userId, "EXECUTION_STARTED", mapOf("run_id", runId));
             stateStore.markRunStatus(runId, AgentRunStatus.EXECUTING.name());
 
+            // endpoint/model 允许请求级覆盖，未指定时由 resolver 走默认配置。
             String endpointName = eventService.extractEndpointName(run.getExt());
             String modelName = eventService.extractModelName(run.getExt());
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(endpointName, modelName);
@@ -103,6 +122,7 @@ public class AgentRunExecutor {
                 if (handled) {
                     return;
                 }
+                // 并行未接管时显式记录回退事件，便于排查为什么进入串行流程。
                 eventService.append(runId, userId, "PARALLEL_FALLBACK_TO_SERIAL", Map.of(
                         "reason", "parallel_executor_returned_false",
                         "plan_valid_hint", stateStore.loadPlanValid(runId).map(String::valueOf).orElse("unknown"),
@@ -140,6 +160,7 @@ public class AgentRunExecutor {
                 messages.add(aiMessage);
 
                 if (aiMessage.hasToolExecutionRequests()) {
+                    // 模型要求调用工具：逐个执行并把结果回灌给模型。
                     for (ToolExecutionRequest toolRequest : aiMessage.toolExecutionRequests()) {
                          String toolName = toolRequest.name();
                          String argsJson = toolRequest.arguments();
@@ -162,6 +183,7 @@ public class AgentRunExecutor {
                          executionLog += "Tool: " + toolName + "\nResult: " + result + "\n\n";
                     }
                 } else {
+                    // 无工具请求时，视为模型已产出最终答案。
                     finalAnswer = aiMessage.text();
                     break;
                 }
@@ -194,7 +216,10 @@ public class AgentRunExecutor {
     }
 
     /**
-     * 工具调用分发（按 tool_name 路由到具体实现）。
+     * 将 JSON 字符串解析为 Map，解析失败返回空 Map。
+     *
+     * @param json JSON 文本
+     * @return 参数 Map
      */
     private Map<String, Object> jsonToMap(String json) {
         try {
@@ -205,6 +230,12 @@ public class AgentRunExecutor {
         }
     }
 
+    /**
+     * JsonNode 对象节点转 Map，支持常用基础类型。
+     *
+     * @param node JsonNode
+     * @return 参数 Map
+     */
     private Map<String, Object> jsonNodeToMap(JsonNode node) {
         if (node == null || node.isNull() || node.isMissingNode()) {
             return Map.of();
@@ -232,6 +263,12 @@ public class AgentRunExecutor {
         return map;
     }
 
+    /**
+     * 尝试把 JSON 文本解析为 JsonNode，失败时保留原始字符串。
+     *
+     * @param jsonText 原始文本
+     * @return JsonNode 或原始字符串
+     */
     private Object safeJson(String jsonText) {
         if (jsonText == null) {
             return null;
@@ -243,6 +280,13 @@ public class AgentRunExecutor {
         }
     }
 
+    /**
+     * 构造单键值 map，便于写事件 payload。
+     *
+     * @param k 键
+     * @param v 值
+     * @return 单项 map
+     */
     private Map<String, Object> mapOf(String k, Object v) {
         Map<String, Object> map = new HashMap<>();
         map.put(k, v);

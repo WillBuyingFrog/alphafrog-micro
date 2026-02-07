@@ -32,34 +32,73 @@ import static org.bsc.langgraph4j.action.AsyncNodeAction.node_async;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+/**
+ * 并行图执行器（LangGraph4j）。
+ * <p>
+ * 核心职责：
+ * 1. 生成并校验并行计划；
+ * 2. 执行并行任务并聚合结果；
+ * 3. 在可观测事件中输出“并行是否接管、为何回退”的决策信息；
+ * 4. 在满足条件时将 run 直接标记为 COMPLETED。
+ */
 public class ParallelGraphExecutor {
 
+    /** 具体的并行任务调度执行器。 */
     private final ParallelTaskExecutor taskExecutor;
+    /** 计划结构与约束校验器。 */
     private final ParallelPlanValidator planValidator = new ParallelPlanValidator();
+    /** run 主表更新。 */
     private final AgentRunMapper runMapper;
+    /** 事件写入服务。 */
     private final AgentEventService eventService;
+    /** Redis 状态缓存（计划、任务进度、run 状态）。 */
     private final AgentRunStateStore stateStore;
+    /** JSON 序列化/反序列化。 */
     private final ObjectMapper objectMapper;
 
+    /** 是否启用并行图总开关。 */
     @Value("${agent.flow.parallel.enabled:true}")
     private boolean enabled;
 
+    /** 计划允许的最大任务数。 */
     @Value("${agent.flow.parallel.max-tasks:6}")
     private int maxTasks;
 
+    /** 单个 sub_agent 允许的最大步数。 */
     @Value("${agent.flow.parallel.sub-agent-max-steps:6}")
     private int subAgentMaxSteps;
 
+    /** 允许的“无依赖并行任务”上限，-1 表示不限制。 */
     @Value("${agent.flow.parallel.max-parallel-tasks:-1}")
     private int maxParallelTasks;
 
+    /** 允许的 sub_agent 任务上限，-1 表示不限制。 */
     @Value("${agent.flow.parallel.max-sub-agents:-1}")
     private int maxSubAgents;
 
+    /**
+     * 并行图执行器是否启用。
+     *
+     * @return true 表示启用
+     */
     public boolean isEnabled() {
         return enabled;
     }
 
+    /**
+     * 执行并行图主流程。
+     * <p>
+     * 返回值语义：
+     * 1. true：并行流程已接管并完成（或在 HITL 场景下按约定结束）；
+     * 2. false：并行流程未接管，调用方应回退串行执行。
+     *
+     * @param run                当前 run
+     * @param userId             用户 ID
+     * @param userGoal           用户目标
+     * @param model              聊天模型
+     * @param toolSpecifications 工具声明
+     * @return 是否由并行流程处理完成
+     */
     public boolean execute(AgentRun run,
                            String userId,
                            String userGoal,
@@ -83,6 +122,7 @@ public class ParallelGraphExecutor {
             for (var event : graph.stream(initial)) {
                 finalState = event.state();
             }
+            // finalState 为空通常表示图执行过程被中断或未产生可用状态。
             if (finalState == null) {
                 emitParallelDecision(run.getId(), userId, false, false, false, true, false, "final_state_missing");
                 return false;
@@ -91,10 +131,12 @@ public class ParallelGraphExecutor {
             boolean allDone = finalState.allDone().orElse(false);
             boolean paused = finalState.paused().orElse(false);
             String finalAnswer = finalState.finalAnswer().orElse("");
+            // 计划不合法：明确记录决策，回退串行。
             if (!planValid) {
                 emitParallelDecision(run.getId(), userId, false, allDone, paused, finalAnswer.isBlank(), false, "plan_invalid");
                 return false;
             }
+            // 任务尚未完成：只有 paused 场景才算“已由并行流程处理到等待态”。
             if (!allDone) {
                 boolean handled = paused;
                 emitParallelDecision(
@@ -109,6 +151,7 @@ public class ParallelGraphExecutor {
                 );
                 return paused;
             }
+            // 任务都做完但没有最终结论，视为并行流程未成功接管。
             if (finalAnswer.isBlank()) {
                 emitParallelDecision(run.getId(), userId, true, true, paused, true, false, "final_answer_blank");
                 return false;
@@ -127,6 +170,7 @@ public class ParallelGraphExecutor {
             emitParallelDecision(run.getId(), userId, true, true, paused, false, true, "completed");
             return true;
         } catch (Exception e) {
+            // 决策事件的异常路径也尽量记录，便于线上排障。
             try {
                 emitParallelDecision(run.getId(), userId, false, false, false, true, false, "exception:" + e.getClass().getSimpleName());
             } catch (Exception eventEx) {
@@ -137,6 +181,18 @@ public class ParallelGraphExecutor {
         }
     }
 
+    /**
+     * 输出并行决策埋点事件，便于定位“为何回退串行/为何未产出并行任务事件”。
+     *
+     * @param runId            任务 ID
+     * @param userId           用户 ID
+     * @param planValid        计划是否有效
+     * @param allDone          任务是否全部完成
+     * @param paused           是否处于暂停态
+     * @param finalAnswerBlank 最终答案是否为空
+     * @param handled          并行流程是否视作已处理
+     * @param reason           决策原因
+     */
     private void emitParallelDecision(String runId,
                                       String userId,
                                       boolean planValid,
@@ -155,6 +211,16 @@ public class ParallelGraphExecutor {
         ));
     }
 
+    /**
+     * 构建 LangGraph4j 编排图。
+     *
+     * @param run           当前 run
+     * @param userId        用户 ID
+     * @param userGoal      用户目标
+     * @param model         聊天模型
+     * @param toolWhitelist 可用工具白名单
+     * @return 编译后的图对象
+     */
     private CompiledGraph<ParallelGraphState> buildGraph(AgentRun run,
                                                          String userId,
                                                          String userGoal,
@@ -176,6 +242,16 @@ public class ParallelGraphExecutor {
         }
     }
 
+    /**
+     * 规划节点：生成计划、校验计划并写入状态。
+     *
+     * @param run           当前 run
+     * @param userId        用户 ID
+     * @param userGoal      用户目标
+     * @param model         聊天模型
+     * @param toolWhitelist 可用工具白名单
+     * @return 状态更新字段
+     */
     private Map<String, Object> planNode(AgentRun run,
                                          String userId,
                                          String userGoal,
@@ -188,6 +264,7 @@ public class ParallelGraphExecutor {
         boolean usedStoredPlan = false;
         boolean override = stateStore.isPlanOverride(run.getId());
         Optional<String> stored = stateStore.loadPlan(run.getId());
+        // Redis 未命中时回退到 DB 已持久化计划，支持恢复/续跑场景。
         if (stored.isEmpty() && run.getPlanJson() != null && !run.getPlanJson().isBlank() && !"{}".equals(run.getPlanJson().trim())) {
             stored = Optional.of(run.getPlanJson());
         }
@@ -249,6 +326,17 @@ public class ParallelGraphExecutor {
         return update;
     }
 
+    /**
+     * 执行节点：并发执行任务并汇总阶段结果。
+     *
+     * @param run           当前 run
+     * @param userId        用户 ID
+     * @param userGoal      用户目标
+     * @param model         聊天模型
+     * @param toolWhitelist 可用工具白名单
+     * @param state         当前图状态
+     * @return 状态更新字段
+     */
     private Map<String, Object> executeNode(AgentRun run,
                                             String userId,
                                             String userGoal,
@@ -271,6 +359,16 @@ public class ParallelGraphExecutor {
         return update;
     }
 
+    /**
+     * 收敛节点：对并行任务结果进行总结，生成最终答案文本。
+     *
+     * @param run      当前 run
+     * @param userId   用户 ID
+     * @param userGoal 用户目标
+     * @param model    聊天模型
+     * @param state    当前图状态
+     * @return 状态更新字段（包含 final_answer）
+     */
     private Map<String, Object> finalNode(AgentRun run,
                                           String userId,
                                           String userGoal,
@@ -292,6 +390,12 @@ public class ParallelGraphExecutor {
         return Map.of("final_answer", answer);
     }
 
+    /**
+     * 安全反序列化计划 JSON，失败时返回空计划对象。
+     *
+     * @param json 计划 JSON
+     * @return 计划对象
+     */
     private ParallelPlan parsePlan(String json) {
         try {
             return objectMapper.readValue(json, ParallelPlan.class);
@@ -300,6 +404,12 @@ public class ParallelGraphExecutor {
         }
     }
 
+    /**
+     * 安全序列化对象，失败时返回空 JSON 对象。
+     *
+     * @param obj 任意对象
+     * @return JSON 字符串
+     */
     private String safeWrite(Object obj) {
         try {
             return objectMapper.writeValueAsString(obj);
@@ -308,6 +418,12 @@ public class ParallelGraphExecutor {
         }
     }
 
+    /**
+     * 从模型输出文本中提取最外层 JSON 片段。
+     *
+     * @param text 模型原始输出
+     * @return JSON 文本
+     */
     private String extractJson(String text) {
         if (text == null) {
             return "{}";
@@ -320,6 +436,13 @@ public class ParallelGraphExecutor {
         return text.trim();
     }
 
+    /**
+     * 判断计划中的任务是否都已经产出结果。
+     *
+     * @param plan    计划
+     * @param results 当前结果映射
+     * @return true 表示全部完成
+     */
     private boolean isAllDone(ParallelPlan plan, Map<String, ParallelTaskResult> results) {
         if (plan == null || plan.getTasks() == null || plan.getTasks().isEmpty()) {
             return true;
@@ -335,6 +458,14 @@ public class ParallelGraphExecutor {
         return true;
     }
 
+    /**
+     * 构建规划模型的系统提示词。
+     *
+     * @param toolWhitelist 工具白名单
+     * @param maxTasks      最大任务数
+     * @param maxSubSteps   sub_agent 最大步数
+     * @return 提示词文本
+     */
     private String buildPlannerPrompt(Set<String> toolWhitelist, int maxTasks, int maxSubSteps) {
         StringBuilder sb = new StringBuilder();
         sb.append("你是并行任务规划器。只输出 JSON。");

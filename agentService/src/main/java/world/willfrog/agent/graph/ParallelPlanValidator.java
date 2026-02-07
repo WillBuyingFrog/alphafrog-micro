@@ -7,15 +7,40 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 
+/**
+ * 并行计划校验器。
+ * <p>
+ * 主要校验维度：
+ * 1. 计划结构完整性（任务存在、ID 唯一、依赖有效）；
+ * 2. 任务类型合法性（tool / sub_agent）；
+ * 3. 工具白名单约束；
+ * 4. 并行数量、sub_agent 数量与步数上限约束。
+ */
 public class ParallelPlanValidator {
 
+    /**
+     * 计划校验结果。
+     */
     @Data
     @Builder
     public static class Result {
+        /** 是否通过校验。 */
         private boolean valid;
+        /** 失败原因（通过时通常为空）。 */
         private String reason;
     }
 
+    /**
+     * 校验并行计划是否满足运行要求。
+     *
+     * @param plan             并行计划
+     * @param toolWhitelist    可用工具白名单
+     * @param maxTasks         最大任务数
+     * @param maxSubSteps      sub_agent 最大步数
+     * @param maxParallelTasks 并行任务上限（无依赖任务数），-1 表示不限制
+     * @param maxSubAgents     sub_agent 任务上限，-1 表示不限制
+     * @return 校验结果
+     */
     public Result validate(ParallelPlan plan,
                            Set<String> toolWhitelist,
                            int maxTasks,
@@ -32,7 +57,9 @@ public class ParallelPlanValidator {
             return Result.builder().valid(false).reason("plan exceeds max tasks").build();
         }
         Set<String> ids = new HashSet<>();
+        // parallelCount: 无依赖任务数，作为“可并行任务数量”的近似约束指标。
         int parallelCount = 0;
+        // subAgentCount: sub_agent 类型任务数量。
         int subAgentCount = 0;
         for (ParallelPlan.PlanTask task : plan.getTasks()) {
             if (task.getId() == null || task.getId().isBlank()) {

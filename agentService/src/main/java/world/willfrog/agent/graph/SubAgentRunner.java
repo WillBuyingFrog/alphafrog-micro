@@ -23,33 +23,68 @@ import java.util.Set;
 @Component
 @RequiredArgsConstructor
 @Slf4j
+/**
+ * 子代理执行器。
+ * <p>
+ * 子代理不直接输出最终回复，而是：
+ * 1. 先生成线性步骤计划；
+ * 2. 按步骤调用工具；
+ * 3. 产出可供主流程合并的局部结论。
+ */
 public class SubAgentRunner {
 
+    /** 工具路由器。 */
     private final ToolRouter toolRouter;
+    /** JSON 序列化/反序列化工具。 */
     private final ObjectMapper objectMapper;
+    /** 事件服务（记录子代理过程）。 */
     private final AgentEventService eventService;
 
+    /**
+     * 子代理请求参数。
+     */
     @Data
     @Builder
     public static class SubAgentRequest {
+        /** run ID。 */
         private String runId;
+        /** 用户 ID。 */
         private String userId;
+        /** 对应的并行任务 ID。 */
         private String taskId;
+        /** 子任务目标。 */
         private String goal;
+        /** 上下文补充。 */
         private String context;
+        /** 可用工具白名单。 */
         private Set<String> toolWhitelist;
+        /** 允许的最大步骤数。 */
         private int maxSteps;
     }
 
+    /**
+     * 子代理执行结果。
+     */
     @Data
     @Builder
     public static class SubAgentResult {
+        /** 是否成功。 */
         private boolean success;
+        /** 子代理结论文本。 */
         private String answer;
+        /** 错误信息（失败时）。 */
         private String error;
+        /** 逐步执行记录。 */
         private List<Map<String, Object>> steps;
     }
 
+    /**
+     * 执行子代理任务。
+     *
+     * @param request 子代理请求
+     * @param model   聊天模型
+     * @return 子代理执行结果
+     */
     public SubAgentResult run(SubAgentRequest request, ChatLanguageModel model) {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
@@ -62,6 +97,7 @@ public class SubAgentRunner {
 
         List<Map<String, Object>> executedSteps = new ArrayList<>();
         try {
+            // 第一步：让模型先生成“可执行的线性步骤 JSON”。
             Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
                     new SystemMessage(systemPrompt),
                     new UserMessage("目标: " + request.getGoal() + "\n上下文: " + (request.getContext() == null ? "" : request.getContext()))
@@ -92,6 +128,7 @@ public class SubAgentRunner {
                     "steps", buildStepSummary(stepsNode)
             ));
 
+            // 第二步：按计划逐步执行工具。
             for (JsonNode stepNode : stepsNode) {
                 String tool = stepNode.path("tool").asText();
                 if (!request.getToolWhitelist().contains(tool)) {
@@ -128,6 +165,7 @@ public class SubAgentRunner {
                 ));
             }
 
+            // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
             String summaryPrompt = "请基于以下工具执行结果，给出简洁结论用于主流程合并：";
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
                     new SystemMessage(summaryPrompt),
@@ -154,6 +192,12 @@ public class SubAgentRunner {
         }
     }
 
+    /**
+     * 从文本中抽取最外层 JSON 片段。
+     *
+     * @param text 模型输出文本
+     * @return JSON 文本
+     */
     private String extractJson(String text) {
         if (text == null) {
             return "{}";
@@ -166,6 +210,13 @@ public class SubAgentRunner {
         return text.trim();
     }
 
+    /**
+     * 输出子代理事件（参数缺失时静默跳过，避免污染主流程）。
+     *
+     * @param request   子代理请求
+     * @param eventType 事件类型
+     * @param payload   事件负载
+     */
     private void emitEvent(SubAgentRequest request, String eventType, Object payload) {
         if (request == null || request.getRunId() == null || request.getRunId().isBlank()) {
             return;
@@ -176,6 +227,12 @@ public class SubAgentRunner {
         eventService.append(request.getRunId(), request.getUserId(), eventType, payload);
     }
 
+    /**
+     * 将步骤 JSON 生成简要摘要，供事件与前端展示使用。
+     *
+     * @param stepsNode 步骤数组节点
+     * @return 步骤摘要
+     */
     private List<Map<String, Object>> buildStepSummary(JsonNode stepsNode) {
         List<Map<String, Object>> summary = new ArrayList<>();
         int idx = 0;
@@ -189,6 +246,12 @@ public class SubAgentRunner {
         return summary;
     }
 
+    /**
+     * 裁剪长文本，避免事件负载过大。
+     *
+     * @param text 原始文本
+     * @return 预览文本
+     */
     private String preview(String text) {
         if (text == null) {
             return "";
@@ -199,6 +262,12 @@ public class SubAgentRunner {
         return text;
     }
 
+    /**
+     * 空值转空字符串。
+     *
+     * @param value 原始字符串
+     * @return 非空字符串
+     */
     private String nvl(String value) {
         return value == null ? "" : value;
     }
