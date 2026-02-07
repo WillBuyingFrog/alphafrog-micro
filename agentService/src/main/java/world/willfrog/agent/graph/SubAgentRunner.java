@@ -17,10 +17,13 @@ import world.willfrog.agent.tool.ToolRouter;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
@@ -36,6 +39,8 @@ import java.util.stream.Collectors;
 public class SubAgentRunner {
     /** 子代理规划最大重试次数（用于修正无效工具/格式问题）。 */
     private static final int MAX_PLAN_ATTEMPTS = 3;
+    /** 从工具输出中提取 dataset_id。 */
+    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
@@ -177,7 +182,8 @@ public class SubAgentRunner {
                     return SubAgentResult.builder().success(false).error("sub_agent tool not allowed: " + tool).build();
                 }
                 JsonNode argsNode = stepNode.path("args");
-                Map<String, Object> args = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
+                Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
+                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps, request.getGoal());
 
                 int stepIndex = executedSteps.size();
                 emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
@@ -187,20 +193,34 @@ public class SubAgentRunner {
                         "args", args
                 ));
                 String output = toolRouter.invoke(tool, args);
+                boolean stepSuccess = isStepSuccessful(tool, output);
 
                 Map<String, Object> stepResult = new HashMap<>();
                 stepResult.put("tool", tool);
                 stepResult.put("args", args);
                 stepResult.put("output", output);
+                stepResult.put("success", stepSuccess);
                 executedSteps.add(stepResult);
 
                 emitEvent(request, "SUB_AGENT_STEP_FINISHED", Map.of(
                         "task_id", nvl(request.getTaskId()),
                         "step_index", stepIndex,
                         "tool", tool,
-                        "success", !output.startsWith("Tool invocation error"),
+                        "success", stepSuccess,
                         "output_preview", preview(output)
                 ));
+                if (!stepSuccess) {
+                    String err = "sub_agent step failed: tool=" + tool + ", reason=" + preview(output);
+                    emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "error", err
+                    ));
+                    return SubAgentResult.builder()
+                            .success(false)
+                            .error(err)
+                            .steps(executedSteps)
+                            .build();
+                }
             }
 
             // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
@@ -241,6 +261,10 @@ public class SubAgentRunner {
         return "你是一个子任务代理。必须先输出线性计划 JSON，不超过 " + maxSteps + " 步。"
                 + "仅能使用下列工具名称：" + tools + "。"
                 + "严禁把 sub_agent、workflow、tool、agent 作为步骤工具名。"
+                + "工具参数必须严格匹配真实签名："
+                + "searchIndex/searchStock/searchFund 使用 keyword；"
+                + "getIndexDaily/getStockDaily 使用 tsCode,startDateStr,endDateStr（日期格式必须为YYYYMMDD）；"
+                + "executePython 使用 code,dataset_id（dataset_id必须来自前一步 DATASET_CREATED/REUSED 输出）。"
                 + "输出格式:\n"
                 + "{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}";
     }
@@ -261,6 +285,264 @@ public class SubAgentRunner {
             }
         }
         return invalid;
+    }
+
+    /**
+     * 对步骤参数做兼容性归一化，提升子代理工具调用成功率。
+     *
+     * @param tool          工具名
+     * @param rawArgs       模型原始参数
+     * @param executedSteps 已执行步骤（用于回填 dataset_id）
+     * @param goal          子任务目标（用于选择 fallback 逻辑）
+     * @return 归一化参数
+     */
+    private Map<String, Object> normalizeStepArgs(String tool,
+                                                  Map<String, Object> rawArgs,
+                                                  List<Map<String, Object>> executedSteps,
+                                                  String goal) {
+        Map<String, Object> args = new HashMap<>();
+        if (rawArgs != null) {
+            args.putAll(rawArgs);
+        }
+
+        if ("searchIndex".equals(tool) || "searchStock".equals(tool) || "searchFund".equals(tool)) {
+            String keyword = firstNonBlank(args.get("keyword"), args.get("query"), args.get("q"), args.get("name"), args.get("arg0"));
+            if (!keyword.isBlank()) {
+                args.put("keyword", keyword);
+            }
+        }
+
+        if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool)) {
+            String tsCode = firstNonBlank(
+                    args.get("tsCode"),
+                    args.get("ts_code"),
+                    args.get("code"),
+                    args.get("index_code"),
+                    args.get("stock_code"),
+                    args.get("arg0")
+            );
+            String startDateStr = compactDate(firstNonBlank(
+                    args.get("startDateStr"),
+                    args.get("startDate"),
+                    args.get("start_date"),
+                    args.get("arg1")
+            ));
+            String endDateStr = compactDate(firstNonBlank(
+                    args.get("endDateStr"),
+                    args.get("endDate"),
+                    args.get("end_date"),
+                    args.get("arg2")
+            ));
+            if (!tsCode.isBlank()) {
+                args.put("tsCode", tsCode);
+            }
+            if (!startDateStr.isBlank()) {
+                args.put("startDateStr", startDateStr);
+            }
+            if (!endDateStr.isBlank()) {
+                args.put("endDateStr", endDateStr);
+            }
+        }
+
+        if ("executePython".equals(tool)) {
+            String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            List<String> discoveredDatasetIds = extractDatasetIds(executedSteps);
+            if (datasetId.isBlank()) {
+                datasetId = selectDatasetIdForGoal(goal, executedSteps, discoveredDatasetIds);
+            }
+            if (!datasetId.isBlank()) {
+                args.put("dataset_id", datasetId);
+            }
+            if (args.get("dataset_ids") == null && discoveredDatasetIds.size() > 1) {
+                final String selectedDatasetId = datasetId;
+                String extra = discoveredDatasetIds.stream()
+                        .filter(id -> !id.equals(selectedDatasetId))
+                        .collect(Collectors.joining(","));
+                if (!extra.isBlank()) {
+                    args.put("dataset_ids", extra);
+                }
+            }
+            if (shouldUseFallbackPythonCode(code) && !datasetId.isBlank()) {
+                args.put("code", buildFallbackPythonCode(goal, datasetId, discoveredDatasetIds));
+            } else if (!code.isBlank()) {
+                args.put("code", code);
+            }
+        }
+        return args;
+    }
+
+    /**
+     * 判断一步工具执行是否可视为成功。
+     *
+     * @param tool   工具名
+     * @param output 工具输出
+     * @return true 表示成功
+     */
+    private boolean isStepSuccessful(String tool, String output) {
+        if (output == null) {
+            return false;
+        }
+        if (output.startsWith("Tool invocation error")) {
+            return false;
+        }
+        if (output.startsWith("Unsupported tool")) {
+            return false;
+        }
+        if (output.contains("Invalid date range")) {
+            return false;
+        }
+        if (output.contains("No daily index data found")) {
+            return false;
+        }
+        if (output.contains("No daily data found")) {
+            return false;
+        }
+        if (output.startsWith("Task PENDING (Timeout)")) {
+            return false;
+        }
+        if ("executePython".equals(tool) && (output.startsWith("Exit Code:") || output.contains("STDERR:"))) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 从已执行步骤中提取 dataset_id 列表（按出现顺序去重）。
+     *
+     * @param executedSteps 已执行步骤
+     * @return dataset_id 列表
+     */
+    private List<String> extractDatasetIds(List<Map<String, Object>> executedSteps) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Map<String, Object> step : executedSteps) {
+            String output = firstNonBlank(step.get("output"));
+            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
+            while (matcher.find()) {
+                ids.add(matcher.group(1));
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /**
+     * 根据目标文本，优先选择最匹配的 dataset_id。
+     *
+     * @param goal          子任务目标
+     * @param executedSteps 已执行步骤
+     * @param fallbackIds   回退 ID 列表
+     * @return 选中的 dataset_id
+     */
+    private String selectDatasetIdForGoal(String goal, List<Map<String, Object>> executedSteps, List<String> fallbackIds) {
+        String goalText = goal == null ? "" : goal;
+        String preferCode = "";
+        if (goalText.contains("沪深300") || goalText.contains("000300")) {
+            preferCode = "000300";
+        } else if (goalText.contains("中证500") || goalText.contains("000905")) {
+            preferCode = "000905";
+        }
+        if (!preferCode.isBlank()) {
+            for (Map<String, Object> step : executedSteps) {
+                String output = firstNonBlank(step.get("output"));
+                Matcher matcher = DATASET_ID_PATTERN.matcher(output);
+                if (!matcher.find()) {
+                    continue;
+                }
+                String id = matcher.group(1);
+                Map<String, Object> args = castMap(step.get("args"));
+                String tsCode = firstNonBlank(args.get("tsCode"), args.get("ts_code"), args.get("code"));
+                if (tsCode.contains(preferCode)) {
+                    return id;
+                }
+            }
+        }
+        return fallbackIds.isEmpty() ? "" : fallbackIds.get(0);
+    }
+
+    /**
+     * 判断是否应使用内置 fallback Python 代码。
+     *
+     * @param code 模型给出的代码
+     * @return true 表示应替换
+     */
+    private boolean shouldUseFallbackPythonCode(String code) {
+        if (code == null || code.isBlank()) {
+            return true;
+        }
+        String lower = code.toLowerCase();
+        return lower.contains("steps[") || lower.contains("待计算") || lower.contains("假设") || lower.contains("placeholder");
+    }
+
+    /**
+     * 构建 fallback Python 代码：优先产出可解析的 JSON 结果。
+     *
+     * @param goal       子任务目标
+     * @param datasetId  主 dataset_id
+     * @param datasetIds 已发现 dataset 列表
+     * @return Python 代码
+     */
+    private String buildFallbackPythonCode(String goal, String datasetId, List<String> datasetIds) {
+        String goalText = goal == null ? "" : goal;
+        boolean compare = (goalText.contains("对比") || goalText.contains("比较")) && datasetIds.size() >= 2;
+        if (!compare) {
+            return ""
+                    + "import json, pandas as pd\n"
+                    + "dataset_id = \"" + datasetId + "\"\n"
+                    + "path = f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\"\n"
+                    + "df = pd.read_csv(path)\n"
+                    + "df = df.sort_values('trade_date')\n"
+                    + "start_close = float(df.iloc[0]['close'])\n"
+                    + "end_close = float(df.iloc[-1]['close'])\n"
+                    + "pct = (end_close - start_close) / start_close * 100\n"
+                    + "print(json.dumps({'dataset_id': dataset_id, 'start_close': start_close, 'end_close': end_close, 'pct_chg': pct}, ensure_ascii=False))\n";
+        }
+        String a = datasetIds.get(0);
+        String b = datasetIds.get(1);
+        return ""
+                + "import json, pandas as pd\n"
+                + "ids = ['" + a + "', '" + b + "']\n"
+                + "def calc(dataset_id):\n"
+                + "    path = f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\"\n"
+                + "    df = pd.read_csv(path).sort_values('trade_date')\n"
+                + "    s = float(df.iloc[0]['close'])\n"
+                + "    e = float(df.iloc[-1]['close'])\n"
+                + "    return {'dataset_id': dataset_id, 'start_close': s, 'end_close': e, 'pct_chg': (e - s) / s * 100}\n"
+                + "r1 = calc(ids[0])\n"
+                + "r2 = calc(ids[1])\n"
+                + "diff = r1['pct_chg'] - r2['pct_chg']\n"
+                + "print(json.dumps({'left': r1, 'right': r2, 'diff_pct': diff}, ensure_ascii=False))\n";
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> castMap(Object value) {
+        if (value instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return Collections.emptyMap();
+    }
+
+    private String compactDate(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String digits = raw.replaceAll("[^0-9]", "");
+        if (digits.length() == 8 || digits.length() == 13) {
+            return digits;
+        }
+        return raw.trim();
+    }
+
+    private String firstNonBlank(Object... values) {
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+            String s = String.valueOf(value).trim();
+            if (!s.isBlank()) {
+                return s;
+            }
+        }
+        return "";
     }
 
     /**

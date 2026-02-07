@@ -17,12 +17,12 @@ public class ToolRouter {
         try {
             return switch (toolName) {
                 case "getStockInfo" -> marketDataTools.getStockInfo(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("stock_code"), params.get("arg0"))
                 );
                 case "getStockDaily" -> marketDataTools.getStockDaily(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
-                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
-                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("stock_code"), params.get("arg0")),
+                        dateStr(params.get("startDateStr"), params.get("startDate"), params.get("start_date"), params.get("arg1")),
+                        dateStr(params.get("endDateStr"), params.get("endDate"), params.get("end_date"), params.get("arg2"))
                 );
                 case "searchStock" -> marketDataTools.searchStock(
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
@@ -31,12 +31,12 @@ public class ToolRouter {
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
                 );
                 case "getIndexInfo" -> marketDataTools.getIndexInfo(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("index_code"), params.get("arg0"))
                 );
                 case "getIndexDaily" -> marketDataTools.getIndexDaily(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg0")),
-                        str(params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
-                        str(params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("index_code"), params.get("arg0")),
+                        dateStr(params.get("startDateStr"), params.get("startDate"), params.get("start_date"), params.get("arg1")),
+                        dateStr(params.get("endDateStr"), params.get("endDate"), params.get("end_date"), params.get("arg2"))
                 );
                 case "searchIndex" -> marketDataTools.searchIndex(
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
@@ -46,7 +46,7 @@ public class ToolRouter {
                         str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
                         str(params.get("dataset_ids"), params.get("datasetIds"), params.get("arg2")),
                         str(params.get("libraries"), params.get("arg3")),
-                        params.get("timeout_seconds") != null ? Integer.parseInt(str(params.get("timeout_seconds"), params.get("arg4"))) : null
+                        toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
                 );
                 default -> "Unsupported tool: " + toolName;
             };
@@ -79,5 +79,30 @@ public class ToolRouter {
             }
         }
         return "";
+    }
+
+    private Integer toNullableInt(Object... candidates) {
+        String value = str(candidates);
+        if (value.isEmpty()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String dateStr(Object... candidates) {
+        String raw = str(candidates);
+        if (raw.isEmpty()) {
+            return "";
+        }
+        // 兼容 yyyy-MM-dd / yyyy/MM/dd / yyyyMMdd 三类常见入参
+        String digits = raw.replaceAll("[^0-9]", "");
+        if (digits.length() == 8 || digits.length() == 13) {
+            return digits;
+        }
+        return raw;
     }
 }
