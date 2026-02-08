@@ -18,6 +18,7 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.util.HashMap;
@@ -53,6 +54,8 @@ public class ParallelGraphExecutor {
     private final AgentEventService eventService;
     /** Redis 状态缓存（计划、任务进度、run 状态）。 */
     private final AgentRunStateStore stateStore;
+    /** Prompt 配置服务。 */
+    private final AgentPromptService promptService;
     /** JSON 序列化/反序列化。 */
     private final ObjectMapper objectMapper;
 
@@ -381,7 +384,7 @@ public class ParallelGraphExecutor {
         }
         Map<String, ParallelTaskResult> results = state.taskResults().orElse(Map.of());
         String resultJson = safeWrite(results);
-        String prompt = "你是金融分析助手，请基于任务结果给出最终结论。";
+        String prompt = promptService.parallelFinalSystemPrompt();
         Response<AiMessage> response = model.generate(List.of(
                 new SystemMessage(prompt),
                 new UserMessage("目标: " + userGoal + "\n结果: " + resultJson)
@@ -467,21 +470,15 @@ public class ParallelGraphExecutor {
      * @return 提示词文本
      */
     private String buildPlannerPrompt(Set<String> toolWhitelist, int maxTasks, int maxSubSteps) {
-        StringBuilder sb = new StringBuilder();
-        sb.append("你是并行任务规划器。只输出 JSON。");
-        sb.append("必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。");
-        sb.append("任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。");
-        sb.append("请优先拆分为可并行的任务，但不要牺牲正确性。");
-        sb.append("约束：任务数 <= ").append(maxTasks)
-                .append(", sub_agent 步数 <= ").append(maxSubSteps).append("。");
-        if (maxParallelTasks > 0) {
-            sb.append("并行任务数 <= ").append(maxParallelTasks).append("。");
-        }
-        if (maxSubAgents > 0) {
-            sb.append("sub_agent 任务数 <= ").append(maxSubAgents).append("。");
-        }
-        sb.append("仅允许使用以下工具：").append(String.join(", ", toolWhitelist)).append("。");
-        sb.append("可并行的任务应设置为空依赖；有依赖的任务使用 dependsOn。");
-        return sb.toString();
+        String toolList = toolWhitelist == null
+                ? ""
+                : toolWhitelist.stream().sorted().collect(Collectors.joining(", "));
+        return promptService.parallelPlannerSystemPrompt(
+                toolList,
+                maxTasks,
+                maxSubSteps,
+                maxParallelTasks,
+                maxSubAgents
+        );
     }
 }

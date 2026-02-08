@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.ArrayList;
@@ -56,6 +57,8 @@ public class SubAgentRunner {
     private final ObjectMapper objectMapper;
     /** 事件服务（记录子代理过程）。 */
     private final AgentEventService eventService;
+    /** Prompt 配置服务。 */
+    private final AgentPromptService promptService;
 
     /**
      * 子代理请求参数。
@@ -260,7 +263,7 @@ public class SubAgentRunner {
             }
 
             // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
-            String summaryPrompt = "请基于以下工具执行结果，给出简洁结论用于主流程合并：";
+            String summaryPrompt = promptService.subAgentSummarySystemPrompt();
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
                     new SystemMessage(summaryPrompt),
                     new UserMessage("目标: " + request.getGoal() + "\n结果: " + objectMapper.writeValueAsString(executedSteps))
@@ -294,16 +297,7 @@ public class SubAgentRunner {
      * @return 系统提示词
      */
     private String buildPlannerPrompt(String tools, int maxSteps) {
-        return "你是一个子任务代理。必须先输出线性计划 JSON，不超过 " + maxSteps + " 步。"
-                + "仅能使用下列工具名称：" + tools + "。"
-                + "严禁把 sub_agent、workflow、tool、agent 作为步骤工具名。"
-                + "工具参数必须严格匹配真实签名："
-                + "searchIndex/searchStock/searchFund 使用 keyword；"
-                + "getIndexDaily/getStockDaily 使用 tsCode,startDateStr,endDateStr（日期格式必须为YYYYMMDD）；"
-                + "executePython 使用 code,dataset_id；"
-                + "可选传 coding_context（由你自行挑选与编码最相关的上下文）。"
-                + "输出格式:\n"
-                + "{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}";
+        return promptService.subAgentPlannerSystemPrompt(tools, maxSteps);
     }
 
     /**

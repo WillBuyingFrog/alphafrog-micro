@@ -59,6 +59,8 @@ public class AgentRunExecutor {
     private final world.willfrog.agent.graph.ParallelGraphExecutor parallelGraphExecutor;
     /** 运行态缓存。 */
     private final AgentRunStateStore stateStore;
+    /** Prompt 配置服务。 */
+    private final AgentPromptService promptService;
     /** JSON 工具。 */
     private final ObjectMapper objectMapper;
 
@@ -132,16 +134,7 @@ public class AgentRunExecutor {
 
             // 2. Prepare Conversation
             List<ChatMessage> messages = new ArrayList<>();
-            messages.add(new SystemMessage("""
-                You are an expert financial agent. Use the provided tools to retrieve market data and answer the user's question accurately.
-                
-                IMPORTANT: You typically do NOT know the exact TS codes (e.g., 000300.SH) in the database. 
-                You MUST always use 'searchStock', 'searchFund', or 'searchIndex' to find the correct ts_code BEFORE calling 'getStockDaily', 'getIndexDaily', or other code-based tools. 
-                Never guess the code.
-                
-                When you get a 'dataset_id' from a market data tool, you MUST use the 'executePython' tool to analyze it.
-                The python environment has 'numpy', 'pandas', 'matplotlib', and 'scipy' pre-installed. Please prioritize using these libraries for data processing and calculation.
-                """));
+            messages.add(new SystemMessage(promptService.agentRunSystemPrompt()));
             messages.add(new UserMessage(userGoal));
 
             // 3. Execution Loop
@@ -190,7 +183,7 @@ public class AgentRunExecutor {
             }
             
             if (finalAnswer == null || finalAnswer.isBlank()) {
-                finalAnswer = "Agent stopped after reaching max steps without final answer.";
+                finalAnswer = "达到最大步骤数后仍未生成最终答案，任务已停止。";
             }
 
             // 4. Complete

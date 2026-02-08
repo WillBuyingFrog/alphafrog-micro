@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.CodeRefineProperties;
+import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
 import world.willfrog.agent.tool.ToolRouter;
 
@@ -39,6 +40,7 @@ public class PythonCodeRefinementNode {
     private final ObjectMapper objectMapper;
     private final CodeRefineProperties codeRefineProperties;
     private final CodeRefineLocalConfigLoader localConfigLoader;
+    private final AgentPromptService promptService;
 
     @Data
     @Builder
@@ -150,24 +152,23 @@ public class PythonCodeRefinementNode {
                                              List<AttemptTrace> traces,
                                              Map<String, Object> currentRunArgs,
                                              ChatLanguageModel model) {
-        String systemPrompt = "你是代码执行代理。请基于目标、相关上下文和执行反馈，输出可直接运行的 Python 代码和运行参数。"
-                + "必须只输出 JSON，格式为 {\"code\":\"...\",\"run_args\":{\"dataset_id\":\"...\",\"dataset_ids\":\"...\",\"libraries\":\"...\",\"timeout_seconds\":30},\"reason\":\"...\"}。"
-                + "run_args 中最关键是 dataset_id，必须指向真实可访问的数据目录。";
+        String systemPrompt = promptService.pythonRefineSystemPrompt();
         StringBuilder userPrompt = new StringBuilder();
         userPrompt.append("任务目标:\n").append(safe(request.getGoal())).append("\n");
         userPrompt.append("任务上下文:\n").append(safe(request.getContext())).append("\n");
         userPrompt.append("编码相关上下文(由上游模型筛选):\n").append(safe(request.getCodingContext())).append("\n");
         userPrompt.append("当前运行参数:\n").append(writeJson(currentRunArgs)).append("\n");
         userPrompt.append("要求:\n");
-        userPrompt.append("- 你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids\n");
-        userPrompt.append("- 代码中不要假设未定义变量，直接按可访问文件路径读取数据\n");
-        userPrompt.append("- 数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv\n");
-        userPrompt.append("- 若存在 dataset_ids，请逐个读取对应 csv，不要写死 /mnt/data 等路径\n");
-        userPrompt.append("- 日期字段请先排序后再取首尾行，不要硬编码某个交易日一定存在\n");
-        userPrompt.append("- 价格字段请优先使用 close/open 等数值列，避免把 ts_code 当作价格\n");
-        userPrompt.append("- ts_code 是数据库内区分不同资产的标识字段，不可用于涨跌幅数值计算\n");
-        userPrompt.append("- 优先输出 JSON 结果，便于后续流程消费\n");
-        userPrompt.append("- 若上轮报 dataset_id 相关错误，必须优先修正 run_args 再生成代码\n");
+        List<String> requirements = promptService.pythonRefineRequirements();
+        for (String requirement : requirements) {
+            if (requirement != null && !requirement.isBlank()) {
+                userPrompt.append("- ").append(requirement).append("\n");
+            }
+        }
+        String fieldGuide = promptService.pythonRefineDatasetFieldGuide();
+        if (!fieldGuide.isBlank()) {
+            userPrompt.append("可用数据字段说明:\n").append(fieldGuide).append("\n");
+        }
 
         if (!traces.isEmpty()) {
             AttemptTrace last = traces.get(traces.size() - 1);
@@ -180,7 +181,7 @@ public class PythonCodeRefinementNode {
                     .append("\n");
         }
 
-        userPrompt.append("请只返回 JSON，不要返回 markdown。");
+        userPrompt.append(promptService.pythonRefineOutputInstruction());
 
         try {
             Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(List.of(

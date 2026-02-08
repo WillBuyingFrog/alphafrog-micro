@@ -62,7 +62,15 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getModels() == null) {
             cfg.setModels(null);
         }
+        if (cfg.getPrompts() == null) {
+            cfg.setPrompts(null);
+        }
+        if (cfg.getPrompts().getPythonRefineRequirements() == null) {
+            cfg.getPrompts().setPythonRefineRequirements(null);
+        }
+        if (cfg.getPrompts().getDatasetFieldSpecs() == null) {
+            cfg.getPrompts().setDatasetFieldSpecs(null);
+        }
         return cfg;
     }
 }
-
