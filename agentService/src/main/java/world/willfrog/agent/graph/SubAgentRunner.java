@@ -41,6 +41,12 @@ public class SubAgentRunner {
     private static final int MAX_PLAN_ATTEMPTS = 3;
     /** 从工具输出中提取 dataset_id。 */
     private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
+    /** 从工具输出中提取数据集行数提示。 */
+    private static final Pattern ROWS_PATTERN = Pattern.compile("Rows:\\s*([^\\n]+)");
+    /** 从工具输出中提取数据时间范围提示。 */
+    private static final Pattern RANGE_PATTERN = Pattern.compile("Range:\\s*([^\\n]+)");
+    /** 从工具输出中提取字段提示。 */
+    private static final Pattern FIELDS_PATTERN = Pattern.compile("Fields:\\s*([^\\n]+)");
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
@@ -218,7 +224,7 @@ public class SubAgentRunner {
                             "step_index", stepIndex,
                             "success", stepSuccess,
                             "attempts_used", refineResult.getAttemptsUsed(),
-                            "traces", summarizePythonTraces(refineResult.getTraces())
+                            "traces", summarizePythonTraces(refineResult.getTraces(), !stepSuccess)
                     ));
                 } else {
                     output = toolRouter.invoke(tool, args);
@@ -455,7 +461,8 @@ public class SubAgentRunner {
      * @param traces 原始 trace 列表
      * @return 摘要列表
      */
-    private List<Map<String, Object>> summarizePythonTraces(List<PythonCodeRefinementNode.AttemptTrace> traces) {
+    private List<Map<String, Object>> summarizePythonTraces(List<PythonCodeRefinementNode.AttemptTrace> traces,
+                                                            boolean includeLlmSnapshot) {
         if (traces == null || traces.isEmpty()) {
             return List.of();
         }
@@ -467,6 +474,9 @@ public class SubAgentRunner {
             item.put("code_preview", preview(trace.getCode()));
             item.put("run_args_preview", trace.getRunArgs());
             item.put("output_preview", preview(trace.getOutput()));
+            if (includeLlmSnapshot && trace.getLlmSnapshot() != null && !trace.getLlmSnapshot().isEmpty()) {
+                item.put("llm_snapshot", trace.getLlmSnapshot());
+            }
             summary.add(item);
         }
         return summary;
@@ -546,15 +556,32 @@ public class SubAgentRunner {
                 String tool = firstNonBlank(step.get("tool"));
                 Map<String, Object> stepArgs = toMap(step.get("args"));
                 String tsCode = firstNonBlank(stepArgs.get("tsCode"), stepArgs.get("ts_code"), stepArgs.get("code"));
+                String rows = extractFirstGroup(ROWS_PATTERN, output);
+                String range = extractFirstGroup(RANGE_PATTERN, output);
+                String fields = extractFirstGroup(FIELDS_PATTERN, output);
                 String line = "- dataset_id=" + id
                         + (tool.isBlank() ? "" : " (tool=" + tool + ")")
-                        + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")");
+                        + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")")
+                        + (rows.isBlank() ? "" : " (rows=" + rows + ")")
+                        + (range.isBlank() ? "" : " (range=" + range + ")")
+                        + (fields.isBlank() ? "" : " (fields=" + fields + ")");
                 if (!hints.contains(line)) {
                     hints.add(line);
                 }
             }
         }
         return String.join("\n", hints);
+    }
+
+    private String extractFirstGroup(Pattern pattern, String text) {
+        if (pattern == null || text == null || text.isBlank()) {
+            return "";
+        }
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find()) {
+            return "";
+        }
+        return firstNonBlank(matcher.group(1));
     }
 
     @SuppressWarnings("unchecked")

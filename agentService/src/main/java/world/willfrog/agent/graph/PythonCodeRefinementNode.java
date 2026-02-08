@@ -29,7 +29,11 @@ import java.util.regex.Pattern;
 public class PythonCodeRefinementNode {
 
     private static final int DEFAULT_MAX_ATTEMPTS = 3;
+    private static final int DEFAULT_TIMEOUT_SECONDS = 90;
+    private static final int MIN_TIMEOUT_SECONDS = 60;
+    private static final int MAX_TIMEOUT_SECONDS = 300;
     private static final Pattern PYTHON_BLOCK_PATTERN = Pattern.compile("```(?:python)?\\s*([\\s\\S]*?)```", Pattern.CASE_INSENSITIVE);
+    private static final Pattern DATASET_ID_VALUE_PATTERN = Pattern.compile("^[A-Za-z0-9._-]+$");
 
     private final ToolRouter toolRouter;
     private final ObjectMapper objectMapper;
@@ -56,6 +60,7 @@ public class PythonCodeRefinementNode {
         private int attempt;
         private String code;
         private Map<String, Object> runArgs;
+        private Map<String, Object> llmSnapshot;
         private String output;
         private boolean success;
     }
@@ -74,6 +79,7 @@ public class PythonCodeRefinementNode {
     private static class GeneratedPlan {
         private String code;
         private Map<String, Object> runArgs;
+        private Map<String, Object> llmSnapshot;
     }
 
     public Result execute(Request request, ChatLanguageModel model) {
@@ -83,16 +89,19 @@ public class PythonCodeRefinementNode {
         Map<String, Object> currentRunArgs = buildInitialRunArgs(request);
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            Map<String, Object> llmSnapshot = null;
             if (currentCode.isBlank()) {
                 GeneratedPlan generated = generatePythonPlan(request, traces, currentRunArgs, model);
                 currentCode = safe(generated.getCode());
                 currentRunArgs = mergeRunArgs(currentRunArgs, generated.getRunArgs());
+                llmSnapshot = copySnapshot(generated.getLlmSnapshot());
                 if (currentCode.isBlank()) {
                     String output = "Python code generation failed: empty code";
                     traces.add(AttemptTrace.builder()
                             .attempt(attempt)
                             .code("")
                             .runArgs(copyForTrace(currentRunArgs))
+                            .llmSnapshot(copySnapshot(llmSnapshot))
                             .output(output)
                             .success(false)
                             .build());
@@ -106,6 +115,7 @@ public class PythonCodeRefinementNode {
                     .attempt(attempt)
                     .code(currentCode)
                     .runArgs(copyForTrace(currentRunArgs))
+                    .llmSnapshot(copySnapshot(llmSnapshot))
                     .output(output)
                     .success(success)
                     .build());
@@ -151,6 +161,11 @@ public class PythonCodeRefinementNode {
         userPrompt.append("要求:\n");
         userPrompt.append("- 你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids\n");
         userPrompt.append("- 代码中不要假设未定义变量，直接按可访问文件路径读取数据\n");
+        userPrompt.append("- 数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv\n");
+        userPrompt.append("- 若存在 dataset_ids，请逐个读取对应 csv，不要写死 /mnt/data 等路径\n");
+        userPrompt.append("- 日期字段请先排序后再取首尾行，不要硬编码某个交易日一定存在\n");
+        userPrompt.append("- 价格字段请优先使用 close/open 等数值列，避免把 ts_code 当作价格\n");
+        userPrompt.append("- ts_code 是数据库内区分不同资产的标识字段，不可用于涨跌幅数值计算\n");
         userPrompt.append("- 优先输出 JSON 结果，便于后续流程消费\n");
         userPrompt.append("- 若上轮报 dataset_id 相关错误，必须优先修正 run_args 再生成代码\n");
 
@@ -172,17 +187,22 @@ public class PythonCodeRefinementNode {
                     new SystemMessage(systemPrompt),
                     new UserMessage(userPrompt.toString())
             ));
-            return extractPlan(resp.content().text(), currentRunArgs);
+            return extractPlan(resp.content().text(), currentRunArgs, systemPrompt, userPrompt.toString(), null);
         } catch (Exception e) {
             log.warn("Generate python code failed", e);
             return GeneratedPlan.builder()
                     .code("")
                     .runArgs(currentRunArgs)
+                    .llmSnapshot(buildLlmSnapshot(systemPrompt, userPrompt.toString(), currentRunArgs, "", e.getMessage()))
                     .build();
         }
     }
 
-    private GeneratedPlan extractPlan(String text, Map<String, Object> fallbackRunArgs) {
+    private GeneratedPlan extractPlan(String text,
+                                      Map<String, Object> fallbackRunArgs,
+                                      String systemPrompt,
+                                      String userPrompt,
+                                      String error) {
         String code = extractCode(text);
         Map<String, Object> runArgs = extractRunArgs(text);
         if (runArgs.isEmpty()) {
@@ -191,6 +211,7 @@ public class PythonCodeRefinementNode {
         return GeneratedPlan.builder()
                 .code(code)
                 .runArgs(mergeRunArgs(fallbackRunArgs, runArgs))
+                .llmSnapshot(buildLlmSnapshot(systemPrompt, userPrompt, fallbackRunArgs, text, error))
                 .build();
     }
 
@@ -251,6 +272,7 @@ public class PythonCodeRefinementNode {
         if (request.getTimeoutSeconds() != null && request.getTimeoutSeconds() > 0) {
             merged.putIfAbsent("timeout_seconds", request.getTimeoutSeconds());
         }
+        merged.putIfAbsent("timeout_seconds", DEFAULT_TIMEOUT_SECONDS);
         return sanitizeRunArgs(merged);
     }
 
@@ -266,27 +288,92 @@ public class PythonCodeRefinementNode {
         if (raw == null) {
             return out;
         }
-        String datasetId = firstNonBlank(raw.get("dataset_id"), raw.get("datasetId"), raw.get("arg1"));
+        String datasetId = firstNonBlank(raw.get("dataset_id"), raw.get("datasetId"));
+        datasetId = normalizeDatasetId(datasetId);
         if (!datasetId.isBlank()) {
             out.put("dataset_id", datasetId);
         }
-        String datasetIds = firstNonBlank(raw.get("dataset_ids"), raw.get("datasetIds"), raw.get("arg2"));
+        String datasetIds = firstNonBlank(raw.get("dataset_ids"), raw.get("datasetIds"));
+        datasetIds = normalizeDatasetIds(datasetIds);
         if (!datasetIds.isBlank()) {
             out.put("dataset_ids", datasetIds);
         }
-        String libraries = firstNonBlank(raw.get("libraries"), raw.get("arg3"));
+        String libraries = firstNonBlank(raw.get("libraries"));
         if (!libraries.isBlank()) {
             out.put("libraries", libraries);
         }
-        Integer timeout = toNullableInt(raw.get("timeout_seconds"), raw.get("timeoutSeconds"), raw.get("arg4"));
+        Integer timeout = toNullableInt(raw.get("timeout_seconds"), raw.get("timeoutSeconds"));
+        timeout = clampTimeout(timeout);
         if (timeout != null && timeout > 0) {
             out.put("timeout_seconds", timeout);
         }
         return out;
     }
 
+    private String normalizeDatasetId(String datasetId) {
+        String id = safe(datasetId).trim();
+        if (id.isBlank()) {
+            return "";
+        }
+        if (!DATASET_ID_VALUE_PATTERN.matcher(id).matches()) {
+            return "";
+        }
+        return id;
+    }
+
+    private String normalizeDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return "";
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        List<String> ids = new ArrayList<>();
+        for (String item : raw.split(",")) {
+            String normalized = normalizeDatasetId(item);
+            if (!normalized.isBlank() && !ids.contains(normalized)) {
+                ids.add(normalized);
+            }
+        }
+        return String.join(",", ids);
+    }
+
+    private Integer clampTimeout(Integer timeout) {
+        if (timeout == null || timeout <= 0) {
+            return DEFAULT_TIMEOUT_SECONDS;
+        }
+        if (timeout < MIN_TIMEOUT_SECONDS) {
+            return MIN_TIMEOUT_SECONDS;
+        }
+        return Math.min(timeout, MAX_TIMEOUT_SECONDS);
+    }
+
     private Map<String, Object> copyForTrace(Map<String, Object> runArgs) {
         return new LinkedHashMap<>(runArgs == null ? Map.of() : runArgs);
+    }
+
+    private Map<String, Object> copySnapshot(Map<String, Object> snapshot) {
+        if (snapshot == null || snapshot.isEmpty()) {
+            return Map.of();
+        }
+        return new LinkedHashMap<>(snapshot);
+    }
+
+    private Map<String, Object> buildLlmSnapshot(String systemPrompt,
+                                                 String userPrompt,
+                                                 Map<String, Object> runArgs,
+                                                 String rawResponse,
+                                                 String error) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        snapshot.put("system_prompt", safe(systemPrompt));
+        snapshot.put("user_prompt", safe(userPrompt));
+        snapshot.put("run_args", copyForTrace(runArgs));
+        snapshot.put("raw_response", safe(rawResponse));
+        if (!safe(error).isBlank()) {
+            snapshot.put("error", error);
+        }
+        return snapshot;
     }
 
     private String extractJson(String text) {
