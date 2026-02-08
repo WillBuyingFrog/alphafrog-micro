@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
@@ -12,17 +13,34 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 
 import java.time.OffsetDateTime;
+import java.time.Duration;
 import java.util.HashMap;
 import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
 @Slf4j
+/**
+ * Agent 运行事件服务。
+ * <p>
+ * 职责：
+ * 1. 创建 run 并写入初始事件；
+ * 2. 对 run 生命周期事件进行持久化；
+ * 3. 提供 ext 字段中常用业务字段的读取能力；
+ * 4. 使用 Redis 原子序号保证同一 run 的事件顺序。
+ */
 public class AgentEventService {
 
+    private static final String EVENT_SEQ_KEY_PREFIX = "agent:run:event_seq:";
+
+    /** run 主表读写。 */
     private final AgentRunMapper runMapper;
+    /** run 事件表读写。 */
     private final AgentRunEventMapper eventMapper;
+    /** JSON 序列化/反序列化工具。 */
     private final ObjectMapper objectMapper;
+    /** Redis 客户端：用于事件序号原子递增。 */
+    private final StringRedisTemplate redisTemplate;
 
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
@@ -86,6 +104,10 @@ public class AgentEventService {
             log.info("Run canceled, stop: {}", runId);
             return false;
         }
+        if (run.getStatus() == AgentRunStatus.WAITING) {
+            log.info("Run paused (waiting), stop: {}", runId);
+            return false;
+        }
         if (run.getTtlExpiresAt() != null && OffsetDateTime.now().isAfter(run.getTtlExpiresAt())) {
             log.info("Run expired (ttl), stop: {}", runId);
             return false;
@@ -106,15 +128,23 @@ public class AgentEventService {
         if (run == null) {
             return;
         }
-        Integer maxSeq = eventMapper.findMaxSeq(runId);
-        int nextSeq = (maxSeq == null ? 0 : maxSeq) + 1;
-
+        // 事件序号采用 Redis 原子递增，避免并发落库时 seq 冲突。
+        int nextSeq = nextSeq(runId);
         AgentRunEvent event = new AgentRunEvent();
         event.setRunId(runId);
         event.setSeq(nextSeq);
         event.setEventType(eventType);
         event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
-        eventMapper.insert(event);
+        try {
+            eventMapper.insert(event);
+        } catch (Exception e) {
+            String msg = String.format(
+                    "Append event failed (fail-fast): runId=%s, eventType=%s, seq=%d",
+                    runId, eventType, nextSeq
+            );
+            log.error(msg, e);
+            throw new IllegalStateException(msg, e);
+        }
     }
 
     /**
@@ -179,6 +209,55 @@ public class AgentEventService {
         }
     }
 
+    /**
+     * 生成下一条事件序号（Redis-only, fail-fast）。
+     * <p>
+     * 设计说明：
+     * 1. 使用 setIfAbsent 初始化 key，避免首次写入时 key 不存在；
+     * 2. 使用 INCR 实现原子递增；
+     * 3. 每次刷新 TTL，确保 run 生命周期内 key 有效；
+     * 4. 任一环节异常直接抛错，不做 DB 回退，避免“看似可用但可能乱序”的隐患。
+     *
+     * @param runId 任务 ID
+     * @return 下一序号
+     */
+    private int nextSeq(String runId) {
+        String key = eventSeqKey(runId);
+        try {
+            redisTemplate.opsForValue().setIfAbsent(key, "0", Duration.ofMinutes(ttlMinutes));
+            Long next = redisTemplate.opsForValue().increment(key);
+            if (next == null) {
+                throw new IllegalStateException("Redis INCR returned null");
+            }
+            redisTemplate.expire(key, Duration.ofMinutes(ttlMinutes));
+            if (next > Integer.MAX_VALUE) {
+                throw new IllegalStateException("Event seq overflow: " + next);
+            }
+            return next.intValue();
+        } catch (Exception e) {
+            String msg = String.format("Next seq generation failed (Redis only): runId=%s", runId);
+            log.error(msg, e);
+            throw new IllegalStateException(msg, e);
+        }
+    }
+
+    /**
+     * 组装 run 对应的 Redis 事件序号 key。
+     *
+     * @param runId 任务 ID
+     * @return Redis key
+     */
+    private String eventSeqKey(String runId) {
+        return EVENT_SEQ_KEY_PREFIX + runId;
+    }
+
+    /**
+     * 从 ext JSON 里读取指定字段，缺失或异常时返回空字符串。
+     *
+     * @param extJson ext 字段 JSON
+     * @param field   目标字段名
+     * @return 字段值字符串
+     */
     private String extractField(String extJson, String field) {
         if (extJson == null || extJson.isBlank()) {
             return "";
@@ -191,4 +270,5 @@ public class AgentEventService {
             return "";
         }
     }
+
 }

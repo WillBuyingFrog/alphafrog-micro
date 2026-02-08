@@ -7,7 +7,7 @@ import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
 @Configuration
-@EnableConfigurationProperties(AgentLlmProperties.class)
+@EnableConfigurationProperties({AgentLlmProperties.class, CodeRefineProperties.class})
 public class AiConfig {
 
     @Bean

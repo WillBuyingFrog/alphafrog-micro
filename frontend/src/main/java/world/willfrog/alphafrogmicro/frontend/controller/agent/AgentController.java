@@ -21,6 +21,7 @@ import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunResponse;
+import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
@@ -35,6 +36,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentExportResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunEventResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunEventsPageResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResumeRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
@@ -156,15 +158,38 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}:resume")
-    public ResponseWrapper<AgentRunResponse> resume(Authentication authentication,
-                                                   @PathVariable("runId") String runId) {
+    @PostMapping("/{runId}:pause")
+    public ResponseWrapper<AgentRunResponse> pause(Authentication authentication,
+                                                  @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.resumeRun(ResumeAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = agentDubboService.pauseRun(PauseAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            return ResponseWrapper.success(toRunResponse(run));
+        } catch (RpcException e) {
+            return handleRpcError(e, "暂停 agent run");
+        } catch (Exception e) {
+            return handleError(e, "暂停 agent run");
+        }
+    }
+
+    @PostMapping("/{runId}:resume")
+    public ResponseWrapper<AgentRunResponse> resume(Authentication authentication,
+                                                   @PathVariable("runId") String runId,
+                                                   @RequestBody(required = false) AgentRunResumeRequest request) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            String planOverrideJson = request == null ? "" : nvl(request.planOverrideJson());
+            AgentRunMessage run = agentDubboService.resumeRun(ResumeAgentRunRequest.newBuilder()
+                    .setUserId(userId)
+                    .setId(runId)
+                    .setPlanOverrideJson(planOverrideJson)
+                    .build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "续做 agent run");
@@ -225,7 +250,9 @@ public class AgentController {
                     emptyToNull(status.getCurrentTool()),
                     emptyToNull(status.getLastEventType()),
                     emptyToNull(status.getLastEventAt()),
-                    emptyToNull(status.getLastEventPayloadJson())
+                    emptyToNull(status.getLastEventPayloadJson()),
+                    emptyToNull(status.getPlanJson()),
+                    emptyToNull(status.getProgressJson())
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");

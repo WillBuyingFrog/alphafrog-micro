@@ -2,13 +2,10 @@ package world.willfrog.agent.service;
 
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
-import dev.langchain4j.service.AiServices;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.ai.PlanningAgent;
-import world.willfrog.agent.ai.SummarizingAgent;
 
 import java.util.HashMap;
 import java.util.Map;
@@ -35,39 +32,15 @@ public class AgentAiServiceFactory {
     @Value("${agent.llm.openrouter.title:}")
     private String openRouterTitle;
 
-    /**
-     * 创建规划 Agent（可按 run 维度选择模型与端点）。
-     *
-     * @param endpointName 端点名（可为空，使用默认值）
-     * @param modelName    模型名（可为空，使用默认值）
-     * @return PlanningAgent
-     */
-    public PlanningAgent createPlanningAgent(String endpointName, String modelName) {
-        ChatLanguageModel model = buildChatModel(endpointName, modelName);
-        return AiServices.builder(PlanningAgent.class)
-                .chatLanguageModel(model)
-                .build();
-    }
-
-    /**
-     * 创建总结 Agent（可按 run 维度选择模型与端点）。
-     *
-     * @param endpointName 端点名（可为空，使用默认值）
-     * @param modelName    模型名（可为空，使用默认值）
-     * @return SummarizingAgent
-     */
-    public SummarizingAgent createSummarizingAgent(String endpointName, String modelName) {
-        ChatLanguageModel model = buildChatModel(endpointName, modelName);
-        return AiServices.builder(SummarizingAgent.class)
-                .chatLanguageModel(model)
-                .build();
-    }
-
     public ChatLanguageModel buildChatModel(String endpointName, String modelName) {
         AgentLlmResolver.ResolvedLlm resolved = llmResolver.resolve(endpointName, modelName);
         boolean debugEnabled = log.isDebugEnabled();
+        String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
+        if (isBlank(apiKey)) {
+            throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
+        }
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
-                .apiKey(openAiApiKey)
+                .apiKey(apiKey)
                 .baseUrl(resolved.baseUrl())
                 .modelName(resolved.modelName())
                 .maxTokens(maxTokens)
@@ -94,5 +67,9 @@ public class AgentAiServiceFactory {
             headers.put("X-Title", openRouterTitle);
         }
         return headers;
+    }
+
+    private boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
     }
 }

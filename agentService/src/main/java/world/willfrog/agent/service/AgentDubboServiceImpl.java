@@ -29,6 +29,7 @@ import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsResponse;
+import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 
@@ -44,6 +45,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentRunEventMapper eventMapper;
     private final AgentEventService eventService;
     private final AgentRunExecutor executor;
+    private final AgentRunStateStore stateStore;
     private final AgentLlmResolver llmResolver;
     private final ObjectMapper objectMapper;
 
@@ -131,6 +133,25 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
         runMapper.updateStatus(run.getId(), run.getUserId(), AgentRunStatus.CANCELED);
         eventService.append(run.getId(), run.getUserId(), "CANCELED", Map.of("run_id", run.getId()));
+        stateStore.markRunStatus(run.getId(), AgentRunStatus.CANCELED.name());
+        return toRunMessage(requireRun(run.getId(), run.getUserId()));
+    }
+
+    /**
+     * 暂停 run 执行。
+     *
+     * @param request 暂停请求
+     * @return 暂停后的 run 信息
+     */
+    @Override
+    public AgentRunMessage pauseRun(PauseAgentRunRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        if (isTerminal(run.getStatus())) {
+            return toRunMessage(run);
+        }
+        runMapper.updateStatus(run.getId(), run.getUserId(), AgentRunStatus.WAITING);
+        eventService.append(run.getId(), run.getUserId(), "PAUSED", Map.of("run_id", run.getId()));
+        stateStore.markRunStatus(run.getId(), AgentRunStatus.WAITING.name());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
 
@@ -143,11 +164,18 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     @Override
     public AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
-        if (run.getStatus() != AgentRunStatus.FAILED && run.getStatus() != AgentRunStatus.CANCELED) {
+        if (run.getStatus() != AgentRunStatus.FAILED
+                && run.getStatus() != AgentRunStatus.CANCELED
+                && run.getStatus() != AgentRunStatus.WAITING) {
             return toRunMessage(run);
+        }
+        if (request.getPlanOverrideJson() != null && !request.getPlanOverrideJson().isBlank()) {
+            stateStore.clearTasks(run.getId());
+            stateStore.storePlanOverride(run.getId(), request.getPlanOverrideJson());
         }
         runMapper.resetForResume(run.getId(), run.getUserId(), eventService.nextTtlExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "RESUMED", Map.of("run_id", run.getId()));
+        stateStore.markRunStatus(run.getId(), AgentRunStatus.RECEIVED.name());
         executor.executeAsync(run.getId());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
@@ -190,7 +218,16 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     public AgentRunStatusMessage getStatus(GetAgentRunStatusRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         AgentRunEvent latestEvent = eventMapper.findLatestByRunId(run.getId());
-        return toStatusMessage(run, latestEvent);
+        String planJson = run.getPlanJson() == null ? "" : run.getPlanJson();
+        var cachedPlan = stateStore.loadPlan(run.getId());
+        if (cachedPlan.isPresent()) {
+            planJson = cachedPlan.get();
+        }
+        String progressJson = "";
+        if (planJson != null && !planJson.isBlank()) {
+            progressJson = stateStore.buildProgressJson(run.getId(), planJson);
+        }
+        return toStatusMessage(run, latestEvent, planJson, progressJson);
     }
 
     /**
@@ -342,7 +379,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .build();
     }
 
-    private AgentRunStatusMessage toStatusMessage(AgentRun run, AgentRunEvent lastEvent) {
+    private AgentRunStatusMessage toStatusMessage(AgentRun run,
+                                                  AgentRunEvent lastEvent,
+                                                  String planJson,
+                                                  String progressJson) {
         String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
         String currentTool = "";
         if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
@@ -357,6 +397,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setLastEventType(lastEventType)
                 .setLastEventAt(lastEvent == null || lastEvent.getCreatedAt() == null ? "" : lastEvent.getCreatedAt().toString())
                 .setLastEventPayloadJson(lastEvent == null ? "" : nvl(lastEvent.getPayloadJson()))
+                .setPlanJson(nvl(planJson))
+                .setProgressJson(nvl(progressJson))
                 .build();
     }
 
@@ -373,11 +415,17 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (status == AgentRunStatus.CANCELED) {
             return "CANCELED";
         }
-        if ("PLANNING_STARTED".equals(lastEventType)) {
+        if (status == AgentRunStatus.WAITING) {
+            return "PAUSED";
+        }
+        if ("PLANNING_STARTED".equals(lastEventType) || "PLAN_STARTED".equals(lastEventType) || "PLAN_CREATED".equals(lastEventType)) {
             return "PLANNING";
         }
         if ("TOOL_CALL_STARTED".equals(lastEventType)) {
             return "EXECUTING_TOOL";
+        }
+        if ("PARALLEL_TASK_STARTED".equals(lastEventType)) {
+            return "EXECUTING";
         }
         if ("SUMMARIZING_STARTED".equals(lastEventType)) {
             return "SUMMARIZING";

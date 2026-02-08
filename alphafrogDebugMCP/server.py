@@ -143,9 +143,20 @@ async def _run_ssh(
 
 @mcp.tool()
 async def remote_docker_ps(host: Optional[str] = None) -> dict:
-    """List docker containers on the remote host."""
+    """List docker containers on the remote host.
+
+    Args:
+        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+
+    Returns:
+        dict with:
+        - ok/exit_code/timed_out/duration_ms/command/stdout/stderr
+        - items: parsed docker ps rows (list of dicts, when available)
+    """
     resolved = _resolve_host(host)
-    result = await _run_ssh(resolved, _docker_cmd() + ["ps", "--format", "{{json .}}"])
+    # Quote format to avoid remote shell brace expansion via ssh command string.
+    format_arg = "'{{json .}}'"
+    result = await _run_ssh(resolved, _docker_cmd() + ["ps", "--format", format_arg])
     items = []
     if result["stdout"]:
         for line in result["stdout"].splitlines():
@@ -166,7 +177,16 @@ async def remote_git_log(
     repo_path: Optional[str] = None,
     limit: Optional[int] = 10,
 ) -> dict:
-    """Show recent git log on the remote host."""
+    """Show recent git log on the remote host.
+
+    Args:
+        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        repo_path: remote repo path (default: ALPHAFROG_DEBUG_DEFAULT_REPO_PATH).
+        limit: max commits to return (clamped 1..200).
+
+    Returns:
+        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+    """
     resolved = _resolve_host(host)
     repo = repo_path or os.getenv("ALPHAFROG_DEBUG_DEFAULT_REPO_PATH")
     if not repo:
@@ -187,7 +207,21 @@ async def remote_docker_logs(
     max_bytes: Optional[int] = 20000,
     timeout_seconds: Optional[int] = 30,
 ) -> dict:
-    """Fetch docker logs on the remote host (non-follow)."""
+    """Fetch docker logs on the remote host (non-follow).
+
+    Args:
+        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        container: container name/id (required).
+        tail: number of lines (clamped 1..10000, default 200).
+        since: docker --since value (e.g. '10m' or ISO time).
+        grep: substring filter, or regex via 're:<pattern>'.
+        timestamps: include timestamps in output (default true).
+        max_bytes: truncate stdout/stderr to this many bytes.
+        timeout_seconds: overall timeout for command.
+
+    Returns:
+        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+    """
     if not container:
         raise ValueError("container is required")
     resolved = _resolve_host(host)
@@ -215,7 +249,21 @@ async def remote_docker_follow(
     timestamps: bool = True,
     max_bytes: Optional[int] = 50000,
 ) -> dict:
-    """Follow docker logs on the remote host for a limited time."""
+    """Follow docker logs on the remote host for a limited time.
+
+    Args:
+        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        container: container name/id (required).
+        follow_seconds: follow duration (clamped 1..300, default 15).
+        tail: number of lines before follow (clamped 1..10000, default 200).
+        since: docker --since value (e.g. '10m' or ISO time).
+        grep: substring filter, or regex via 're:<pattern>'.
+        timestamps: include timestamps in output (default true).
+        max_bytes: truncate stdout/stderr to this many bytes.
+
+    Returns:
+        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+    """
     if not container:
         raise ValueError("container is required")
     resolved = _resolve_host(host)

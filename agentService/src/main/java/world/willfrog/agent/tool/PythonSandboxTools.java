@@ -11,6 +11,8 @@ import java.util.concurrent.TimeUnit;
 @Component
 @Slf4j
 public class PythonSandboxTools {
+    private static final int PENDING_EXTRA_WAIT_SECONDS = 90;
+    private static final int POLL_INTERVAL_MS = 1000;
 
     @DubboReference
     private PythonSandboxService pythonSandboxService;
@@ -50,24 +52,31 @@ public class PythonSandboxTools {
             long startTime = System.currentTimeMillis();
 
             while (System.currentTimeMillis() - startTime < maxWaitMs) {
-                TaskStatusResponse statusResp = pythonSandboxService.getTaskStatus(
-                        GetTaskStatusRequest.newBuilder().setTaskId(taskId).build()
-                );
-                
-                String status = statusResp.getStatus();
-                if ("SUCCEEDED".equals(status)) {
-                    TaskResultResponse result = pythonSandboxService.getTaskResult(
-                            GetTaskResultRequest.newBuilder().setTaskId(taskId).build()
-                    );
-                    return formatResult(result);
-                } else if ("FAILED".equals(status)) {
-                    return "Task FAILED: " + statusResp.getError();
-                } else if ("CANCELED".equals(status)) {
-                    return "Task CANCELED";
+                TaskStatusResponse statusResp = getTaskStatus(taskId);
+                String terminal = terminalOutput(taskId, statusResp);
+                if (terminal != null) {
+                    return terminal;
                 }
 
                 try {
-                    TimeUnit.MILLISECONDS.sleep(1000);
+                    TimeUnit.MILLISECONDS.sleep(POLL_INTERVAL_MS);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return "Task polling interrupted";
+                }
+            }
+
+            // 任务可能在超时边界附近完成，再给一段额外轮询窗口，减少“假超时”。
+            long extraWaitMs = PENDING_EXTRA_WAIT_SECONDS * 1000L;
+            long extraStart = System.currentTimeMillis();
+            while (System.currentTimeMillis() - extraStart < extraWaitMs) {
+                TaskStatusResponse statusResp = getTaskStatus(taskId);
+                String terminal = terminalOutput(taskId, statusResp);
+                if (terminal != null) {
+                    return terminal;
+                }
+                try {
+                    TimeUnit.MILLISECONDS.sleep(POLL_INTERVAL_MS);
                 } catch (InterruptedException e) {
                     Thread.currentThread().interrupt();
                     return "Task polling interrupted";
@@ -80,6 +89,32 @@ public class PythonSandboxTools {
             log.error("Execute python tool error", e);
             return "Tool Execution Error: " + e.getMessage();
         }
+    }
+
+    private TaskStatusResponse getTaskStatus(String taskId) {
+        return pythonSandboxService.getTaskStatus(
+                GetTaskStatusRequest.newBuilder().setTaskId(taskId).build()
+        );
+    }
+
+    private String terminalOutput(String taskId, TaskStatusResponse statusResp) {
+        String status = statusResp.getStatus();
+        if ("SUCCEEDED".equals(status)) {
+            TaskResultResponse result = pythonSandboxService.getTaskResult(
+                    GetTaskResultRequest.newBuilder().setTaskId(taskId).build()
+            );
+            return formatResult(result);
+        }
+        if ("FAILED".equals(status)) {
+            return "Task FAILED: " + statusResp.getError();
+        }
+        if ("CANCELED".equals(status)) {
+            return "Task CANCELED";
+        }
+        if ("NOT_FOUND".equals(status)) {
+            return "Task FAILED: task not found " + taskId;
+        }
+        return null;
     }
 
     private String[] parseDatasetIds(String datasetIds) {

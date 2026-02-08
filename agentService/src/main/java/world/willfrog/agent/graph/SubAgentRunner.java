@@ -1,0 +1,704 @@
+package world.willfrog.agent.graph;
+
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.output.Response;
+import lombok.Builder;
+import lombok.Data;
+import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
+import org.springframework.stereotype.Component;
+import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.tool.ToolRouter;
+
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.HashMap;
+import java.util.LinkedHashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
+
+@Component
+@RequiredArgsConstructor
+@Slf4j
+/**
+ * 子代理执行器。
+ * <p>
+ * 子代理不直接输出最终回复，而是：
+ * 1. 先生成线性步骤计划；
+ * 2. 按步骤调用工具；
+ * 3. 产出可供主流程合并的局部结论。
+ */
+public class SubAgentRunner {
+    /** 子代理规划最大重试次数（用于修正无效工具/格式问题）。 */
+    private static final int MAX_PLAN_ATTEMPTS = 3;
+    /** 从工具输出中提取 dataset_id。 */
+    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
+    /** 从工具输出中提取数据集行数提示。 */
+    private static final Pattern ROWS_PATTERN = Pattern.compile("Rows:\\s*([^\\n]+)");
+    /** 从工具输出中提取数据时间范围提示。 */
+    private static final Pattern RANGE_PATTERN = Pattern.compile("Range:\\s*([^\\n]+)");
+    /** 从工具输出中提取字段提示。 */
+    private static final Pattern FIELDS_PATTERN = Pattern.compile("Fields:\\s*([^\\n]+)");
+
+    /** 工具路由器。 */
+    private final ToolRouter toolRouter;
+    /** Python 代码执行重试节点。 */
+    private final PythonCodeRefinementNode pythonCodeRefinementNode;
+    /** JSON 序列化/反序列化工具。 */
+    private final ObjectMapper objectMapper;
+    /** 事件服务（记录子代理过程）。 */
+    private final AgentEventService eventService;
+    /** Prompt 配置服务。 */
+    private final AgentPromptService promptService;
+
+    /**
+     * 子代理请求参数。
+     */
+    @Data
+    @Builder
+    public static class SubAgentRequest {
+        /** run ID。 */
+        private String runId;
+        /** 用户 ID。 */
+        private String userId;
+        /** 对应的并行任务 ID。 */
+        private String taskId;
+        /** 子任务目标。 */
+        private String goal;
+        /** 上下文补充。 */
+        private String context;
+        /** 可用工具白名单。 */
+        private Set<String> toolWhitelist;
+        /** 允许的最大步骤数。 */
+        private int maxSteps;
+    }
+
+    /**
+     * 子代理执行结果。
+     */
+    @Data
+    @Builder
+    public static class SubAgentResult {
+        /** 是否成功。 */
+        private boolean success;
+        /** 子代理结论文本。 */
+        private String answer;
+        /** 错误信息（失败时）。 */
+        private String error;
+        /** 逐步执行记录。 */
+        private List<Map<String, Object>> steps;
+    }
+
+    /**
+     * 执行子代理任务。
+     *
+     * @param request 子代理请求
+     * @param model   聊天模型
+     * @return 子代理执行结果
+     */
+    public SubAgentResult run(SubAgentRequest request, ChatLanguageModel model) {
+        if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
+            return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
+        }
+        Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
+        String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
+        String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
+
+        List<Map<String, Object>> executedSteps = new ArrayList<>();
+        try {
+            // 第一步：生成“可执行的线性步骤 JSON”。若出现无效工具，自动要求模型重规划。
+            JsonNode stepsNode = null;
+            String lastPlanError = "sub_agent plan generation failed";
+            String retryHint = "";
+            for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
+                        new SystemMessage(systemPrompt),
+                        new UserMessage("目标: " + request.getGoal()
+                                + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
+                                + "\n" + retryHint)
+                ));
+                String planText = planResp.content().text();
+                String json = extractJson(planText);
+                JsonNode root = objectMapper.readTree(json);
+                JsonNode candidate = root.path("steps");
+
+                if (!candidate.isArray()) {
+                    lastPlanError = "sub_agent plan missing steps";
+                    retryHint = "上一次输出缺少 steps 数组。请严格按 JSON 格式输出 steps。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", lastPlanError
+                    ));
+                    continue;
+                }
+                if (candidate.size() > request.getMaxSteps()) {
+                    lastPlanError = "sub_agent steps exceed max";
+                    retryHint = "上一次步骤数超过上限。请将 steps 控制在 " + request.getMaxSteps() + " 步以内。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", lastPlanError,
+                            "steps_count", candidate.size()
+                    ));
+                    continue;
+                }
+                List<String> invalidTools = collectInvalidTools(candidate, whitelist);
+                if (!invalidTools.isEmpty()) {
+                    lastPlanError = "sub_agent tool not allowed: " + invalidTools.get(0);
+                    retryHint = "上一次包含未允许的工具名: " + String.join(", ", invalidTools)
+                            + "。禁止使用 sub_agent/workflow/tool 等伪工具名，只能使用允许列表中的真实工具。";
+                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "attempt", attempt,
+                            "reason", "invalid_tool",
+                            "invalid_tools", invalidTools
+                    ));
+                    continue;
+                }
+                stepsNode = candidate;
+                break;
+            }
+            if (stepsNode == null) {
+                emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                        "task_id", nvl(request.getTaskId()),
+                        "error", lastPlanError
+                ));
+                return SubAgentResult.builder().success(false).error(lastPlanError).build();
+            }
+
+            emitEvent(request, "SUB_AGENT_PLAN_CREATED", Map.of(
+                    "task_id", nvl(request.getTaskId()),
+                    "steps_count", stepsNode.size(),
+                    "steps", buildStepSummary(stepsNode)
+            ));
+
+            // 第二步：按计划逐步执行工具。
+            for (JsonNode stepNode : stepsNode) {
+                String tool = stepNode.path("tool").asText();
+                if (!whitelist.contains(tool)) {
+                    emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "error", "sub_agent tool not allowed: " + tool
+                    ));
+                    return SubAgentResult.builder().success(false).error("sub_agent tool not allowed: " + tool).build();
+                }
+                JsonNode argsNode = stepNode.path("args");
+                Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
+                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps);
+
+                int stepIndex = executedSteps.size();
+                emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
+                        "task_id", nvl(request.getTaskId()),
+                        "step_index", stepIndex,
+                        "tool", tool,
+                        "args", args
+                ));
+                String output;
+                boolean stepSuccess;
+                if ("executePython".equals(tool)) {
+                    PythonCodeRefinementNode.Result refineResult = pythonCodeRefinementNode.execute(
+                            PythonCodeRefinementNode.Request.builder()
+                                    .goal(request.getGoal())
+                                    .context(request.getContext())
+                                    .codingContext(buildCodingContext(args, executedSteps, request.getContext()))
+                                    .initialCode(firstNonBlank(args.get("code"), args.get("arg0")))
+                                    .initialRunArgs(extractInitialPythonRunArgs(args))
+                                    .datasetId(firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1")))
+                                    .datasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2")))
+                                    .libraries(firstNonBlank(args.get("libraries"), args.get("arg3")))
+                                    .timeoutSeconds(toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4")))
+                                    .build(),
+                            model
+                    );
+                    output = refineResult.getOutput();
+                    stepSuccess = refineResult.isSuccess();
+                    emitEvent(request, "SUB_AGENT_PYTHON_REFINED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "step_index", stepIndex,
+                            "success", stepSuccess,
+                            "attempts_used", refineResult.getAttemptsUsed(),
+                            "traces", summarizePythonTraces(refineResult.getTraces(), !stepSuccess)
+                    ));
+                } else {
+                    output = toolRouter.invoke(tool, args);
+                    stepSuccess = isStepSuccessful(tool, output);
+                }
+
+                Map<String, Object> stepResult = new HashMap<>();
+                stepResult.put("tool", tool);
+                stepResult.put("args", args);
+                stepResult.put("output", output);
+                stepResult.put("success", stepSuccess);
+                executedSteps.add(stepResult);
+
+                emitEvent(request, "SUB_AGENT_STEP_FINISHED", Map.of(
+                        "task_id", nvl(request.getTaskId()),
+                        "step_index", stepIndex,
+                        "tool", tool,
+                        "success", stepSuccess,
+                        "output_preview", preview(output)
+                ));
+                if (!stepSuccess) {
+                    String err = "sub_agent step failed: tool=" + tool + ", reason=" + preview(output);
+                    emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "error", err
+                    ));
+                    return SubAgentResult.builder()
+                            .success(false)
+                            .error(err)
+                            .steps(executedSteps)
+                            .build();
+                }
+            }
+
+            // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
+            String summaryPrompt = promptService.subAgentSummarySystemPrompt();
+            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
+                    new SystemMessage(summaryPrompt),
+                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + objectMapper.writeValueAsString(executedSteps))
+            ));
+
+            emitEvent(request, "SUB_AGENT_COMPLETED", Map.of(
+                    "task_id", nvl(request.getTaskId()),
+                    "steps", executedSteps.size()
+            ));
+
+            return SubAgentResult.builder()
+                    .success(true)
+                    .answer(finalResp.content().text())
+                    .steps(executedSteps)
+                    .build();
+        } catch (Exception e) {
+            log.warn("Sub-agent failed", e);
+            emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                    "task_id", nvl(request.getTaskId()),
+                    "error", nvl(e.getMessage())
+            ));
+            return SubAgentResult.builder().success(false).error(nvl(e.getMessage())).steps(executedSteps).build();
+        }
+    }
+
+    /**
+     * 构建子代理规划提示词。
+     *
+     * @param tools    可用工具列表（逗号拼接）
+     * @param maxSteps 最大步骤数
+     * @return 系统提示词
+     */
+    private String buildPlannerPrompt(String tools, int maxSteps) {
+        return promptService.subAgentPlannerSystemPrompt(tools, maxSteps);
+    }
+
+    /**
+     * 收集计划中不在白名单的工具名。
+     *
+     * @param stepsNode      步骤数组
+     * @param toolWhitelist  工具白名单
+     * @return 非法工具名列表（去重后）
+     */
+    private List<String> collectInvalidTools(JsonNode stepsNode, Set<String> toolWhitelist) {
+        List<String> invalid = new ArrayList<>();
+        for (JsonNode node : stepsNode) {
+            String tool = node.path("tool").asText();
+            if (!toolWhitelist.contains(tool) && !invalid.contains(tool)) {
+                invalid.add(tool);
+            }
+        }
+        return invalid;
+    }
+
+    /**
+     * 对步骤参数做兼容性归一化，提升子代理工具调用成功率。
+     *
+     * @param tool          工具名
+     * @param rawArgs       模型原始参数
+     * @param executedSteps 已执行步骤（用于回填 dataset_id）
+     * @return 归一化参数
+     */
+    private Map<String, Object> normalizeStepArgs(String tool,
+                                                  Map<String, Object> rawArgs,
+                                                  List<Map<String, Object>> executedSteps) {
+        Map<String, Object> args = new HashMap<>();
+        if (rawArgs != null) {
+            args.putAll(rawArgs);
+        }
+
+        if ("searchIndex".equals(tool) || "searchStock".equals(tool) || "searchFund".equals(tool)) {
+            String keyword = firstNonBlank(args.get("keyword"), args.get("query"), args.get("q"), args.get("name"), args.get("arg0"));
+            if (!keyword.isBlank()) {
+                args.put("keyword", keyword);
+            }
+        }
+
+        if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool)) {
+            String tsCode = firstNonBlank(
+                    args.get("tsCode"),
+                    args.get("ts_code"),
+                    args.get("code"),
+                    args.get("index_code"),
+                    args.get("stock_code"),
+                    args.get("arg0")
+            );
+            String startDateStr = compactDate(firstNonBlank(
+                    args.get("startDateStr"),
+                    args.get("startDate"),
+                    args.get("start_date"),
+                    args.get("arg1")
+            ));
+            String endDateStr = compactDate(firstNonBlank(
+                    args.get("endDateStr"),
+                    args.get("endDate"),
+                    args.get("end_date"),
+                    args.get("arg2")
+            ));
+            if (!tsCode.isBlank()) {
+                args.put("tsCode", tsCode);
+            }
+            if (!startDateStr.isBlank()) {
+                args.put("startDateStr", startDateStr);
+            }
+            if (!endDateStr.isBlank()) {
+                args.put("endDateStr", endDateStr);
+            }
+        }
+
+        if ("executePython".equals(tool)) {
+            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            List<String> discoveredDatasetIds = extractDatasetIds(executedSteps);
+            if (datasetId.isBlank()) {
+                datasetId = discoveredDatasetIds.isEmpty() ? "" : discoveredDatasetIds.get(0);
+            }
+            if (!datasetId.isBlank()) {
+                args.put("dataset_id", datasetId);
+            }
+            if (args.get("dataset_ids") == null && !discoveredDatasetIds.isEmpty()) {
+                String all = discoveredDatasetIds.stream().collect(Collectors.joining(","));
+                if (!all.isBlank()) {
+                    args.put("dataset_ids", all);
+                }
+            }
+            String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            if (!code.isBlank()) {
+                args.put("code", code);
+            }
+        }
+        return args;
+    }
+
+    /**
+     * 判断一步工具执行是否可视为成功。
+     *
+     * @param tool   工具名
+     * @param output 工具输出
+     * @return true 表示成功
+     */
+    private boolean isStepSuccessful(String tool, String output) {
+        if (output == null) {
+            return false;
+        }
+        if (output.startsWith("Tool invocation error")) {
+            return false;
+        }
+        if (output.startsWith("Unsupported tool")) {
+            return false;
+        }
+        if (output.contains("Invalid date range")) {
+            return false;
+        }
+        if (output.contains("No daily index data found")) {
+            return false;
+        }
+        if (output.contains("No daily data found")) {
+            return false;
+        }
+        if (output.startsWith("Task PENDING (Timeout)")) {
+            return false;
+        }
+        if ("executePython".equals(tool) && (output.startsWith("Exit Code:") || output.contains("STDERR:"))) {
+            return false;
+        }
+        return true;
+    }
+
+    /**
+     * 从已执行步骤中提取 dataset_id 列表（按出现顺序去重）。
+     *
+     * @param executedSteps 已执行步骤
+     * @return dataset_id 列表
+     */
+    private List<String> extractDatasetIds(List<Map<String, Object>> executedSteps) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (Map<String, Object> step : executedSteps) {
+            String output = firstNonBlank(step.get("output"));
+            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
+            while (matcher.find()) {
+                ids.add(matcher.group(1));
+            }
+        }
+        return new ArrayList<>(ids);
+    }
+
+    /**
+     * 生成 Python 重试节点的 trace 摘要，避免在事件中存放过大文本。
+     *
+     * @param traces 原始 trace 列表
+     * @return 摘要列表
+     */
+    private List<Map<String, Object>> summarizePythonTraces(List<PythonCodeRefinementNode.AttemptTrace> traces,
+                                                            boolean includeLlmSnapshot) {
+        if (traces == null || traces.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> summary = new ArrayList<>();
+        for (PythonCodeRefinementNode.AttemptTrace trace : traces) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("attempt", trace.getAttempt());
+            item.put("success", trace.isSuccess());
+            item.put("code_preview", preview(trace.getCode()));
+            item.put("run_args_preview", trace.getRunArgs());
+            item.put("output_preview", preview(trace.getOutput()));
+            if (includeLlmSnapshot && trace.getLlmSnapshot() != null && !trace.getLlmSnapshot().isEmpty()) {
+                item.put("llm_snapshot", trace.getLlmSnapshot());
+            }
+            summary.add(item);
+        }
+        return summary;
+    }
+
+    private Map<String, Object> extractInitialPythonRunArgs(Map<String, Object> args) {
+        Map<String, Object> runArgs = new HashMap<>();
+        if (args == null) {
+            return runArgs;
+        }
+        Map<String, Object> rawRunArgs = toMap(args.get("run_args"));
+        if (!rawRunArgs.isEmpty()) {
+            runArgs.putAll(rawRunArgs);
+        }
+
+        String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+        if (!datasetId.isBlank()) {
+            runArgs.put("dataset_id", datasetId);
+        }
+        String datasetIds = firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2"));
+        if (!datasetIds.isBlank()) {
+            runArgs.put("dataset_ids", datasetIds);
+        }
+        String libraries = firstNonBlank(args.get("libraries"), args.get("arg3"));
+        if (!libraries.isBlank()) {
+            runArgs.put("libraries", libraries);
+        }
+        Integer timeout = toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4"));
+        if (timeout != null && timeout > 0) {
+            runArgs.put("timeout_seconds", timeout);
+        }
+        return runArgs;
+    }
+
+    private String buildCodingContext(Map<String, Object> args,
+                                      List<Map<String, Object>> executedSteps,
+                                      String fallbackContext) {
+        String modelSelectedContext = firstNonBlank(
+                args.get("coding_context"),
+                args.get("codingContext"),
+                args.get("analysis_context"),
+                args.get("analysisContext"),
+                args.get("related_context"),
+                args.get("relatedContext"),
+                args.get("input_context"),
+                args.get("inputContext"),
+                args.get("context")
+        );
+
+        StringBuilder sb = new StringBuilder();
+        if (!modelSelectedContext.isBlank()) {
+            sb.append("模型指定相关上下文:\n").append(modelSelectedContext.trim()).append("\n");
+        } else if (fallbackContext != null && !fallbackContext.isBlank()) {
+            sb.append("任务上下文:\n").append(fallbackContext.trim()).append("\n");
+        }
+
+        String datasetHints = buildDatasetHints(executedSteps);
+        if (!datasetHints.isBlank()) {
+            sb.append("最近工具输出中的数据线索:\n").append(datasetHints);
+        }
+        return sb.toString().trim();
+    }
+
+    private String buildDatasetHints(List<Map<String, Object>> executedSteps) {
+        if (executedSteps == null || executedSteps.isEmpty()) {
+            return "";
+        }
+        List<String> hints = new ArrayList<>();
+        for (Map<String, Object> step : executedSteps) {
+            String output = firstNonBlank(step.get("output"));
+            if (output.isBlank()) {
+                continue;
+            }
+            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
+            while (matcher.find()) {
+                String id = matcher.group(1);
+                String tool = firstNonBlank(step.get("tool"));
+                Map<String, Object> stepArgs = toMap(step.get("args"));
+                String tsCode = firstNonBlank(stepArgs.get("tsCode"), stepArgs.get("ts_code"), stepArgs.get("code"));
+                String rows = extractFirstGroup(ROWS_PATTERN, output);
+                String range = extractFirstGroup(RANGE_PATTERN, output);
+                String fields = extractFirstGroup(FIELDS_PATTERN, output);
+                String line = "- dataset_id=" + id
+                        + (tool.isBlank() ? "" : " (tool=" + tool + ")")
+                        + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")")
+                        + (rows.isBlank() ? "" : " (rows=" + rows + ")")
+                        + (range.isBlank() ? "" : " (range=" + range + ")")
+                        + (fields.isBlank() ? "" : " (fields=" + fields + ")");
+                if (!hints.contains(line)) {
+                    hints.add(line);
+                }
+            }
+        }
+        return String.join("\n", hints);
+    }
+
+    private String extractFirstGroup(Pattern pattern, String text) {
+        if (pattern == null || text == null || text.isBlank()) {
+            return "";
+        }
+        Matcher matcher = pattern.matcher(text);
+        if (!matcher.find()) {
+            return "";
+        }
+        return firstNonBlank(matcher.group(1));
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map<?, ?> m) {
+            return (Map<String, Object>) m;
+        }
+        return Collections.emptyMap();
+    }
+
+    private Integer toNullableInt(Object... values) {
+        String raw = firstNonBlank(values);
+        if (raw.isBlank()) {
+            return null;
+        }
+        try {
+            return Integer.parseInt(raw);
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+
+    private String compactDate(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String digits = raw.replaceAll("[^0-9]", "");
+        if (digits.length() == 8 || digits.length() == 13) {
+            return digits;
+        }
+        return raw.trim();
+    }
+
+    private String firstNonBlank(Object... values) {
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+            String s = String.valueOf(value).trim();
+            if (!s.isBlank()) {
+                return s;
+            }
+        }
+        return "";
+    }
+
+    /**
+     * 从文本中抽取最外层 JSON 片段。
+     *
+     * @param text 模型输出文本
+     * @return JSON 文本
+     */
+    private String extractJson(String text) {
+        if (text == null) {
+            return "{}";
+        }
+        int start = text.indexOf('{');
+        int end = text.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return text.substring(start, end + 1);
+        }
+        return text.trim();
+    }
+
+    /**
+     * 输出子代理事件（参数缺失时静默跳过，避免污染主流程）。
+     *
+     * @param request   子代理请求
+     * @param eventType 事件类型
+     * @param payload   事件负载
+     */
+    private void emitEvent(SubAgentRequest request, String eventType, Object payload) {
+        if (request == null || request.getRunId() == null || request.getRunId().isBlank()) {
+            return;
+        }
+        if (request.getUserId() == null || request.getUserId().isBlank()) {
+            return;
+        }
+        eventService.append(request.getRunId(), request.getUserId(), eventType, payload);
+    }
+
+    /**
+     * 将步骤 JSON 生成简要摘要，供事件与前端展示使用。
+     *
+     * @param stepsNode 步骤数组节点
+     * @return 步骤摘要
+     */
+    private List<Map<String, Object>> buildStepSummary(JsonNode stepsNode) {
+        List<Map<String, Object>> summary = new ArrayList<>();
+        int idx = 0;
+        for (JsonNode node : stepsNode) {
+            Map<String, Object> item = new HashMap<>();
+            item.put("index", idx++);
+            item.put("tool", node.path("tool").asText());
+            item.put("note", node.path("note").asText());
+            summary.add(item);
+        }
+        return summary;
+    }
+
+    /**
+     * 裁剪长文本，避免事件负载过大。
+     *
+     * @param text 原始文本
+     * @return 预览文本
+     */
+    private String preview(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() > 300) {
+            return text.substring(0, 300);
+        }
+        return text;
+    }
+
+    /**
+     * 空值转空字符串。
+     *
+     * @param value 原始字符串
+     * @return 非空字符串
+     */
+    private String nvl(String value) {
+        return value == null ? "" : value;
+    }
+}

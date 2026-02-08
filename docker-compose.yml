@@ -308,6 +308,8 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -315,11 +317,31 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_REDIS_HOST: redis
+      AF_REDIS_PORT: 6379
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
-      # Agent Service LLM 配置 (OpenRouter/OpenAI)
+      # Agent Service LLM 配置
+      # 本地 JSON 配置文件（容器内路径）
+      AF_AGENT_LLM_CONFIG_FILE: ${AF_AGENT_LLM_CONFIG_FILE:-/app/config/agent-llm.local.json}
+      # 全局兜底 key（当 endpoint 未配置 apiKey 时回退）
       AF_AGENT_API_KEY: ${AF_AGENT_API_KEY:-demo}
+      # 默认 endpoint 和 model（可选: openrouter, openai, fireworks）
+      AF_AGENT_DEFAULT_ENDPOINT: ${AF_AGENT_DEFAULT_ENDPOINT:-openrouter}
+      AF_AGENT_DEFAULT_MODEL: ${AF_AGENT_DEFAULT_MODEL:-openai/gpt-5.2}
+      # 允许的模型列表（逗号分隔）
+      AF_AGENT_MODELS: ${AF_AGENT_MODELS:-openai/gpt-5.2,openai/gpt-5.1,google/gemini-3-pro-preview,moonshotai/kimi-k2.5,accounts/fireworks/models/kimi-k2p5}
+      # 各 endpoint 的 base-url
+      AF_AGENT_ENDPOINT_OPENROUTER: ${AF_AGENT_ENDPOINT_OPENROUTER:-https://openrouter.ai/api/v1}
+      AF_AGENT_ENDPOINT_OPENAI: ${AF_AGENT_ENDPOINT_OPENAI:-https://api.openai.com/v1}
+      AF_AGENT_ENDPOINT_FIREWORKS: ${AF_AGENT_ENDPOINT_FIREWORKS:-https://api.fireworks.ai/inference/v1}
+      # 各 endpoint 的 api-key（可选；优先级低于 JSON）
+      AF_AGENT_ENDPOINT_OPENROUTER_API_KEY: ${AF_AGENT_ENDPOINT_OPENROUTER_API_KEY:-}
+      AF_AGENT_ENDPOINT_OPENAI_API_KEY: ${AF_AGENT_ENDPOINT_OPENAI_API_KEY:-}
+      AF_AGENT_ENDPOINT_FIREWORKS_API_KEY: ${AF_AGENT_ENDPOINT_FIREWORKS_API_KEY:-}
+      # langchain4j 配置（兼容旧配置，实际使用 default endpoint）
       AF_AGENT_BASE_URL: ${AF_AGENT_BASE_URL:-https://openrouter.ai/api/v1}
-      AF_AGENT_MODEL_NAME: ${AF_AGENT_MODEL_NAME:-openai/gpt-4o}
+      AF_AGENT_MODEL_NAME: ${AF_AGENT_MODEL_NAME:-openai/gpt-5.2}
       AF_AGENT_MAX_TOKENS: ${AF_AGENT_MAX_TOKENS:-4096}
       AF_AGENT_TEMPERATURE: ${AF_AGENT_TEMPERATURE:-0.7}
       # Reasoning 配置 (OpenRouter)
@@ -332,6 +354,7 @@ services:
       JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1g"
     volumes:
       - ./data/agent_datasets:/data/agent_datasets
+      - ./agentService/config:/app/config:ro
     ports:
       - "50058:50058"
     deploy:
