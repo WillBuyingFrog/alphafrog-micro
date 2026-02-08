@@ -33,7 +33,7 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ---
 
-## v0.3-phase1 版本功能 (当前版本)
+## v0.3-phase2 版本功能（当前版本）
 
 ### Agent 能力
 - **Agent Run**: 创建/查询/取消/续做/状态/事件流/结果
@@ -41,6 +41,10 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 - **数据集落盘**: 日线数据落盘并通过 dataset_id 传递
 - **Python 沙箱**: 安全运行计算脚本并返回结果
 - **多数据集挂载**: 支持 dataset_ids 同步挂载
+- **并行/图编排执行**: 支持并行任务规划、依赖编排与 sub_agent fan-out 执行
+- **子代理步骤级事件**: 支持子代理计划/步骤开始/步骤完成/失败等事件观测
+- **Python 代码执行自修复**: executePython 失败后可基于反馈自动重试与修正
+- **Prompt 本地配置化**: 支持通过 `agent-llm.local.json` 配置模型提示词与字段说明（简体中文主体）
 
 ## v0.2 版本功能（数据服务基础能力）
 
@@ -71,11 +75,12 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ---
 
-## v0.3 后续规划（Agent 进阶能力）
+## v0.4 TODO（规划）
 
-- 并行/图编排执行（如 DAG / 子任务 fan-out）
-- 断点恢复与中间结果缓存
-- 工具搜索与上下文压缩
+- 断点恢复能力完善
+- 中间结果缓存策略完善
+- 工具搜索能力完善
+- 上下文压缩策略
 - 指标库与预定义分析能力
 
 
@@ -117,9 +122,10 @@ docker-compose up -d
 | 文档 | 说明 |
 |------|------|
 | [deploy_guide.md](./deploy_guide.md) | 完整部署指南（构建、Docker 打包、服务上线） |
-| [api_guide.md](./api_guide.md) | API 接口文档 |
 | [portfolio_schema.sql](./portfolio_schema.sql) | Portfolio 服务数据库 Schema |
 | [alphafrog-wiki/agent-api-guide.md](./alphafrog-wiki/agent-api-guide.md) | Agent 对外 API 文档 |
+
+> Frontend 对外接口文档将后续统一重构发布。
 
 ---
 
