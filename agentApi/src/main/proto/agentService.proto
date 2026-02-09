@@ -53,6 +53,9 @@ message AgentRunListItemMessage {
   string created_at = 4;
   string completed_at = 5;
   bool has_artifacts = 6;
+  int64 duration_ms = 7;
+  int32 total_tokens = 8;
+  int32 tool_calls = 9;
 }
 
 message ListAgentRunsResponse {
@@ -119,6 +122,7 @@ message AgentRunResultMessage {
   string status = 2;
   string answer = 3;
   string payload_json = 4;
+  string observability_json = 5;
 }
 
 message AgentRunStatusMessage {
@@ -131,6 +135,7 @@ message AgentRunStatusMessage {
   string last_event_payload_json = 7;
   string plan_json = 8;
   string progress_json = 9;
+  string observability_json = 10;
 }
 
 message AgentToolMessage {

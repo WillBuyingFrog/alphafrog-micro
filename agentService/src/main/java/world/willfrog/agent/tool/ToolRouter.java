@@ -1,7 +1,11 @@
 package world.willfrog.agent.tool;
 
+import lombok.Builder;
+import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.AgentObservabilityService;
 
 import java.util.Map;
 import java.util.Set;
@@ -12,10 +16,55 @@ public class ToolRouter {
 
     private final MarketDataTools marketDataTools;
     private final PythonSandboxTools pythonSandboxTools;
+    private final ToolResultCacheService toolResultCacheService;
+    private final AgentObservabilityService observabilityService;
 
     public String invoke(String toolName, Map<String, Object> params) {
+        return invokeWithMeta(toolName, params).getOutput();
+    }
+
+    public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
+        ToolResultCacheService.CachedToolCallResult cached = toolResultCacheService.executeWithCache(
+                toolName,
+                params,
+                resolveScope(),
+                () -> executeDirect(toolName, params)
+        );
+        String result = nvl(cached.getResult());
+        boolean success = cached.isSuccess();
+        long durationMs = Math.max(0L, cached.getDurationMs());
+        ToolResultCacheService.CacheMeta cacheMeta = cached.getCacheMeta();
+        recordObservability(toolName, result, durationMs, success, cacheMeta);
+        return ToolInvocationResult.builder()
+                .output(result)
+                .success(success)
+                .durationMs(durationMs)
+                .cacheMeta(cacheMeta)
+                .build();
+    }
+
+    public Map<String, Object> toEventCachePayload(ToolInvocationResult invocationResult) {
+        return toolResultCacheService.toPayload(invocationResult == null ? null : invocationResult.getCacheMeta());
+    }
+
+    public Set<String> supportedTools() {
+        return Set.of(
+                "getStockInfo",
+                "getStockDaily",
+                "searchStock",
+                "searchFund",
+                "getIndexInfo",
+                "getIndexDaily",
+                "searchIndex",
+                "executePython"
+        );
+    }
+
+    private ToolResultCacheService.ToolExecutionOutcome executeDirect(String toolName, Map<String, Object> params) {
+        long startedAt = System.currentTimeMillis();
+        String result;
         try {
-            return switch (toolName) {
+            result = switch (toolName) {
                 case "getStockInfo" -> marketDataTools.getStockInfo(
                         str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("stock_code"), params.get("arg0"))
                 );
@@ -51,21 +100,13 @@ public class ToolRouter {
                 default -> "Unsupported tool: " + toolName;
             };
         } catch (Exception e) {
-            return "Tool invocation error: " + e.getMessage();
+            result = "Tool invocation error: " + e.getMessage();
         }
-    }
-
-    public Set<String> supportedTools() {
-        return Set.of(
-                "getStockInfo",
-                "getStockDaily",
-                "searchStock",
-                "searchFund",
-                "getIndexInfo",
-                "getIndexDaily",
-                "searchIndex",
-                "executePython"
-        );
+        return ToolResultCacheService.ToolExecutionOutcome.builder()
+                .result(result)
+                .durationMs(Math.max(0L, System.currentTimeMillis() - startedAt))
+                .success(isToolSuccess(result))
+                .build();
     }
 
     private String str(Object... candidates) {
@@ -104,5 +145,74 @@ public class ToolRouter {
             return digits;
         }
         return raw;
+    }
+
+    private void recordObservability(String toolName,
+                                     String result,
+                                     long durationMs,
+                                     boolean success,
+                                     ToolResultCacheService.CacheMeta cacheMeta) {
+        String runId = AgentContext.getRunId();
+        if (runId == null || runId.isBlank()) {
+            return;
+        }
+        String phase = AgentContext.getPhase();
+        observabilityService.recordToolCall(
+                runId,
+                phase,
+                toolName,
+                durationMs,
+                success,
+                cacheMeta != null && cacheMeta.isEligible(),
+                cacheMeta != null && cacheMeta.isHit(),
+                cacheMeta == null ? "" : cacheMeta.getKey(),
+                cacheMeta == null ? "" : cacheMeta.getSource(),
+                cacheMeta == null ? -1L : cacheMeta.getTtlRemainingMs(),
+                cacheMeta == null ? 0L : cacheMeta.getEstimatedSavedDurationMs(),
+                success ? null : result
+        );
+    }
+
+    private boolean isToolSuccess(String result) {
+        if (result == null || result.isBlank()) {
+            return false;
+        }
+        if (result.startsWith("Tool invocation error")) {
+            return false;
+        }
+        if (result.startsWith("Unsupported tool")) {
+            return false;
+        }
+        if (result.startsWith("Tool Execution Error")) {
+            return false;
+        }
+        if (result.startsWith("Failed to create task")) {
+            return false;
+        }
+        if (result.startsWith("Task FAILED")) {
+            return false;
+        }
+        return !result.startsWith("Task CANCELED");
+    }
+
+    private String resolveScope() {
+        String userId = AgentContext.getUserId();
+        if (userId == null || userId.isBlank()) {
+            return "global";
+        }
+        return "user:" + userId.trim();
+    }
+
+    private String nvl(String value) {
+        return value == null ? "" : value;
+    }
+
+    @Data
+    @Builder
+    public static class ToolInvocationResult {
+        private String output;
+        private boolean success;
+        private long durationMs;
+        private ToolResultCacheService.CacheMeta cacheMeta;
     }
 }

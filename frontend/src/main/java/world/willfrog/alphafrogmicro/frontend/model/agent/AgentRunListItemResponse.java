@@ -6,6 +6,9 @@ public record AgentRunListItemResponse(
         String status,
         String createdAt,
         String completedAt,
-        boolean hasArtifacts
+        boolean hasArtifacts,
+        Long durationMs,
+        Integer totalTokens,
+        Integer toolCalls
 ) {
 }

@@ -18,6 +18,7 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
 
@@ -56,6 +57,8 @@ public class ParallelGraphExecutor {
     private final AgentRunStateStore stateStore;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
+    /** 可观测指标聚合服务。 */
+    private final AgentObservabilityService observabilityService;
     /** JSON 序列化/反序列化。 */
     private final ObjectMapper objectMapper;
 
@@ -167,6 +170,7 @@ public class ParallelGraphExecutor {
             snapshot.put("answer", finalAnswer);
 
             String snapshotJson = objectMapper.writeValueAsString(snapshot);
+            snapshotJson = observabilityService.attachObservabilityToSnapshot(run.getId(), snapshotJson, AgentRunStatus.COMPLETED);
             runMapper.updateSnapshot(run.getId(), userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
             eventService.append(run.getId(), userId, "COMPLETED", Map.of("answer", finalAnswer));
             stateStore.markRunStatus(run.getId(), AgentRunStatus.COMPLETED.name());
@@ -278,12 +282,23 @@ public class ParallelGraphExecutor {
             usedStoredPlan = true;
         } else {
             String prompt = buildPlannerPrompt(toolWhitelist, maxTasks, subAgentMaxSteps);
+            long llmStartedAt = System.currentTimeMillis();
             Response<AiMessage> response = model.generate(List.of(
                     new SystemMessage(prompt),
                     new UserMessage(userGoal)
             ));
+            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
             planText = response.content().text();
             planJson = extractJson(planText);
+            observabilityService.recordLlmCall(
+                    run.getId(),
+                    AgentObservabilityService.PHASE_PLANNING,
+                    response.tokenUsage(),
+                    llmDurationMs,
+                    null,
+                    null,
+                    null
+            );
         }
 
         ParallelPlan plan = parsePlan(planJson);
@@ -301,6 +316,7 @@ public class ParallelGraphExecutor {
         runMapper.updatePlan(run.getId(), userId, AgentRunStatus.EXECUTING, planJson);
         stateStore.recordPlan(run.getId(), planJson, valid);
         stateStore.markRunStatus(run.getId(), AgentRunStatus.EXECUTING.name());
+        observabilityService.addNodeCount(run.getId(), plan.getTasks() == null ? 0 : plan.getTasks().size());
 
         if (valid) {
             eventService.append(run.getId(), userId, "PLAN_CREATED", Map.of(
@@ -352,7 +368,13 @@ public class ParallelGraphExecutor {
         }
         ParallelPlan plan = parsePlan(state.planJson().orElse("{}"));
         Map<String, ParallelTaskResult> existing = stateStore.loadTaskResults(run.getId());
+        long startedAt = System.currentTimeMillis();
         Map<String, ParallelTaskResult> results = taskExecutor.execute(plan, run.getId(), userId, toolWhitelist, subAgentMaxSteps, userGoal, model, existing);
+        observabilityService.recordPhaseDuration(
+                run.getId(),
+                AgentObservabilityService.PHASE_PARALLEL_EXECUTION,
+                System.currentTimeMillis() - startedAt
+        );
         boolean allDone = isAllDone(plan, results);
         boolean paused = !eventService.isRunnable(run.getId(), userId);
         Map<String, Object> update = new HashMap<>();
@@ -385,10 +407,21 @@ public class ParallelGraphExecutor {
         Map<String, ParallelTaskResult> results = state.taskResults().orElse(Map.of());
         String resultJson = safeWrite(results);
         String prompt = promptService.parallelFinalSystemPrompt();
+        long llmStartedAt = System.currentTimeMillis();
         Response<AiMessage> response = model.generate(List.of(
                 new SystemMessage(prompt),
                 new UserMessage("目标: " + userGoal + "\n结果: " + resultJson)
         ));
+        long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        observabilityService.recordLlmCall(
+                run.getId(),
+                AgentObservabilityService.PHASE_SUMMARIZING,
+                response.tokenUsage(),
+                llmDurationMs,
+                null,
+                null,
+                null
+        );
         String answer = response.content().text();
         return Map.of("final_answer", answer);
     }

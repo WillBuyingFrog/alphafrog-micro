@@ -30,6 +30,7 @@ public class AgentRunStateStore {
     private static final String PLAN_VALID_KEY = ":plan_valid";
     private static final String PLAN_OVERRIDE_KEY = ":plan_override";
     private static final String STATUS_KEY = ":status";
+    private static final String OBSERVABILITY_KEY = ":observability";
     private static final String TASK_INDEX_KEY = ":tasks";
     private static final String TASK_KEY_PREFIX = ":task:";
 
@@ -133,6 +134,25 @@ public class AgentRunStateStore {
             return Optional.empty();
         }
         return Optional.of(status);
+    }
+
+    public void saveObservability(String runId, String observabilityJson) {
+        if (runId == null || runId.isBlank()) {
+            return;
+        }
+        redisTemplate.opsForValue().set(observabilityKey(runId), nvl(observabilityJson));
+        touch(runId, observabilityKey(runId));
+    }
+
+    public Optional<String> loadObservability(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return Optional.empty();
+        }
+        String json = redisTemplate.opsForValue().get(observabilityKey(runId));
+        if (json == null || json.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(json);
     }
 
     public void markTaskStarted(String runId, ParallelPlan.PlanTask task) {
@@ -261,6 +281,7 @@ public class AgentRunStateStore {
         redisTemplate.delete(planValidKey(runId));
         redisTemplate.delete(planOverrideKey(runId));
         redisTemplate.delete(statusKey(runId));
+        redisTemplate.delete(observabilityKey(runId));
     }
 
     public void clearTasks(String runId) {
@@ -355,6 +376,10 @@ public class AgentRunStateStore {
 
     private String statusKey(String runId) {
         return PREFIX + runId + STATUS_KEY;
+    }
+
+    private String observabilityKey(String runId) {
+        return PREFIX + runId + OBSERVABILITY_KEY;
     }
 
     private String taskIndexKey(String runId) {

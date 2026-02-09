@@ -20,6 +20,17 @@
       "apiKey": "replace-with-your-openai-api-key"
     }
   },
+  "runtime": {
+    "resume": {
+      "interruptedTtlDays": 7
+    },
+    "cache": {
+      "version": "v1",
+      "searchTtlSeconds": 3600,
+      "infoTtlSeconds": 21600,
+      "datasetTtlSeconds": 604800
+    }
+  },
   "prompts": {
     "agentRunSystemPrompt": "你是专业金融分析代理。请使用可用工具获取市场数据并准确回答用户问题。\n重要约束：\n1. 你通常并不知道数据库中的精确 ts_code（例如 000300.SH），必须先调用 searchStock/searchFund/searchIndex 检索后再调用按代码查询的工具。\n2. 禁止猜测代码，禁止使用不存在的工具名。\n3. 当市场数据工具返回 dataset_id 后，必须调用 executePython 对数据进行计算与分析。\n4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。",
     "parallelPlannerSystemPromptTemplate": "你是并行任务规划器。只输出 JSON。必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。请优先拆分为可并行任务，但不要牺牲正确性。约束：任务数 <= {{maxTasks}}，sub_agent 步数 <= {{maxSubSteps}}，并行任务数 <= {{maxParallelTasks}}，sub_agent 任务数 <= {{maxSubAgents}}。仅允许工具：{{toolWhitelist}}。可并行任务应设置为空依赖；有依赖任务用 dependsOn。",

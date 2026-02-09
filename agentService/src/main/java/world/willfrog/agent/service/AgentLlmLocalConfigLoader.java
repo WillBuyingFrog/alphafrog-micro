@@ -65,6 +65,15 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getPrompts() == null) {
             cfg.setPrompts(null);
         }
+        if (cfg.getRuntime() == null) {
+            cfg.setRuntime(null);
+        }
+        if (cfg.getRuntime().getResume() == null) {
+            cfg.getRuntime().setResume(null);
+        }
+        if (cfg.getRuntime().getCache() == null) {
+            cfg.getRuntime().setCache(null);
+        }
         if (cfg.getPrompts().getPythonRefineRequirements() == null) {
             cfg.getPrompts().setPythonRefineRequirements(null);
         }

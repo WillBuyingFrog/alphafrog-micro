@@ -11,7 +11,9 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
@@ -57,6 +59,8 @@ public class SubAgentRunner {
     private final ObjectMapper objectMapper;
     /** 事件服务（记录子代理过程）。 */
     private final AgentEventService eventService;
+    /** 可观测指标聚合服务。 */
+    private final AgentObservabilityService observabilityService;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
 
@@ -109,6 +113,8 @@ public class SubAgentRunner {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
+        String previousPhase = AgentContext.getPhase();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
         Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
         String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
@@ -120,12 +126,23 @@ public class SubAgentRunner {
             String lastPlanError = "sub_agent plan generation failed";
             String retryHint = "";
             for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+                long llmStartedAt = System.currentTimeMillis();
                 Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
                         new SystemMessage(systemPrompt),
                         new UserMessage("目标: " + request.getGoal()
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
                 ));
+                long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+                observabilityService.recordLlmCall(
+                        request.getRunId(),
+                        AgentObservabilityService.PHASE_SUB_AGENT,
+                        planResp.tokenUsage(),
+                        llmDurationMs,
+                        null,
+                        null,
+                        null
+                );
                 String planText = planResp.content().text();
                 String json = extractJson(planText);
                 JsonNode root = objectMapper.readTree(json);
@@ -181,6 +198,7 @@ public class SubAgentRunner {
                     "steps_count", stepsNode.size(),
                     "steps", buildStepSummary(stepsNode)
             ));
+            observabilityService.addNodeCount(request.getRunId(), stepsNode.size());
 
             // 第二步：按计划逐步执行工具。
             for (JsonNode stepNode : stepsNode) {
@@ -205,6 +223,7 @@ public class SubAgentRunner {
                 ));
                 String output;
                 boolean stepSuccess;
+                Map<String, Object> cachePayload = toolRouter.toEventCachePayload(null);
                 if ("executePython".equals(tool)) {
                     PythonCodeRefinementNode.Result refineResult = pythonCodeRefinementNode.execute(
                             PythonCodeRefinementNode.Request.builder()
@@ -230,8 +249,10 @@ public class SubAgentRunner {
                             "traces", summarizePythonTraces(refineResult.getTraces(), !stepSuccess)
                     ));
                 } else {
-                    output = toolRouter.invoke(tool, args);
-                    stepSuccess = isStepSuccessful(tool, output);
+                    ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(tool, args);
+                    output = invokeResult.getOutput();
+                    stepSuccess = invokeResult.isSuccess() && isStepSuccessful(tool, output);
+                    cachePayload = toolRouter.toEventCachePayload(invokeResult);
                 }
 
                 Map<String, Object> stepResult = new HashMap<>();
@@ -246,7 +267,8 @@ public class SubAgentRunner {
                         "step_index", stepIndex,
                         "tool", tool,
                         "success", stepSuccess,
-                        "output_preview", preview(output)
+                        "output_preview", preview(output),
+                        "cache", cachePayload
                 ));
                 if (!stepSuccess) {
                     String err = "sub_agent step failed: tool=" + tool + ", reason=" + preview(output);
@@ -264,10 +286,21 @@ public class SubAgentRunner {
 
             // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
             String summaryPrompt = promptService.subAgentSummarySystemPrompt();
+            long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
                     new SystemMessage(summaryPrompt),
                     new UserMessage("目标: " + request.getGoal() + "\n结果: " + objectMapper.writeValueAsString(executedSteps))
             ));
+            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            observabilityService.recordLlmCall(
+                    request.getRunId(),
+                    AgentObservabilityService.PHASE_SUB_AGENT,
+                    finalResp.tokenUsage(),
+                    llmDurationMs,
+                    null,
+                    null,
+                    null
+            );
 
             emitEvent(request, "SUB_AGENT_COMPLETED", Map.of(
                     "task_id", nvl(request.getTaskId()),
@@ -286,6 +319,12 @@ public class SubAgentRunner {
                     "error", nvl(e.getMessage())
             ));
             return SubAgentResult.builder().success(false).error(nvl(e.getMessage())).steps(executedSteps).build();
+        } finally {
+            if (previousPhase == null || previousPhase.isBlank()) {
+                AgentContext.clearPhase();
+            } else {
+                AgentContext.setPhase(previousPhase);
+            }
         }
     }
 

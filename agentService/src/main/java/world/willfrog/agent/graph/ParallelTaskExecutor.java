@@ -3,6 +3,8 @@ package world.willfrog.agent.graph;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.tool.ToolRouter;
@@ -97,6 +99,9 @@ public class ParallelTaskExecutor {
             for (ParallelPlan.PlanTask task : ready) {
                 futures.add(CompletableFuture.runAsync(() -> {
                     try {
+                        AgentContext.setRunId(runId);
+                        AgentContext.setUserId(userId);
+                        AgentContext.setPhase(AgentObservabilityService.PHASE_PARALLEL_EXECUTION);
                         Map<String, Object> startPayload = new java.util.HashMap<>();
                         startPayload.put("task_id", task.getId());
                         startPayload.put("type", nvl(task.getType()));
@@ -108,11 +113,12 @@ public class ParallelTaskExecutor {
                         ParallelTaskResult result = executeTask(task, runId, userId, toolWhitelist, subAgentMaxSteps, taskContext, model);
                         results.put(task.getId(), result);
                         stateStore.saveTaskResult(runId, task.getId(), result);
-                        eventService.append(runId, userId, "PARALLEL_TASK_FINISHED", Map.of(
-                                "task_id", task.getId(),
-                                "success", result.isSuccess(),
-                                "output_preview", preview(result.getOutput())
-                        ));
+                        Map<String, Object> finishPayload = new java.util.HashMap<>();
+                        finishPayload.put("task_id", task.getId());
+                        finishPayload.put("success", result.isSuccess());
+                        finishPayload.put("output_preview", preview(result.getOutput()));
+                        finishPayload.put("cache", result.getCache() == null ? Map.of() : result.getCache());
+                        eventService.append(runId, userId, "PARALLEL_TASK_FINISHED", finishPayload);
                     } catch (Exception e) {
                         // 线程内异常不再外抛，统一转换成失败任务并记录内部错误事件。
                         log.warn("Parallel task execution failed: runId={}, taskId={}", runId, task.getId(), e);
@@ -128,6 +134,8 @@ public class ParallelTaskExecutor {
                                 "task_id", task.getId(),
                                 "error", e.getClass().getSimpleName() + ": " + nvl(e.getMessage())
                         ));
+                    } finally {
+                        AgentContext.clear();
                     }
                 }, parallelExecutor));
             }
@@ -158,12 +166,14 @@ public class ParallelTaskExecutor {
                                            dev.langchain4j.model.chat.ChatLanguageModel model) {
         String type = task.getType() == null ? "" : task.getType().trim().toLowerCase();
         if (type.equals("tool")) {
-            String output = toolRouter.invoke(task.getTool(), safeArgs(task.getArgs()));
+            ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(task.getTool(), safeArgs(task.getArgs()));
+            String output = invokeResult.getOutput();
             return ParallelTaskResult.builder()
                     .taskId(task.getId())
                     .type("tool")
-                    .success(!output.startsWith("Tool invocation error"))
+                    .success(invokeResult.isSuccess())
                     .output(output)
+                    .cache(toolRouter.toEventCachePayload(invokeResult))
                     .build();
         }
         if (type.equals("sub_agent")) {
@@ -183,6 +193,7 @@ public class ParallelTaskExecutor {
                     .success(subResult.isSuccess())
                     .output(subResult.getAnswer())
                     .error(subResult.getError())
+                    .cache(toolRouter.toEventCachePayload(null))
                     .build();
         }
         return ParallelTaskResult.builder()
@@ -190,6 +201,7 @@ public class ParallelTaskExecutor {
                 .type(type)
                 .success(false)
                 .error("unsupported task type")
+                .cache(toolRouter.toEventCachePayload(null))
                 .build();
     }
 

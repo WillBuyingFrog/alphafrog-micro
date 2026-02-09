@@ -14,6 +14,7 @@ public class AgentLlmProperties {
     private String defaultModel;
     private Map<String, Endpoint> endpoints = new HashMap<>();
     private List<String> models = new ArrayList<>();
+    private Runtime runtime = new Runtime();
     private Prompts prompts = new Prompts();
 
     public String getDefaultEndpoint() {
@@ -56,6 +57,14 @@ public class AgentLlmProperties {
         this.prompts = prompts == null ? new Prompts() : prompts;
     }
 
+    public Runtime getRuntime() {
+        return runtime;
+    }
+
+    public void setRuntime(Runtime runtime) {
+        this.runtime = runtime == null ? new Runtime() : runtime;
+    }
+
     public static class Endpoint {
         private String baseUrl;
         private String apiKey;
@@ -74,6 +83,78 @@ public class AgentLlmProperties {
 
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey;
+        }
+    }
+
+    public static class Runtime {
+        private Resume resume = new Resume();
+        private Cache cache = new Cache();
+
+        public Resume getResume() {
+            return resume;
+        }
+
+        public void setResume(Resume resume) {
+            this.resume = resume == null ? new Resume() : resume;
+        }
+
+        public Cache getCache() {
+            return cache;
+        }
+
+        public void setCache(Cache cache) {
+            this.cache = cache == null ? new Cache() : cache;
+        }
+    }
+
+    public static class Resume {
+        private Integer interruptedTtlDays;
+
+        public Integer getInterruptedTtlDays() {
+            return interruptedTtlDays;
+        }
+
+        public void setInterruptedTtlDays(Integer interruptedTtlDays) {
+            this.interruptedTtlDays = interruptedTtlDays;
+        }
+    }
+
+    public static class Cache {
+        private String version;
+        private Integer searchTtlSeconds;
+        private Integer infoTtlSeconds;
+        private Integer datasetTtlSeconds;
+
+        public String getVersion() {
+            return version;
+        }
+
+        public void setVersion(String version) {
+            this.version = version;
+        }
+
+        public Integer getSearchTtlSeconds() {
+            return searchTtlSeconds;
+        }
+
+        public void setSearchTtlSeconds(Integer searchTtlSeconds) {
+            this.searchTtlSeconds = searchTtlSeconds;
+        }
+
+        public Integer getInfoTtlSeconds() {
+            return infoTtlSeconds;
+        }
+
+        public void setInfoTtlSeconds(Integer infoTtlSeconds) {
+            this.infoTtlSeconds = infoTtlSeconds;
+        }
+
+        public Integer getDatasetTtlSeconds() {
+            return datasetTtlSeconds;
+        }
+
+        public void setDatasetTtlSeconds(Integer datasetTtlSeconds) {
+            this.datasetTtlSeconds = datasetTtlSeconds;
         }
     }
 

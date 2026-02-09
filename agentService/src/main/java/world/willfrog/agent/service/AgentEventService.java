@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
@@ -41,9 +42,17 @@ public class AgentEventService {
     private final ObjectMapper objectMapper;
     /** Redis 客户端：用于事件序号原子递增。 */
     private final StringRedisTemplate redisTemplate;
+    /** 本地 llm/runtim 配置加载器。 */
+    private final AgentLlmLocalConfigLoader llmLocalConfigLoader;
 
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
+
+    @Value("${agent.run.interrupted-ttl-days:7}")
+    private int interruptedTtlDays;
+
+    @Value("${agent.run.checkpoint-version:v1}")
+    private String checkpointVersion;
 
     @Value("${agent.event.payload.max-chars:10000}")
     private int payloadMaxChars;
@@ -76,6 +85,7 @@ public class AgentEventService {
         ext.put("idempotency_key", idempotencyKey == null ? "" : idempotencyKey);
         ext.put("model_name", modelName == null ? "" : modelName);
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
+        ext.put("checkpoint_version", resolveCheckpointVersion());
 
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -108,6 +118,10 @@ public class AgentEventService {
         }
         if (run.getStatus() == AgentRunStatus.CANCELED) {
             log.info("Run canceled, stop: {}", runId);
+            return false;
+        }
+        if (run.getStatus() == AgentRunStatus.EXPIRED) {
+            log.info("Run expired, stop: {}", runId);
             return false;
         }
         if (run.getStatus() == AgentRunStatus.WAITING) {
@@ -200,6 +214,26 @@ public class AgentEventService {
      */
     public OffsetDateTime nextTtlExpiresAt() {
         return OffsetDateTime.now().plusMinutes(ttlMinutes);
+    }
+
+    public OffsetDateTime nextInterruptedExpiresAt() {
+        return OffsetDateTime.now().plusDays(resolveInterruptedTtlDays());
+    }
+
+    public boolean shouldMarkExpired(AgentRun run) {
+        if (run == null) {
+            return false;
+        }
+        AgentRunStatus status = run.getStatus();
+        if (status != AgentRunStatus.WAITING
+                && status != AgentRunStatus.FAILED
+                && status != AgentRunStatus.CANCELED) {
+            return false;
+        }
+        if (run.getTtlExpiresAt() == null) {
+            return false;
+        }
+        return OffsetDateTime.now().isAfter(run.getTtlExpiresAt());
     }
 
     /**
@@ -327,6 +361,26 @@ public class AgentEventService {
         } catch (Exception e) {
             return "";
         }
+    }
+
+    private int resolveInterruptedTtlDays() {
+        int local = llmLocalConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getResume)
+                .map(AgentLlmProperties.Resume::getInterruptedTtlDays)
+                .orElse(0);
+        if (local > 0) {
+            return local;
+        }
+        return interruptedTtlDays > 0 ? interruptedTtlDays : 7;
+    }
+
+    private String resolveCheckpointVersion() {
+        String version = checkpointVersion == null ? "" : checkpointVersion.trim();
+        if (version.isBlank()) {
+            return "v1";
+        }
+        return version;
     }
 
 }

@@ -122,7 +122,10 @@ public class AgentController {
                         item.getStatus(),
                         emptyToNull(item.getCreatedAt()),
                         emptyToNull(item.getCompletedAt()),
-                        item.getHasArtifacts()
+                        item.getHasArtifacts(),
+                        item.getDurationMs() <= 0 ? null : item.getDurationMs(),
+                        item.getTotalTokens() <= 0 ? null : item.getTotalTokens(),
+                        item.getToolCalls() <= 0 ? null : item.getToolCalls()
                 ));
             }
             return ResponseWrapper.success(new AgentRunListResponse(items, resp.getTotal(), resp.getHasMore()));
@@ -279,7 +282,8 @@ public class AgentController {
                     result.getId(),
                     result.getStatus(),
                     emptyToNull(result.getAnswer()),
-                    emptyToNull(result.getPayloadJson())
+                    emptyToNull(result.getPayloadJson()),
+                    emptyToNull(result.getObservabilityJson())
             );
             if (!"COMPLETED".equalsIgnoreCase(result.getStatus())) {
                 return ResponseEntity.status(202).body(ResponseWrapper.success(body, "任务未完成"));
@@ -315,7 +319,8 @@ public class AgentController {
                     emptyToNull(status.getLastEventAt()),
                     emptyToNull(status.getLastEventPayloadJson()),
                     emptyToNull(status.getPlanJson()),
-                    emptyToNull(status.getProgressJson())
+                    emptyToNull(status.getProgressJson()),
+                    emptyToNull(status.getObservabilityJson())
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");
@@ -468,6 +473,15 @@ public class AgentController {
         if (msg.contains("run is running")) {
             return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 运行中，请先停止后删除");
         }
+        if (msg.contains("run expired")) {
+            return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 已过期，不能断点续跑，请新建 run");
+        }
+        if (msg.contains("snapshot_version_incompatible")) {
+            return ResponseWrapper.error(
+                    ResponseCode.BUSINESS_ERROR,
+                    "断点版本不兼容，建议新建 run。详情: " + (e.getMessage() == null ? "" : e.getMessage())
+            );
+        }
         if (msg.contains("invalid status filter")) {
             return ResponseWrapper.error(ResponseCode.PARAM_ERROR, "status 参数非法");
         }
@@ -482,6 +496,15 @@ public class AgentController {
         }
         if (msg.contains("run is running")) {
             return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 运行中，请先停止后删除");
+        }
+        if (msg.contains("run expired")) {
+            return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 已过期，不能断点续跑，请新建 run");
+        }
+        if (msg.contains("snapshot_version_incompatible")) {
+            return ResponseWrapper.error(
+                    ResponseCode.BUSINESS_ERROR,
+                    "断点版本不兼容，建议新建 run。详情: " + (e.getMessage() == null ? "" : e.getMessage())
+            );
         }
         if (msg.contains("invalid status filter")) {
             return ResponseWrapper.error(ResponseCode.PARAM_ERROR, "status 参数非法");

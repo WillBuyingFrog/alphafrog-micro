@@ -11,7 +11,9 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.config.CodeRefineProperties;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
 import world.willfrog.agent.tool.ToolRouter;
@@ -41,6 +43,7 @@ public class PythonCodeRefinementNode {
     private final CodeRefineProperties codeRefineProperties;
     private final CodeRefineLocalConfigLoader localConfigLoader;
     private final AgentPromptService promptService;
+    private final AgentObservabilityService observabilityService;
 
     @Data
     @Builder
@@ -184,10 +187,24 @@ public class PythonCodeRefinementNode {
         userPrompt.append(promptService.pythonRefineOutputInstruction());
 
         try {
+            long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(List.of(
                     new SystemMessage(systemPrompt),
                     new UserMessage(userPrompt.toString())
             ));
+            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            String runId = AgentContext.getRunId();
+            if (runId != null && !runId.isBlank()) {
+                observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_SUB_AGENT,
+                        resp.tokenUsage(),
+                        llmDurationMs,
+                        null,
+                        null,
+                        null
+                );
+            }
             return extractPlan(resp.content().text(), currentRunArgs, systemPrompt, userPrompt.toString(), null);
         } catch (Exception e) {
             log.warn("Generate python code failed", e);

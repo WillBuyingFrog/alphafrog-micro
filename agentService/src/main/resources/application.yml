@@ -29,8 +29,20 @@ dubbo:
     check: false
 
 agent:
+  run:
+    interrupted-ttl-days: ${AF_AGENT_RUN_INTERRUPTED_TTL_DAYS:7}
+    checkpoint-version: ${AF_AGENT_RUN_CHECKPOINT_VERSION:v1}
+  tool-cache:
+    version: ${AF_AGENT_TOOL_CACHE_VERSION:v1}
+    search-ttl-seconds: ${AF_AGENT_TOOL_CACHE_SEARCH_TTL_SECONDS:3600}
+    info-ttl-seconds: ${AF_AGENT_TOOL_CACHE_INFO_TTL_SECONDS:21600}
+    dataset-ttl-seconds: ${AF_AGENT_TOOL_CACHE_DATASET_TTL_SECONDS:604800}
   api:
     max-polling-interval-seconds: ${AF_AGENT_API_MAX_POLLING_INTERVAL_SECONDS:3}
+  observability:
+    debug-file:
+      enabled: ${AF_AGENT_OBS_DEBUG_FILE_ENABLED:false}
+      path: ${AF_AGENT_OBS_DEBUG_FILE_PATH:/data/logs/agent-observability-debug.log}
   artifact:
     retention-days:
       normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}

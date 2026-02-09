@@ -8,5 +8,6 @@ public enum AgentRunStatus {
     SUMMARIZING,
     COMPLETED,
     FAILED,
-    CANCELED;
+    CANCELED,
+    EXPIRED;
 }

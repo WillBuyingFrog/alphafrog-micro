@@ -61,6 +61,8 @@ public class AgentRunExecutor {
     private final AgentRunStateStore stateStore;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
+    /** 可观测指标聚合服务。 */
+    private final AgentObservabilityService observabilityService;
     /** JSON 工具。 */
     private final ObjectMapper objectMapper;
 
@@ -97,6 +99,7 @@ public class AgentRunExecutor {
         String userId = run.getUserId();
         try {
             AgentContext.setRunId(runId); // Set Context
+            AgentContext.setUserId(userId);
 
             if (!eventService.isRunnable(runId, userId)) {
                 return;
@@ -109,6 +112,7 @@ public class AgentRunExecutor {
             // endpoint/model 允许请求级覆盖，未指定时由 resolver 走默认配置。
             String endpointName = eventService.extractEndpointName(run.getExt());
             String modelName = eventService.extractModelName(run.getExt());
+            observabilityService.initializeRun(runId, endpointName, modelName);
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(endpointName, modelName);
 
             String userGoal = eventService.extractUserGoal(run.getExt());
@@ -146,11 +150,30 @@ public class AgentRunExecutor {
                 if (!eventService.isRunnable(runId, userId)) {
                     return;
                 }
+                observabilityService.addNodeCount(runId, 1);
 
                 // Call LLM
+                long llmStartedAt = System.currentTimeMillis();
                 Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
+                long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
                 AiMessage aiMessage = response.content();
                 messages.add(aiMessage);
+                String llmPhase = "tool_execution";
+                if (i == 0) {
+                    llmPhase = AgentObservabilityService.PHASE_PLANNING;
+                }
+                if (!aiMessage.hasToolExecutionRequests()) {
+                    llmPhase = AgentObservabilityService.PHASE_SUMMARIZING;
+                }
+                observabilityService.recordLlmCall(
+                        runId,
+                        llmPhase,
+                        response.tokenUsage(),
+                        llmDurationMs,
+                        endpointName,
+                        modelName,
+                        null
+                );
 
                 if (aiMessage.hasToolExecutionRequests()) {
                     // 模型要求调用工具：逐个执行并把结果回灌给模型。
@@ -164,12 +187,21 @@ public class AgentRunExecutor {
                          eventService.append(runId, userId, "TOOL_CALL_STARTED", startPayload);
                          
                          Map<String, Object> params = jsonToMap(argsJson);
-                         String result = toolRouter.invoke(toolName, params);
+                         String result;
+                         world.willfrog.agent.tool.ToolRouter.ToolInvocationResult invokeResult = null;
+                         AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
+                         try {
+                             invokeResult = toolRouter.invokeWithMeta(toolName, params);
+                             result = invokeResult.getOutput();
+                         } finally {
+                             AgentContext.clearPhase();
+                         }
                          
                          Map<String, Object> finishPayload = new HashMap<>();
                          finishPayload.put("tool_name", toolName);
-                         finishPayload.put("success", !result.startsWith("Tool invocation error"));
+                         finishPayload.put("success", invokeResult != null && invokeResult.isSuccess());
                          finishPayload.put("result_preview", result);
+                         finishPayload.put("cache", toolRouter.toEventCachePayload(invokeResult));
                          eventService.append(runId, userId, "TOOL_CALL_FINISHED", finishPayload);
 
                          messages.add(ToolExecutionResultMessage.from(toolRequest, result));
@@ -192,6 +224,7 @@ public class AgentRunExecutor {
             snapshot.put("execution_log", executionLog);
             snapshot.put("answer", finalAnswer);
             String snapshotJson = objectMapper.writeValueAsString(snapshot);
+            snapshotJson = observabilityService.attachObservabilityToSnapshot(runId, snapshotJson, AgentRunStatus.COMPLETED);
 
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
             eventService.append(runId, userId, "COMPLETED", mapOf("answer", finalAnswer));
@@ -200,7 +233,10 @@ public class AgentRunExecutor {
         } catch (Exception e) {
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             log.error("Execution error", e);
-            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, run.getSnapshotJson(), true, err);
+            observabilityService.recordFailure(runId, e.getClass().getSimpleName(), err);
+            String failedSnapshotJson = observabilityService.attachObservabilityToSnapshot(runId, run.getSnapshotJson(), AgentRunStatus.FAILED);
+            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, failedSnapshotJson, true, err);
+            runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.FAILED, eventService.nextInterruptedExpiresAt());
             eventService.append(runId, userId, "FAILED", mapOf("error", err));
             stateStore.markRunStatus(runId, AgentRunStatus.FAILED.name());
         } finally {

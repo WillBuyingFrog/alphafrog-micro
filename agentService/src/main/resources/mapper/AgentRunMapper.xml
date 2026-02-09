@@ -113,6 +113,15 @@
           AND user_id = #{userId}
     </update>
 
+    <update id="updateStatusWithTtl">
+        UPDATE alphafrog_agent_run
+        SET status = #{status},
+            ttl_expires_at = #{ttlExpiresAt},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
     <update id="updatePlan">
         UPDATE alphafrog_agent_run
         SET status = #{status},

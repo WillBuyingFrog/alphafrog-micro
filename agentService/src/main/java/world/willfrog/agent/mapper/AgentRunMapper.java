@@ -31,6 +31,11 @@ public interface AgentRunMapper {
                      @Param("userId") String userId,
                      @Param("status") AgentRunStatus status);
 
+    int updateStatusWithTtl(@Param("id") String id,
+                            @Param("userId") String userId,
+                            @Param("status") AgentRunStatus status,
+                            @Param("ttlExpiresAt") OffsetDateTime ttlExpiresAt);
+
     int updatePlan(@Param("id") String id,
                    @Param("userId") String userId,
                    @Param("status") AgentRunStatus status,

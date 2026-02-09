@@ -58,6 +58,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentEventService eventService;
     private final AgentRunExecutor executor;
     private final AgentRunStateStore stateStore;
+    private final AgentObservabilityService observabilityService;
     private final AgentLlmResolver llmResolver;
     private final AgentArtifactService artifactService;
     private final ObjectMapper objectMapper;
@@ -76,6 +77,9 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
 
     @Value("${agent.flow.parallel.enabled:true}")
     private boolean parallelExecutionEnabled;
+
+    @Value("${agent.run.checkpoint-version:v1}")
+    private String checkpointVersion;
 
     /**
      * 创建 run 并触发异步执行。
@@ -144,8 +148,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         builder.setTotal(total);
         builder.setHasMore(hasMore);
         for (AgentRun run : runs) {
+            run = markExpiredIfNeeded(run);
             String userGoal = eventService.extractUserGoal(run.getExt());
             boolean hasArtifacts = hasVisibleArtifacts(run);
+            AgentObservabilityService.ListMetrics metrics = observabilityService.extractListMetrics(run.getSnapshotJson());
             builder.addItems(AgentRunListItemMessage.newBuilder()
                     .setId(nvl(run.getId()))
                     .setMessage(nvl(userGoal))
@@ -153,6 +159,9 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                     .setCreatedAt(run.getStartedAt() == null ? "" : run.getStartedAt().toString())
                     .setCompletedAt(run.getCompletedAt() == null ? "" : run.getCompletedAt().toString())
                     .setHasArtifacts(hasArtifacts)
+                    .setDurationMs(Math.max(0L, metrics.durationMs()))
+                    .setTotalTokens(Math.max(0, metrics.totalTokens()))
+                    .setToolCalls(Math.max(0, metrics.toolCalls()))
                     .build());
         }
         return builder.build();
@@ -219,7 +228,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
-        runMapper.updateStatus(run.getId(), run.getUserId(), AgentRunStatus.CANCELED);
+        runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "CANCELED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.CANCELED.name());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
@@ -237,7 +246,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
-        runMapper.updateStatus(run.getId(), run.getUserId(), AgentRunStatus.WAITING);
+        runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "PAUSED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.WAITING.name());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
@@ -252,6 +261,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     @Override
     public AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
+        if (run.getStatus() == AgentRunStatus.EXPIRED) {
+            throw new IllegalStateException("run expired");
+        }
+        ensureCheckpointCompatible(run);
         if (run.getStatus() != AgentRunStatus.FAILED
                 && run.getStatus() != AgentRunStatus.CANCELED
                 && run.getStatus() != AgentRunStatus.WAITING) {
@@ -293,6 +306,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
                 .setAnswer(answer == null ? "" : answer)
                 .setPayloadJson(snapshotJson == null ? "" : snapshotJson)
+                .setObservabilityJson(nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson)))
                 .build();
     }
 
@@ -315,7 +329,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (planJson != null && !planJson.isBlank()) {
             progressJson = stateStore.buildProgressJson(run.getId(), planJson);
         }
-        return toStatusMessage(run, latestEvent, planJson, progressJson);
+        String observabilityJson = observabilityService.loadObservabilityJson(run.getId(), run.getSnapshotJson());
+        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson);
     }
 
     /**
@@ -480,7 +495,49 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (run == null) {
             throw new IllegalArgumentException("run not found");
         }
-        return run;
+        return markExpiredIfNeeded(run);
+    }
+
+    private AgentRun markExpiredIfNeeded(AgentRun run) {
+        if (run == null) {
+            return null;
+        }
+        if (!eventService.shouldMarkExpired(run)) {
+            return run;
+        }
+        runMapper.updateStatus(run.getId(), run.getUserId(), AgentRunStatus.EXPIRED);
+        eventService.append(run.getId(), run.getUserId(), "RUN_EXPIRED", Map.of(
+                "run_id", run.getId(),
+                "expired_at", OffsetDateTime.now().toString()
+        ));
+        stateStore.markRunStatus(run.getId(), AgentRunStatus.EXPIRED.name());
+        AgentRun refreshed = runMapper.findByIdAndUser(run.getId(), run.getUserId());
+        return refreshed == null ? run : refreshed;
+    }
+
+    private void ensureCheckpointCompatible(AgentRun run) {
+        String expected = checkpointVersion == null || checkpointVersion.isBlank() ? "v1" : checkpointVersion.trim();
+        String actual = readExtField(run.getExt(), "checkpoint_version");
+        if (actual == null || actual.isBlank() || expected.equals(actual)) {
+            return;
+        }
+        String originalMessage = eventService.extractUserGoal(run.getExt());
+        String payload = "reason=SNAPSHOT_VERSION_INCOMPATIBLE; suggested_action=CREATE_NEW_RUN_WITH_ORIGINAL_MESSAGE; original_message="
+                + nvl(originalMessage);
+        throw new IllegalStateException(payload);
+    }
+
+    private String readExtField(String extJson, String field) {
+        if (extJson == null || extJson.isBlank()) {
+            return "";
+        }
+        try {
+            Map<?, ?> ext = objectMapper.readValue(extJson, Map.class);
+            Object value = ext.get(field);
+            return value == null ? "" : String.valueOf(value);
+        } catch (Exception e) {
+            return "";
+        }
     }
 
     private boolean hasVisibleArtifacts(AgentRun run) {
@@ -493,7 +550,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     }
 
     private boolean isTerminal(AgentRunStatus status) {
-        return status == AgentRunStatus.COMPLETED || status == AgentRunStatus.FAILED || status == AgentRunStatus.CANCELED;
+        return status == AgentRunStatus.COMPLETED
+                || status == AgentRunStatus.FAILED
+                || status == AgentRunStatus.CANCELED
+                || status == AgentRunStatus.EXPIRED;
     }
 
     private boolean isRunning(AgentRunStatus status) {
@@ -546,7 +606,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private AgentRunStatusMessage toStatusMessage(AgentRun run,
                                                   AgentRunEvent lastEvent,
                                                   String planJson,
-                                                  String progressJson) {
+                                                  String progressJson,
+                                                  String observabilityJson) {
         String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
         String currentTool = "";
         if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
@@ -563,6 +624,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setLastEventPayloadJson(lastEvent == null ? "" : nvl(lastEvent.getPayloadJson()))
                 .setPlanJson(nvl(planJson))
                 .setProgressJson(nvl(progressJson))
+                .setObservabilityJson(nvl(observabilityJson))
                 .build();
     }
 
@@ -578,6 +640,9 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
         if (status == AgentRunStatus.CANCELED) {
             return "CANCELED";
+        }
+        if (status == AgentRunStatus.EXPIRED) {
+            return "EXPIRED";
         }
         if (status == AgentRunStatus.WAITING) {
             return "PAUSED";
