@@ -66,6 +66,45 @@
         LIMIT 1
     </select>
 
+    <select id="listByUser" resultMap="AgentRunResultMap">
+        SELECT id,
+               user_id,
+               status,
+               current_step,
+               max_steps,
+               plan_json::text AS plan_json,
+               snapshot_json::text AS snapshot_json,
+               last_error,
+               ttl_expires_at,
+               started_at,
+               updated_at,
+               completed_at,
+               ext::text AS ext
+        FROM alphafrog_agent_run
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="fromTime != null">
+            AND started_at &gt;= #{fromTime}
+        </if>
+        ORDER BY started_at DESC
+        LIMIT #{limit}
+        OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="int">
+        SELECT COUNT(1)
+        FROM alphafrog_agent_run
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="fromTime != null">
+            AND started_at &gt;= #{fromTime}
+        </if>
+    </select>
+
     <update id="updateStatus">
         UPDATE alphafrog_agent_run
         SET status = #{status},
@@ -107,5 +146,11 @@
         WHERE id = #{id}
           AND user_id = #{userId}
     </update>
+
+    <delete id="deleteByIdAndUser">
+        DELETE FROM alphafrog_agent_run
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </delete>
 
 </mapper>

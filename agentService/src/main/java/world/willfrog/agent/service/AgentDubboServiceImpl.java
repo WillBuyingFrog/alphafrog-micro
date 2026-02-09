@@ -4,11 +4,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.beans.factory.annotation.Value;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.alphafrogmicro.agent.idl.AgentRunListItemMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunEventMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
@@ -17,22 +19,32 @@ import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.DubboAgentDubboServiceTriple;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunResponse;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 import java.util.Map;
 
@@ -47,7 +59,23 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentRunExecutor executor;
     private final AgentRunStateStore stateStore;
     private final AgentLlmResolver llmResolver;
+    private final AgentArtifactService artifactService;
     private final ObjectMapper objectMapper;
+
+    @Value("${agent.run.list.default-days:30}")
+    private int listDefaultDays;
+
+    @Value("${agent.artifact.retention-days.normal:7}")
+    private int artifactRetentionNormalDays;
+
+    @Value("${agent.artifact.retention-days.admin:30}")
+    private int artifactRetentionAdminDays;
+
+    @Value("${agent.api.max-polling-interval-seconds:3}")
+    private int maxPollingIntervalSeconds;
+
+    @Value("${agent.flow.parallel.enabled:true}")
+    private boolean parallelExecutionEnabled;
 
     /**
      * 创建 run 并触发异步执行。
@@ -91,6 +119,45 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     }
 
     /**
+     * 按用户分页查询历史 run 列表。
+     *
+     * @param request 查询请求
+     * @return 列表结果
+     */
+    @Override
+    public ListAgentRunsResponse listRuns(ListAgentRunsRequest request) {
+        String userId = request.getUserId();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        int limit = request.getLimit() <= 0 ? 20 : Math.min(request.getLimit(), 100);
+        int offset = Math.max(0, request.getOffset());
+        AgentRunStatus statusFilter = parseStatusFilter(request.getStatus());
+        int days = request.getDays() > 0 ? request.getDays() : listDefaultDays;
+        OffsetDateTime fromTime = days > 0 ? OffsetDateTime.now().minusDays(days) : null;
+
+        List<AgentRun> runs = runMapper.listByUser(userId, statusFilter, fromTime, limit, offset);
+        int total = runMapper.countByUser(userId, statusFilter, fromTime);
+        boolean hasMore = offset + runs.size() < total;
+
+        ListAgentRunsResponse.Builder builder = ListAgentRunsResponse.newBuilder();
+        builder.setTotal(total);
+        builder.setHasMore(hasMore);
+        for (AgentRun run : runs) {
+            String userGoal = eventService.extractUserGoal(run.getExt());
+            builder.addItems(AgentRunListItemMessage.newBuilder()
+                    .setId(nvl(run.getId()))
+                    .setMessage(nvl(userGoal))
+                    .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
+                    .setCreatedAt(run.getStartedAt() == null ? "" : run.getStartedAt().toString())
+                    .setCompletedAt(run.getCompletedAt() == null ? "" : run.getCompletedAt().toString())
+                    .setHasArtifacts(false)
+                    .build());
+        }
+        return builder.build();
+    }
+
+    /**
      * 列出 run 事件流（分页）。
      *
      * @param request 查询请求
@@ -117,6 +184,26 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         builder.setNextAfterSeq(nextAfterSeq);
         builder.setHasMore(hasMore);
         return builder.build();
+    }
+
+    /**
+     * 删除指定 run（运行中任务禁止删除）。
+     *
+     * @param request 删除请求
+     * @return 空响应
+     */
+    @Override
+    public AgentEmpty deleteRun(DeleteAgentRunRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        if (isRunning(run.getStatus())) {
+            throw new IllegalStateException("run is running, cancel/pause first");
+        }
+        int deleted = runMapper.deleteByIdAndUser(run.getId(), run.getUserId());
+        if (deleted <= 0) {
+            throw new IllegalArgumentException("run not found");
+        }
+        stateStore.clear(run.getId());
+        return AgentEmpty.newBuilder().build();
     }
 
     /**
@@ -288,8 +375,57 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      */
     @Override
     public ListAgentArtifactsResponse listArtifacts(ListAgentArtifactsRequest request) {
-        requireRun(request.getId(), request.getUserId());
-        return ListAgentArtifactsResponse.newBuilder().build();
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        return ListAgentArtifactsResponse.newBuilder()
+                .addAllItems(artifactService.listArtifacts(run, request.getIsAdmin()))
+                .build();
+    }
+
+    /**
+     * 下载指定 artifact 内容。
+     *
+     * @param request 下载请求
+     * @return 文件内容
+     */
+    @Override
+    public DownloadAgentArtifactResponse downloadArtifact(DownloadAgentArtifactRequest request) {
+        String runId = artifactService.extractRunId(request.getArtifactId());
+        AgentRun run = requireRun(runId, request.getUserId());
+        AgentArtifactService.ArtifactContent artifact = artifactService.loadArtifact(
+                run,
+                request.getIsAdmin(),
+                request.getArtifactId()
+        );
+        return DownloadAgentArtifactResponse.newBuilder()
+                .setArtifactId(artifact.artifactId())
+                .setFilename(nvl(artifact.filename()))
+                .setContentType(nvl(artifact.contentType()))
+                .setContent(com.google.protobuf.ByteString.copyFrom(artifact.content()))
+                .build();
+    }
+
+    /**
+     * 获取 Agent 前端所需配置。
+     *
+     * @param request 配置请求
+     * @return 配置结果
+     */
+    @Override
+    public GetAgentConfigResponse getConfig(GetAgentConfigRequest request) {
+        if (request.getUserId() == null || request.getUserId().isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        return GetAgentConfigResponse.newBuilder()
+                .setRetentionDays(AgentRetentionConfigMessage.newBuilder()
+                        .setNormalDays(Math.max(0, artifactRetentionNormalDays))
+                        .setAdminDays(Math.max(0, artifactRetentionAdminDays))
+                        .build())
+                .setMaxPollingInterval(Math.max(1, maxPollingIntervalSeconds))
+                .setFeatures(AgentFeatureConfigMessage.newBuilder()
+                        .setParallelExecution(parallelExecutionEnabled)
+                        .setPauseResume(true)
+                        .build())
+                .build();
     }
 
     /**
@@ -348,6 +484,24 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
 
     private boolean isTerminal(AgentRunStatus status) {
         return status == AgentRunStatus.COMPLETED || status == AgentRunStatus.FAILED || status == AgentRunStatus.CANCELED;
+    }
+
+    private boolean isRunning(AgentRunStatus status) {
+        return status == AgentRunStatus.RECEIVED
+                || status == AgentRunStatus.PLANNING
+                || status == AgentRunStatus.EXECUTING
+                || status == AgentRunStatus.SUMMARIZING;
+    }
+
+    private AgentRunStatus parseStatusFilter(String status) {
+        if (status == null || status.isBlank()) {
+            return null;
+        }
+        try {
+            return AgentRunStatus.valueOf(status.trim().toUpperCase());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("invalid status filter: " + status);
+        }
     }
 
     private AgentRunMessage toRunMessage(AgentRun run) {

@@ -18,4 +18,6 @@ public interface AgentRunEventMapper {
     Integer findMaxSeq(@Param("runId") String runId);
 
     AgentRunEvent findLatestByRunId(@Param("runId") String runId);
+
+    List<AgentRunEvent> listByRunId(@Param("runId") String runId);
 }

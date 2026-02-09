@@ -13,11 +13,14 @@ import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunResponse;
@@ -39,6 +42,8 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunEventsPageResp
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResumeRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListItemResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
@@ -50,6 +55,8 @@ import java.util.List;
 @RequiredArgsConstructor
 @Slf4j
 public class AgentController {
+
+    private static final int ADMIN_USER_TYPE = 1127;
 
     @DubboReference
     private AgentDubboService agentDubboService;
@@ -87,6 +94,45 @@ public class AgentController {
         }
     }
 
+    @GetMapping
+    public ResponseWrapper<AgentRunListResponse> list(Authentication authentication,
+                                                      @RequestParam(value = "limit", required = false, defaultValue = "20") int limit,
+                                                      @RequestParam(value = "offset", required = false, defaultValue = "0") int offset,
+                                                      @RequestParam(value = "status", required = false, defaultValue = "") String status,
+                                                      @RequestParam(value = "days", required = false, defaultValue = "0") int days) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            ListAgentRunsResponse resp = agentDubboService.listRuns(
+                    ListAgentRunsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setLimit(limit)
+                            .setOffset(offset)
+                            .setStatus(nvl(status))
+                            .setDays(days)
+                            .build()
+            );
+            List<AgentRunListItemResponse> items = new ArrayList<>();
+            for (var item : resp.getItemsList()) {
+                items.add(new AgentRunListItemResponse(
+                        item.getId(),
+                        emptyToNull(item.getMessage()),
+                        item.getStatus(),
+                        emptyToNull(item.getCreatedAt()),
+                        emptyToNull(item.getCompletedAt()),
+                        item.getHasArtifacts()
+                ));
+            }
+            return ResponseWrapper.success(new AgentRunListResponse(items, resp.getTotal(), resp.getHasMore()));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 agent run 列表");
+        } catch (Exception e) {
+            return handleError(e, "查询 agent run 列表");
+        }
+    }
+
     @GetMapping("/{runId}")
     public ResponseWrapper<AgentRunResponse> get(Authentication authentication,
                                                 @PathVariable("runId") String runId) {
@@ -101,6 +147,23 @@ public class AgentController {
             return handleRpcError(e, "查询 agent run");
         } catch (Exception e) {
             return handleError(e, "查询 agent run");
+        }
+    }
+
+    @DeleteMapping("/{runId}")
+    public ResponseWrapper<String> delete(Authentication authentication,
+                                          @PathVariable("runId") String runId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            agentDubboService.deleteRun(DeleteAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            return ResponseWrapper.success("ok");
+        } catch (RpcException e) {
+            return handleRpcError(e, "删除 agent run");
+        } catch (Exception e) {
+            return handleError(e, "删除 agent run");
         }
     }
 
@@ -269,8 +332,13 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
+            boolean isAdmin = isAdmin(authentication);
             ListAgentArtifactsResponse resp = agentDubboService.listArtifacts(
-                    ListAgentArtifactsRequest.newBuilder().setUserId(userId).setId(runId).build()
+                    ListAgentArtifactsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setIsAdmin(isAdmin)
+                            .build()
             );
             List<AgentArtifactResponse> items = new ArrayList<>();
             for (var a : resp.getItemsList()) {
@@ -281,7 +349,8 @@ public class AgentController {
                         a.getContentType(),
                         a.getUrl(),
                         emptyToNull(a.getMetaJson()),
-                        emptyToNull(a.getCreatedAt())
+                        emptyToNull(a.getCreatedAt()),
+                        a.getExpiresAtMillis() <= 0 ? null : a.getExpiresAtMillis()
                 ));
             }
             return ResponseWrapper.success(items);
@@ -360,6 +429,19 @@ public class AgentController {
         return String.valueOf(user.getUserId());
     }
 
+    private boolean isAdmin(Authentication authentication) {
+        if (authentication == null || !authentication.isAuthenticated()) {
+            return false;
+        }
+        String username = authentication.getName();
+        User user = authService.getUserByUsername(username);
+        if (user == null) {
+            return false;
+        }
+        Integer userType = user.getUserType();
+        return userType != null && userType == ADMIN_USER_TYPE;
+    }
+
     private AgentRunResponse toRunResponse(AgentRunMessage run) {
         return new AgentRunResponse(
                 run.getId(),
@@ -379,11 +461,31 @@ public class AgentController {
 
     private <T> ResponseWrapper<T> handleRpcError(RpcException e, String action) {
         log.error("{}失败: {}", action, e.getMessage());
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        if (msg.contains("run not found")) {
+            return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "run 不存在");
+        }
+        if (msg.contains("run is running")) {
+            return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 运行中，请先停止后删除");
+        }
+        if (msg.contains("invalid status filter")) {
+            return ResponseWrapper.error(ResponseCode.PARAM_ERROR, "status 参数非法");
+        }
         return ResponseWrapper.error(ResponseCode.EXTERNAL_SERVICE_ERROR, action + "失败");
     }
 
     private <T> ResponseWrapper<T> handleError(Exception e, String action) {
         log.error("{}失败", action, e);
+        String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+        if (msg.contains("run not found")) {
+            return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "run 不存在");
+        }
+        if (msg.contains("run is running")) {
+            return ResponseWrapper.error(ResponseCode.BUSINESS_ERROR, "run 运行中，请先停止后删除");
+        }
+        if (msg.contains("invalid status filter")) {
+            return ResponseWrapper.error(ResponseCode.PARAM_ERROR, "status 参数非法");
+        }
         return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, action + "失败");
     }
 

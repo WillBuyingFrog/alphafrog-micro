@@ -6,6 +6,7 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.model.AgentRunStatus;
 
 import java.time.OffsetDateTime;
+import java.util.List;
 
 @Mapper
 public interface AgentRunMapper {
@@ -15,6 +16,16 @@ public interface AgentRunMapper {
     AgentRun findById(@Param("id") String id);
 
     AgentRun findByIdAndUser(@Param("id") String id, @Param("userId") String userId);
+
+    List<AgentRun> listByUser(@Param("userId") String userId,
+                              @Param("status") AgentRunStatus status,
+                              @Param("fromTime") OffsetDateTime fromTime,
+                              @Param("limit") int limit,
+                              @Param("offset") int offset);
+
+    int countByUser(@Param("userId") String userId,
+                    @Param("status") AgentRunStatus status,
+                    @Param("fromTime") OffsetDateTime fromTime);
 
     int updateStatus(@Param("id") String id,
                      @Param("userId") String userId,
@@ -35,4 +46,6 @@ public interface AgentRunMapper {
     int resetForResume(@Param("id") String id,
                        @Param("userId") String userId,
                        @Param("ttlExpiresAt") OffsetDateTime ttlExpiresAt);
+
+    int deleteByIdAndUser(@Param("id") String id, @Param("userId") String userId);
 }

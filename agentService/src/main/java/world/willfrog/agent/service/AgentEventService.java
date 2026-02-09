@@ -45,6 +45,12 @@ public class AgentEventService {
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
 
+    @Value("${agent.event.payload.max-chars:10000}")
+    private int payloadMaxChars;
+
+    @Value("${agent.event.payload.preview-chars:4096}")
+    private int payloadPreviewChars;
+
     /**
      * 创建新的 run 记录并写入初始事件。
      *
@@ -134,7 +140,8 @@ public class AgentEventService {
         event.setRunId(runId);
         event.setSeq(nextSeq);
         event.setEventType(eventType);
-        event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
+        String payloadJson = payload instanceof String ? (String) payload : writeJson(payload);
+        event.setPayloadJson(normalizePayloadJson(eventType, payloadJson));
         try {
             eventMapper.insert(event);
         } catch (Exception e) {
@@ -249,6 +256,57 @@ public class AgentEventService {
      */
     private String eventSeqKey(String runId) {
         return EVENT_SEQ_KEY_PREFIX + runId;
+    }
+
+    /**
+     * 规范化事件 payload。
+     * <p>
+     * 策略：
+     * 1. 默认允许原样写入；
+     * 2. 当 payload 长度超过上限时，写入“截断摘要对象”，避免事件体无限增长；
+     * 3. 摘要对象保留 event_type、原始长度和预览内容，便于排查。
+     *
+     * @param eventType   事件类型
+     * @param payloadJson 原始 payload JSON
+     * @return 可落库的 payload JSON
+     */
+    private String normalizePayloadJson(String eventType, String payloadJson) {
+        String normalized = payloadJson == null || payloadJson.isBlank() ? "{}" : payloadJson;
+        if (payloadMaxChars <= 0 || normalized.length() <= payloadMaxChars) {
+            return normalized;
+        }
+
+        int previewChars = payloadPreviewChars <= 0 ? 1024 : payloadPreviewChars;
+        previewChars = Math.min(previewChars, payloadMaxChars);
+        previewChars = Math.max(previewChars, 128);
+        String preview = normalized.substring(0, Math.min(previewChars, normalized.length()));
+
+        Map<String, Object> compact = new HashMap<>();
+        compact.put("truncated", true);
+        compact.put("event_type", eventType == null ? "" : eventType);
+        compact.put("original_size", normalized.length());
+        compact.put("max_size", payloadMaxChars);
+        compact.put("payload_preview", preview);
+        String compactJson = writeJson(compact);
+        if (compactJson.length() <= payloadMaxChars) {
+            log.warn("Event payload truncated: eventType={}, originalSize={}, maxSize={}",
+                    eventType, normalized.length(), payloadMaxChars);
+            return compactJson;
+        }
+
+        // 极端情况下继续缩减，确保落库字符串可控。
+        int adjustedPreview = Math.max(64, payloadMaxChars / 4);
+        compact.put("payload_preview", normalized.substring(0, Math.min(adjustedPreview, normalized.length())));
+        compactJson = writeJson(compact);
+        if (compactJson.length() <= payloadMaxChars) {
+            log.warn("Event payload truncated with compact preview: eventType={}, originalSize={}, maxSize={}",
+                    eventType, normalized.length(), payloadMaxChars);
+            return compactJson;
+        }
+
+        log.warn("Event payload replaced by minimal marker: eventType={}, originalSize={}, maxSize={}",
+                eventType, normalized.length(), payloadMaxChars);
+        return "{\"truncated\":true}";
     }
 
     /**

@@ -38,7 +38,35 @@ message GetAgentRunRequest {
   string id = 2;
 }
 
+message ListAgentRunsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  string status = 4;
+  int32 days = 5;
+}
+
+message AgentRunListItemMessage {
+  string id = 1;
+  string message = 2;
+  string status = 3;
+  string created_at = 4;
+  string completed_at = 5;
+  bool has_artifacts = 6;
+}
+
+message ListAgentRunsResponse {
+  repeated AgentRunListItemMessage items = 1;
+  int32 total = 2;
+  bool has_more = 3;
+}
+
 message CancelAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message DeleteAgentRunRequest {
   string user_id = 1;
   string id = 2;
 }
@@ -127,15 +155,50 @@ message AgentArtifactMessage {
   string url = 5;
   string meta_json = 6;
   string created_at = 7;
+  int64 expires_at_millis = 8;
 }
 
 message ListAgentArtifactsRequest {
   string user_id = 1;
   string id = 2;
+  bool is_admin = 3;
 }
 
 message ListAgentArtifactsResponse {
   repeated AgentArtifactMessage items = 1;
+}
+
+message DownloadAgentArtifactRequest {
+  string user_id = 1;
+  string artifact_id = 2;
+  bool is_admin = 3;
+}
+
+message DownloadAgentArtifactResponse {
+  string artifact_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  bytes content = 4;
+}
+
+message GetAgentConfigRequest {
+  string user_id = 1;
+}
+
+message AgentRetentionConfigMessage {
+  int32 normal_days = 1;
+  int32 admin_days = 2;
+}
+
+message AgentFeatureConfigMessage {
+  bool parallel_execution = 1;
+  bool pause_resume = 2;
+}
+
+message GetAgentConfigResponse {
+  AgentRetentionConfigMessage retention_days = 1;
+  int32 max_polling_interval = 2;
+  AgentFeatureConfigMessage features = 3;
 }
 
 message SubmitAgentFeedbackRequest {
@@ -163,7 +226,9 @@ message ExportAgentRunResponse {
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
+  rpc ListRuns(ListAgentRunsRequest) returns (ListAgentRunsResponse);
   rpc ListEvents(ListAgentRunEventsRequest) returns (ListAgentRunEventsResponse);
+  rpc DeleteRun(DeleteAgentRunRequest) returns (AgentEmpty);
   rpc CancelRun(CancelAgentRunRequest) returns (AgentRunMessage);
   rpc PauseRun(PauseAgentRunRequest) returns (AgentRunMessage);
   rpc ResumeRun(ResumeAgentRunRequest) returns (AgentRunMessage);
@@ -171,6 +236,8 @@ service AgentDubboService {
   rpc GetStatus(GetAgentRunStatusRequest) returns (AgentRunStatusMessage);
   rpc ListTools(ListAgentToolsRequest) returns (ListAgentToolsResponse);
   rpc ListArtifacts(ListAgentArtifactsRequest) returns (ListAgentArtifactsResponse);
+  rpc DownloadArtifact(DownloadAgentArtifactRequest) returns (DownloadAgentArtifactResponse);
+  rpc GetConfig(GetAgentConfigRequest) returns (GetAgentConfigResponse);
   rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
 }

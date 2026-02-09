@@ -29,6 +29,18 @@ dubbo:
     check: false
 
 agent:
+  api:
+    max-polling-interval-seconds: ${AF_AGENT_API_MAX_POLLING_INTERVAL_SECONDS:3}
+  artifact:
+    retention-days:
+      normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}
+      admin: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_ADMIN:30}
+    download:
+      max-bytes: ${AF_AGENT_ARTIFACT_DOWNLOAD_MAX_BYTES:10485760}
+  event:
+    payload:
+      max-chars: ${AF_AGENT_EVENT_PAYLOAD_MAX_CHARS:10000}
+      preview-chars: ${AF_AGENT_EVENT_PAYLOAD_PREVIEW_CHARS:4096}
   llm:
     # 本地 JSON 配置文件（可选，不存在则回退到当前 yml/env 配置）
     config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
