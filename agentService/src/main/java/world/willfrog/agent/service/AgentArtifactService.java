@@ -16,6 +16,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
+import java.nio.file.StandardCopyOption;
+import java.nio.file.attribute.FileTime;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
@@ -36,6 +38,7 @@ public class AgentArtifactService {
 
     private static final Pattern DATASET_RESULT_PATTERN =
             Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([A-Za-z0-9._-]+)");
+    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]+$");
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
     private final AgentRunEventMapper eventMapper;
@@ -43,6 +46,9 @@ public class AgentArtifactService {
 
     @Value("${agent.tools.market-data.dataset.path:/data/agent_datasets}")
     private String datasetPath;
+
+    @Value("${agent.artifact.storage.path:/data/agent_artifacts}")
+    private String artifactStoragePath;
 
     @Value("${agent.artifact.retention-days.normal:7}")
     private int normalRetentionDays;
@@ -83,10 +89,6 @@ public class AgentArtifactService {
                 .findFirst()
                 .orElseThrow(() -> new IllegalArgumentException("artifact not found"));
 
-        if (target.getInlineContent() != null) {
-            byte[] bytes = target.getInlineContent().getBytes(StandardCharsets.UTF_8);
-            return new ArtifactContent(target.getArtifactId(), target.getName(), target.getContentType(), bytes);
-        }
         if (target.getFilePath() == null) {
             throw new IllegalArgumentException("artifact source not found");
         }
@@ -114,13 +116,7 @@ public class AgentArtifactService {
         for (PythonInvocation invocation : selectedInvocations) {
             selectedDatasetIds.addAll(invocation.datasetIds());
         }
-        if (selectedDatasetIds.isEmpty()) {
-            if (isAdmin) {
-                selectedDatasetIds.addAll(parsed.fallbackDatasetIds());
-            } else if (!parsed.fallbackDatasetIds().isEmpty()) {
-                selectedDatasetIds.add(parsed.fallbackDatasetIds().get(parsed.fallbackDatasetIds().size() - 1));
-            }
-        }
+        selectedDatasetIds.addAll(parsed.fallbackDatasetIds());
 
         List<ResolvedArtifact> artifacts = new ArrayList<>();
         for (PythonInvocation invocation : selectedInvocations) {
@@ -132,21 +128,26 @@ public class AgentArtifactService {
             if (isExpired(expiresAtMillis)) {
                 continue;
             }
-            String artifactId = encodeArtifactId("script", run.getId(), String.valueOf(invocation.seq()));
+            String artifactId = encodeArtifactId("script", run.getId(), invocation.ref());
+            Path scriptFile = snapshotPythonScript(run.getId(), invocation.ref(), invocation.code(), createdAtMillis);
+            if (scriptFile == null) {
+                continue;
+            }
             Map<String, Object> meta = new HashMap<>();
             meta.put("kind", "python_script");
             meta.put("scope", isAdmin ? "admin" : "normal");
+            meta.put("source", invocation.source());
             meta.put("seq", invocation.seq());
-            meta.put("final_candidate", Objects.equals(invocation, selectedInvocations.get(selectedInvocations.size() - 1)));
+            meta.put("success", invocation.success());
             artifacts.add(ResolvedArtifact.builder()
                     .artifactId(artifactId)
                     .type("python_script")
-                    .name("run-" + run.getId() + "-seq-" + invocation.seq() + ".py")
+                    .name(scriptFile.getFileName().toString())
                     .contentType("text/x-python")
                     .metaJson(writeJson(meta))
                     .createdAt(toOffsetDateTime(createdAtMillis))
                     .expiresAtMillis(expiresAtMillis)
-                    .inlineContent(invocation.code())
+                    .filePath(scriptFile)
                     .build());
         }
 
@@ -188,6 +189,10 @@ public class AgentArtifactService {
             if (isExpired(expiresAtMillis)) {
                 return;
             }
+            Path copiedFile = snapshotDatasetFile(runId, datasetId, filePath);
+            if (copiedFile == null) {
+                return;
+            }
             String artifactId = encodeArtifactId(type, runId, datasetId);
             Map<String, Object> meta = new HashMap<>();
             meta.put("kind", type);
@@ -196,12 +201,12 @@ public class AgentArtifactService {
             artifacts.add(ResolvedArtifact.builder()
                     .artifactId(artifactId)
                     .type(type)
-                    .name(filePath.getFileName().toString())
+                    .name(copiedFile.getFileName().toString())
                     .contentType(contentType)
                     .metaJson(writeJson(meta))
                     .createdAt(toOffsetDateTime(createdAtMillis))
                     .expiresAtMillis(expiresAtMillis)
-                    .filePath(filePath)
+                    .filePath(copiedFile)
                     .build());
         } catch (Exception e) {
             log.warn("Resolve dataset artifact failed: runId={}, datasetId={}, file={}", runId, datasetId, filePath, e);
@@ -209,54 +214,154 @@ public class AgentArtifactService {
     }
 
     private ParsedEvents parseEvents(List<AgentRunEvent> events) {
-        List<PythonInvocation> invocations = new ArrayList<>();
+        List<MutableInvocation> invocations = new ArrayList<>();
+        Map<String, MutableInvocation> invocationByRef = new HashMap<>();
         LinkedHashSet<String> fallbackDatasetIds = new LinkedHashSet<>();
+        List<String> pendingToolRefs = new ArrayList<>();
+        Map<String, String> pendingParallelRefsByTask = new HashMap<>();
+        Map<String, Map<String, Object>> parallelExecuteArgsByTask = new HashMap<>();
         for (AgentRunEvent event : events) {
             if (event == null || event.getEventType() == null) {
                 continue;
             }
             Map<String, Object> payload = readJsonMap(event.getPayloadJson());
-            if ("TOOL_CALL_STARTED".equals(event.getEventType())) {
+            String eventType = event.getEventType();
+            collectDatasetIds(fallbackDatasetIds, readAsString(payload.get("result_preview")));
+            collectDatasetIds(fallbackDatasetIds, readAsString(payload.get("output_preview")));
+
+            if ("PLAN_CREATED".equals(eventType)) {
+                collectParallelExecutePythonArgs(payload, parallelExecuteArgsByTask);
+                continue;
+            }
+
+            if ("TOOL_CALL_STARTED".equals(eventType)) {
                 String toolName = readAsString(payload.get("tool_name"));
                 if (!"executePython".equals(toolName)) {
                     continue;
                 }
                 Map<String, Object> params = readNestedMap(payload.get("parameters"));
-                String code = firstNonBlank(
-                        readAsString(params.get("code")),
-                        readAsString(params.get("arg0"))
-                );
-                String datasetId = firstNonBlank(
-                        readAsString(params.get("dataset_id")),
-                        readAsString(params.get("datasetId")),
-                        readAsString(params.get("arg1"))
-                );
-                String datasetIds = firstNonBlank(
-                        readAsString(params.get("dataset_ids")),
-                        readAsString(params.get("datasetIds")),
-                        readAsString(params.get("arg2"))
-                );
-                List<String> mergedDatasetIds = mergeDatasetIds(datasetId, datasetIds);
-                invocations.add(new PythonInvocation(
-                        event.getSeq() == null ? 0 : event.getSeq(),
+                MutableInvocation invocation = createInvocation(
+                        "tool-" + safeSeq(event),
+                        safeSeq(event),
                         event.getCreatedAt(),
-                        code == null ? "" : code,
-                        mergedDatasetIds
-                ));
+                        "TOOL_CALL",
+                        extractCode(params),
+                        extractDatasetIds(params),
+                        null
+                );
+                invocations.add(invocation);
+                invocationByRef.put(invocation.ref, invocation);
+                pendingToolRefs.add(invocation.ref);
                 continue;
             }
-            if ("TOOL_CALL_FINISHED".equals(event.getEventType())) {
+
+            if ("TOOL_CALL_FINISHED".equals(eventType)) {
+                String toolName = readAsString(payload.get("tool_name"));
+                if (!"executePython".equals(toolName)) {
+                    continue;
+                }
                 String preview = readAsString(payload.get("result_preview"));
-                Matcher matcher = DATASET_RESULT_PATTERN.matcher(preview == null ? "" : preview);
-                while (matcher.find()) {
-                    String datasetId = matcher.group(1);
-                    if (datasetId != null && !datasetId.isBlank()) {
-                        fallbackDatasetIds.add(datasetId.trim());
+                if (!pendingToolRefs.isEmpty()) {
+                    String ref = pendingToolRefs.remove(0);
+                    MutableInvocation invocation = invocationByRef.get(ref);
+                    if (invocation != null) {
+                        invocation.success = toNullableBoolean(payload.get("success"));
+                        if (invocation.success == null) {
+                            invocation.success = inferPythonSuccess(preview);
+                        }
+                        invocation.datasetIds.addAll(extractDatasetIdsFromText(preview));
                     }
+                }
+                continue;
+            }
+
+            if ("PARALLEL_TASK_STARTED".equals(eventType)) {
+                String toolName = readAsString(payload.get("tool"));
+                if (!"executePython".equals(toolName)) {
+                    continue;
+                }
+                String taskId = readAsString(payload.get("task_id"));
+                Map<String, Object> taskArgs = parallelExecuteArgsByTask.getOrDefault(taskId, Map.of());
+                MutableInvocation invocation = createInvocation(
+                        "parallel-" + taskId + "-" + safeSeq(event),
+                        safeSeq(event),
+                        event.getCreatedAt(),
+                        "PARALLEL_TASK",
+                        extractCode(taskArgs),
+                        extractDatasetIds(taskArgs),
+                        null
+                );
+                invocations.add(invocation);
+                invocationByRef.put(invocation.ref, invocation);
+                pendingParallelRefsByTask.put(taskId, invocation.ref);
+                continue;
+            }
+
+            if ("PARALLEL_TASK_FINISHED".equals(eventType)) {
+                String taskId = readAsString(payload.get("task_id"));
+                String preview = readAsString(payload.get("output_preview"));
+                String ref = pendingParallelRefsByTask.remove(taskId);
+                if (ref != null) {
+                    MutableInvocation invocation = invocationByRef.get(ref);
+                    if (invocation != null) {
+                        invocation.success = toNullableBoolean(payload.get("success"));
+                        if (invocation.success == null) {
+                            invocation.success = inferPythonSuccess(preview);
+                        }
+                        invocation.datasetIds.addAll(extractDatasetIdsFromText(preview));
+                    }
+                }
+                continue;
+            }
+
+            if ("SUB_AGENT_PYTHON_REFINED".equals(eventType)) {
+                List<Map<String, Object>> traces = readMapList(payload.get("traces"));
+                String taskId = readAsString(payload.get("task_id"));
+                String stepIndex = readAsString(payload.get("step_index"));
+                for (Map<String, Object> trace : traces) {
+                    String code = firstNonBlank(
+                            readAsString(trace.get("code")),
+                            readAsString(trace.get("code_preview"))
+                    );
+                    Map<String, Object> runArgs = readNestedMap(
+                            trace.get("run_args"),
+                            trace.get("run_args_preview")
+                    );
+                    LinkedHashSet<String> datasetIds = new LinkedHashSet<>(extractDatasetIds(runArgs));
+                    String outputPreview = readAsString(trace.get("output_preview"));
+                    datasetIds.addAll(extractDatasetIdsFromText(outputPreview));
+
+                    int attempt = toInt(trace.get("attempt"), 0);
+                    MutableInvocation invocation = createInvocation(
+                            "subtrace-" + taskId + "-" + stepIndex + "-" + attempt + "-" + safeSeq(event),
+                            safeSeq(event),
+                            event.getCreatedAt(),
+                            "SUB_AGENT_TRACE",
+                            code,
+                            datasetIds,
+                            toNullableBoolean(trace.get("success"))
+                    );
+                    invocations.add(invocation);
                 }
             }
         }
-        return new ParsedEvents(invocations, new ArrayList<>(fallbackDatasetIds));
+
+        List<PythonInvocation> stableInvocations = new ArrayList<>();
+        for (MutableInvocation invocation : invocations) {
+            if (invocation.code == null || invocation.code.isBlank()) {
+                continue;
+            }
+            stableInvocations.add(new PythonInvocation(
+                    invocation.ref,
+                    invocation.seq,
+                    invocation.createdAt,
+                    invocation.code,
+                    new ArrayList<>(invocation.datasetIds),
+                    invocation.success,
+                    invocation.source
+            ));
+        }
+        return new ParsedEvents(stableInvocations, new ArrayList<>(fallbackDatasetIds));
     }
 
     private List<PythonInvocation> selectInvocations(List<PythonInvocation> invocations, boolean isAdmin) {
@@ -266,7 +371,227 @@ public class AgentArtifactService {
         if (isAdmin) {
             return invocations;
         }
-        return List.of(invocations.get(invocations.size() - 1));
+        List<PythonInvocation> success = new ArrayList<>();
+        for (PythonInvocation invocation : invocations) {
+            if (Boolean.TRUE.equals(invocation.success())) {
+                success.add(invocation);
+            }
+        }
+        return success;
+    }
+
+    private MutableInvocation createInvocation(String ref,
+                                               int seq,
+                                               OffsetDateTime createdAt,
+                                               String source,
+                                               String code,
+                                               LinkedHashSet<String> datasetIds,
+                                               Boolean success) {
+        MutableInvocation invocation = new MutableInvocation();
+        invocation.ref = ref;
+        invocation.seq = seq;
+        invocation.createdAt = createdAt;
+        invocation.source = source;
+        invocation.code = code == null ? "" : code;
+        invocation.datasetIds = datasetIds == null ? new LinkedHashSet<>() : datasetIds;
+        invocation.success = success;
+        return invocation;
+    }
+
+    private void collectParallelExecutePythonArgs(Map<String, Object> payload,
+                                                  Map<String, Map<String, Object>> parallelExecuteArgsByTask) {
+        if (payload == null || payload.isEmpty()) {
+            return;
+        }
+        Map<String, Object> plan = readNestedMap(payload.get("plan"));
+        if (plan.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> task : readMapList(plan.get("tasks"))) {
+            if (!"executePython".equals(readAsString(task.get("tool")))) {
+                continue;
+            }
+            String taskId = readAsString(task.get("id"));
+            if (taskId.isBlank()) {
+                continue;
+            }
+            parallelExecuteArgsByTask.put(taskId, readNestedMap(task.get("args")));
+        }
+    }
+
+    private Path snapshotPythonScript(String runId, String ref, String code, long createdAtMillis) {
+        if (runId == null || runId.isBlank() || code == null) {
+            return null;
+        }
+        try {
+            Path targetDir = resolveRunArtifactDir(runId).resolve("scripts");
+            Files.createDirectories(targetDir);
+            Path targetFile = targetDir.resolve(sanitizeFileName(ref) + ".py");
+            Files.writeString(targetFile, code, StandardCharsets.UTF_8);
+            if (createdAtMillis > 0) {
+                Files.setLastModifiedTime(targetFile, FileTime.fromMillis(createdAtMillis));
+            }
+            return targetFile;
+        } catch (Exception e) {
+            log.warn("Snapshot python script failed: runId={}, ref={}", runId, ref, e);
+            return null;
+        }
+    }
+
+    private Path snapshotDatasetFile(String runId, String datasetId, Path sourceFile) {
+        if (runId == null || runId.isBlank() || datasetId == null || datasetId.isBlank()) {
+            return null;
+        }
+        try {
+            Path targetDir = resolveRunArtifactDir(runId).resolve("datasets").resolve(datasetId);
+            Files.createDirectories(targetDir);
+            Path targetFile = targetDir.resolve(sourceFile.getFileName().toString());
+            if (!Files.exists(targetFile)) {
+                Files.copy(sourceFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
+            } else {
+                long srcMtime = Files.getLastModifiedTime(sourceFile).toMillis();
+                long dstMtime = Files.getLastModifiedTime(targetFile).toMillis();
+                if (srcMtime > dstMtime) {
+                    Files.copy(sourceFile, targetFile, StandardCopyOption.REPLACE_EXISTING);
+                }
+            }
+            return targetFile;
+        } catch (Exception e) {
+            log.warn("Snapshot dataset file failed: runId={}, datasetId={}, source={}", runId, datasetId, sourceFile, e);
+            return null;
+        }
+    }
+
+    private Path resolveRunArtifactDir(String runId) {
+        Path baseDir = Paths.get(artifactStoragePath).normalize();
+        Path runDir = baseDir.resolve(runId).normalize();
+        if (!runDir.startsWith(baseDir)) {
+            throw new IllegalArgumentException("invalid run id path");
+        }
+        return runDir;
+    }
+
+    private String sanitizeFileName(String value) {
+        if (value == null || value.isBlank()) {
+            return "artifact";
+        }
+        return value.replaceAll("[^A-Za-z0-9._-]", "_");
+    }
+
+    private void collectDatasetIds(LinkedHashSet<String> target, String text) {
+        if (target == null || text == null || text.isBlank()) {
+            return;
+        }
+        target.addAll(extractDatasetIdsFromText(text));
+    }
+
+    private LinkedHashSet<String> extractDatasetIds(Map<String, Object> args) {
+        if (args == null || args.isEmpty()) {
+            return new LinkedHashSet<>();
+        }
+        return mergeDatasetIds(
+                firstNonBlank(
+                        readAsString(args.get("dataset_id")),
+                        readAsString(args.get("datasetId")),
+                        readAsString(args.get("arg1"))
+                ),
+                firstNonBlank(
+                        readAsString(args.get("dataset_ids")),
+                        readAsString(args.get("datasetIds")),
+                        readAsString(args.get("arg2"))
+                )
+        );
+    }
+
+    private String extractCode(Map<String, Object> args) {
+        if (args == null || args.isEmpty()) {
+            return "";
+        }
+        return firstNonBlank(
+                readAsString(args.get("code")),
+                readAsString(args.get("arg0"))
+        );
+    }
+
+    private LinkedHashSet<String> extractDatasetIdsFromText(String text) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        if (text == null || text.isBlank()) {
+            return ids;
+        }
+        Matcher matcher = DATASET_RESULT_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String datasetId = matcher.group(1);
+            if (datasetId != null && !datasetId.isBlank()) {
+                String cleaned = datasetId.trim();
+                if (DATASET_ID_PATTERN.matcher(cleaned).matches()) {
+                    ids.add(cleaned);
+                }
+            }
+        }
+        return ids;
+    }
+
+    private Boolean toNullableBoolean(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean b) {
+            return b;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isBlank()) {
+            return null;
+        }
+        if ("true".equalsIgnoreCase(text) || "1".equals(text)) {
+            return true;
+        }
+        if ("false".equalsIgnoreCase(text) || "0".equals(text)) {
+            return false;
+        }
+        return null;
+    }
+
+    private boolean inferPythonSuccess(String output) {
+        if (output == null || output.isBlank()) {
+            return false;
+        }
+        if (output.startsWith("Tool invocation error")) {
+            return false;
+        }
+        if (output.startsWith("Tool Execution Error")) {
+            return false;
+        }
+        if (output.startsWith("Failed to create task")) {
+            return false;
+        }
+        if (output.startsWith("Task FAILED")) {
+            return false;
+        }
+        if (output.startsWith("Task CANCELED")) {
+            return false;
+        }
+        if (output.startsWith("Task PENDING (Timeout)")) {
+            return false;
+        }
+        if (output.startsWith("Exit Code:")) {
+            return false;
+        }
+        return !output.contains("STDERR:");
+    }
+
+    private int safeSeq(AgentRunEvent event) {
+        return event == null || event.getSeq() == null ? 0 : event.getSeq();
+    }
+
+    private int toInt(Object value, int defaultValue) {
+        if (value == null) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception e) {
+            return defaultValue;
+        }
     }
 
     private Map<String, Object> readNestedMap(Object obj) {
@@ -282,6 +607,19 @@ public class AgentArtifactService {
         }
         if (obj instanceof String text && !text.isBlank()) {
             return readJsonMap(text);
+        }
+        return Map.of();
+    }
+
+    private Map<String, Object> readNestedMap(Object... candidates) {
+        if (candidates == null || candidates.length == 0) {
+            return Map.of();
+        }
+        for (Object candidate : candidates) {
+            Map<String, Object> parsed = readNestedMap(candidate);
+            if (!parsed.isEmpty()) {
+                return parsed;
+            }
         }
         return Map.of();
     }
@@ -302,10 +640,13 @@ public class AgentArtifactService {
         }
     }
 
-    private List<String> mergeDatasetIds(String primary, String others) {
+    private LinkedHashSet<String> mergeDatasetIds(String primary, String others) {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
         if (primary != null && !primary.isBlank()) {
-            ids.add(primary.trim());
+            String cleaned = primary.trim();
+            if (DATASET_ID_PATTERN.matcher(cleaned).matches()) {
+                ids.add(cleaned);
+            }
         }
         if (others != null && !others.isBlank()) {
             String normalized = others.trim();
@@ -318,12 +659,29 @@ public class AgentArtifactService {
                 if (id.startsWith("\"") && id.endsWith("\"") && id.length() >= 2) {
                     id = id.substring(1, id.length() - 1).trim();
                 }
-                if (!id.isBlank()) {
+                if (!id.isBlank() && DATASET_ID_PATTERN.matcher(id).matches()) {
                     ids.add(id);
                 }
             }
         }
-        return new ArrayList<>(ids);
+        return ids;
+    }
+
+    private List<Map<String, Object>> readMapList(Object obj) {
+        if (obj == null) {
+            return List.of();
+        }
+        if (obj instanceof List<?> rawList) {
+            List<Map<String, Object>> result = new ArrayList<>();
+            for (Object item : rawList) {
+                Map<String, Object> map = readNestedMap(item);
+                if (!map.isEmpty()) {
+                    result.add(map);
+                }
+            }
+            return result;
+        }
+        return List.of();
     }
 
     private String readAsString(Object value) {
@@ -412,7 +770,13 @@ public class AgentArtifactService {
     private record ParsedEvents(List<PythonInvocation> invocations, List<String> fallbackDatasetIds) {
     }
 
-    private record PythonInvocation(int seq, OffsetDateTime createdAt, String code, List<String> datasetIds) {
+    private record PythonInvocation(String ref,
+                                    int seq,
+                                    OffsetDateTime createdAt,
+                                    String code,
+                                    List<String> datasetIds,
+                                    Boolean success,
+                                    String source) {
     }
 
     private record ArtifactRef(String type, String runId, String ref) {
@@ -428,8 +792,17 @@ public class AgentArtifactService {
         private String metaJson;
         private OffsetDateTime createdAt;
         private long expiresAtMillis;
-        private String inlineContent;
         private Path filePath;
+    }
+
+    private static class MutableInvocation {
+        private String ref;
+        private int seq;
+        private OffsetDateTime createdAt;
+        private String source;
+        private String code;
+        private LinkedHashSet<String> datasetIds = new LinkedHashSet<>();
+        private Boolean success;
     }
 
     public record ArtifactContent(String artifactId, String filename, String contentType, byte[] content) {

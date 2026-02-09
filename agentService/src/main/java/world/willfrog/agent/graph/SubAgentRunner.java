@@ -465,7 +465,9 @@ public class SubAgentRunner {
             Map<String, Object> item = new HashMap<>();
             item.put("attempt", trace.getAttempt());
             item.put("success", trace.isSuccess());
+            item.put("code", trace.getCode());
             item.put("code_preview", preview(trace.getCode()));
+            item.put("run_args", trace.getRunArgs());
             item.put("run_args_preview", trace.getRunArgs());
             item.put("output_preview", preview(trace.getOutput()));
             if (includeLlmSnapshot && trace.getLlmSnapshot() != null && !trace.getLlmSnapshot().isEmpty()) {
