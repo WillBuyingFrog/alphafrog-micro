@@ -145,13 +145,14 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         builder.setHasMore(hasMore);
         for (AgentRun run : runs) {
             String userGoal = eventService.extractUserGoal(run.getExt());
+            boolean hasArtifacts = hasVisibleArtifacts(run);
             builder.addItems(AgentRunListItemMessage.newBuilder()
                     .setId(nvl(run.getId()))
                     .setMessage(nvl(userGoal))
                     .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
                     .setCreatedAt(run.getStartedAt() == null ? "" : run.getStartedAt().toString())
                     .setCompletedAt(run.getCompletedAt() == null ? "" : run.getCompletedAt().toString())
-                    .setHasArtifacts(false)
+                    .setHasArtifacts(hasArtifacts)
                     .build());
         }
         return builder.build();
@@ -368,7 +369,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     }
 
     /**
-     * 列出 run 的产物列表（当前为 MVP 空实现）。
+     * 列出 run 的产物列表。
      *
      * @param request 查询请求
      * @return 产物列表
@@ -480,6 +481,15 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             throw new IllegalArgumentException("run not found");
         }
         return run;
+    }
+
+    private boolean hasVisibleArtifacts(AgentRun run) {
+        try {
+            return !artifactService.listArtifacts(run, false).isEmpty();
+        } catch (Exception e) {
+            log.warn("Resolve hasArtifacts failed for runId={}", run.getId(), e);
+            return false;
+        }
     }
 
     private boolean isTerminal(AgentRunStatus status) {
