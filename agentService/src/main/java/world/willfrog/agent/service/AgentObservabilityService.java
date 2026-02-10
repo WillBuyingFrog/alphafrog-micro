@@ -2,16 +2,21 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.model.AgentRunStatus;
 
+import java.util.ArrayList;
+import java.util.Collection;
 import java.time.OffsetDateTime;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
@@ -33,12 +38,26 @@ public class AgentObservabilityService {
     private final AgentObservabilityDebugFileWriter debugFileWriter;
     private final ConcurrentHashMap<String, Object> locks = new ConcurrentHashMap<>();
 
+    @Value("${agent.observability.llm-trace.enabled:false}")
+    private boolean llmTraceEnabled;
+
+    @Value("${agent.observability.llm-trace.max-calls:100}")
+    private int llmTraceMaxCalls;
+
+    @Value("${agent.observability.llm-trace.max-text-chars:20000}")
+    private int llmTraceMaxTextChars;
+
     public void initializeRun(String runId, String endpointName, String modelName) {
+        initializeRun(runId, endpointName, modelName, false);
+    }
+
+    public void initializeRun(String runId, String endpointName, String modelName, boolean captureLlmRequests) {
         mutate(runId, state -> {
             if (state.getSummary().getStartedAtMillis() <= 0) {
                 state.getSummary().setStartedAtMillis(System.currentTimeMillis());
             }
             state.getSummary().setStatus(AgentRunStatus.EXECUTING.name());
+            state.getDiagnostics().setCaptureLlmRequests(captureLlmRequests);
             if (endpointName != null && !endpointName.isBlank()) {
                 state.getDiagnostics().setLastEndpoint(endpointName);
             }
@@ -65,6 +84,32 @@ public class AgentObservabilityService {
                               String endpointName,
                               String modelName,
                               String errorMessage) {
+        recordLlmCall(
+                runId,
+                phase,
+                tokenUsage,
+                durationMs,
+                endpointName,
+                modelName,
+                errorMessage,
+                null,
+                null,
+                null
+        );
+    }
+
+    public void recordLlmCall(String runId,
+                              String phase,
+                              TokenUsage tokenUsage,
+                              long durationMs,
+                              String endpointName,
+                              String modelName,
+                              String errorMessage,
+                              List<ChatMessage> requestMessages,
+                              Map<String, Object> requestMeta,
+                              String responseText) {
+        Map<String, Object> requestSnapshot = buildLlmRequestSnapshot(requestMessages, requestMeta);
+        String responsePreview = trim(responseText, llmTraceTextLimit());
         if (log.isDebugEnabled()) {
             log.debug("OBS_LLM runId={} phase={} durationMs={} endpoint={} model={} hasError={}",
                     runId, normalizePhase(phase), clampDuration(durationMs), nvl(endpointName), nvl(modelName),
@@ -82,6 +127,8 @@ public class AgentObservabilityService {
                     "output", tokenUsage.outputTokenCount(),
                     "total", tokenUsage.totalTokenCount()
             ));
+            payload.put("request", requestSnapshot);
+            payload.put("responsePreview", responsePreview);
             debugFileWriter.write("OBS_LLM", payload);
         }
         mutate(runId, state -> {
@@ -102,6 +149,7 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
+            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, endpointName, modelName, errorMessage, requestSnapshot, responsePreview);
         });
     }
 
@@ -399,6 +447,115 @@ public class AgentObservabilityService {
         return value == null ? "" : value;
     }
 
+    private int llmTraceTextLimit() {
+        return llmTraceMaxTextChars <= 0 ? 20000 : llmTraceMaxTextChars;
+    }
+
+    private int llmTraceCallLimit() {
+        return llmTraceMaxCalls <= 0 ? 100 : llmTraceMaxCalls;
+    }
+
+    private void appendLlmTrace(Diagnostics diagnostics,
+                                String runId,
+                                String phase,
+                                long durationMs,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage,
+                                Map<String, Object> requestSnapshot,
+                                String responsePreview) {
+        if (!shouldCaptureLlmTrace(diagnostics)) {
+            return;
+        }
+        if (diagnostics.getLlmTraces() == null) {
+            diagnostics.setLlmTraces(new ArrayList<>());
+        }
+        List<LlmTrace> traces = diagnostics.getLlmTraces();
+        LlmTrace trace = new LlmTrace();
+        trace.setTime(OffsetDateTime.now().toString());
+        trace.setRunId(nvl(runId));
+        trace.setPhase(normalizePhase(phase));
+        trace.setDurationMs(clampDuration(durationMs));
+        trace.setEndpoint(nvl(endpointName));
+        trace.setModel(nvl(modelName));
+        trace.setHasError(errorMessage != null && !errorMessage.isBlank());
+        trace.setError(trim(errorMessage, 1000));
+        trace.setRequest(requestSnapshot);
+        trace.setResponsePreview(responsePreview);
+        traces.add(trace);
+        int limit = llmTraceCallLimit();
+        while (traces.size() > limit) {
+            traces.remove(0);
+        }
+    }
+
+    private boolean shouldCaptureLlmTrace(Diagnostics diagnostics) {
+        if (diagnostics == null) {
+            return false;
+        }
+        return llmTraceEnabled || Boolean.TRUE.equals(diagnostics.getCaptureLlmRequests());
+    }
+
+    private Map<String, Object> buildLlmRequestSnapshot(List<ChatMessage> requestMessages, Map<String, Object> requestMeta) {
+        Map<String, Object> snapshot = new LinkedHashMap<>();
+        if (requestMeta != null && !requestMeta.isEmpty()) {
+            snapshot.put("meta", sanitizeForTrace(requestMeta, 0));
+        }
+        if (requestMessages != null && !requestMessages.isEmpty()) {
+            List<Map<String, Object>> messages = new ArrayList<>();
+            for (ChatMessage message : requestMessages) {
+                messages.add(serializeChatMessage(message));
+            }
+            snapshot.put("messages", messages);
+        }
+        return snapshot.isEmpty() ? null : snapshot;
+    }
+
+    private Map<String, Object> serializeChatMessage(ChatMessage message) {
+        Map<String, Object> output = new LinkedHashMap<>();
+        if (message == null) {
+            return output;
+        }
+        output.put("class", message.getClass().getName());
+        try {
+            Object raw = objectMapper.convertValue(message, Object.class);
+            output.put("body", sanitizeForTrace(raw, 0));
+        } catch (Exception e) {
+            output.put("body", trim(String.valueOf(message), llmTraceTextLimit()));
+        }
+        return output;
+    }
+
+    private Object sanitizeForTrace(Object value, int depth) {
+        if (value == null) {
+            return null;
+        }
+        if (depth >= 6) {
+            return trim(String.valueOf(value), llmTraceTextLimit());
+        }
+        if (value instanceof String str) {
+            return trim(str, llmTraceTextLimit());
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            return value;
+        }
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sanitized = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                sanitized.put(String.valueOf(entry.getKey()), sanitizeForTrace(entry.getValue(), depth + 1));
+            }
+            return sanitized;
+        }
+        if (value instanceof Collection<?> collection) {
+            List<Object> sanitized = new ArrayList<>();
+            for (Object item : collection) {
+                sanitized.add(sanitizeForTrace(item, depth + 1));
+            }
+            return sanitized;
+        }
+        return trim(String.valueOf(value), llmTraceTextLimit());
+    }
+
     @Data
     public static class ObservabilityState {
         private Summary summary;
@@ -445,6 +602,22 @@ public class AgentObservabilityService {
         private String lastErrorType;
         private String lastErrorMessage;
         private String updatedAt;
+        private Boolean captureLlmRequests;
+        private List<LlmTrace> llmTraces;
+    }
+
+    @Data
+    public static class LlmTrace {
+        private String time;
+        private String runId;
+        private String phase;
+        private long durationMs;
+        private String endpoint;
+        private String model;
+        private boolean hasError;
+        private String error;
+        private Map<String, Object> request;
+        private String responsePreview;
     }
 
     public record ListMetrics(long durationMs, int totalTokens, int toolCalls) {

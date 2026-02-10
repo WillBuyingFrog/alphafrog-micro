@@ -7,6 +7,7 @@ public record AgentRunCreateRequest(
         Map<String, Object> context,
         String idempotencyKey,
         String modelName,
-        String endpointName
+        String endpointName,
+        Boolean captureLlmRequests
 ) {
 }

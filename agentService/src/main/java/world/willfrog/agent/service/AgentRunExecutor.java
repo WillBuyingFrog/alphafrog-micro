@@ -112,7 +112,8 @@ public class AgentRunExecutor {
             // endpoint/model 允许请求级覆盖，未指定时由 resolver 走默认配置。
             String endpointName = eventService.extractEndpointName(run.getExt());
             String modelName = eventService.extractModelName(run.getExt());
-            observabilityService.initializeRun(runId, endpointName, modelName);
+            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(endpointName, modelName);
 
             String userGoal = eventService.extractUserGoal(run.getExt());
@@ -153,6 +154,13 @@ public class AgentRunExecutor {
                 observabilityService.addNodeCount(runId, 1);
 
                 // Call LLM
+                List<ChatMessage> requestMessages = new ArrayList<>(messages);
+                List<String> toolSpecNames = new ArrayList<>();
+                for (ToolSpecification specification : toolSpecifications) {
+                    if (specification != null && specification.name() != null) {
+                        toolSpecNames.add(specification.name());
+                    }
+                }
                 long llmStartedAt = System.currentTimeMillis();
                 Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
                 long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
@@ -172,7 +180,10 @@ public class AgentRunExecutor {
                         llmDurationMs,
                         endpointName,
                         modelName,
-                        null
+                        null,
+                        requestMessages,
+                        Map.of("toolSpecifications", toolSpecNames),
+                        aiMessage == null ? null : aiMessage.text()
                 );
 
                 if (aiMessage.hasToolExecutionRequests()) {

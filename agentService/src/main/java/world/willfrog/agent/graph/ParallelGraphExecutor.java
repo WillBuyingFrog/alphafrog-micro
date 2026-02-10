@@ -282,11 +282,12 @@ public class ParallelGraphExecutor {
             usedStoredPlan = true;
         } else {
             String prompt = buildPlannerPrompt(toolWhitelist, maxTasks, subAgentMaxSteps);
-            long llmStartedAt = System.currentTimeMillis();
-            Response<AiMessage> response = model.generate(List.of(
+            List<dev.langchain4j.data.message.ChatMessage> plannerMessages = List.of(
                     new SystemMessage(prompt),
                     new UserMessage(userGoal)
-            ));
+            );
+            long llmStartedAt = System.currentTimeMillis();
+            Response<AiMessage> response = model.generate(plannerMessages);
             long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
             planText = response.content().text();
             planJson = extractJson(planText);
@@ -297,7 +298,10 @@ public class ParallelGraphExecutor {
                     llmDurationMs,
                     null,
                     null,
-                    null
+                    null,
+                    plannerMessages,
+                    Map.of("stage", "parallel_plan"),
+                    planText
             );
         }
 
@@ -407,12 +411,14 @@ public class ParallelGraphExecutor {
         Map<String, ParallelTaskResult> results = state.taskResults().orElse(Map.of());
         String resultJson = safeWrite(results);
         String prompt = promptService.parallelFinalSystemPrompt();
-        long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response = model.generate(List.of(
+        List<dev.langchain4j.data.message.ChatMessage> finalMessages = List.of(
                 new SystemMessage(prompt),
                 new UserMessage("目标: " + userGoal + "\n结果: " + resultJson)
-        ));
+        );
+        long llmStartedAt = System.currentTimeMillis();
+        Response<AiMessage> response = model.generate(finalMessages);
         long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        String answer = response.content().text();
         observabilityService.recordLlmCall(
                 run.getId(),
                 AgentObservabilityService.PHASE_SUMMARIZING,
@@ -420,9 +426,11 @@ public class ParallelGraphExecutor {
                 llmDurationMs,
                 null,
                 null,
-                null
+                null,
+                finalMessages,
+                Map.of("stage", "parallel_final"),
+                answer
         );
-        String answer = response.content().text();
         return Map.of("final_answer", answer);
     }
 

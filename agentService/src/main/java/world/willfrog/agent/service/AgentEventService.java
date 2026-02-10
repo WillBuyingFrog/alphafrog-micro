@@ -76,7 +76,8 @@ public class AgentEventService {
                               String contextJson,
                               String idempotencyKey,
                               String modelName,
-                              String endpointName) {
+                              String endpointName,
+                              boolean captureLlmRequests) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -85,6 +86,7 @@ public class AgentEventService {
         ext.put("idempotency_key", idempotencyKey == null ? "" : idempotencyKey);
         ext.put("model_name", modelName == null ? "" : modelName);
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
+        ext.put("capture_llm_requests", captureLlmRequests);
         ext.put("checkpoint_version", resolveCheckpointVersion());
 
         AgentRun run = new AgentRun();
@@ -205,6 +207,37 @@ public class AgentEventService {
      */
     public String extractEndpointName(String extJson) {
         return extractField(extJson, "endpoint_name");
+    }
+
+    public boolean extractCaptureLlmRequests(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return false;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object value = map.get("capture_llm_requests");
+            if (value instanceof Boolean boolVal) {
+                return boolVal;
+            }
+            if (value != null) {
+                return Boolean.parseBoolean(String.valueOf(value));
+            }
+            Object contextRaw = map.get("context_json");
+            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
+                return false;
+            }
+            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
+            Object contextValue = contextMap.get("captureLlmRequests");
+            if (contextValue == null) {
+                contextValue = contextMap.get("capture_llm_requests");
+            }
+            if (contextValue instanceof Boolean boolCtx) {
+                return boolCtx;
+            }
+            return contextValue != null && Boolean.parseBoolean(String.valueOf(contextValue));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     /**

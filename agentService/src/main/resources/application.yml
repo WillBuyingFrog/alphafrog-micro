@@ -43,6 +43,10 @@ agent:
     debug-file:
       enabled: ${AF_AGENT_OBS_DEBUG_FILE_ENABLED:false}
       path: ${AF_AGENT_OBS_DEBUG_FILE_PATH:/data/logs/agent-observability-debug.log}
+    llm-trace:
+      enabled: ${AF_AGENT_OBS_LLM_TRACE_ENABLED:false}
+      max-calls: ${AF_AGENT_OBS_LLM_TRACE_MAX_CALLS:100}
+      max-text-chars: ${AF_AGENT_OBS_LLM_TRACE_MAX_TEXT_CHARS:20000}
   artifact:
     retention-days:
       normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}

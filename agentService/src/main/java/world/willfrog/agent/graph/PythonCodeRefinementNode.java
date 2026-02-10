@@ -187,13 +187,15 @@ public class PythonCodeRefinementNode {
         userPrompt.append(promptService.pythonRefineOutputInstruction());
 
         try {
-            long llmStartedAt = System.currentTimeMillis();
-            Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(List.of(
+            List<dev.langchain4j.data.message.ChatMessage> llmMessages = List.of(
                     new SystemMessage(systemPrompt),
                     new UserMessage(userPrompt.toString())
-            ));
+            );
+            long llmStartedAt = System.currentTimeMillis();
+            Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(llmMessages);
             long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
             String runId = AgentContext.getRunId();
+            String llmText = resp.content().text();
             if (runId != null && !runId.isBlank()) {
                 observabilityService.recordLlmCall(
                         runId,
@@ -202,10 +204,13 @@ public class PythonCodeRefinementNode {
                         llmDurationMs,
                         null,
                         null,
-                        null
+                        null,
+                        llmMessages,
+                        Map.of("stage", "python_refine_plan"),
+                        llmText
                 );
             }
-            return extractPlan(resp.content().text(), currentRunArgs, systemPrompt, userPrompt.toString(), null);
+            return extractPlan(llmText, currentRunArgs, systemPrompt, userPrompt.toString(), null);
         } catch (Exception e) {
             log.warn("Generate python code failed", e);
             return GeneratedPlan.builder()

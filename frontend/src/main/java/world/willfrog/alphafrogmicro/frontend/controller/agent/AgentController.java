@@ -48,7 +48,9 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 
 @RestController
 @RequestMapping("/api/agent/runs")
@@ -75,7 +77,14 @@ public class AgentController {
             return ResponseWrapper.paramError("message 不能为空");
         }
         try {
-            String contextJson = request.context() == null ? "" : objectMapper.writeValueAsString(request.context());
+            Map<String, Object> contextMap = request.context() == null
+                    ? new HashMap<>()
+                    : new HashMap<>(request.context());
+            boolean captureLlmRequests = Boolean.TRUE.equals(request.captureLlmRequests());
+            if (captureLlmRequests) {
+                contextMap.put("captureLlmRequests", true);
+            }
+            String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
             AgentRunMessage run = agentDubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
@@ -84,6 +93,7 @@ public class AgentController {
                             .setIdempotencyKey(nvl(request.idempotencyKey()))
                             .setModelName(nvl(request.modelName()))
                             .setEndpointName(nvl(request.endpointName()))
+                            .setCaptureLlmRequests(captureLlmRequests)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));

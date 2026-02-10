@@ -31,6 +31,7 @@ message CreateAgentRunRequest {
   string idempotency_key = 4;
   string model_name = 5;
   string endpoint_name = 6;
+  bool capture_llm_requests = 7;
 }
 
 message GetAgentRunRequest {

@@ -126,14 +126,16 @@ public class SubAgentRunner {
             String lastPlanError = "sub_agent plan generation failed";
             String retryHint = "";
             for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
-                long llmStartedAt = System.currentTimeMillis();
-                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
+                List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
                         new UserMessage("目标: " + request.getGoal()
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
-                ));
+                );
+                long llmStartedAt = System.currentTimeMillis();
+                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
                 long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+                String planText = planResp.content().text();
                 observabilityService.recordLlmCall(
                         request.getRunId(),
                         AgentObservabilityService.PHASE_SUB_AGENT,
@@ -141,9 +143,11 @@ public class SubAgentRunner {
                         llmDurationMs,
                         null,
                         null,
-                        null
+                        null,
+                        planMessages,
+                        Map.of("stage", "sub_agent_plan", "attempt", attempt),
+                        planText
                 );
-                String planText = planResp.content().text();
                 String json = extractJson(planText);
                 JsonNode root = objectMapper.readTree(json);
                 JsonNode candidate = root.path("steps");
@@ -286,12 +290,15 @@ public class SubAgentRunner {
 
             // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
             String summaryPrompt = promptService.subAgentSummarySystemPrompt();
-            long llmStartedAt = System.currentTimeMillis();
-            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
+            String executedStepsJson = objectMapper.writeValueAsString(executedSteps);
+            List<dev.langchain4j.data.message.ChatMessage> summaryMessages = List.of(
                     new SystemMessage(summaryPrompt),
-                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + objectMapper.writeValueAsString(executedSteps))
-            ));
+                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
+            );
+            long llmStartedAt = System.currentTimeMillis();
+            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
             long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            String finalText = finalResp.content().text();
             observabilityService.recordLlmCall(
                     request.getRunId(),
                     AgentObservabilityService.PHASE_SUB_AGENT,
@@ -299,7 +306,10 @@ public class SubAgentRunner {
                     llmDurationMs,
                     null,
                     null,
-                    null
+                    null,
+                    summaryMessages,
+                    Map.of("stage", "sub_agent_summary"),
+                    finalText
             );
 
             emitEvent(request, "SUB_AGENT_COMPLETED", Map.of(
@@ -309,7 +319,7 @@ public class SubAgentRunner {
 
             return SubAgentResult.builder()
                     .success(true)
-                    .answer(finalResp.content().text())
+                    .answer(finalText)
                     .steps(executedSteps)
                     .build();
         } catch (Exception e) {
