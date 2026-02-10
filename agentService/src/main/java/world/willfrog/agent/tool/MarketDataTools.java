@@ -37,7 +37,7 @@ public class MarketDataTools {
      * @param tsCode 股票代码
      * @return 信息字符串（失败时返回错误描述）
      */
-    @Tool("Get basic information about a stock by its TS code (e.g., 000001.SZ)")
+    @Tool("查询单只股票基础信息。参数要求：tsCode 必须是 TuShare 代码格式“6位数字.交易所后缀”，例如 000001.SZ、600519.SH；后缀通常为 SH/SZ/BJ（按数据源可用值）。不要只传裸代码（如 000001）。")
     public String getStockInfo(String tsCode) {
         try {
             DomesticStockInfoByTsCodeRequest request = DomesticStockInfoByTsCodeRequest.newBuilder()
@@ -62,7 +62,7 @@ public class MarketDataTools {
      * @param endDateStr   结束日期（YYYYMMDD）
      * @return 日线信息字符串（失败时返回错误描述）
      */
-    @Tool("Get daily stock market data for a specific stock within a date range")
+    @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
     public String getStockDaily(String tsCode, String startDateStr, String endDateStr) {
         try {
             long startDate = convertToMsTimestamp(startDateStr);
@@ -135,7 +135,7 @@ public class MarketDataTools {
      * @param keyword 搜索关键词
      * @return 搜索结果字符串（失败时返回错误描述）
      */
-    @Tool("Search for a stock by keyword")
+    @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。")
     public String searchStock(String keyword) {
         try {
             DomesticStockSearchRequest request = DomesticStockSearchRequest.newBuilder()
@@ -161,7 +161,7 @@ public class MarketDataTools {
      * @param keyword 搜索关键词
      * @return 搜索结果字符串（失败时返回错误描述）
      */
-    @Tool("Search for a fund by keyword")
+    @Tool("按关键词搜索基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或基金名称关键词（例如 510300、沪深300ETF）。")
     public String searchFund(String keyword) {
         try {
             DomesticFundSearchRequest request = DomesticFundSearchRequest.newBuilder()
@@ -187,7 +187,7 @@ public class MarketDataTools {
      * @param tsCode 指数代码
      * @return 信息字符串（失败时返回错误描述）
      */
-    @Tool("Get basic information about an index by its TS code (e.g., 000300.SH)")
+    @Tool("查询单只指数基础信息。参数要求：tsCode 必须是 TuShare 指数代码格式“6位数字.交易所后缀”，例如 000300.SH、000905.SH；不要只传裸代码。")
     public String getIndexInfo(String tsCode) {
         try {
             DomesticIndexInfoByTsCodeRequest request = DomesticIndexInfoByTsCodeRequest.newBuilder()
@@ -212,7 +212,7 @@ public class MarketDataTools {
      * @param endDateStr   结束日期（YYYYMMDD）
      * @return 日线信息字符串（失败时返回错误描述）
      */
-    @Tool("Get daily index market data for a specific index within a date range")
+    @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
     public String getIndexDaily(String tsCode, String startDateStr, String endDateStr) {
         try {
             long startDate = convertToMsTimestamp(startDateStr);
@@ -284,7 +284,7 @@ public class MarketDataTools {
      * @param keyword 搜索关键词
      * @return 搜索结果字符串（失败时返回错误描述）
      */
-    @Tool("Search for an index by keyword")
+    @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。")
     public String searchIndex(String keyword) {
         try {
             DomesticIndexSearchRequest request = DomesticIndexSearchRequest.newBuilder()
