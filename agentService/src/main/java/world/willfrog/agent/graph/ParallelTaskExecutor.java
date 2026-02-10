@@ -63,7 +63,10 @@ public class ParallelTaskExecutor {
                                                    int subAgentMaxSteps,
                                                    String context,
                                                    dev.langchain4j.model.chat.ChatLanguageModel model,
-                                                   Map<String, ParallelTaskResult> existingResults) {
+                                                   Map<String, ParallelTaskResult> existingResults,
+                                                   String endpointName,
+                                                   String endpointBaseUrl,
+                                                   String modelName) {
         if (plan == null || plan.getTasks() == null) {
             return Map.of();
         }
@@ -110,7 +113,18 @@ public class ParallelTaskExecutor {
 
                         stateStore.markTaskStarted(runId, task);
                         String taskContext = buildContext(task, context, results);
-                        ParallelTaskResult result = executeTask(task, runId, userId, toolWhitelist, subAgentMaxSteps, taskContext, model);
+                        ParallelTaskResult result = executeTask(
+                                task,
+                                runId,
+                                userId,
+                                toolWhitelist,
+                                subAgentMaxSteps,
+                                taskContext,
+                                model,
+                                endpointName,
+                                endpointBaseUrl,
+                                modelName
+                        );
                         results.put(task.getId(), result);
                         stateStore.saveTaskResult(runId, task.getId(), result);
                         Map<String, Object> finishPayload = new java.util.HashMap<>();
@@ -163,7 +177,10 @@ public class ParallelTaskExecutor {
                                            Set<String> toolWhitelist,
                                            int subAgentMaxSteps,
                                            String context,
-                                           dev.langchain4j.model.chat.ChatLanguageModel model) {
+                                           dev.langchain4j.model.chat.ChatLanguageModel model,
+                                           String endpointName,
+                                           String endpointBaseUrl,
+                                           String modelName) {
         String type = task.getType() == null ? "" : task.getType().trim().toLowerCase();
         if (type.equals("tool")) {
             ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(task.getTool(), safeArgs(task.getArgs()));
@@ -185,6 +202,9 @@ public class ParallelTaskExecutor {
                     .context(context)
                     .toolWhitelist(toolWhitelist)
                     .maxSteps(task.getMaxSteps() != null ? Math.min(task.getMaxSteps(), subAgentMaxSteps) : subAgentMaxSteps)
+                    .endpointName(endpointName)
+                    .endpointBaseUrl(endpointBaseUrl)
+                    .modelName(modelName)
                     .build();
             SubAgentRunner.SubAgentResult subResult = subAgentRunner.run(req, model);
             return ParallelTaskResult.builder()

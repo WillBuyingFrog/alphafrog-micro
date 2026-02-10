@@ -60,6 +60,8 @@ agent:
   llm:
     # 本地 JSON 配置文件（可选，不存在则回退到当前 yml/env 配置）
     config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
+    # 本地 JSON 热更新轮询间隔（毫秒）
+    config-refresh-interval-ms: ${AF_AGENT_LLM_CONFIG_REFRESH_INTERVAL_MS:10000}
     # 默认模型与端点（用于未指定 model/endpoint 的请求）
     default-endpoint: ${AF_AGENT_DEFAULT_ENDPOINT:openrouter}
     default-model: ${AF_AGENT_DEFAULT_MODEL:openai/gpt-5.2}

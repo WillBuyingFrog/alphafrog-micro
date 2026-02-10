@@ -18,6 +18,7 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
@@ -59,6 +60,8 @@ public class ParallelGraphExecutor {
     private final AgentPromptService promptService;
     /** 可观测指标聚合服务。 */
     private final AgentObservabilityService observabilityService;
+    /** LLM 原始请求快照构建器。 */
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     /** JSON 序列化/反序列化。 */
     private final ObjectMapper objectMapper;
 
@@ -109,7 +112,10 @@ public class ParallelGraphExecutor {
                            String userId,
                            String userGoal,
                            ChatLanguageModel model,
-                           List<ToolSpecification> toolSpecifications) {
+                           List<ToolSpecification> toolSpecifications,
+                           String endpointName,
+                           String endpointBaseUrl,
+                           String modelName) {
         if (!enabled) {
             return false;
         }
@@ -119,7 +125,7 @@ public class ParallelGraphExecutor {
                     .map(ToolSpecification::name)
                     .collect(Collectors.toSet());
 
-            var graph = buildGraph(run, userId, userGoal, model, toolWhitelist);
+            var graph = buildGraph(run, userId, userGoal, model, toolWhitelist, endpointName, endpointBaseUrl, modelName);
             Map<String, Object> initial = Map.of(
                     "user_goal", userGoal
             );
@@ -232,12 +238,43 @@ public class ParallelGraphExecutor {
                                                          String userId,
                                                          String userGoal,
                                                          ChatLanguageModel model,
-                                                         Set<String> toolWhitelist) {
+                                                         Set<String> toolWhitelist,
+                                                         String endpointName,
+                                                         String endpointBaseUrl,
+                                                         String modelName) {
         try {
             var stateGraph = new StateGraph<>(ParallelGraphState.SCHEMA, ParallelGraphState::new)
-                    .addNode("plan", node_async(state -> planNode(run, userId, userGoal, model, toolWhitelist)))
-                    .addNode("execute", node_async(state -> executeNode(run, userId, userGoal, model, toolWhitelist, state)))
-                    .addNode("final", node_async(state -> finalNode(run, userId, userGoal, model, state)))
+                    .addNode("plan", node_async(state -> planNode(
+                            run,
+                            userId,
+                            userGoal,
+                            model,
+                            toolWhitelist,
+                            endpointName,
+                            endpointBaseUrl,
+                            modelName
+                    )))
+                    .addNode("execute", node_async(state -> executeNode(
+                            run,
+                            userId,
+                            userGoal,
+                            model,
+                            toolWhitelist,
+                            endpointName,
+                            endpointBaseUrl,
+                            modelName,
+                            state
+                    )))
+                    .addNode("final", node_async(state -> finalNode(
+                            run,
+                            userId,
+                            userGoal,
+                            model,
+                            endpointName,
+                            endpointBaseUrl,
+                            modelName,
+                            state
+                    )))
                     .addEdge(StateGraph.START, "plan")
                     .addEdge("plan", "execute")
                     .addEdge("execute", "final")
@@ -263,7 +300,10 @@ public class ParallelGraphExecutor {
                                          String userId,
                                          String userGoal,
                                          ChatLanguageModel model,
-                                         Set<String> toolWhitelist) {
+                                         Set<String> toolWhitelist,
+                                         String endpointName,
+                                         String endpointBaseUrl,
+                                         String modelName) {
         eventService.append(run.getId(), userId, "PLAN_STARTED", Map.of("run_id", run.getId()));
 
         String planText;
@@ -291,16 +331,23 @@ public class ParallelGraphExecutor {
             long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
             planText = response.content().text();
             planJson = extractJson(planText);
+            Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                    endpointName,
+                    endpointBaseUrl,
+                    modelName,
+                    plannerMessages,
+                    null,
+                    Map.of("stage", "parallel_plan")
+            );
             observabilityService.recordLlmCall(
                     run.getId(),
                     AgentObservabilityService.PHASE_PLANNING,
                     response.tokenUsage(),
                     llmDurationMs,
+                    endpointName,
+                    modelName,
                     null,
-                    null,
-                    null,
-                    plannerMessages,
-                    Map.of("stage", "parallel_plan"),
+                    llmRequestSnapshot,
                     planText
             );
         }
@@ -365,6 +412,9 @@ public class ParallelGraphExecutor {
                                             String userGoal,
                                             ChatLanguageModel model,
                                             Set<String> toolWhitelist,
+                                            String endpointName,
+                                            String endpointBaseUrl,
+                                            String modelName,
                                             ParallelGraphState state) {
         boolean planValid = state.planValid().orElse(false);
         if (!planValid) {
@@ -373,7 +423,19 @@ public class ParallelGraphExecutor {
         ParallelPlan plan = parsePlan(state.planJson().orElse("{}"));
         Map<String, ParallelTaskResult> existing = stateStore.loadTaskResults(run.getId());
         long startedAt = System.currentTimeMillis();
-        Map<String, ParallelTaskResult> results = taskExecutor.execute(plan, run.getId(), userId, toolWhitelist, subAgentMaxSteps, userGoal, model, existing);
+        Map<String, ParallelTaskResult> results = taskExecutor.execute(
+                plan,
+                run.getId(),
+                userId,
+                toolWhitelist,
+                subAgentMaxSteps,
+                userGoal,
+                model,
+                existing,
+                endpointName,
+                endpointBaseUrl,
+                modelName
+        );
         observabilityService.recordPhaseDuration(
                 run.getId(),
                 AgentObservabilityService.PHASE_PARALLEL_EXECUTION,
@@ -402,6 +464,9 @@ public class ParallelGraphExecutor {
                                           String userId,
                                           String userGoal,
                                           ChatLanguageModel model,
+                                          String endpointName,
+                                          String endpointBaseUrl,
+                                          String modelName,
                                           ParallelGraphState state) {
         boolean planValid = state.planValid().orElse(false);
         boolean allDone = state.allDone().orElse(false);
@@ -419,16 +484,23 @@ public class ParallelGraphExecutor {
         Response<AiMessage> response = model.generate(finalMessages);
         long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
         String answer = response.content().text();
+        Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                endpointName,
+                endpointBaseUrl,
+                modelName,
+                finalMessages,
+                null,
+                Map.of("stage", "parallel_final")
+        );
         observabilityService.recordLlmCall(
                 run.getId(),
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
                 llmDurationMs,
+                endpointName,
+                modelName,
                 null,
-                null,
-                null,
-                finalMessages,
-                Map.of("stage", "parallel_final"),
+                llmRequestSnapshot,
                 answer
         );
         return Map.of("final_answer", answer);

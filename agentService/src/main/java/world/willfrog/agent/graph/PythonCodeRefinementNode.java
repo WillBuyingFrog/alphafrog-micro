@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.config.CodeRefineProperties;
+import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
@@ -44,6 +45,7 @@ public class PythonCodeRefinementNode {
     private final CodeRefineLocalConfigLoader localConfigLoader;
     private final AgentPromptService promptService;
     private final AgentObservabilityService observabilityService;
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
 
     @Data
     @Builder
@@ -57,6 +59,9 @@ public class PythonCodeRefinementNode {
         private String datasetIds;
         private String libraries;
         private Integer timeoutSeconds;
+        private String endpointName;
+        private String endpointBaseUrl;
+        private String modelName;
     }
 
     @Data
@@ -197,16 +202,23 @@ public class PythonCodeRefinementNode {
             String runId = AgentContext.getRunId();
             String llmText = resp.content().text();
             if (runId != null && !runId.isBlank()) {
+                Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        llmMessages,
+                        null,
+                        Map.of("stage", "python_refine_plan")
+                );
                 observabilityService.recordLlmCall(
                         runId,
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         resp.tokenUsage(),
                         llmDurationMs,
+                        request.getEndpointName(),
+                        request.getModelName(),
                         null,
-                        null,
-                        null,
-                        llmMessages,
-                        Map.of("stage", "python_refine_plan"),
+                        llmRequestSnapshot,
                         llmText
                 );
             }

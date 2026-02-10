@@ -63,6 +63,8 @@ public class AgentRunExecutor {
     private final AgentPromptService promptService;
     /** 可观测指标聚合服务。 */
     private final AgentObservabilityService observabilityService;
+    /** LLM 原始请求快照构建器。 */
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     /** JSON 工具。 */
     private final ObjectMapper objectMapper;
 
@@ -110,11 +112,15 @@ public class AgentRunExecutor {
             stateStore.markRunStatus(runId, AgentRunStatus.EXECUTING.name());
 
             // endpoint/model 允许请求级覆盖，未指定时由 resolver 走默认配置。
-            String endpointName = eventService.extractEndpointName(run.getExt());
-            String modelName = eventService.extractModelName(run.getExt());
+            String requestedEndpointName = eventService.extractEndpointName(run.getExt());
+            String requestedModelName = eventService.extractModelName(run.getExt());
+            AgentLlmResolver.ResolvedLlm resolvedLlm = aiServiceFactory.resolveLlm(requestedEndpointName, requestedModelName);
+            String endpointName = resolvedLlm.endpointName();
+            String modelName = resolvedLlm.modelName();
+            String endpointBaseUrl = resolvedLlm.baseUrl();
             boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
-            ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(endpointName, modelName);
+            ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(resolvedLlm);
 
             String userGoal = eventService.extractUserGoal(run.getExt());
             
@@ -125,7 +131,16 @@ public class AgentRunExecutor {
 
             // 1.5 Try parallel graph execution (LangGraph4j)
             if (parallelGraphExecutor.isEnabled()) {
-                boolean handled = parallelGraphExecutor.execute(run, userId, userGoal, chatModel, toolSpecifications);
+                boolean handled = parallelGraphExecutor.execute(
+                        run,
+                        userId,
+                        userGoal,
+                        chatModel,
+                        toolSpecifications,
+                        endpointName,
+                        endpointBaseUrl,
+                        modelName
+                );
                 if (handled) {
                     return;
                 }
@@ -155,12 +170,6 @@ public class AgentRunExecutor {
 
                 // Call LLM
                 List<ChatMessage> requestMessages = new ArrayList<>(messages);
-                List<String> toolSpecNames = new ArrayList<>();
-                for (ToolSpecification specification : toolSpecifications) {
-                    if (specification != null && specification.name() != null) {
-                        toolSpecNames.add(specification.name());
-                    }
-                }
                 long llmStartedAt = System.currentTimeMillis();
                 Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
                 long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
@@ -173,6 +182,17 @@ public class AgentRunExecutor {
                 if (!aiMessage.hasToolExecutionRequests()) {
                     llmPhase = AgentObservabilityService.PHASE_SUMMARIZING;
                 }
+                Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        endpointName,
+                        endpointBaseUrl,
+                        modelName,
+                        requestMessages,
+                        toolSpecifications,
+                        Map.of(
+                                "stage", "serial_tool_loop",
+                                "step", i
+                        )
+                );
                 observabilityService.recordLlmCall(
                         runId,
                         llmPhase,
@@ -181,8 +201,7 @@ public class AgentRunExecutor {
                         endpointName,
                         modelName,
                         null,
-                        requestMessages,
-                        Map.of("toolSpecifications", toolSpecNames),
+                        llmRequestSnapshot,
                         aiMessage == null ? null : aiMessage.text()
                 );
 

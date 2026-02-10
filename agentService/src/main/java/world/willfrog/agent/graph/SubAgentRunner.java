@@ -13,6 +13,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
@@ -61,6 +62,8 @@ public class SubAgentRunner {
     private final AgentEventService eventService;
     /** 可观测指标聚合服务。 */
     private final AgentObservabilityService observabilityService;
+    /** LLM 原始请求快照构建器。 */
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
 
@@ -84,6 +87,12 @@ public class SubAgentRunner {
         private Set<String> toolWhitelist;
         /** 允许的最大步骤数。 */
         private int maxSteps;
+        /** 端点名。 */
+        private String endpointName;
+        /** 端点 baseUrl。 */
+        private String endpointBaseUrl;
+        /** 模型名。 */
+        private String modelName;
     }
 
     /**
@@ -136,16 +145,26 @@ public class SubAgentRunner {
                 Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
                 long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
                 String planText = planResp.content().text();
+                Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        planMessages,
+                        null,
+                        Map.of(
+                                "stage", "sub_agent_plan",
+                                "attempt", attempt
+                        )
+                );
                 observabilityService.recordLlmCall(
                         request.getRunId(),
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         planResp.tokenUsage(),
                         llmDurationMs,
+                        request.getEndpointName(),
+                        request.getModelName(),
                         null,
-                        null,
-                        null,
-                        planMessages,
-                        Map.of("stage", "sub_agent_plan", "attempt", attempt),
+                        planRequestSnapshot,
                         planText
                 );
                 String json = extractJson(planText);
@@ -240,6 +259,9 @@ public class SubAgentRunner {
                                     .datasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2")))
                                     .libraries(firstNonBlank(args.get("libraries"), args.get("arg3")))
                                     .timeoutSeconds(toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4")))
+                                    .endpointName(request.getEndpointName())
+                                    .endpointBaseUrl(request.getEndpointBaseUrl())
+                                    .modelName(request.getModelName())
                                     .build(),
                             model
                     );
@@ -299,16 +321,23 @@ public class SubAgentRunner {
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
             long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
             String finalText = finalResp.content().text();
+            Map<String, Object> summaryRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                    request.getEndpointName(),
+                    request.getEndpointBaseUrl(),
+                    request.getModelName(),
+                    summaryMessages,
+                    null,
+                    Map.of("stage", "sub_agent_summary")
+            );
             observabilityService.recordLlmCall(
                     request.getRunId(),
                     AgentObservabilityService.PHASE_SUB_AGENT,
                     finalResp.tokenUsage(),
                     llmDurationMs,
+                    request.getEndpointName(),
+                    request.getModelName(),
                     null,
-                    null,
-                    null,
-                    summaryMessages,
-                    Map.of("stage", "sub_agent_summary"),
+                    summaryRequestSnapshot,
                     finalText
             );
 

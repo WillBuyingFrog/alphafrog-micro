@@ -33,7 +33,14 @@ public class AgentAiServiceFactory {
     private String openRouterTitle;
 
     public ChatLanguageModel buildChatModel(String endpointName, String modelName) {
-        AgentLlmResolver.ResolvedLlm resolved = llmResolver.resolve(endpointName, modelName);
+        return buildChatModel(resolveLlm(endpointName, modelName));
+    }
+
+    public AgentLlmResolver.ResolvedLlm resolveLlm(String endpointName, String modelName) {
+        return llmResolver.resolve(endpointName, modelName);
+    }
+
+    public ChatLanguageModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {

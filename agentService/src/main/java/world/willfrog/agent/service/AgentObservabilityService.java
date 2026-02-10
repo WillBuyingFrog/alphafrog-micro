@@ -109,6 +109,29 @@ public class AgentObservabilityService {
                               Map<String, Object> requestMeta,
                               String responseText) {
         Map<String, Object> requestSnapshot = buildLlmRequestSnapshot(requestMessages, requestMeta);
+        recordLlmCall(
+                runId,
+                phase,
+                tokenUsage,
+                durationMs,
+                endpointName,
+                modelName,
+                errorMessage,
+                requestSnapshot,
+                responseText
+        );
+    }
+
+    public void recordLlmCall(String runId,
+                              String phase,
+                              TokenUsage tokenUsage,
+                              long durationMs,
+                              String endpointName,
+                              String modelName,
+                              String errorMessage,
+                              Map<String, Object> requestSnapshot,
+                              String responseText) {
+        Map<String, Object> sanitizedRequestSnapshot = sanitizeRequestSnapshot(requestSnapshot);
         String responsePreview = trim(responseText, llmTraceTextLimit());
         if (log.isDebugEnabled()) {
             log.debug("OBS_LLM runId={} phase={} durationMs={} endpoint={} model={} hasError={}",
@@ -127,7 +150,7 @@ public class AgentObservabilityService {
                     "output", tokenUsage.outputTokenCount(),
                     "total", tokenUsage.totalTokenCount()
             ));
-            payload.put("request", requestSnapshot);
+            payload.put("request", sanitizedRequestSnapshot);
             payload.put("responsePreview", responsePreview);
             debugFileWriter.write("OBS_LLM", payload);
         }
@@ -149,7 +172,7 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, endpointName, modelName, errorMessage, requestSnapshot, responsePreview);
+            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview);
         });
     }
 
@@ -509,6 +532,21 @@ public class AgentObservabilityService {
             snapshot.put("messages", messages);
         }
         return snapshot.isEmpty() ? null : snapshot;
+    }
+
+    private Map<String, Object> sanitizeRequestSnapshot(Map<String, Object> requestSnapshot) {
+        if (requestSnapshot == null || requestSnapshot.isEmpty()) {
+            return null;
+        }
+        Object sanitized = sanitizeForTrace(requestSnapshot, 0);
+        if (!(sanitized instanceof Map<?, ?> map)) {
+            return null;
+        }
+        Map<String, Object> normalized = new LinkedHashMap<>();
+        for (Map.Entry<?, ?> entry : map.entrySet()) {
+            normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+        }
+        return normalized;
     }
 
     private Map<String, Object> serializeChatMessage(ChatMessage message) {

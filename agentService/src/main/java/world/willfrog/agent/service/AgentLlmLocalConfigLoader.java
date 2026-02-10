@@ -5,6 +5,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 
@@ -25,33 +26,75 @@ public class AgentLlmLocalConfigLoader {
     private String configFile;
 
     private volatile AgentLlmProperties localConfig;
+    private volatile String loadedConfigPath = "";
+    private volatile long loadedConfigLastModified = Long.MIN_VALUE;
+    private final Object reloadLock = new Object();
 
     @PostConstruct
     public void load() {
+        reloadIfNeeded(true);
+    }
+
+    @Scheduled(fixedDelayString = "${agent.llm.config-refresh-interval-ms:10000}")
+    public void refresh() {
+        reloadIfNeeded(false);
+    }
+
+    private void reloadIfNeeded(boolean force) {
         String file = configFile == null ? "" : configFile.trim();
         if (file.isEmpty()) {
-            log.info("agent.llm.config-file is empty, skip local llm config loading");
+            if (force) {
+                log.info("agent.llm.config-file is empty, skip local llm config loading");
+            }
+            clearLocalConfigIfPresent("agent.llm.config-file is empty");
             return;
         }
-        Path path = Paths.get(file);
-        if (!Files.exists(path)) {
-            log.info("Local llm config file not found, skip: {}", file);
-            return;
-        }
-        try (InputStream in = Files.newInputStream(path)) {
-            AgentLlmProperties parsed = objectMapper.readValue(in, AgentLlmProperties.class);
-            this.localConfig = sanitize(parsed);
-            log.info("Loaded local llm config from {} (endpoints={}, models={})",
-                    file,
-                    this.localConfig.getEndpoints().size(),
-                    this.localConfig.getModels().size());
-        } catch (Exception e) {
-            log.error("Failed to load local llm config from {}", file, e);
+        Path path = Paths.get(file).toAbsolutePath().normalize();
+        synchronized (reloadLock) {
+            if (!Files.exists(path)) {
+                if (force && this.localConfig == null) {
+                    log.info("Local llm config file not found, skip: {}", path);
+                }
+                clearLocalConfigIfPresent("Local llm config file not found: " + path);
+                return;
+            }
+            try {
+                long currentModified = Files.getLastModifiedTime(path).toMillis();
+                String normalizedPath = path.toString();
+                boolean unchanged = normalizedPath.equals(loadedConfigPath) && currentModified == loadedConfigLastModified;
+                if (!force && unchanged) {
+                    return;
+                }
+                try (InputStream in = Files.newInputStream(path)) {
+                    AgentLlmProperties parsed = objectMapper.readValue(in, AgentLlmProperties.class);
+                    AgentLlmProperties sanitized = sanitize(parsed);
+                    this.localConfig = sanitized;
+                    this.loadedConfigPath = normalizedPath;
+                    this.loadedConfigLastModified = currentModified;
+                    log.info("Loaded local llm config from {} (endpoints={}, models={})",
+                            path,
+                            sanitized.getEndpoints().size(),
+                            sanitized.getModels().size());
+                }
+            } catch (Exception e) {
+                log.error("Failed to load local llm config from {}", path, e);
+            }
         }
     }
 
     public Optional<AgentLlmProperties> current() {
         return Optional.ofNullable(localConfig);
+    }
+
+    private void clearLocalConfigIfPresent(String reason) {
+        synchronized (reloadLock) {
+            if (this.localConfig != null) {
+                this.localConfig = null;
+                this.loadedConfigPath = "";
+                this.loadedConfigLastModified = Long.MIN_VALUE;
+                log.warn("Local llm config cleared: {}", reason);
+            }
+        }
     }
 
     private AgentLlmProperties sanitize(AgentLlmProperties input) {
