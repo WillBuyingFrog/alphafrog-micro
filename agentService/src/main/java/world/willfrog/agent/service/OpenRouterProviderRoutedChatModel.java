@@ -3,6 +3,7 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.ai4j.openai4j.OpenAiClient;
+import dev.ai4j.openai4j.OpenAiHttpException;
 import dev.ai4j.openai4j.chat.ChatCompletionRequest;
 import dev.ai4j.openai4j.chat.ChatCompletionResponse;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -38,6 +39,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
 
     @Override
     public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+        String requestJson = null;
         try {
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(nvl(modelName))
@@ -55,7 +57,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             );
             requestJsonMap.put("provider", Map.of("order", providerOrder));
 
-            String requestJson = objectMapper.writeValueAsString(requestJsonMap);
+            requestJson = objectMapper.writeValueAsString(requestJsonMap);
             if (log.isDebugEnabled()) {
                 log.debug("OpenRouter provider routing enabled: providers={}", providerOrder);
             }
@@ -73,8 +75,22 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
                 metadata.put("model", completion.model());
             }
             return Response.from(aiMessage, tokenUsage, finishReason, metadata);
+        } catch (OpenAiHttpException e) {
+            String detail = "OpenRouter provider routed chat completion failed"
+                    + " (http=" + e.code()
+                    + ", providers=" + providerOrder
+                    + ", model=" + nvl(modelName)
+                    + ", error=" + shorten(e.getMessage()) + ")";
+            log.warn(detail);
+            throw new IllegalStateException(detail, e);
         } catch (Exception e) {
-            throw new IllegalStateException("OpenRouter provider routed chat completion failed", e);
+            String detail = "OpenRouter provider routed chat completion failed"
+                    + " (providers=" + providerOrder
+                    + ", model=" + nvl(modelName)
+                    + ", error=" + shorten(e.getMessage())
+                    + ", request=" + shorten(requestJson) + ")";
+            log.warn(detail, e);
+            throw new IllegalStateException(detail, e);
         }
     }
 
@@ -96,5 +112,15 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
     private String nvl(String value) {
         return value == null ? "" : value;
     }
-}
 
+    private String shorten(String text) {
+        if (text == null) {
+            return "";
+        }
+        String normalized = text.replace('\n', ' ').replace('\r', ' ');
+        if (normalized.length() <= 600) {
+            return normalized;
+        }
+        return normalized.substring(0, 600) + "...";
+    }
+}

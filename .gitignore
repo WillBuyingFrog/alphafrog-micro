@@ -59,6 +59,7 @@ test-secrets.yml
 
 /.qwen
 /.qoder
+/.kimi
 .mcp.json
 /.cursor
 /.codex
