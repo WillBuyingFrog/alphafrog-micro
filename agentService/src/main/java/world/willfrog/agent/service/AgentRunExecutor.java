@@ -119,8 +119,9 @@ public class AgentRunExecutor {
             String modelName = resolvedLlm.modelName();
             String endpointBaseUrl = resolvedLlm.baseUrl();
             boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            var providerOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
-            ChatLanguageModel chatModel = aiServiceFactory.buildChatModel(resolvedLlm);
+            ChatLanguageModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
 
             String userGoal = eventService.extractUserGoal(run.getExt());
             

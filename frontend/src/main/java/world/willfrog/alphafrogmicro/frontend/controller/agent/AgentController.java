@@ -81,8 +81,12 @@ public class AgentController {
                     ? new HashMap<>()
                     : new HashMap<>(request.context());
             boolean captureLlmRequests = Boolean.TRUE.equals(request.captureLlmRequests());
+            String provider = nvl(request.provider());
             if (captureLlmRequests) {
                 contextMap.put("captureLlmRequests", true);
+            }
+            if (!provider.isBlank()) {
+                contextMap.put("provider", provider);
             }
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
             AgentRunMessage run = agentDubboService.createRun(
@@ -94,6 +98,7 @@ public class AgentController {
                             .setModelName(nvl(request.modelName()))
                             .setEndpointName(nvl(request.endpointName()))
                             .setCaptureLlmRequests(captureLlmRequests)
+                            .setProvider(provider)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));

@@ -32,6 +32,7 @@ message CreateAgentRunRequest {
   string model_name = 5;
   string endpoint_name = 6;
   bool capture_llm_requests = 7;
+  string provider = 8;
 }
 
 message GetAgentRunRequest {

@@ -15,7 +15,9 @@ import world.willfrog.agent.model.AgentRunStatus;
 
 import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -77,7 +79,8 @@ public class AgentEventService {
                               String idempotencyKey,
                               String modelName,
                               String endpointName,
-                              boolean captureLlmRequests) {
+                              boolean captureLlmRequests,
+                              String provider) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -87,6 +90,7 @@ public class AgentEventService {
         ext.put("model_name", modelName == null ? "" : modelName);
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
         ext.put("capture_llm_requests", captureLlmRequests);
+        ext.put("provider", provider == null ? "" : provider.trim());
         ext.put("checkpoint_version", resolveCheckpointVersion());
 
         AgentRun run = new AgentRun();
@@ -238,6 +242,46 @@ public class AgentEventService {
         } catch (Exception e) {
             return false;
         }
+    }
+
+    public List<String> extractOpenRouterProviderOrder(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object raw = map.get("provider");
+            List<String> providers = parseProviderOrderValue(raw);
+            if (!providers.isEmpty()) {
+                return providers;
+            }
+            Object contextRaw = map.get("context_json");
+            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
+                return List.of();
+            }
+            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
+            return parseProviderOrderValue(contextMap.get("provider"));
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    private List<String> parseProviderOrderValue(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return List.of();
+        }
+        List<String> providers = new ArrayList<>();
+        for (String token : text.split(",")) {
+            String provider = token == null ? "" : token.trim();
+            if (!provider.isBlank()) {
+                providers.add(provider);
+            }
+        }
+        return providers;
     }
 
     /**

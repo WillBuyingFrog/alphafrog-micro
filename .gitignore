@@ -58,6 +58,8 @@ test-secrets.yml
 # Coding Agent configs
 
 /.qwen
+/.qoder
+.mcp.json
 /.cursor
 /.codex
 /.kilocode

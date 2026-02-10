@@ -105,7 +105,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 request.getIdempotencyKey(),
                 request.getModelName(),
                 request.getEndpointName(),
-                request.getCaptureLlmRequests()
+                request.getCaptureLlmRequests(),
+                request.getProvider()
         );
         executor.executeAsync(run.getId());
         return toRunMessage(run);
