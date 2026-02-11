@@ -27,6 +27,16 @@ public class AgentPromptService {
                                               int maxSubSteps,
                                               int maxParallelTasks,
                                               int maxSubAgents) {
+        return parallelPlannerSystemPrompt(toolWhitelist, maxTasks, maxSubSteps, maxParallelTasks, maxSubAgents, 1, 1);
+    }
+
+    public String parallelPlannerSystemPrompt(String toolWhitelist,
+                                              int maxTasks,
+                                              int maxSubSteps,
+                                              int maxParallelTasks,
+                                              int maxSubAgents,
+                                              int candidateIndex,
+                                              int candidateCount) {
         String template = firstNonBlank(currentPrompts().getParallelPlannerSystemPromptTemplate(),
                 "");
         String specific = render(template, Map.of(
@@ -34,13 +44,23 @@ public class AgentPromptService {
                 "maxTasks", String.valueOf(maxTasks),
                 "maxSubSteps", String.valueOf(maxSubSteps),
                 "maxParallelTasks", String.valueOf(maxParallelTasks),
-                "maxSubAgents", String.valueOf(maxSubAgents)
+                "maxSubAgents", String.valueOf(maxSubAgents),
+                "candidateIndex", String.valueOf(Math.max(candidateIndex, 1)),
+                "candidateCount", String.valueOf(Math.max(candidateCount, 1))
         ));
         return composeSystemPrompt(specific);
     }
 
     public String parallelFinalSystemPrompt() {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getParallelFinalSystemPrompt(), ""));
+    }
+
+    public String parallelPatchPlannerSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getParallelPatchPlannerSystemPromptTemplate(), ""));
+    }
+
+    public String planJudgeSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getPlanJudgeSystemPromptTemplate(), ""));
     }
 
     public String subAgentPlannerSystemPrompt(String tools, int maxSteps) {
@@ -140,6 +160,8 @@ public class AgentPromptService {
         merged.setAgentRunSystemPrompt(firstNonBlank(local.getAgentRunSystemPrompt(), base.getAgentRunSystemPrompt()));
         merged.setParallelPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPlannerSystemPromptTemplate(), base.getParallelPlannerSystemPromptTemplate()));
         merged.setParallelFinalSystemPrompt(firstNonBlank(local.getParallelFinalSystemPrompt(), base.getParallelFinalSystemPrompt()));
+        merged.setParallelPatchPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPatchPlannerSystemPromptTemplate(), base.getParallelPatchPlannerSystemPromptTemplate()));
+        merged.setPlanJudgeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeSystemPromptTemplate(), base.getPlanJudgeSystemPromptTemplate()));
         merged.setSubAgentPlannerSystemPromptTemplate(firstNonBlank(local.getSubAgentPlannerSystemPromptTemplate(), base.getSubAgentPlannerSystemPromptTemplate()));
         merged.setSubAgentSummarySystemPrompt(firstNonBlank(local.getSubAgentSummarySystemPrompt(), base.getSubAgentSummarySystemPrompt()));
         merged.setPythonRefineSystemPrompt(firstNonBlank(local.getPythonRefineSystemPrompt(), base.getPythonRefineSystemPrompt()));

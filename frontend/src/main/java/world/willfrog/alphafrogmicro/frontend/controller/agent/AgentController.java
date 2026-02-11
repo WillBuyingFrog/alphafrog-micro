@@ -82,11 +82,21 @@ public class AgentController {
                     : new HashMap<>(request.context());
             boolean captureLlmRequests = Boolean.TRUE.equals(request.captureLlmRequests());
             String provider = nvl(request.provider());
+            Integer plannerCandidateCount = request.plannerCandidateCount();
+            boolean admin = isAdmin(authentication);
             if (captureLlmRequests) {
                 contextMap.put("captureLlmRequests", true);
             }
             if (!provider.isBlank()) {
                 contextMap.put("provider", provider);
+            }
+            int plannerCandidateCountForRpc = 0;
+            if (plannerCandidateCount != null && plannerCandidateCount > 0) {
+                if (admin) {
+                    plannerCandidateCountForRpc = plannerCandidateCount;
+                } else {
+                    log.info("Ignore plannerCandidateCount for non-admin user: userId={}, value={}", userId, plannerCandidateCount);
+                }
             }
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
             AgentRunMessage run = agentDubboService.createRun(
@@ -99,6 +109,7 @@ public class AgentController {
                             .setEndpointName(nvl(request.endpointName()))
                             .setCaptureLlmRequests(captureLlmRequests)
                             .setProvider(provider)
+                            .setPlannerCandidateCount(plannerCandidateCountForRpc)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));

@@ -80,7 +80,8 @@ public class AgentEventService {
                               String modelName,
                               String endpointName,
                               boolean captureLlmRequests,
-                              String provider) {
+                              String provider,
+                              int plannerCandidateCount) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -91,6 +92,9 @@ public class AgentEventService {
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
         ext.put("capture_llm_requests", captureLlmRequests);
         ext.put("provider", provider == null ? "" : provider.trim());
+        if (plannerCandidateCount > 0) {
+            ext.put("planner_candidate_count", plannerCandidateCount);
+        }
         ext.put("checkpoint_version", resolveCheckpointVersion());
 
         AgentRun run = new AgentRun();
@@ -263,6 +267,29 @@ public class AgentEventService {
             return parseProviderOrderValue(contextMap.get("provider"));
         } catch (Exception e) {
             return List.of();
+        }
+    }
+
+    public int extractPlannerCandidateCount(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return 0;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object raw = map.get("planner_candidate_count");
+            if (raw == null) {
+                return 0;
+            }
+            if (raw instanceof Number number) {
+                return Math.max(0, number.intValue());
+            }
+            String text = String.valueOf(raw).trim();
+            if (text.isBlank()) {
+                return 0;
+            }
+            return Math.max(0, Integer.parseInt(text));
+        } catch (Exception e) {
+            return 0;
         }
     }
 

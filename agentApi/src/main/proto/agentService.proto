@@ -33,6 +33,7 @@ message CreateAgentRunRequest {
   string endpoint_name = 6;
   bool capture_llm_requests = 7;
   string provider = 8;
+  int32 planner_candidate_count = 9;
 }
 
 message GetAgentRunRequest {

@@ -89,6 +89,8 @@ public class AgentLlmProperties {
     public static class Runtime {
         private Resume resume = new Resume();
         private Cache cache = new Cache();
+        private Planning planning = new Planning();
+        private Judge judge = new Judge();
 
         public Resume getResume() {
             return resume;
@@ -104,6 +106,22 @@ public class AgentLlmProperties {
 
         public void setCache(Cache cache) {
             this.cache = cache == null ? new Cache() : cache;
+        }
+
+        public Planning getPlanning() {
+            return planning;
+        }
+
+        public void setPlanning(Planning planning) {
+            this.planning = planning == null ? new Planning() : planning;
+        }
+
+        public Judge getJudge() {
+            return judge;
+        }
+
+        public void setJudge(Judge judge) {
+            this.judge = judge == null ? new Judge() : judge;
         }
     }
 
@@ -158,10 +176,96 @@ public class AgentLlmProperties {
         }
     }
 
+    public static class Planning {
+        private Integer candidatePlanCount;
+        private Integer maxLocalReplans;
+        private Double complexityPenaltyLambda;
+
+        public Integer getCandidatePlanCount() {
+            return candidatePlanCount;
+        }
+
+        public void setCandidatePlanCount(Integer candidatePlanCount) {
+            this.candidatePlanCount = candidatePlanCount;
+        }
+
+        public Integer getMaxLocalReplans() {
+            return maxLocalReplans;
+        }
+
+        public void setMaxLocalReplans(Integer maxLocalReplans) {
+            this.maxLocalReplans = maxLocalReplans;
+        }
+
+        public Double getComplexityPenaltyLambda() {
+            return complexityPenaltyLambda;
+        }
+
+        public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
+            this.complexityPenaltyLambda = complexityPenaltyLambda;
+        }
+    }
+
+    public static class Judge {
+        private Boolean enabled;
+        private Double temperature;
+        /**
+         * 新配置：有序路由列表，每个 endpoint 可配置一组候选 model。
+         */
+        private List<JudgeRoute> routes = new ArrayList<>();
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Double getTemperature() {
+            return temperature;
+        }
+
+        public void setTemperature(Double temperature) {
+            this.temperature = temperature;
+        }
+
+        public List<JudgeRoute> getRoutes() {
+            return routes;
+        }
+
+        public void setRoutes(List<JudgeRoute> routes) {
+            this.routes = routes == null ? new ArrayList<>() : routes;
+        }
+    }
+
+    public static class JudgeRoute {
+        private String endpointName;
+        private List<String> models = new ArrayList<>();
+
+        public String getEndpointName() {
+            return endpointName;
+        }
+
+        public void setEndpointName(String endpointName) {
+            this.endpointName = endpointName;
+        }
+
+        public List<String> getModels() {
+            return models;
+        }
+
+        public void setModels(List<String> models) {
+            this.models = models == null ? new ArrayList<>() : models;
+        }
+    }
+
     public static class Prompts {
         private String agentRunSystemPrompt;
         private String parallelPlannerSystemPromptTemplate;
         private String parallelFinalSystemPrompt;
+        private String parallelPatchPlannerSystemPromptTemplate;
+        private String planJudgeSystemPromptTemplate;
         private String subAgentPlannerSystemPromptTemplate;
         private String subAgentSummarySystemPrompt;
         private String pythonRefineSystemPrompt;
@@ -193,6 +297,22 @@ public class AgentLlmProperties {
 
         public void setParallelFinalSystemPrompt(String parallelFinalSystemPrompt) {
             this.parallelFinalSystemPrompt = parallelFinalSystemPrompt;
+        }
+
+        public String getParallelPatchPlannerSystemPromptTemplate() {
+            return parallelPatchPlannerSystemPromptTemplate;
+        }
+
+        public void setParallelPatchPlannerSystemPromptTemplate(String parallelPatchPlannerSystemPromptTemplate) {
+            this.parallelPatchPlannerSystemPromptTemplate = parallelPatchPlannerSystemPromptTemplate;
+        }
+
+        public String getPlanJudgeSystemPromptTemplate() {
+            return planJudgeSystemPromptTemplate;
+        }
+
+        public void setPlanJudgeSystemPromptTemplate(String planJudgeSystemPromptTemplate) {
+            this.planJudgeSystemPromptTemplate = planJudgeSystemPromptTemplate;
         }
 
         public String getSubAgentPlannerSystemPromptTemplate() {

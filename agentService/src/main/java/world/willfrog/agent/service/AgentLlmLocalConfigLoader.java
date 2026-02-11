@@ -117,6 +117,21 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getRuntime().getCache() == null) {
             cfg.getRuntime().setCache(null);
         }
+        if (cfg.getRuntime().getPlanning() == null) {
+            cfg.getRuntime().setPlanning(null);
+        }
+        if (cfg.getRuntime().getJudge() == null) {
+            cfg.getRuntime().setJudge(null);
+        }
+        if (cfg.getRuntime().getJudge().getRoutes() == null) {
+            cfg.getRuntime().getJudge().setRoutes(null);
+        } else {
+            for (AgentLlmProperties.JudgeRoute route : cfg.getRuntime().getJudge().getRoutes()) {
+                if (route != null && route.getModels() == null) {
+                    route.setModels(null);
+                }
+            }
+        }
         if (cfg.getPrompts().getPythonRefineRequirements() == null) {
             cfg.getPrompts().setPythonRefineRequirements(null);
         }
