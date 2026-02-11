@@ -1,7 +1,6 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.ai4j.openai4j.OpenAiClient;
 import dev.langchain4j.model.chat.ChatLanguageModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
@@ -56,19 +55,12 @@ public class AgentAiServiceFactory {
         }
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
         if (isOpenRouterEndpoint(resolved) && !normalizedProviderOrder.isEmpty()) {
-            OpenAiClient.Builder<?, ?> clientBuilder = OpenAiClient.builder()
-                    .baseUrl(resolved.baseUrl())
-                    .openAiApiKey(apiKey)
-                    .logRequests(debugEnabled)
-                    .logResponses(debugEnabled);
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
-            if (!headers.isEmpty()) {
-                clientBuilder.customHeaders(headers);
-            }
-            OpenAiClient client = clientBuilder.build();
             return new OpenRouterProviderRoutedChatModel(
-                    client,
                     objectMapper,
+                    resolved.baseUrl(),
+                    apiKey,
+                    headers,
                     resolved.modelName(),
                     temperature,
                     maxTokens,
