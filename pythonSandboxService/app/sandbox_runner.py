@@ -48,6 +48,17 @@ def _normalize_dataset_ids(primary: str, extra: List[str] | None) -> List[str]:
     return ids
 
 
+def _copy_dataset_file(session: SandboxSession, source: Path, dataset_mount: str, dataset_id: str) -> None:
+    filename = source.name
+    session.copy_to_runtime(str(source), f"{dataset_mount}/{filename}")
+
+    # 兼容常见读取路径：/sandbox/input/<dataset_id>/data.csv(.meta.json)
+    if filename == f"{dataset_id}.csv":
+        session.copy_to_runtime(str(source), f"{dataset_mount}/data.csv")
+    elif filename == f"{dataset_id}.meta.json":
+        session.copy_to_runtime(str(source), f"{dataset_mount}/data.meta.json")
+
+
 def run_in_sandbox(
     config: SandboxConfig,
     dataset_id: str,
@@ -83,8 +94,7 @@ def run_in_sandbox(
             dataset_mount = f"{config.workdir}/input/{ds_id}"
             session.execute_command(f"mkdir -p {dataset_mount}")
             for file_path in files_to_copy:
-                dest = f"{dataset_mount}/{file_path.name}"
-                session.copy_to_runtime(str(file_path), dest)
+                _copy_dataset_file(session, file_path, dataset_mount, ds_id)
 
         result = session.run(code, libraries=libraries, timeout=timeout)
 

@@ -20,13 +20,21 @@ public class PythonSandboxTools {
     @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: dataset_ids (comma-separated extra dataset ids), libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Dataset files are mounted under /sandbox/input/<dataset_id>/ (default: <dataset_id>.csv and <dataset_id>.meta.json). Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
     public String executePython(String code, String dataset_id, String dataset_ids, String libraries, Integer timeout_seconds) {
         try {
-            log.info("Executing python task for dataset: {}", dataset_id);
+            String[] parsedDatasetIds = parseDatasetIds(dataset_ids);
+            String primaryDatasetId = dataset_id == null ? "" : dataset_id.trim();
+            if (primaryDatasetId.isBlank() && parsedDatasetIds.length > 0) {
+                primaryDatasetId = parsedDatasetIds[0];
+            }
+            log.info("Executing python task for dataset: {} (extras={})", primaryDatasetId, parsedDatasetIds.length);
             
             ExecuteRequest.Builder requestBuilder = ExecuteRequest.newBuilder()
                     .setCode(code)
-                    .setDatasetId(dataset_id);
+                    .setDatasetId(primaryDatasetId);
 
-            for (String extraId : parseDatasetIds(dataset_ids)) {
+            for (String extraId : parsedDatasetIds) {
+                if (extraId.equals(primaryDatasetId)) {
+                    continue;
+                }
                 requestBuilder.addDatasetIds(extraId);
             }
 
