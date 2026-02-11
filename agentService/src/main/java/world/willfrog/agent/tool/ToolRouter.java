@@ -177,6 +177,10 @@ public class ToolRouter {
         if (result == null || result.isBlank()) {
             return false;
         }
+        Integer exitCode = parseLeadingExitCode(result);
+        if (exitCode != null) {
+            return exitCode == 0;
+        }
         if (result.startsWith("Tool invocation error")) {
             return false;
         }
@@ -192,7 +196,30 @@ public class ToolRouter {
         if (result.startsWith("Task FAILED")) {
             return false;
         }
+        if (result.startsWith("Task PENDING")) {
+            return false;
+        }
         return !result.startsWith("Task CANCELED");
+    }
+
+    private Integer parseLeadingExitCode(String result) {
+        String trimmed = result == null ? "" : result.trim();
+        if (!trimmed.startsWith("Exit Code:")) {
+            return null;
+        }
+        int lineEnd = trimmed.indexOf('\n');
+        String firstLine = lineEnd >= 0 ? trimmed.substring(0, lineEnd) : trimmed;
+        String value = firstLine.substring("Exit Code:".length()).trim();
+        if (value.isEmpty()) {
+            return null;
+        }
+        int spaceIdx = value.indexOf(' ');
+        String candidate = spaceIdx > 0 ? value.substring(0, spaceIdx) : value;
+        try {
+            return Integer.parseInt(candidate);
+        } catch (NumberFormatException e) {
+            return null;
+        }
     }
 
     private String resolveScope() {
