@@ -290,22 +290,20 @@ public class ParallelTaskExecutor {
 
         LinkedHashSet<String> resolvedDatasets = new LinkedHashSet<>();
         for (String ref : extractDatasetRefs(args.get("datasets"))) {
-            String resolved = refToDataset.getOrDefault(ref, ref);
+            String resolved = resolveDatasetRef(ref, refToDataset);
             if (!resolved.isBlank()) {
                 resolvedDatasets.add(resolved);
             }
         }
         for (String ref : extractDatasetRefs(args.get("dataset_refs"))) {
-            String resolved = refToDataset.getOrDefault(ref, ref);
+            String resolved = resolveDatasetRef(ref, refToDataset);
             if (!resolved.isBlank()) {
                 resolvedDatasets.add(resolved);
             }
         }
 
         String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
-        if (!datasetId.isBlank() && refToDataset.containsKey(datasetId)) {
-            datasetId = refToDataset.get(datasetId);
-        }
+        datasetId = resolveDatasetRef(datasetId, refToDataset);
         if (datasetId.isBlank() && !resolvedDatasets.isEmpty()) {
             datasetId = resolvedDatasets.iterator().next();
         }
@@ -326,13 +324,8 @@ public class ParallelTaskExecutor {
         }
 
         String code = firstNonBlank(args.get("code"), args.get("arg0"));
-        if (!code.isBlank() && !refToDataset.isEmpty()) {
-            String rewritten = code;
-            for (Map.Entry<String, String> entry : refToDataset.entrySet()) {
-                String ref = entry.getKey();
-                String realId = entry.getValue();
-                rewritten = rewritten.replace("/sandbox/input/" + ref + "/", "/sandbox/input/" + realId + "/");
-            }
+        if (!code.isBlank()) {
+            String rewritten = rewriteCodeDatasetRefs(code, refToDataset, allDatasetIds, datasetId);
             if (!rewritten.equals(code)) {
                 args.put("code", rewritten);
             }
@@ -383,6 +376,105 @@ public class ParallelTaskExecutor {
             }
         }
         return new ArrayList<>(refs);
+    }
+
+    private String resolveDatasetRef(String rawRef, Map<String, String> refToDataset) {
+        String ref = nvl(rawRef).trim();
+        if (ref.isBlank()) {
+            return "";
+        }
+        String token = unwrapDatasetRefToken(ref);
+        String resolved = resolveDatasetByTaskRef(token, refToDataset);
+        if (!resolved.isBlank()) {
+            return resolved;
+        }
+        resolved = resolveDatasetByTaskRef(ref, refToDataset);
+        if (!resolved.isBlank()) {
+            return resolved;
+        }
+        if (looksLikeTaskDatasetPlaceholder(ref) || looksLikeTaskDatasetPlaceholder(token)) {
+            return "";
+        }
+        return token;
+    }
+
+    private String unwrapDatasetRefToken(String raw) {
+        String token = nvl(raw).trim();
+        if (token.startsWith("${") && token.endsWith("}") && token.length() > 3) {
+            return token.substring(2, token.length() - 1).trim();
+        }
+        if (token.startsWith("{") && token.endsWith("}") && token.length() > 2) {
+            return token.substring(1, token.length() - 1).trim();
+        }
+        return token;
+    }
+
+    private String resolveDatasetByTaskRef(String raw, Map<String, String> refToDataset) {
+        String ref = nvl(raw).trim();
+        if (ref.isBlank()) {
+            return "";
+        }
+        String direct = nvl(refToDataset.get(ref)).trim();
+        if (!direct.isBlank()) {
+            return direct;
+        }
+        int dotIndex = ref.indexOf('.');
+        if (dotIndex > 0) {
+            String prefix = ref.substring(0, dotIndex).trim();
+            String suffix = ref.substring(dotIndex + 1).trim().toLowerCase();
+            if ((suffix.equals("dataset_id") || suffix.equals("datasetid")) && !prefix.isBlank()) {
+                return nvl(refToDataset.get(prefix)).trim();
+            }
+        }
+        return "";
+    }
+
+    private boolean looksLikeTaskDatasetPlaceholder(String raw) {
+        String text = nvl(raw).trim();
+        if (text.isBlank()) {
+            return false;
+        }
+        String token = unwrapDatasetRefToken(text).trim();
+        if (token.matches("[A-Za-z0-9_-]+")) {
+            return false;
+        }
+        if (token.matches("[A-Za-z0-9_-]+\\.(dataset_id|datasetId)")) {
+            return true;
+        }
+        return text.startsWith("${") || text.startsWith("{");
+    }
+
+    private String rewriteCodeDatasetRefs(String code,
+                                          Map<String, String> refToDataset,
+                                          Set<String> allDatasetIds,
+                                          String primaryDatasetId) {
+        String rewritten = code;
+        for (Map.Entry<String, String> entry : refToDataset.entrySet()) {
+            String ref = entry.getKey();
+            String realId = entry.getValue();
+            rewritten = rewritten.replace("${" + ref + ".dataset_id}", realId);
+            rewritten = rewritten.replace("{" + ref + ".dataset_id}", realId);
+            rewritten = rewritten.replace("${" + ref + ".datasetId}", realId);
+            rewritten = rewritten.replace("{" + ref + ".datasetId}", realId);
+            rewritten = rewritten.replace("${" + ref + "}", realId);
+            rewritten = rewritten.replace("{" + ref + "}", realId);
+            rewritten = rewritten.replace("/sandbox/input/" + ref + "/", "/sandbox/input/" + realId + "/");
+        }
+
+        LinkedHashSet<String> idsForRewrite = new LinkedHashSet<>();
+        if (!primaryDatasetId.isBlank()) {
+            idsForRewrite.add(primaryDatasetId);
+        }
+        idsForRewrite.addAll(allDatasetIds);
+        for (String datasetId : idsForRewrite) {
+            if (datasetId == null || datasetId.isBlank()) {
+                continue;
+            }
+            String canonicalPath = "/sandbox/input/" + datasetId + "/data.csv";
+            rewritten = rewritten.replace("pd.read_csv('" + datasetId + "')", "pd.read_csv('" + canonicalPath + "')");
+            rewritten = rewritten.replace("pd.read_csv(\"" + datasetId + "\")", "pd.read_csv(\"" + canonicalPath + "\")");
+        }
+        return rewritten;
     }
 
     private String firstNonBlank(Object... values) {

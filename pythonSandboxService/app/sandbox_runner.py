@@ -48,13 +48,22 @@ def _normalize_dataset_ids(primary: str, extra: List[str] | None) -> List[str]:
     return ids
 
 
-def _copy_dataset_file(session: SandboxSession, source: Path, dataset_mount: str, dataset_id: str) -> None:
+def _copy_dataset_file(
+    session: SandboxSession,
+    source: Path,
+    dataset_mount: str,
+    dataset_id: str,
+    workdir: str,
+) -> None:
     filename = source.name
     session.copy_to_runtime(str(source), f"{dataset_mount}/{filename}")
 
     # 兼容常见读取路径：/sandbox/input/<dataset_id>/data.csv(.meta.json)
     if filename == f"{dataset_id}.csv":
         session.copy_to_runtime(str(source), f"{dataset_mount}/data.csv")
+        # 兼容部分模型直接 pd.read_csv('<dataset_id>') / pd.read_csv('<dataset_id>.csv')
+        session.copy_to_runtime(str(source), f"{workdir}/{dataset_id}")
+        session.copy_to_runtime(str(source), f"{workdir}/{dataset_id}.csv")
     elif filename == f"{dataset_id}.meta.json":
         session.copy_to_runtime(str(source), f"{dataset_mount}/data.meta.json")
 
@@ -94,7 +103,7 @@ def run_in_sandbox(
             dataset_mount = f"{config.workdir}/input/{ds_id}"
             session.execute_command(f"mkdir -p {dataset_mount}")
             for file_path in files_to_copy:
-                _copy_dataset_file(session, file_path, dataset_mount, ds_id)
+                _copy_dataset_file(session, file_path, dataset_mount, ds_id, config.workdir)
 
         result = session.run(code, libraries=libraries, timeout=timeout)
 
