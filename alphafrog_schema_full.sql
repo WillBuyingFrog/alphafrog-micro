@@ -329,6 +329,19 @@ CREATE TABLE IF NOT EXISTS alphafrog_agent_run_event (
     UNIQUE (run_id, seq)
 );
 
+CREATE TABLE IF NOT EXISTS alphafrog_agent_credit_application (
+    id BIGSERIAL PRIMARY KEY,
+    application_id VARCHAR(64) NOT NULL UNIQUE,
+    user_id VARCHAR(64) NOT NULL,
+    amount INTEGER NOT NULL,
+    reason TEXT,
+    contact VARCHAR(255),
+    status VARCHAR(32) NOT NULL DEFAULT 'APPROVED',
+    ext JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    processed_at TIMESTAMPTZ
+);
+
 -- ==========
 -- 4) Indexes
 -- ==========
@@ -385,5 +398,7 @@ CREATE INDEX IF NOT EXISTS idx_agent_run_user ON alphafrog_agent_run(user_id);
 CREATE INDEX IF NOT EXISTS idx_agent_run_status ON alphafrog_agent_run(status);
 CREATE INDEX IF NOT EXISTS idx_agent_run_updated ON alphafrog_agent_run(updated_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_event_run ON alphafrog_agent_run_event(run_id);
+CREATE INDEX IF NOT EXISTS idx_agent_credit_apply_user ON alphafrog_agent_credit_application(user_id);
+CREATE INDEX IF NOT EXISTS idx_agent_credit_apply_created ON alphafrog_agent_credit_application(created_at);
 
 COMMIT;

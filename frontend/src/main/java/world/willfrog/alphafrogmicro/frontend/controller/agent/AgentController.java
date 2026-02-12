@@ -85,8 +85,20 @@ public class AgentController {
                     || toBoolean(contextMap.get("debugMode"))
                     || toBoolean(contextMap.get("debug_mode"));
             String provider = nvl(request.provider());
+            String modelName = nvl(request.modelName());
+            String endpointName = nvl(request.endpointName());
             Integer plannerCandidateCount = request.plannerCandidateCount();
             boolean admin = isAdmin(authentication);
+            if (request.config() != null) {
+                contextMap.put("config", request.config());
+                ParsedModelSelection modelSelection = parseModelSelection(request.config().model());
+                if (!modelSelection.modelName().isBlank()) {
+                    modelName = modelSelection.modelName();
+                }
+                if (!modelSelection.endpointName().isBlank()) {
+                    endpointName = modelSelection.endpointName();
+                }
+            }
             if (captureLlmRequests) {
                 contextMap.put("captureLlmRequests", true);
             }
@@ -112,8 +124,8 @@ public class AgentController {
                             .setMessage(request.message())
                             .setContextJson(contextJson)
                             .setIdempotencyKey(nvl(request.idempotencyKey()))
-                            .setModelName(nvl(request.modelName()))
-                            .setEndpointName(nvl(request.endpointName()))
+                            .setModelName(modelName)
+                            .setEndpointName(endpointName)
                             .setCaptureLlmRequests(captureLlmRequests)
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
@@ -317,7 +329,8 @@ public class AgentController {
                     result.getStatus(),
                     emptyToNull(result.getAnswer()),
                     emptyToNull(result.getPayloadJson()),
-                    emptyToNull(result.getObservabilityJson())
+                    emptyToNull(result.getObservabilityJson()),
+                    Math.max(0, result.getTotalCreditsConsumed())
             );
             if (!"COMPLETED".equalsIgnoreCase(result.getStatus())) {
                 return ResponseEntity.status(202).body(ResponseWrapper.success(body, "任务未完成"));
@@ -354,7 +367,8 @@ public class AgentController {
                     emptyToNull(status.getLastEventPayloadJson()),
                     emptyToNull(status.getPlanJson()),
                     emptyToNull(status.getProgressJson()),
-                    emptyToNull(status.getObservabilityJson())
+                    emptyToNull(status.getObservabilityJson()),
+                    Math.max(0, status.getTotalCreditsConsumed())
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");
@@ -558,6 +572,23 @@ public class AgentController {
             return boolValue;
         }
         return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private ParsedModelSelection parseModelSelection(String compositeModelId) {
+        String normalized = nvl(compositeModelId).trim();
+        if (normalized.isBlank()) {
+            return new ParsedModelSelection("", "");
+        }
+        int idx = normalized.lastIndexOf('@');
+        if (idx <= 0 || idx >= normalized.length() - 1) {
+            return new ParsedModelSelection(normalized, "");
+        }
+        String modelName = normalized.substring(0, idx).trim();
+        String endpointName = normalized.substring(idx + 1).trim();
+        return new ParsedModelSelection(modelName, endpointName);
+    }
+
+    private record ParsedModelSelection(String modelName, String endpointName) {
     }
 
     private String emptyToNull(String value) {

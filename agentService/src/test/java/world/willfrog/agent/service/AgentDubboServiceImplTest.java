@@ -14,10 +14,12 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 
-import java.util.Map;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -44,6 +46,10 @@ class AgentDubboServiceImplTest {
     private AgentLlmResolver llmResolver;
     @Mock
     private AgentArtifactService artifactService;
+    @Mock
+    private AgentModelCatalogService modelCatalogService;
+    @Mock
+    private AgentCreditService creditService;
 
     private AgentDubboServiceImpl service;
 
@@ -58,6 +64,8 @@ class AgentDubboServiceImplTest {
                 observabilityService,
                 llmResolver,
                 artifactService,
+                modelCatalogService,
+                creditService,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
@@ -68,6 +76,11 @@ class AgentDubboServiceImplTest {
         lenient().when(eventService.shouldMarkExpired(org.mockito.ArgumentMatchers.any())).thenReturn(false);
         lenient().when(stateStore.loadPlan(anyString())).thenReturn(java.util.Optional.empty());
         lenient().when(observabilityService.loadObservabilityJson(anyString(), anyString())).thenReturn("{}");
+        lenient().when(creditService.calculateRunTotalCredits(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyString()
+        )).thenReturn(0);
     }
 
     @Test
@@ -110,5 +123,61 @@ class AgentDubboServiceImplTest {
 
         var status = service.getStatus(GetAgentRunStatusRequest.newBuilder().setUserId("u1").setId("run-2").build());
         assertEquals("EXECUTING", status.getPhase());
+        assertEquals(0, status.getTotalCreditsConsumed());
+    }
+
+    @Test
+    void listModels_shouldReturnCompositeModels() {
+        when(modelCatalogService.listModels()).thenReturn(List.of(
+                new AgentModelCatalogService.ModelCatalogItem(
+                        "openai/gpt-5.2",
+                        "GPT-5.2",
+                        "openrouter",
+                        "openai/gpt-5.2@openrouter",
+                        1.5D,
+                        List.of("reasoning", "code")
+                )
+        ));
+
+        var resp = service.listModels(ListAgentModelsRequest.newBuilder().setUserId("u1").build());
+        assertEquals(1, resp.getModelsCount());
+        assertEquals("openai/gpt-5.2@openrouter", resp.getModels(0).getCompositeId());
+    }
+
+    @Test
+    void getCredits_shouldReturnSummary() {
+        when(creditService.getUserCredits("u1")).thenReturn(
+                new AgentCreditService.CreditSummary(5000, 2450, 2550, "monthly", "2026-03-01T00:00:00Z")
+        );
+
+        var resp = service.getCredits(GetAgentCreditsRequest.newBuilder().setUserId("u1").build());
+        assertEquals(5000, resp.getTotalCredits());
+        assertEquals(2450, resp.getRemainingCredits());
+        assertEquals(2550, resp.getUsedCredits());
+    }
+
+    @Test
+    void applyCredits_shouldReturnAppliedSummary() {
+        when(creditService.applyCredits("u1", 1000, "test", "u@example.com")).thenReturn(
+                new AgentCreditService.ApplyCreditSummary(
+                        "app-1",
+                        6000,
+                        3450,
+                        2550,
+                        "APPROVED",
+                        "2026-02-12T10:00:00Z"
+                )
+        );
+
+        var resp = service.applyCredits(
+                world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest.newBuilder()
+                        .setUserId("u1")
+                        .setAmount(1000)
+                        .setReason("test")
+                        .setContact("u@example.com")
+                        .build()
+        );
+        assertEquals("app-1", resp.getApplicationId());
+        assertEquals(6000, resp.getTotalCredits());
     }
 }

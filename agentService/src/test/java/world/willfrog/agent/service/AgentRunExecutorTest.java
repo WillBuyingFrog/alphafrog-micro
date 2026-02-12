@@ -28,6 +28,7 @@ import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class AgentRunExecutorTest {
@@ -47,6 +48,8 @@ class AgentRunExecutorTest {
     @Mock
     private AgentObservabilityService observabilityService;
     @Mock
+    private AgentCreditService creditService;
+    @Mock
     private TodoPlanner todoPlanner;
     @Mock
     private LinearWorkflowExecutor workflowExecutor;
@@ -65,6 +68,7 @@ class AgentRunExecutorTest {
                 pythonSandboxTools,
                 stateStore,
                 observabilityService,
+                creditService,
                 todoPlanner,
                 workflowExecutor,
                 new ObjectMapper()
@@ -80,6 +84,7 @@ class AgentRunExecutorTest {
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", ""));
         when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
+        lenient().when(creditService.calculateRunTotalCredits(anyString(), anyString(), any())).thenReturn(0);
     }
 
     @Test

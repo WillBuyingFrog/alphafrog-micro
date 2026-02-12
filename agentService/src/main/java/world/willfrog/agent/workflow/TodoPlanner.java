@@ -96,7 +96,8 @@ public class TodoPlanner {
                     "plan", planJson
             ));
             eventService.append(runId, userId, "PLANNING_COMPLETED", Map.of(
-                    "items_count", todoPlan.getItems().size()
+                    "items_count", todoPlan.getItems().size(),
+                    "itemsCount", todoPlan.getItems().size()
             ));
             return todoPlan;
         } catch (Exception e) {

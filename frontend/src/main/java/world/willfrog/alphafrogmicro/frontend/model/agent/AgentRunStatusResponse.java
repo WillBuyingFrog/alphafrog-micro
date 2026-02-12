@@ -10,6 +10,7 @@ public record AgentRunStatusResponse(
         String lastEventPayloadJson,
         String planJson,
         String progressJson,
-        String observabilityJson
+        String observabilityJson,
+        Integer totalCreditsConsumed
 ) {
 }

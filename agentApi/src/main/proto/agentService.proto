@@ -127,6 +127,7 @@ message AgentRunResultMessage {
   string answer = 3;
   string payload_json = 4;
   string observability_json = 5;
+  int32 total_credits_consumed = 6;
 }
 
 message AgentRunStatusMessage {
@@ -140,6 +141,7 @@ message AgentRunStatusMessage {
   string plan_json = 8;
   string progress_json = 9;
   string observability_json = 10;
+  int32 total_credits_consumed = 11;
 }
 
 message AgentToolMessage {
@@ -192,6 +194,51 @@ message DownloadAgentArtifactResponse {
 
 message GetAgentConfigRequest {
   string user_id = 1;
+}
+
+message AgentModelMessage {
+  string id = 1;
+  string display_name = 2;
+  string endpoint = 3;
+  string composite_id = 4;
+  double base_rate = 5;
+  repeated string features = 6;
+}
+
+message ListAgentModelsRequest {
+  string user_id = 1;
+}
+
+message ListAgentModelsResponse {
+  repeated AgentModelMessage models = 1;
+}
+
+message GetAgentCreditsRequest {
+  string user_id = 1;
+}
+
+message GetAgentCreditsResponse {
+  int32 total_credits = 1;
+  int32 remaining_credits = 2;
+  int32 used_credits = 3;
+  string reset_cycle = 4;
+  string next_reset_at = 5;
+}
+
+message ApplyAgentCreditsRequest {
+  string user_id = 1;
+  int32 amount = 2;
+  string reason = 3;
+  string contact = 4;
+}
+
+message ApplyAgentCreditsResponse {
+  string application_id = 1;
+  int32 total_credits = 2;
+  int32 remaining_credits = 3;
+  int32 used_credits = 4;
+  string status = 5;
+  string applied_at = 6;
 }
 
 message AgentRetentionConfigMessage {
@@ -247,6 +294,9 @@ service AgentDubboService {
   rpc ListArtifacts(ListAgentArtifactsRequest) returns (ListAgentArtifactsResponse);
   rpc DownloadArtifact(DownloadAgentArtifactRequest) returns (DownloadAgentArtifactResponse);
   rpc GetConfig(GetAgentConfigRequest) returns (GetAgentConfigResponse);
+  rpc ListModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
+  rpc GetCredits(GetAgentCreditsRequest) returns (GetAgentCreditsResponse);
+  rpc ApplyCredits(ApplyAgentCreditsRequest) returns (ApplyAgentCreditsResponse);
   rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
 }

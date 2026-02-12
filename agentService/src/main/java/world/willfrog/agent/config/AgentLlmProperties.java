@@ -14,6 +14,7 @@ public class AgentLlmProperties {
     private String defaultModel;
     private Map<String, Endpoint> endpoints = new HashMap<>();
     private List<String> models = new ArrayList<>();
+    private Map<String, ModelMetadata> modelMetadata = new HashMap<>();
     private Runtime runtime = new Runtime();
     private Prompts prompts = new Prompts();
 
@@ -47,6 +48,14 @@ public class AgentLlmProperties {
 
     public void setModels(List<String> models) {
         this.models = models == null ? new ArrayList<>() : models;
+    }
+
+    public Map<String, ModelMetadata> getModelMetadata() {
+        return modelMetadata;
+    }
+
+    public void setModelMetadata(Map<String, ModelMetadata> modelMetadata) {
+        this.modelMetadata = modelMetadata == null ? new HashMap<>() : modelMetadata;
     }
 
     public Prompts getPrompts() {
@@ -83,6 +92,36 @@ public class AgentLlmProperties {
 
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey;
+        }
+    }
+
+    public static class ModelMetadata {
+        private String displayName;
+        private Double baseRate;
+        private List<String> features = new ArrayList<>();
+
+        public String getDisplayName() {
+            return displayName;
+        }
+
+        public void setDisplayName(String displayName) {
+            this.displayName = displayName;
+        }
+
+        public Double getBaseRate() {
+            return baseRate;
+        }
+
+        public void setBaseRate(Double baseRate) {
+            this.baseRate = baseRate;
+        }
+
+        public List<String> getFeatures() {
+            return features;
+        }
+
+        public void setFeatures(List<String> features) {
+            this.features = features == null ? new ArrayList<>() : features;
         }
     }
 

@@ -35,6 +35,7 @@ public class AgentRunExecutor {
     private final PythonSandboxTools pythonSandboxTools;
     private final AgentRunStateStore stateStore;
     private final AgentObservabilityService observabilityService;
+    private final AgentCreditService creditService;
     private final TodoPlanner todoPlanner;
     private final LinearWorkflowExecutor workflowExecutor;
     private final ObjectMapper objectMapper;
@@ -123,9 +124,16 @@ public class AgentRunExecutor {
             if (result.isSuccess()) {
                 String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), AgentRunStatus.COMPLETED, runId);
                 runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
+                int totalCreditsConsumed = creditService.calculateRunTotalCredits(
+                        runId,
+                        userId,
+                        observabilityService.loadObservabilityJson(runId, snapshotJson)
+                );
                 eventService.append(runId, userId, "WORKFLOW_COMPLETED", mapOf(
                         "answer", nvl(result.getFinalAnswer()),
-                        "tool_calls_used", result.getToolCallsUsed()
+                        "tool_calls_used", result.getToolCallsUsed(),
+                        "totalCreditsConsumed", totalCreditsConsumed,
+                        "total_credits_consumed", totalCreditsConsumed
                 ));
                 stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
                 return;

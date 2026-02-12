@@ -39,6 +39,9 @@ agent:
     dataset-ttl-seconds: ${AF_AGENT_TOOL_CACHE_DATASET_TTL_SECONDS:604800}
   api:
     max-polling-interval-seconds: ${AF_AGENT_API_MAX_POLLING_INTERVAL_SECONDS:3}
+  credit:
+    default-tool-cost: ${AF_AGENT_CREDIT_DEFAULT_TOOL_COST:1}
+    execute-python-cost: ${AF_AGENT_CREDIT_EXECUTE_PYTHON_COST:5}
   observability:
     debug-file:
       enabled: ${AF_AGENT_OBS_DEBUG_FILE_ENABLED:false}

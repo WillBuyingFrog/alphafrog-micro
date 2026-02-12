@@ -8,6 +8,7 @@ import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -15,6 +16,7 @@ import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.graph.SubAgentRunner;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentCreditService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -57,6 +59,8 @@ class LinearWorkflowExecutorTest {
     @Mock
     private AgentObservabilityService observabilityService;
     @Mock
+    private AgentCreditService creditService;
+    @Mock
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
     private ChatLanguageModel model;
@@ -77,6 +81,7 @@ class LinearWorkflowExecutorTest {
                 stateStore,
                 llmRequestSnapshotBuilder,
                 observabilityService,
+                creditService,
                 localConfigLoader,
                 new AgentLlmProperties(),
                 new ObjectMapper()
@@ -95,6 +100,7 @@ class LinearWorkflowExecutorTest {
         lenient().when(promptService.workflowFinalSystemPrompt()).thenReturn("final");
         lenient().when(promptService.workflowTodoRecoverySystemPrompt()).thenReturn("recovery");
         lenient().when(localConfigLoader.current()).thenReturn(Optional.empty());
+        lenient().when(creditService.calculateToolCredits(anyString(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(1);
         lenient().when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))
                 .thenReturn(Map.of());
 
@@ -130,6 +136,30 @@ class LinearWorkflowExecutorTest {
         assertTrue(result.isPaused());
         verify(stateStore).saveWorkflowState(eq("run-2"), any());
         verify(eventService).append(eq("run-2"), eq("u1"), eq("WORKFLOW_PAUSED"), anyMap());
+    }
+
+    @Test
+    void execute_shouldEmitToolCallPayloadWithCreditsAndDisplayFields() {
+        when(eventService.isRunnable("run-4", "u1")).thenReturn(true);
+        when(creditService.calculateToolCredits(eq("searchStock"), eq(false))).thenReturn(1);
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder().success(true).output("{\"ok\":true}").build()
+        );
+
+        executor.execute(request("run-4", planWithTools(1), new AgentLlmProperties()));
+
+        ArgumentCaptor<Map<String, Object>> startedCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(eventService).append(eq("run-4"), eq("u1"), eq("TOOL_CALL_STARTED"), startedCaptor.capture());
+        Map<String, Object> startedPayload = startedCaptor.getValue();
+        assertTrue(startedPayload.containsKey("toolName"));
+        assertTrue(startedPayload.containsKey("displayName"));
+        assertTrue(startedPayload.containsKey("description"));
+
+        ArgumentCaptor<Map<String, Object>> finishedCaptor = ArgumentCaptor.forClass(Map.class);
+        verify(eventService).append(eq("run-4"), eq("u1"), eq("TOOL_CALL_FINISHED"), finishedCaptor.capture());
+        Map<String, Object> finishedPayload = finishedCaptor.getValue();
+        assertTrue(finishedPayload.containsKey("cacheHit"));
+        assertTrue(finishedPayload.containsKey("creditsConsumed"));
     }
 
     @Test

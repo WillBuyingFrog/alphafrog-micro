@@ -105,6 +105,22 @@
         </if>
     </select>
 
+    <select id="sumCompletedCreditsByUser" resultType="int">
+        SELECT COALESCE(SUM(
+                   CASE
+                       WHEN (e.payload_json -&gt;&gt; 'totalCreditsConsumed') ~ '^[0-9]+$'
+                           THEN (e.payload_json -&gt;&gt; 'totalCreditsConsumed')::int
+                       WHEN (e.payload_json -&gt;&gt; 'total_credits_consumed') ~ '^[0-9]+$'
+                           THEN (e.payload_json -&gt;&gt; 'total_credits_consumed')::int
+                       ELSE 0
+                       END
+               ), 0)
+        FROM alphafrog_agent_run_event e
+                 JOIN alphafrog_agent_run r ON r.id = e.run_id
+        WHERE r.user_id = #{userId}
+          AND e.event_type = 'WORKFLOW_COMPLETED'
+    </select>
+
     <update id="updateStatus">
         UPDATE alphafrog_agent_run
         SET status = #{status},

@@ -19,6 +19,7 @@ import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.graph.SubAgentRunner;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentCreditService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -50,6 +51,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final AgentRunStateStore stateStore;
     private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     private final AgentObservabilityService observabilityService;
+    private final AgentCreditService creditService;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
     private final ObjectMapper objectMapper;
@@ -460,26 +462,38 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
 
         Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
+        String toolName = nvl(item.getToolName());
+        String displayName = toolDisplayName(toolName);
+        String description = toolDescription(toolName);
         eventService.append(runId, userId, "TOOL_CALL_STARTED", Map.of(
                 "todo_id", nvl(item.getId()),
-                "tool_name", nvl(item.getToolName()),
+                "tool_name", toolName,
+                "toolName", toolName,
+                "displayName", displayName,
+                "description", description,
                 "parameters", resolvedParams
         ));
 
         ToolRouter.ToolInvocationResult invokeResult;
         AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
         try {
-            invokeResult = toolRouter.invokeWithMeta(item.getToolName(), resolvedParams);
+            invokeResult = toolRouter.invokeWithMeta(toolName, resolvedParams);
         } finally {
             AgentContext.clearPhase();
         }
 
         toolCallCounter.increment(runId, 1);
+        boolean cacheHit = invokeResult.getCacheMeta() != null && invokeResult.getCacheMeta().isHit();
+        int creditsConsumed = creditService.calculateToolCredits(toolName, cacheHit);
 
         eventService.append(runId, userId, "TOOL_CALL_FINISHED", Map.of(
                 "todo_id", nvl(item.getId()),
-                "tool_name", nvl(item.getToolName()),
+                "tool_name", toolName,
+                "toolName", toolName,
                 "success", invokeResult.isSuccess(),
+                "cacheHit", cacheHit,
+                "creditsConsumed", creditsConsumed,
+                "credits_consumed", creditsConsumed,
                 "result_preview", preview(invokeResult.getOutput()),
                 "cache", toolRouter.toEventCachePayload(invokeResult)
         ));
@@ -553,7 +567,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         );
 
         eventService.append(runId, userId, "FINAL_ANSWER_COMPLETED", Map.of(
-                "answer_preview", preview(answer)
+                "answer_preview", preview(answer),
+                "answerPreview", preview(answer)
         ));
         return answer;
     }
@@ -630,6 +645,30 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return text.substring(0, 500);
         }
         return text;
+    }
+
+    private String toolDisplayName(String toolName) {
+        return switch (nvl(toolName)) {
+            case "searchStock" -> "搜索股票代码";
+            case "searchFund" -> "搜索基金代码";
+            case "searchIndex" -> "搜索指数代码";
+            case "getStockInfo" -> "查询股票基础信息";
+            case "getStockDaily" -> "获取股票行情数据";
+            case "getIndexInfo" -> "查询指数基础信息";
+            case "getIndexDaily" -> "获取指数行情数据";
+            case "executePython" -> "执行编程计算";
+            default -> "调用工具";
+        };
+    }
+
+    private String toolDescription(String toolName) {
+        return switch (nvl(toolName)) {
+            case "searchStock", "searchFund", "searchIndex" -> "根据关键词检索代码";
+            case "getStockInfo", "getIndexInfo" -> "读取资产基础信息";
+            case "getStockDaily", "getIndexDaily" -> "读取区间行情数据";
+            case "executePython" -> "在沙箱中执行 Python 计算";
+            default -> "执行工具调用";
+        };
     }
 
     private String nvl(String text) {

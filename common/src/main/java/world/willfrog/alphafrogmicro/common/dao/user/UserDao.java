@@ -18,7 +18,7 @@ public interface UserDao {
             "FROM alphafrog_user " +
             "WHERE username = #{username} " +
             "LIMIT 1")
-    @Results({
+    @Results(id = "userResultMap", value = {
             @Result(column = "user_id", property = "userId"),
             @Result(column = "username", property = "username"),
             @Result(column = "password", property = "password"),
@@ -29,6 +29,18 @@ public interface UserDao {
             @Result(column = "credit", property = "credit")
     })
     List<User> getUserByUsername(@Param("username") String username);
+
+    @Select("SELECT * " +
+            "FROM alphafrog_user " +
+            "WHERE user_id = #{userId} " +
+            "LIMIT 1")
+    @ResultMap("userResultMap")
+    User getUserById(@Param("userId") Long userId);
+
+    @Update("UPDATE alphafrog_user " +
+            "SET credit = COALESCE(credit, 0) + #{delta} " +
+            "WHERE user_id = #{userId}")
+    int increaseCreditByUserId(@Param("userId") Long userId, @Param("delta") int delta);
 
     @Delete("DELETE FROM alphafrog_user WHERE username = #{username} AND user_type = #{userType}")
     int deleteUserByUsernameAndType(@Param("username") String username, @Param("userType") int userType);

@@ -27,6 +27,8 @@ public interface AgentRunMapper {
                     @Param("status") AgentRunStatus status,
                     @Param("fromTime") OffsetDateTime fromTime);
 
+    int sumCompletedCreditsByUser(@Param("userId") String userId);
+
     int updateStatus(@Param("id") String id,
                      @Param("userId") String userId,
                      @Param("status") AgentRunStatus status);

@@ -105,6 +105,15 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getModels() == null) {
             cfg.setModels(null);
         }
+        if (cfg.getModelMetadata() == null) {
+            cfg.setModelMetadata(null);
+        } else {
+            for (AgentLlmProperties.ModelMetadata metadata : cfg.getModelMetadata().values()) {
+                if (metadata != null && metadata.getFeatures() == null) {
+                    metadata.setFeatures(null);
+                }
+            }
+        }
         if (cfg.getPrompts() == null) {
             cfg.setPrompts(null);
         }

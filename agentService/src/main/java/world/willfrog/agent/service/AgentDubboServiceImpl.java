@@ -13,10 +13,13 @@ import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunListItemMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunEventMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentModelMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
+import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
@@ -26,12 +29,16 @@ import world.willfrog.alphafrogmicro.agent.idl.DubboAgentDubboServiceTriple;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ExportAgentRunResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
@@ -61,6 +68,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentObservabilityService observabilityService;
     private final AgentLlmResolver llmResolver;
     private final AgentArtifactService artifactService;
+    private final AgentModelCatalogService modelCatalogService;
+    private final AgentCreditService creditService;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.run.list.default-days:30}")
@@ -295,6 +304,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     public AgentRunResultMessage getResult(GetAgentRunResultRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         String snapshotJson = run.getSnapshotJson();
+        String observabilityJson = nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson));
         String answer = "";
         if (snapshotJson != null && !snapshotJson.isBlank()) {
             try {
@@ -305,12 +315,18 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 // ignore
             }
         }
+        int totalCreditsConsumed = creditService.calculateRunTotalCredits(
+                run,
+                eventMapper.listByRunId(run.getId()),
+                observabilityJson
+        );
         return AgentRunResultMessage.newBuilder()
                 .setId(run.getId())
                 .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
                 .setAnswer(answer == null ? "" : answer)
                 .setPayloadJson(snapshotJson == null ? "" : snapshotJson)
-                .setObservabilityJson(nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson)))
+                .setObservabilityJson(observabilityJson)
+                .setTotalCreditsConsumed(totalCreditsConsumed)
                 .build();
     }
 
@@ -334,7 +350,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             progressJson = stateStore.buildProgressJson(run.getId(), planJson);
         }
         String observabilityJson = observabilityService.loadObservabilityJson(run.getId(), run.getSnapshotJson());
-        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson);
+        int totalCreditsConsumed = creditService.calculateRunTotalCredits(
+                run,
+                eventMapper.listByRunId(run.getId()),
+                observabilityJson
+        );
+        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson, totalCreditsConsumed);
     }
 
     /**
@@ -445,6 +466,55 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                         .setParallelExecution(false)
                         .setPauseResume(true)
                         .build())
+                .build();
+    }
+
+    @Override
+    public ListAgentModelsResponse listModels(ListAgentModelsRequest request) {
+        if (request.getUserId() == null || request.getUserId().isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        ListAgentModelsResponse.Builder builder = ListAgentModelsResponse.newBuilder();
+        for (AgentModelCatalogService.ModelCatalogItem item : modelCatalogService.listModels()) {
+            builder.addModels(AgentModelMessage.newBuilder()
+                    .setId(nvl(item.id()))
+                    .setDisplayName(nvl(item.displayName()))
+                    .setEndpoint(nvl(item.endpoint()))
+                    .setCompositeId(nvl(item.compositeId()))
+                    .setBaseRate(item.baseRate())
+                    .addAllFeatures(item.features() == null ? List.of() : item.features())
+                    .build());
+        }
+        return builder.build();
+    }
+
+    @Override
+    public GetAgentCreditsResponse getCredits(GetAgentCreditsRequest request) {
+        AgentCreditService.CreditSummary summary = creditService.getUserCredits(request.getUserId());
+        return GetAgentCreditsResponse.newBuilder()
+                .setTotalCredits(summary.totalCredits())
+                .setRemainingCredits(summary.remainingCredits())
+                .setUsedCredits(summary.usedCredits())
+                .setResetCycle(nvl(summary.resetCycle()))
+                .setNextResetAt(nvl(summary.nextResetAt()))
+                .build();
+    }
+
+    @Override
+    public ApplyAgentCreditsResponse applyCredits(ApplyAgentCreditsRequest request) {
+        AgentCreditService.ApplyCreditSummary summary = creditService.applyCredits(
+                request.getUserId(),
+                request.getAmount(),
+                request.getReason(),
+                request.getContact()
+        );
+        return ApplyAgentCreditsResponse.newBuilder()
+                .setApplicationId(nvl(summary.applicationId()))
+                .setTotalCredits(summary.totalCredits())
+                .setRemainingCredits(summary.remainingCredits())
+                .setUsedCredits(summary.usedCredits())
+                .setStatus(nvl(summary.status()))
+                .setAppliedAt(nvl(summary.appliedAt()))
                 .build();
     }
 
@@ -611,7 +681,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                                                   AgentRunEvent lastEvent,
                                                   String planJson,
                                                   String progressJson,
-                                                  String observabilityJson) {
+                                                  String observabilityJson,
+                                                  int totalCreditsConsumed) {
         String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
         String currentTool = "";
         if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
@@ -629,6 +700,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPlanJson(nvl(planJson))
                 .setProgressJson(nvl(progressJson))
                 .setObservabilityJson(nvl(observabilityJson))
+                .setTotalCreditsConsumed(Math.max(0, totalCreditsConsumed))
                 .build();
     }
 
