@@ -53,7 +53,7 @@ public class AgentEventService {
     @Value("${agent.run.interrupted-ttl-days:7}")
     private int interruptedTtlDays;
 
-    @Value("${agent.run.checkpoint-version:v1}")
+    @Value("${agent.run.checkpoint-version:v2}")
     private String checkpointVersion;
 
     @Value("${agent.event.payload.max-chars:10000}")

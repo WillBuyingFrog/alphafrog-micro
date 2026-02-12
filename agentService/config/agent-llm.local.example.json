@@ -33,7 +33,25 @@
     "planning": {
       "candidatePlanCount": 3,
       "maxLocalReplans": 2,
+      "maxTodos": 10,
+      "autoSplitThreshold": 3,
       "complexityPenaltyLambda": 0.25
+    },
+    "execution": {
+      "mode": "LINEAR_WORKFLOW",
+      "maxToolCalls": 20,
+      "maxToolCallsPerSubAgent": 10,
+      "failFast": false,
+      "defaultExecutionMode": "AUTO"
+    },
+    "parallel": {
+      "maxParallelSearchQueries": 3,
+      "maxParallelDailyQueries": 2
+    },
+    "subAgent": {
+      "enabled": true,
+      "complexityThreshold": "MEDIUM",
+      "maxSteps": 6
     },
     "judge": {
       "enabled": false,
@@ -57,6 +75,8 @@
   },
   "prompts": {
     "agentRunSystemPrompt": "你是专业金融分析代理。请使用可用工具获取市场数据并准确回答用户问题。\n重要约束：\n1. 你通常并不知道数据库中的精确 ts_code（例如 000300.SH），必须先调用 searchStock/searchFund/searchIndex 检索后再调用按代码查询的工具；从搜索结果 data.items 中选取最符合用户意图的项（比对 name 与用户目标），不要默认取第一条。\n2. 禁止猜测代码，禁止使用不存在的工具名。\n3. 当市场数据工具返回 dataset_id 后，必须调用 executePython 对数据进行计算与分析。\n4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。\n5. 所有工具输出均为 JSON：{\"ok\":boolean,\"tool\":\"...\",\"data\":{...},\"error\":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。",
+    "todoPlannerSystemPromptTemplate": "你是任务规划器。请将用户目标拆解为 Todo List，只输出 JSON。输出格式：{\"analysis\":\"...\",\"items\":[{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"},\"reasoning\":\"...\",\"executionMode\":\"AUTO\"}]}。约束：步骤数 <= {{maxTodos}}；仅允许工具 {{toolWhitelist}}；type 仅 TOOL_CALL/SUB_AGENT/THOUGHT；executionMode 仅 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT。",
+    "workflowFinalSystemPrompt": "你是金融分析助手，请基于 Todo 执行结果给出最终结论。结论应直接回答用户目标，并包含关键数据与口径说明。",
     "parallelPlannerSystemPromptTemplate": "你是并行任务规划器。只输出 JSON。当前在生成候选计划 {{candidateIndex}}/{{candidateCount}}。必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。请优先拆分为可并行任务，但不要牺牲正确性。候选之间要有可辨识差异（拆分粒度、并行扇出或依赖组织），避免重复方案。约束：任务数 <= {{maxTasks}}，sub_agent 步数 <= {{maxSubSteps}}，并行任务数 <= {{maxParallelTasks}}，sub_agent 任务数 <= {{maxSubAgents}}。仅允许工具：{{toolWhitelist}}。可并行任务应设置为空依赖；有依赖任务用 dependsOn。任务间引用协议必须统一为 ${task_id.output} 或 ${task_id.output.path.to.field}。禁止使用 {{...}}、{...}、task.output 这类非标准写法；禁止在 args 里输出无法解析的占位符。search 类工具输出字段示例：${task_search.output.data.items.0.ts_code}；日线工具 dataset_id 字段示例：${task_daily.output.data.dataset_id}。引用 search 类任务 items 时，必须根据用户目标选取 name 最匹配的项，不可默认使用 items.0。",
     "parallelFinalSystemPrompt": "你是金融分析助手，请基于任务结果给出最终结论。\n要求结论可直接回答用户目标，优先保留关键数值、口径与结论，不要只复述过程。",
     "parallelPatchPlannerSystemPromptTemplate": "你是运行中 DAG 的局部重规划器。只输出 JSON，格式严格为 {\"reason\":\"...\",\"replace_task_ids\":[\"...\"],\"tasks\":[...]}。tasks 的字段与主计划一致：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。约束：1) 仅修复 unresolved 子图及其下游；2) 不重建已成功节点；3) 依赖必须闭合且可执行；4) 不输出 markdown。任务间引用协议必须统一为 ${task_id.output} 或 ${task_id.output.path.to.field}。禁止使用 {{...}}、{...}、task.output 这类非标准写法；禁止在 args 里输出无法解析的占位符。",

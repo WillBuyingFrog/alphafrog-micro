@@ -89,7 +89,10 @@ public class AgentLlmProperties {
     public static class Runtime {
         private Resume resume = new Resume();
         private Cache cache = new Cache();
+        private Execution execution = new Execution();
         private Planning planning = new Planning();
+        private Parallel parallel = new Parallel();
+        private SubAgent subAgent = new SubAgent();
         private Judge judge = new Judge();
 
         public Resume getResume() {
@@ -108,12 +111,36 @@ public class AgentLlmProperties {
             this.cache = cache == null ? new Cache() : cache;
         }
 
+        public Execution getExecution() {
+            return execution;
+        }
+
+        public void setExecution(Execution execution) {
+            this.execution = execution == null ? new Execution() : execution;
+        }
+
         public Planning getPlanning() {
             return planning;
         }
 
         public void setPlanning(Planning planning) {
             this.planning = planning == null ? new Planning() : planning;
+        }
+
+        public Parallel getParallel() {
+            return parallel;
+        }
+
+        public void setParallel(Parallel parallel) {
+            this.parallel = parallel == null ? new Parallel() : parallel;
+        }
+
+        public SubAgent getSubAgent() {
+            return subAgent;
+        }
+
+        public void setSubAgent(SubAgent subAgent) {
+            this.subAgent = subAgent == null ? new SubAgent() : subAgent;
         }
 
         public Judge getJudge() {
@@ -179,6 +206,8 @@ public class AgentLlmProperties {
     public static class Planning {
         private Integer candidatePlanCount;
         private Integer maxLocalReplans;
+        private Integer maxTodos;
+        private Integer autoSplitThreshold;
         private Double complexityPenaltyLambda;
 
         public Integer getCandidatePlanCount() {
@@ -197,12 +226,127 @@ public class AgentLlmProperties {
             this.maxLocalReplans = maxLocalReplans;
         }
 
+        public Integer getMaxTodos() {
+            return maxTodos;
+        }
+
+        public void setMaxTodos(Integer maxTodos) {
+            this.maxTodos = maxTodos;
+        }
+
+        public Integer getAutoSplitThreshold() {
+            return autoSplitThreshold;
+        }
+
+        public void setAutoSplitThreshold(Integer autoSplitThreshold) {
+            this.autoSplitThreshold = autoSplitThreshold;
+        }
+
         public Double getComplexityPenaltyLambda() {
             return complexityPenaltyLambda;
         }
 
         public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
             this.complexityPenaltyLambda = complexityPenaltyLambda;
+        }
+    }
+
+    public static class Execution {
+        private String mode;
+        private Integer maxToolCalls;
+        private Integer maxToolCallsPerSubAgent;
+        private Boolean failFast;
+        private String defaultExecutionMode;
+
+        public String getMode() {
+            return mode;
+        }
+
+        public void setMode(String mode) {
+            this.mode = mode;
+        }
+
+        public Integer getMaxToolCalls() {
+            return maxToolCalls;
+        }
+
+        public void setMaxToolCalls(Integer maxToolCalls) {
+            this.maxToolCalls = maxToolCalls;
+        }
+
+        public Integer getMaxToolCallsPerSubAgent() {
+            return maxToolCallsPerSubAgent;
+        }
+
+        public void setMaxToolCallsPerSubAgent(Integer maxToolCallsPerSubAgent) {
+            this.maxToolCallsPerSubAgent = maxToolCallsPerSubAgent;
+        }
+
+        public Boolean getFailFast() {
+            return failFast;
+        }
+
+        public void setFailFast(Boolean failFast) {
+            this.failFast = failFast;
+        }
+
+        public String getDefaultExecutionMode() {
+            return defaultExecutionMode;
+        }
+
+        public void setDefaultExecutionMode(String defaultExecutionMode) {
+            this.defaultExecutionMode = defaultExecutionMode;
+        }
+    }
+
+    public static class Parallel {
+        private Integer maxParallelSearchQueries;
+        private Integer maxParallelDailyQueries;
+
+        public Integer getMaxParallelSearchQueries() {
+            return maxParallelSearchQueries;
+        }
+
+        public void setMaxParallelSearchQueries(Integer maxParallelSearchQueries) {
+            this.maxParallelSearchQueries = maxParallelSearchQueries;
+        }
+
+        public Integer getMaxParallelDailyQueries() {
+            return maxParallelDailyQueries;
+        }
+
+        public void setMaxParallelDailyQueries(Integer maxParallelDailyQueries) {
+            this.maxParallelDailyQueries = maxParallelDailyQueries;
+        }
+    }
+
+    public static class SubAgent {
+        private Boolean enabled;
+        private String complexityThreshold;
+        private Integer maxSteps;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getComplexityThreshold() {
+            return complexityThreshold;
+        }
+
+        public void setComplexityThreshold(String complexityThreshold) {
+            this.complexityThreshold = complexityThreshold;
+        }
+
+        public Integer getMaxSteps() {
+            return maxSteps;
+        }
+
+        public void setMaxSteps(Integer maxSteps) {
+            this.maxSteps = maxSteps;
         }
     }
 
@@ -262,6 +406,8 @@ public class AgentLlmProperties {
 
     public static class Prompts {
         private String agentRunSystemPrompt;
+        private String todoPlannerSystemPromptTemplate;
+        private String workflowFinalSystemPrompt;
         private String parallelPlannerSystemPromptTemplate;
         private String parallelFinalSystemPrompt;
         private String parallelPatchPlannerSystemPromptTemplate;
@@ -281,6 +427,22 @@ public class AgentLlmProperties {
 
         public void setAgentRunSystemPrompt(String agentRunSystemPrompt) {
             this.agentRunSystemPrompt = agentRunSystemPrompt;
+        }
+
+        public String getTodoPlannerSystemPromptTemplate() {
+            return todoPlannerSystemPromptTemplate;
+        }
+
+        public void setTodoPlannerSystemPromptTemplate(String todoPlannerSystemPromptTemplate) {
+            this.todoPlannerSystemPromptTemplate = todoPlannerSystemPromptTemplate;
+        }
+
+        public String getWorkflowFinalSystemPrompt() {
+            return workflowFinalSystemPrompt;
+        }
+
+        public void setWorkflowFinalSystemPrompt(String workflowFinalSystemPrompt) {
+            this.workflowFinalSystemPrompt = workflowFinalSystemPrompt;
         }
 
         public String getParallelPlannerSystemPromptTemplate() {

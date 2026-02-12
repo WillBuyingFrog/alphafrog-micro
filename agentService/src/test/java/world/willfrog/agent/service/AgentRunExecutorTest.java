@@ -1,21 +1,23 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.graph.ParallelGraphExecutor;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+import world.willfrog.agent.workflow.TodoItem;
+import world.willfrog.agent.workflow.TodoPlan;
+import world.willfrog.agent.workflow.TodoPlanner;
+import world.willfrog.agent.workflow.WorkflowExecutionResult;
 
 import java.util.List;
 import java.util.Map;
@@ -24,11 +26,8 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
-import static org.mockito.Mockito.mock;
-import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
-import static org.mockito.Mockito.lenient;
 
 @ExtendWith(MockitoExtension.class)
 class AgentRunExecutorTest {
@@ -44,18 +43,13 @@ class AgentRunExecutorTest {
     @Mock
     private PythonSandboxTools pythonSandboxTools;
     @Mock
-    private ToolRouter toolRouter;
-    @Mock
-    private ParallelGraphExecutor parallelGraphExecutor;
-    @Mock
     private AgentRunStateStore stateStore;
-    @Mock
-    private AgentPromptService promptService;
     @Mock
     private AgentObservabilityService observabilityService;
     @Mock
-    private AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
-
+    private TodoPlanner todoPlanner;
+    @Mock
+    private LinearWorkflowExecutor workflowExecutor;
     @Mock
     private ChatLanguageModel chatLanguageModel;
 
@@ -69,12 +63,10 @@ class AgentRunExecutorTest {
                 aiServiceFactory,
                 marketDataTools,
                 pythonSandboxTools,
-                toolRouter,
-                parallelGraphExecutor,
                 stateStore,
-                promptService,
                 observabilityService,
-                llmRequestSnapshotBuilder,
+                todoPlanner,
+                workflowExecutor,
                 new ObjectMapper()
         );
 
@@ -88,48 +80,57 @@ class AgentRunExecutorTest {
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", ""));
         when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
-        lenient().when(observabilityService.attachObservabilityToSnapshot(anyString(), any(), any())).thenReturn("{}");
     }
 
     @Test
-    void execute_whenDagEnabled_shouldNotFallbackToLegacyLoop() {
-        AgentRun run = run("run-dag");
-        when(runMapper.findById("run-dag")).thenReturn(run);
-        when(eventService.isRunnable("run-dag", "u1")).thenReturn(true);
-        when(parallelGraphExecutor.isEnabled()).thenReturn(true);
-        when(parallelGraphExecutor.execute(any(), anyString(), anyString(), any(), any(), anyString(), anyString(), anyString()))
-                .thenReturn(true);
+    void execute_shouldMarkCompletedWhenWorkflowSuccess() {
+        AgentRun run = run("run-ok");
+        when(runMapper.findById("run-ok")).thenReturn(run);
+        when(eventService.isRunnable("run-ok", "u1")).thenReturn(true);
 
-        executor.execute("run-dag");
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
 
-        verify(parallelGraphExecutor).execute(any(), anyString(), anyString(), any(), any(), anyString(), anyString(), anyString());
-        verify(eventService, never()).append(eq("run-dag"), eq("u1"), eq("PARALLEL_FALLBACK_TO_SERIAL"), anyMap());
-        verify(chatLanguageModel, never()).generate(any(List.class), any(List.class));
+        executor.execute("run-ok");
+
+        verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
+        verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
     }
 
     @Test
-    void execute_whenDagDisabled_shouldUseLegacyLoop() {
-        AgentRun run = run("run-legacy");
-        when(runMapper.findById("run-legacy")).thenReturn(run);
-        when(eventService.isRunnable("run-legacy", "u1")).thenReturn(true, true);
-        when(parallelGraphExecutor.isEnabled()).thenReturn(false);
-        when(promptService.agentRunSystemPrompt()).thenReturn("sys");
-        when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))
-                .thenReturn(Map.of());
+    void execute_shouldMarkFailedWhenWorkflowFailed() {
+        AgentRun run = run("run-fail");
+        when(runMapper.findById("run-fail")).thenReturn(run);
+        when(eventService.isRunnable("run-fail", "u1")).thenReturn(true);
 
-        @SuppressWarnings("unchecked")
-        Response<AiMessage> response = mock(Response.class);
-        AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.hasToolExecutionRequests()).thenReturn(false);
-        when(aiMessage.text()).thenReturn("done");
-        when(response.content()).thenReturn(aiMessage);
-        when(response.tokenUsage()).thenReturn(null);
-        when(chatLanguageModel.generate(any(List.class), any(List.class))).thenReturn(response);
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(false)
+                .paused(false)
+                .failureReason("boom")
+                .finalAnswer("")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
 
-        executor.execute("run-legacy");
+        executor.execute("run-fail");
 
-        verify(eventService).append(eq("run-legacy"), eq("u1"), eq("PARALLEL_FALLBACK_TO_SERIAL"), anyMap());
-        verify(runMapper).updateSnapshot(eq("run-legacy"), eq("u1"), eq(AgentRunStatus.COMPLETED), any(), eq(true), eq(null));
+        verify(runMapper).updateSnapshot(eq("run-fail"), eq("u1"), eq(AgentRunStatus.FAILED), anyString(), eq(true), eq("boom"));
+        verify(eventService).append(eq("run-fail"), eq("u1"), eq("WORKFLOW_FAILED"), anyMap());
     }
 
     private AgentRun run(String id) {

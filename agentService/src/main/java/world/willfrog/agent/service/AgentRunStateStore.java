@@ -1,20 +1,19 @@
 package world.willfrog.agent.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.Builder;
-import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.graph.ParallelPlan;
-import world.willfrog.agent.graph.ParallelTaskResult;
+import world.willfrog.agent.workflow.TodoStatus;
+import world.willfrog.agent.workflow.WorkflowState;
 
 import java.time.Duration;
-import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -31,6 +30,11 @@ public class AgentRunStateStore {
     private static final String PLAN_OVERRIDE_KEY = ":plan_override";
     private static final String STATUS_KEY = ":status";
     private static final String OBSERVABILITY_KEY = ":observability";
+
+    private static final String WORKFLOW_STATE_KEY = ":workflow_state";
+    private static final String TOOL_CALL_COUNT_KEY = ":tool_call_count";
+
+    // legacy keys for read compatibility
     private static final String TASK_INDEX_KEY = ":tasks";
     private static final String TASK_KEY_PREFIX = ":task:";
 
@@ -40,32 +44,18 @@ public class AgentRunStateStore {
     @Value("${agent.flow.hitl.state-ttl-seconds:3600}")
     private long ttlSeconds;
 
-    @Data
-    @Builder
-    public static class TaskState {
-        private String taskId;
-        private String status;
-        private String type;
-        private String tool;
-        private boolean success;
-        private String output;
-        private String outputPreview;
-        private String error;
-        private String updatedAt;
-    }
-
     public void recordPlan(String runId, String planJson, boolean valid) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         redisTemplate.opsForValue().set(planKey(runId), nvl(planJson));
         redisTemplate.opsForValue().set(planValidKey(runId), String.valueOf(valid));
-        touch(runId, planKey(runId));
-        touch(runId, planValidKey(runId));
+        touch(planKey(runId));
+        touch(planValidKey(runId));
     }
 
     public void storePlanOverride(String runId, String planJson) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         recordPlan(runId, planJson, false);
@@ -73,22 +63,22 @@ public class AgentRunStateStore {
     }
 
     public void markPlanOverride(String runId, boolean override) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         redisTemplate.opsForValue().set(planOverrideKey(runId), String.valueOf(override));
-        touch(runId, planOverrideKey(runId));
+        touch(planOverrideKey(runId));
     }
 
     public void clearPlanOverride(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         redisTemplate.delete(planOverrideKey(runId));
     }
 
     public Optional<String> loadPlan(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return Optional.empty();
         }
         String planJson = redisTemplate.opsForValue().get(planKey(runId));
@@ -99,7 +89,7 @@ public class AgentRunStateStore {
     }
 
     public Optional<Boolean> loadPlanValid(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return Optional.empty();
         }
         String value = redisTemplate.opsForValue().get(planValidKey(runId));
@@ -110,7 +100,7 @@ public class AgentRunStateStore {
     }
 
     public boolean isPlanOverride(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return false;
         }
         String value = redisTemplate.opsForValue().get(planOverrideKey(runId));
@@ -118,15 +108,15 @@ public class AgentRunStateStore {
     }
 
     public void markRunStatus(String runId, String status) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         redisTemplate.opsForValue().set(statusKey(runId), nvl(status));
-        touch(runId, statusKey(runId));
+        touch(statusKey(runId));
     }
 
     public Optional<String> loadRunStatus(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return Optional.empty();
         }
         String status = redisTemplate.opsForValue().get(statusKey(runId));
@@ -137,15 +127,15 @@ public class AgentRunStateStore {
     }
 
     public void saveObservability(String runId, String observabilityJson) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return;
         }
         redisTemplate.opsForValue().set(observabilityKey(runId), nvl(observabilityJson));
-        touch(runId, observabilityKey(runId));
+        touch(observabilityKey(runId));
     }
 
     public Optional<String> loadObservability(String runId) {
-        if (runId == null || runId.isBlank()) {
+        if (blank(runId)) {
             return Optional.empty();
         }
         String json = redisTemplate.opsForValue().get(observabilityKey(runId));
@@ -155,85 +145,151 @@ public class AgentRunStateStore {
         return Optional.of(json);
     }
 
-    public void markTaskStarted(String runId, ParallelPlan.PlanTask task) {
-        if (runId == null || runId.isBlank() || task == null || task.getId() == null) {
+    public void saveWorkflowState(String runId, WorkflowState state) {
+        if (blank(runId) || state == null) {
             return;
         }
-        TaskState state = TaskState.builder()
-                .taskId(task.getId())
-                .status("RUNNING")
-                .type(nvl(task.getType()))
-                .tool(nvl(task.getTool()))
-                .success(false)
-                .output("")
-                .outputPreview("")
-                .error("")
-                .updatedAt(OffsetDateTime.now().toString())
-                .build();
-        saveTaskState(runId, task.getId(), state);
+        redisTemplate.opsForValue().set(workflowStateKey(runId), safeWrite(state));
+        touch(workflowStateKey(runId));
     }
 
-    public void saveTaskResult(String runId, String taskId, ParallelTaskResult result) {
-        if (runId == null || runId.isBlank() || taskId == null || taskId.isBlank()) {
+    public Optional<WorkflowState> loadWorkflowState(String runId) {
+        if (blank(runId)) {
+            return Optional.empty();
+        }
+        String json = redisTemplate.opsForValue().get(workflowStateKey(runId));
+        if (json == null || json.isBlank()) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(objectMapper.readValue(json, WorkflowState.class));
+        } catch (Exception e) {
+            return Optional.empty();
+        }
+    }
+
+    public void clearWorkflowState(String runId) {
+        if (blank(runId)) {
             return;
         }
-        TaskState state = TaskState.builder()
-                .taskId(taskId)
-                .status(result != null && result.isSuccess() ? "COMPLETED" : "FAILED")
-                .type(result == null ? "" : nvl(result.getType()))
-                .tool("")
-                .success(result != null && result.isSuccess())
-                .output(result == null ? "" : nvl(result.getOutput()))
-                .outputPreview(preview(result == null ? "" : result.getOutput()))
-                .error(result == null ? "" : nvl(result.getError()))
-                .updatedAt(OffsetDateTime.now().toString())
-                .build();
-        saveTaskState(runId, taskId, state);
+        redisTemplate.delete(workflowStateKey(runId));
     }
 
-    public Map<String, ParallelTaskResult> loadTaskResults(String runId) {
-        if (runId == null || runId.isBlank()) {
-            return Map.of();
+    public int incrementToolCallCount(String runId, int delta) {
+        if (blank(runId)) {
+            return 0;
         }
-        Set<String> taskIds = redisTemplate.opsForSet().members(taskIndexKey(runId));
-        if (taskIds == null || taskIds.isEmpty()) {
-            return Map.of();
+        int safeDelta = Math.max(0, delta);
+        if (safeDelta == 0) {
+            return getToolCallCount(runId);
         }
-        Map<String, ParallelTaskResult> results = new HashMap<>();
-        for (String taskId : taskIds) {
-            TaskState state = loadTaskState(runId, taskId);
-            if (state == null) {
-                continue;
-            }
-            if (!"COMPLETED".equals(state.getStatus()) && !"FAILED".equals(state.getStatus())) {
-                continue;
-            }
-            ParallelTaskResult result = ParallelTaskResult.builder()
-                    .taskId(taskId)
-                    .type(state.getType())
-                    .success(state.isSuccess())
-                    .output(state.getOutput())
-                    .error(state.getError())
-                    .build();
-            results.put(taskId, result);
+        Long value = redisTemplate.opsForValue().increment(toolCallCountKey(runId), safeDelta);
+        touch(toolCallCountKey(runId));
+        return value == null ? 0 : Math.max(0, value.intValue());
+    }
+
+    public int getToolCallCount(String runId) {
+        if (blank(runId)) {
+            return 0;
         }
-        return results;
+        String value = redisTemplate.opsForValue().get(toolCallCountKey(runId));
+        if (value == null || value.isBlank()) {
+            return 0;
+        }
+        try {
+            return Math.max(0, Integer.parseInt(value));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    public void resetToolCallCount(String runId) {
+        if (blank(runId)) {
+            return;
+        }
+        redisTemplate.delete(toolCallCountKey(runId));
+    }
+
+    public void setToolCallCount(String runId, int count) {
+        if (blank(runId)) {
+            return;
+        }
+        redisTemplate.opsForValue().set(toolCallCountKey(runId), String.valueOf(Math.max(0, count)));
+        touch(toolCallCountKey(runId));
     }
 
     public String buildProgressJson(String runId, String planJson) {
-        ParallelPlan plan = parsePlan(planJson);
-        List<ParallelPlan.PlanTask> tasks = plan.getTasks() == null ? List.of() : plan.getTasks();
-        Map<String, TaskState> states = loadTaskStates(runId);
+        JsonNode root = parseJson(planJson);
+        if (root != null && root.path("items").isArray()) {
+            return buildTodoProgressJson(runId, root.path("items"));
+        }
+        if (root != null && root.path("tasks").isArray()) {
+            return buildLegacyProgressJson(runId, root.path("tasks"));
+        }
+        return "{}";
+    }
 
-        int total = tasks.size();
+    public void clear(String runId) {
+        if (blank(runId)) {
+            return;
+        }
+        clearTasks(runId);
+        redisTemplate.delete(planKey(runId));
+        redisTemplate.delete(planValidKey(runId));
+        redisTemplate.delete(planOverrideKey(runId));
+        redisTemplate.delete(statusKey(runId));
+        redisTemplate.delete(observabilityKey(runId));
+        redisTemplate.delete(workflowStateKey(runId));
+        redisTemplate.delete(toolCallCountKey(runId));
+    }
+
+    public void clearTasks(String runId) {
+        if (blank(runId)) {
+            return;
+        }
+        // clear new workflow checkpoint
+        redisTemplate.delete(workflowStateKey(runId));
+        // clear legacy task states
+        Set<String> taskIds = redisTemplate.opsForSet().members(taskIndexKey(runId));
+        if (taskIds != null) {
+            for (String taskId : taskIds) {
+                redisTemplate.delete(taskKey(runId, taskId));
+            }
+        }
+        redisTemplate.delete(taskIndexKey(runId));
+    }
+
+    private String buildTodoProgressJson(String runId, JsonNode itemsNode) {
+        Optional<WorkflowState> workflowState = loadWorkflowState(runId);
+        Map<String, String> completedStatusById = new HashMap<>();
+        int currentIndex = -1;
+        if (workflowState.isPresent()) {
+            currentIndex = workflowState.get().getCurrentIndex();
+            for (var item : workflowState.get().getCompletedItems()) {
+                String key = nvl(item.getId());
+                if (key.isBlank()) {
+                    continue;
+                }
+                TodoStatus status = item.getStatus() == null ? TodoStatus.COMPLETED : item.getStatus();
+                completedStatusById.put(key, status.name());
+            }
+        }
+
+        int total = 0;
         int completed = 0;
         int failed = 0;
         int running = 0;
+        List<Map<String, Object>> tasks = new java.util.ArrayList<>();
 
-        List<Map<String, Object>> taskSummaries = new ArrayList<>();
-        for (ParallelPlan.PlanTask task : tasks) {
-            TaskState state = states.get(task.getId());
-            String status = state == null ? "PENDING" : nvl(state.getStatus());
+        int idx = 0;
+        for (JsonNode node : itemsNode) {
+            total++;
+            String id = nvl(node.path("id").asText("todo_" + (idx + 1)));
+            String status = completedStatusById.get(id);
+            if (status == null || status.isBlank()) {
+                status = idx == currentIndex ? "RUNNING" : "PENDING";
+            }
+
             if ("COMPLETED".equals(status)) {
                 completed++;
             } else if ("FAILED".equals(status)) {
@@ -241,105 +297,96 @@ public class AgentRunStateStore {
             } else if ("RUNNING".equals(status)) {
                 running++;
             }
-            Map<String, Object> item = new HashMap<>();
-            item.put("id", task.getId());
-            item.put("type", nvl(task.getType()));
-            item.put("tool", nvl(task.getTool()));
-            item.put("status", status);
-            item.put("success", state != null && state.isSuccess());
-            item.put("output_preview", state == null ? "" : nvl(state.getOutputPreview()));
-            taskSummaries.add(item);
+
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", id);
+            row.put("sequence", node.path("sequence").asInt(idx + 1));
+            row.put("type", nvl(node.path("type").asText("")));
+            row.put("tool", nvl(node.path("toolName").asText("")));
+            row.put("status", status);
+            tasks.add(row);
+            idx++;
         }
 
         int pending = Math.max(0, total - completed - failed - running);
-        Map<String, Object> progress = new HashMap<>();
-        progress.put("total", total);
-        progress.put("completed", completed);
-        progress.put("failed", failed);
-        progress.put("running", running);
-        progress.put("pending", pending);
-        progress.put("tasks", taskSummaries);
-        try {
-            return objectMapper.writeValueAsString(progress);
-        } catch (Exception e) {
-            return "{}";
-        }
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("total", total);
+        payload.put("completed", completed);
+        payload.put("failed", failed);
+        payload.put("running", running);
+        payload.put("pending", pending);
+        payload.put("tasks", tasks);
+        payload.put("tool_calls_used", getToolCallCount(runId));
+        return safeWrite(payload);
     }
 
-    public void clear(String runId) {
-        if (runId == null || runId.isBlank()) {
-            return;
-        }
+    private String buildLegacyProgressJson(String runId, JsonNode tasksNode) {
         Set<String> taskIds = redisTemplate.opsForSet().members(taskIndexKey(runId));
+        Map<String, String> legacyStatus = new HashMap<>();
         if (taskIds != null) {
             for (String taskId : taskIds) {
-                redisTemplate.delete(taskKey(runId, taskId));
+                JsonNode taskState = parseJson(redisTemplate.opsForValue().get(taskKey(runId, taskId)));
+                if (taskState != null) {
+                    legacyStatus.put(taskId, nvl(taskState.path("status").asText("PENDING")));
+                }
             }
         }
-        redisTemplate.delete(taskIndexKey(runId));
-        redisTemplate.delete(planKey(runId));
-        redisTemplate.delete(planValidKey(runId));
-        redisTemplate.delete(planOverrideKey(runId));
-        redisTemplate.delete(statusKey(runId));
-        redisTemplate.delete(observabilityKey(runId));
-    }
 
-    public void clearTasks(String runId) {
-        if (runId == null || runId.isBlank()) {
-            return;
-        }
-        Set<String> taskIds = redisTemplate.opsForSet().members(taskIndexKey(runId));
-        if (taskIds != null) {
-            for (String taskId : taskIds) {
-                redisTemplate.delete(taskKey(runId, taskId));
+        int total = 0;
+        int completed = 0;
+        int failed = 0;
+        int running = 0;
+        List<Map<String, Object>> tasks = new java.util.ArrayList<>();
+
+        for (JsonNode node : tasksNode) {
+            total++;
+            String id = nvl(node.path("id").asText(""));
+            String status = legacyStatus.getOrDefault(id, "PENDING");
+            if ("COMPLETED".equals(status)) {
+                completed++;
+            } else if ("FAILED".equals(status)) {
+                failed++;
+            } else if ("RUNNING".equals(status)) {
+                running++;
             }
+            Map<String, Object> row = new LinkedHashMap<>();
+            row.put("id", id);
+            row.put("type", nvl(node.path("type").asText("")));
+            row.put("tool", nvl(node.path("tool").asText("")));
+            row.put("status", status);
+            tasks.add(row);
         }
-        redisTemplate.delete(taskIndexKey(runId));
+
+        int pending = Math.max(0, total - completed - failed - running);
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("total", total);
+        payload.put("completed", completed);
+        payload.put("failed", failed);
+        payload.put("running", running);
+        payload.put("pending", pending);
+        payload.put("tasks", tasks);
+        return safeWrite(payload);
     }
 
-    private void saveTaskState(String runId, String taskId, TaskState state) {
-        String json = safeWrite(state);
-        redisTemplate.opsForValue().set(taskKey(runId, taskId), json);
-        redisTemplate.opsForSet().add(taskIndexKey(runId), taskId);
-        touch(runId, taskKey(runId, taskId));
-        touch(runId, taskIndexKey(runId));
-    }
-
-    private TaskState loadTaskState(String runId, String taskId) {
-        String json = redisTemplate.opsForValue().get(taskKey(runId, taskId));
-        if (json == null || json.isBlank()) {
+    private JsonNode parseJson(String raw) {
+        if (raw == null || raw.isBlank()) {
             return null;
         }
         try {
-            return objectMapper.readValue(json, TaskState.class);
+            return objectMapper.readTree(raw);
         } catch (Exception e) {
             return null;
         }
     }
 
-    private Map<String, TaskState> loadTaskStates(String runId) {
-        Set<String> taskIds = redisTemplate.opsForSet().members(taskIndexKey(runId));
-        if (taskIds == null || taskIds.isEmpty()) {
-            return Map.of();
-        }
-        Map<String, TaskState> states = new HashMap<>();
-        for (String taskId : taskIds) {
-            TaskState state = loadTaskState(runId, taskId);
-            if (state != null) {
-                states.put(taskId, state);
-            }
-        }
-        return states;
-    }
-
-    private ParallelPlan parsePlan(String json) {
-        if (json == null || json.isBlank()) {
-            return new ParallelPlan();
+    private void touch(String key) {
+        if (ttlSeconds <= 0 || key == null || key.isBlank()) {
+            return;
         }
         try {
-            return objectMapper.readValue(json, ParallelPlan.class);
+            redisTemplate.expire(key, Duration.ofSeconds(ttlSeconds));
         } catch (Exception e) {
-            return new ParallelPlan();
+            log.debug("touch redis key failed: {}", key, e);
         }
     }
 
@@ -351,15 +398,12 @@ public class AgentRunStateStore {
         }
     }
 
-    private void touch(String runId, String key) {
-        if (ttlSeconds <= 0) {
-            return;
-        }
-        try {
-            redisTemplate.expire(key, Duration.ofSeconds(ttlSeconds));
-        } catch (Exception e) {
-            log.debug("Failed to expire key: {}", key, e);
-        }
+    private String nvl(String text) {
+        return text == null ? "" : text;
+    }
+
+    private boolean blank(String text) {
+        return text == null || text.isBlank();
     }
 
     private String planKey(String runId) {
@@ -382,25 +426,19 @@ public class AgentRunStateStore {
         return PREFIX + runId + OBSERVABILITY_KEY;
     }
 
+    private String workflowStateKey(String runId) {
+        return PREFIX + runId + WORKFLOW_STATE_KEY;
+    }
+
+    private String toolCallCountKey(String runId) {
+        return PREFIX + runId + TOOL_CALL_COUNT_KEY;
+    }
+
     private String taskIndexKey(String runId) {
         return PREFIX + runId + TASK_INDEX_KEY;
     }
 
     private String taskKey(String runId, String taskId) {
         return PREFIX + runId + TASK_KEY_PREFIX + taskId;
-    }
-
-    private String preview(String text) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() > 300) {
-            return text.substring(0, 300);
-        }
-        return text;
-    }
-
-    private String nvl(String v) {
-        return v == null ? "" : v;
     }
 }

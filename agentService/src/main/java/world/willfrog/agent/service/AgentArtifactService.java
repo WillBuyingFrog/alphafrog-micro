@@ -218,6 +218,8 @@ public class AgentArtifactService {
         List<String> pendingToolRefs = new ArrayList<>();
         Map<String, String> pendingParallelRefsByTask = new HashMap<>();
         Map<String, Map<String, Object>> parallelExecuteArgsByTask = new HashMap<>();
+        Map<String, Map<String, Object>> todoExecuteArgsByTodo = new HashMap<>();
+        Map<String, String> pendingTodoRefsByTodoId = new HashMap<>();
         for (AgentRunEvent event : events) {
             if (event == null || event.getEventType() == null) {
                 continue;
@@ -229,6 +231,11 @@ public class AgentArtifactService {
 
             if ("PLAN_CREATED".equals(eventType)) {
                 collectParallelExecutePythonArgs(payload, parallelExecuteArgsByTask);
+                continue;
+            }
+
+            if ("TODO_LIST_CREATED".equals(eventType)) {
+                collectTodoExecutePythonArgs(payload, todoExecuteArgsByTodo);
                 continue;
             }
 
@@ -310,6 +317,54 @@ public class AgentArtifactService {
                         }
                         invocation.datasetIds.addAll(extractDatasetIdsFromToolOutput(outputNode));
                     }
+                }
+                continue;
+            }
+
+            if ("TODO_STARTED".equals(eventType)) {
+                String toolName = firstNonBlank(
+                        readAsString(payload.get("tool")),
+                        readAsString(payload.get("tool_name"))
+                );
+                if (!"executePython".equals(toolName)) {
+                    continue;
+                }
+                String todoId = readAsString(payload.get("todo_id"));
+                Map<String, Object> todoArgs = todoExecuteArgsByTodo.getOrDefault(todoId, Map.of());
+                MutableInvocation invocation = createInvocation(
+                        "todo-" + todoId + "-" + safeSeq(event),
+                        safeSeq(event),
+                        event.getCreatedAt(),
+                        "TODO_TASK",
+                        extractCode(todoArgs),
+                        extractDatasetIds(todoArgs),
+                        null
+                );
+                invocations.add(invocation);
+                invocationByRef.put(invocation.ref, invocation);
+                pendingTodoRefsByTodoId.put(todoId, invocation.ref);
+                continue;
+            }
+
+            if ("TODO_FINISHED".equals(eventType) || "TODO_FAILED".equals(eventType)) {
+                String todoId = readAsString(payload.get("todo_id"));
+                String ref = pendingTodoRefsByTodoId.remove(todoId);
+                if (ref == null) {
+                    continue;
+                }
+                String preview = firstNonBlank(
+                        readAsString(payload.get("output_preview")),
+                        readAsString(payload.get("result_preview")),
+                        readAsString(payload.get("summary"))
+                );
+                JsonNode outputNode = parseToolOutput(preview);
+                MutableInvocation invocation = invocationByRef.get(ref);
+                if (invocation != null) {
+                    invocation.success = toNullableBoolean(payload.get("success"));
+                    if (invocation.success == null) {
+                        invocation.success = isToolOutputSuccess(outputNode);
+                    }
+                    invocation.datasetIds.addAll(extractDatasetIdsFromToolOutput(outputNode));
                 }
                 continue;
             }
@@ -416,6 +471,27 @@ public class AgentArtifactService {
                 continue;
             }
             parallelExecuteArgsByTask.put(taskId, readNestedMap(task.get("args")));
+        }
+    }
+
+    private void collectTodoExecutePythonArgs(Map<String, Object> payload,
+                                              Map<String, Map<String, Object>> todoExecuteArgsByTodo) {
+        if (payload == null || payload.isEmpty()) {
+            return;
+        }
+        Map<String, Object> plan = readNestedMap(payload.get("plan"));
+        if (plan.isEmpty()) {
+            return;
+        }
+        for (Map<String, Object> item : readMapList(plan.get("items"))) {
+            if (!"executePython".equals(readAsString(item.get("toolName")))) {
+                continue;
+            }
+            String todoId = readAsString(item.get("id"));
+            if (todoId.isBlank()) {
+                continue;
+            }
+            todoExecuteArgsByTodo.put(todoId, readNestedMap(item.get("params")));
         }
     }
 

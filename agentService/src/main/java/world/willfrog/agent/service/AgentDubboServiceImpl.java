@@ -75,10 +75,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     @Value("${agent.api.max-polling-interval-seconds:3}")
     private int maxPollingIntervalSeconds;
 
-    @Value("${agent.flow.parallel.enabled:true}")
+    @Value("${agent.flow.parallel.enabled:false}")
     private boolean parallelExecutionEnabled;
 
-    @Value("${agent.run.checkpoint-version:v1}")
+    @Value("${agent.run.checkpoint-version:v2}")
     private String checkpointVersion;
 
     /**
@@ -279,7 +279,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             stateStore.storePlanOverride(run.getId(), request.getPlanOverrideJson());
         }
         runMapper.resetForResume(run.getId(), run.getUserId(), eventService.nextTtlExpiresAt());
-        eventService.append(run.getId(), run.getUserId(), "RESUMED", Map.of("run_id", run.getId()));
+        eventService.append(run.getId(), run.getUserId(), "WORKFLOW_RESUMED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.RECEIVED.name());
         executor.executeAsync(run.getId());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
@@ -442,7 +442,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                         .build())
                 .setMaxPollingInterval(Math.max(1, maxPollingIntervalSeconds))
                 .setFeatures(AgentFeatureConfigMessage.newBuilder()
-                        .setParallelExecution(parallelExecutionEnabled)
+                        .setParallelExecution(false)
                         .setPauseResume(true)
                         .build())
                 .build();
@@ -520,7 +520,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     }
 
     private void ensureCheckpointCompatible(AgentRun run) {
-        String expected = checkpointVersion == null || checkpointVersion.isBlank() ? "v1" : checkpointVersion.trim();
+        String expected = checkpointVersion == null || checkpointVersion.isBlank() ? "v2" : checkpointVersion.trim();
         String actual = readExtField(run.getExt(), "checkpoint_version");
         if (actual == null || actual.isBlank() || expected.equals(actual)) {
             return;
@@ -651,16 +651,23 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (status == AgentRunStatus.WAITING) {
             return "PAUSED";
         }
-        if ("PLANNING_STARTED".equals(lastEventType) || "PLAN_STARTED".equals(lastEventType) || "PLAN_CREATED".equals(lastEventType)) {
+        if ("PLANNING_STARTED".equals(lastEventType)
+                || "PLANNING_COMPLETED".equals(lastEventType)
+                || "TODO_LIST_CREATED".equals(lastEventType)) {
             return "PLANNING";
         }
         if ("TOOL_CALL_STARTED".equals(lastEventType)) {
             return "EXECUTING_TOOL";
         }
-        if ("PARALLEL_TASK_STARTED".equals(lastEventType)) {
+        if ("TODO_STARTED".equals(lastEventType)
+                || "TODO_FINISHED".equals(lastEventType)
+                || "TODO_FAILED".equals(lastEventType)
+                || "SUB_AGENT_STARTED".equals(lastEventType)
+                || "SUB_AGENT_FINISHED".equals(lastEventType)
+                || "WORKFLOW_RESUMED".equals(lastEventType)) {
             return "EXECUTING";
         }
-        if ("SUMMARIZING_STARTED".equals(lastEventType)) {
+        if ("FINAL_ANSWER_GENERATING".equals(lastEventType) || "SUMMARIZING_STARTED".equals(lastEventType)) {
             return "SUMMARIZING";
         }
         if ("EXECUTION_STARTED".equals(lastEventType) || "EXECUTION_FINISHED".equals(lastEventType)) {
@@ -676,6 +683,9 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         try {
             Map<?, ?> map = objectMapper.readValue(payloadJson, Map.class);
             Object v = map.get("tool_name");
+            if (v == null) {
+                v = map.get("tool");
+            }
             return v == null ? "" : String.valueOf(v);
         } catch (Exception e) {
             return "";

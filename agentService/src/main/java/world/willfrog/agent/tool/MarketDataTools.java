@@ -4,15 +4,21 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.function.Function;
 
 @Component
 public class MarketDataTools {
@@ -28,13 +34,19 @@ public class MarketDataTools {
 
     private final DatasetWriter datasetWriter;
     private final DatasetRegistry datasetRegistry;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
+    private final AgentLlmProperties llmProperties;
     private final ObjectMapper objectMapper;
 
     public MarketDataTools(DatasetWriter datasetWriter,
                            DatasetRegistry datasetRegistry,
+                           AgentLlmLocalConfigLoader localConfigLoader,
+                           AgentLlmProperties llmProperties,
                            ObjectMapper objectMapper) {
         this.datasetWriter = datasetWriter;
         this.datasetRegistry = datasetRegistry;
+        this.localConfigLoader = localConfigLoader;
+        this.llmProperties = llmProperties;
         this.objectMapper = objectMapper;
     }
 
@@ -59,6 +71,15 @@ public class MarketDataTools {
 
     @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
     public String getStockDaily(String tsCode, String startDateStr, String endDateStr) {
+        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+        if (tsCodes.size() > 1) {
+            return batchGetDaily("getStockDaily", tsCodes, startDateStr, endDateStr, true);
+        }
+        String singleTsCode = tsCodes.isEmpty() ? tsCode : tsCodes.get(0);
+        return getStockDailySingle(singleTsCode, startDateStr, endDateStr);
+    }
+
+    private String getStockDailySingle(String tsCode, String startDateStr, String endDateStr) {
         String normalizedTsCode = nvl(tsCode).trim();
         String normalizedStart = compactDate(startDateStr);
         String normalizedEnd = compactDate(endDateStr);
@@ -97,6 +118,15 @@ public class MarketDataTools {
 
     @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。")
     public String searchStock(String keyword) {
+        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        if (queries.size() > 1) {
+            return batchSearch("searchStock", queries, this::searchStockSingle);
+        }
+        String single = queries.isEmpty() ? keyword : queries.get(0);
+        return searchStockSingle(single);
+    }
+
+    private String searchStockSingle(String keyword) {
         try {
             DomesticStockSearchRequest request = DomesticStockSearchRequest.newBuilder()
                     .setQuery(nvl(keyword))
@@ -125,6 +155,15 @@ public class MarketDataTools {
 
     @Tool("按关键词搜索基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或基金名称关键词（例如 510300、沪深300ETF）。")
     public String searchFund(String keyword) {
+        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        if (queries.size() > 1) {
+            return batchSearch("searchFund", queries, this::searchFundSingle);
+        }
+        String single = queries.isEmpty() ? keyword : queries.get(0);
+        return searchFundSingle(single);
+    }
+
+    private String searchFundSingle(String keyword) {
         try {
             DomesticFundSearchRequest request = DomesticFundSearchRequest.newBuilder()
                     .setQuery(nvl(keyword))
@@ -171,6 +210,15 @@ public class MarketDataTools {
 
     @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
     public String getIndexDaily(String tsCode, String startDateStr, String endDateStr) {
+        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+        if (tsCodes.size() > 1) {
+            return batchGetDaily("getIndexDaily", tsCodes, startDateStr, endDateStr, false);
+        }
+        String singleTsCode = tsCodes.isEmpty() ? tsCode : tsCodes.get(0);
+        return getIndexDailySingle(singleTsCode, startDateStr, endDateStr);
+    }
+
+    private String getIndexDailySingle(String tsCode, String startDateStr, String endDateStr) {
         String normalizedTsCode = nvl(tsCode).trim();
         String normalizedStart = compactDate(startDateStr);
         String normalizedEnd = compactDate(endDateStr);
@@ -209,6 +257,15 @@ public class MarketDataTools {
 
     @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。")
     public String searchIndex(String keyword) {
+        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        if (queries.size() > 1) {
+            return batchSearch("searchIndex", queries, this::searchIndexSingle);
+        }
+        String single = queries.isEmpty() ? keyword : queries.get(0);
+        return searchIndexSingle(single);
+    }
+
+    private String searchIndexSingle(String keyword) {
         try {
             DomesticIndexSearchRequest request = DomesticIndexSearchRequest.newBuilder()
                     .setQuery(nvl(keyword))
@@ -231,6 +288,173 @@ public class MarketDataTools {
             ));
         } catch (Exception e) {
             return fail("searchIndex", "TOOL_ERROR", "Error searching index", Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    private String batchSearch(String toolName, List<String> queries, Function<String, String> singleCall) {
+        List<CompletableFuture<Map<String, Object>>> futures = queries.stream()
+                .map(query -> CompletableFuture.supplyAsync(() -> {
+                    String response = singleCall.apply(query);
+                    Map<String, Object> payload = readJsonMap(response);
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("query", query);
+                    row.put("ok", Boolean.TRUE.equals(payload.get("ok")));
+                    row.put("data", readNestedMap(payload.get("data")));
+                    row.put("error", readNestedMap(payload.get("error")));
+                    return row;
+                }))
+                .toList();
+
+        List<Map<String, Object>> results = futures.stream().map(CompletableFuture::join).toList();
+        long successCount = results.stream().filter(it -> Boolean.TRUE.equals(it.get("ok"))).count();
+
+        return ok(toolName, Map.of(
+                "mode", "batch",
+                "queries", queries,
+                "results", results,
+                "success_count", successCount,
+                "failure_count", Math.max(0, results.size() - successCount)
+        ));
+    }
+
+    private String batchGetDaily(String toolName,
+                                 List<String> tsCodes,
+                                 String startDateStr,
+                                 String endDateStr,
+                                 boolean stock) {
+        List<CompletableFuture<Map<String, Object>>> futures = tsCodes.stream()
+                .map(code -> CompletableFuture.supplyAsync(() -> {
+                    String response = stock
+                            ? getStockDailySingle(code, startDateStr, endDateStr)
+                            : getIndexDailySingle(code, startDateStr, endDateStr);
+                    Map<String, Object> payload = readJsonMap(response);
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("ts_code", code);
+                    row.put("ok", Boolean.TRUE.equals(payload.get("ok")));
+                    row.put("data", readNestedMap(payload.get("data")));
+                    row.put("error", readNestedMap(payload.get("error")));
+                    return row;
+                }))
+                .toList();
+
+        List<Map<String, Object>> results = futures.stream().map(CompletableFuture::join).toList();
+        long successCount = results.stream().filter(it -> Boolean.TRUE.equals(it.get("ok"))).count();
+
+        return ok(toolName, Map.of(
+                "mode", "batch",
+                "ts_codes", tsCodes,
+                "start_date", compactDate(startDateStr),
+                "end_date", compactDate(endDateStr),
+                "results", results,
+                "success_count", successCount,
+                "failure_count", Math.max(0, results.size() - successCount)
+        ));
+    }
+
+    private List<String> parseBatchValues(String raw, int maxItems) {
+        if (raw == null || raw.isBlank()) {
+            return List.of();
+        }
+        LinkedHashSet<String> values = new LinkedHashSet<>();
+        String text = raw.trim();
+
+        if (text.startsWith("[") && text.endsWith("]")) {
+            try {
+                List<?> arr = objectMapper.readValue(text, List.class);
+                for (Object item : arr) {
+                    String value = item == null ? "" : String.valueOf(item).trim();
+                    if (!value.isBlank()) {
+                        values.add(value);
+                    }
+                    if (values.size() >= maxItems) {
+                        break;
+                    }
+                }
+            } catch (Exception ignore) {
+                // fallback to split mode
+            }
+        }
+
+        if (values.isEmpty()) {
+            String[] parts = text.split("\\|");
+            for (String part : parts) {
+                String value = part == null ? "" : part.trim();
+                if (!value.isBlank()) {
+                    values.add(value);
+                }
+                if (values.size() >= maxItems) {
+                    break;
+                }
+            }
+        }
+
+        if (values.isEmpty() && !text.isBlank()) {
+            values.add(text);
+        }
+        return new ArrayList<>(values).subList(0, Math.min(values.size(), Math.max(1, maxItems)));
+    }
+
+    private int resolveMaxParallelSearchQueries() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getParallel)
+                .map(AgentLlmProperties.Parallel::getMaxParallelSearchQueries)
+                .orElse(0);
+        if (local > 0) {
+            return clamp(local, 1, 20);
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getParallel)
+                .map(AgentLlmProperties.Parallel::getMaxParallelSearchQueries)
+                .orElse(0);
+        if (base > 0) {
+            return clamp(base, 1, 20);
+        }
+        return 3;
+    }
+
+    private int resolveMaxParallelDailyQueries() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getParallel)
+                .map(AgentLlmProperties.Parallel::getMaxParallelDailyQueries)
+                .orElse(0);
+        if (local > 0) {
+            return clamp(local, 1, 20);
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getParallel)
+                .map(AgentLlmProperties.Parallel::getMaxParallelDailyQueries)
+                .orElse(0);
+        if (base > 0) {
+            return clamp(base, 1, 20);
+        }
+        return 2;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
+    }
+
+    private Map<String, Object> readNestedMap(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return out;
+        }
+        return Map.of();
+    }
+
+    private Map<String, Object> readJsonMap(String json) {
+        if (json == null || json.isBlank()) {
+            return Map.of();
+        }
+        try {
+            return objectMapper.readValue(json, Map.class);
+        } catch (Exception e) {
+            return Map.of();
         }
     }
 

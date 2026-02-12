@@ -22,6 +22,35 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), ""));
     }
 
+    public String todoPlannerSystemPrompt(String toolWhitelist, int maxTodos) {
+        String template = firstNonBlank(
+                currentPrompts().getTodoPlannerSystemPromptTemplate(),
+                """
+                你是任务规划专家。请把用户目标拆解为 Todo List，只输出 JSON。
+                输出格式:
+                {"analysis":"...","items":[{"id":"todo_1","sequence":1,"type":"TOOL_CALL","toolName":"searchIndex","params":{"keyword":"沪深300"},"reasoning":"...","executionMode":"AUTO"}]}
+                规则:
+                1) 只能使用工具: {{toolWhitelist}}
+                2) 总步骤数不超过 {{maxTodos}}
+                3) type 仅允许 TOOL_CALL/SUB_AGENT/THOUGHT
+                4) executionMode 仅允许 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT
+                """
+        );
+        String specific = render(template, Map.of(
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos)
+        ));
+        return composeSystemPrompt(specific);
+    }
+
+    public String workflowFinalSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(
+                currentPrompts().getWorkflowFinalSystemPrompt(),
+                currentPrompts().getParallelFinalSystemPrompt(),
+                ""
+        ));
+    }
+
     public String parallelPlannerSystemPrompt(String toolWhitelist,
                                               int maxTasks,
                                               int maxSubSteps,
@@ -158,6 +187,8 @@ public class AgentPromptService {
         }
         AgentLlmProperties.Prompts merged = new AgentLlmProperties.Prompts();
         merged.setAgentRunSystemPrompt(firstNonBlank(local.getAgentRunSystemPrompt(), base.getAgentRunSystemPrompt()));
+        merged.setTodoPlannerSystemPromptTemplate(firstNonBlank(local.getTodoPlannerSystemPromptTemplate(), base.getTodoPlannerSystemPromptTemplate()));
+        merged.setWorkflowFinalSystemPrompt(firstNonBlank(local.getWorkflowFinalSystemPrompt(), base.getWorkflowFinalSystemPrompt()));
         merged.setParallelPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPlannerSystemPromptTemplate(), base.getParallelPlannerSystemPromptTemplate()));
         merged.setParallelFinalSystemPrompt(firstNonBlank(local.getParallelFinalSystemPrompt(), base.getParallelFinalSystemPrompt()));
         merged.setParallelPatchPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPatchPlannerSystemPromptTemplate(), base.getParallelPatchPlannerSystemPromptTemplate()));

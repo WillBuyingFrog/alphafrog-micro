@@ -31,7 +31,7 @@ dubbo:
 agent:
   run:
     interrupted-ttl-days: ${AF_AGENT_RUN_INTERRUPTED_TTL_DAYS:7}
-    checkpoint-version: ${AF_AGENT_RUN_CHECKPOINT_VERSION:v1}
+    checkpoint-version: ${AF_AGENT_RUN_CHECKPOINT_VERSION:v2}
   tool-cache:
     version: ${AF_AGENT_TOOL_CACHE_VERSION:v1}
     search-ttl-seconds: ${AF_AGENT_TOOL_CACHE_SEARCH_TTL_SECONDS:3600}
@@ -92,6 +92,13 @@ agent:
         3. 当市场数据工具返回 dataset_id 后，必须调用 executePython 对数据进行计算与分析。
         4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。
         5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
+      todo-planner-system-prompt-template: >
+        你是任务规划器。请将用户目标拆解为 Todo List，只输出 JSON。
+        格式：{"analysis":"...","items":[{"id":"todo_1","sequence":1,"type":"TOOL_CALL","toolName":"searchIndex","params":{"keyword":"沪深300"},"reasoning":"...","executionMode":"AUTO"}]}。
+        约束：步骤数 <= {{maxTodos}}，仅允许工具 {{toolWhitelist}}；type 仅 TOOL_CALL/SUB_AGENT/THOUGHT；executionMode 仅 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT。
+      workflow-final-system-prompt: |
+        你是金融分析助手，请基于 Todo 执行结果给出最终结论。
+        结论应直接回答用户目标，并包含关键数据与口径说明。
       parallel-planner-system-prompt-template: >
         你是并行任务规划器。只输出 JSON。必须输出格式：{"strategy":"parallel","tasks":[...],"finalHint":"..."}。
         任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。
@@ -200,12 +207,15 @@ agent:
         cleanup-scan-count: ${AF_AGENT_MARKET_DATA_DATASET_CLEANUP_SCAN_COUNT:500}
   flow:
     parallel:
-      enabled: ${AF_AGENT_FLOW_PARALLEL_ENABLED:true}
-      max-concurrency: ${AF_AGENT_FLOW_PARALLEL_MAX_CONCURRENCY:4}
-      max-tasks: ${AF_AGENT_FLOW_PARALLEL_MAX_TASKS:6}
-      max-parallel-tasks: ${AF_AGENT_FLOW_PARALLEL_MAX_PARALLEL_TASKS:-1}
-      max-sub-agents: ${AF_AGENT_FLOW_PARALLEL_MAX_SUB_AGENTS:-1}
-      sub-agent-max-steps: ${AF_AGENT_FLOW_PARALLEL_SUB_AGENT_MAX_STEPS:6}
+      enabled: ${AF_AGENT_FLOW_PARALLEL_ENABLED:false}
+    workflow:
+      max-todos: ${AF_AGENT_FLOW_WORKFLOW_MAX_TODOS:10}
+      max-tool-calls: ${AF_AGENT_FLOW_WORKFLOW_MAX_TOOL_CALLS:20}
+      max-tool-calls-per-sub-agent: ${AF_AGENT_FLOW_WORKFLOW_MAX_TOOL_CALLS_PER_SUB_AGENT:10}
+      fail-fast: ${AF_AGENT_FLOW_WORKFLOW_FAIL_FAST:false}
+      default-execution-mode: ${AF_AGENT_FLOW_WORKFLOW_DEFAULT_EXECUTION_MODE:AUTO}
+      sub-agent-enabled: ${AF_AGENT_FLOW_WORKFLOW_SUB_AGENT_ENABLED:true}
+      sub-agent-max-steps: ${AF_AGENT_FLOW_WORKFLOW_SUB_AGENT_MAX_STEPS:6}
     code-refine:
       config-file: ${AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE:}
       max-attempts: ${AF_AGENT_FLOW_CODE_REFINE_MAX_ATTEMPTS:3}
