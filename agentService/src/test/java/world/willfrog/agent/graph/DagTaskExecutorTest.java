@@ -99,7 +99,7 @@ class DagTaskExecutorTest {
                 .build();
 
         when(stateStore.loadTaskResults("run-s")).thenReturn(Map.of());
-        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
+        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(Map.of("t1", taskResult));
         when(eventService.isRunnable("run-s", "u1")).thenReturn(true);
         when(promptService.parallelFinalSystemPrompt()).thenReturn("final");
@@ -118,7 +118,7 @@ class DagTaskExecutorTest {
         ParallelPlan plan = planWithSingleTask();
 
         when(stateStore.loadTaskResults("run-p")).thenReturn(Map.of());
-        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
+        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(Map.of());
         when(eventService.isRunnable("run-p", "u1")).thenReturn(false);
 
@@ -140,7 +140,7 @@ class DagTaskExecutorTest {
                 .build();
 
         when(stateStore.loadTaskResults("run-f")).thenReturn(Map.of());
-        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
+        when(parallelTaskExecutor.execute(any(), anyString(), anyString(), any(), any(), anyInt(), anyString(), any(), any(), anyString(), anyString(), anyString()))
                 .thenReturn(Map.of("t1", failedResult))
                 .thenReturn(Map.of("t1", failedResult));
         when(eventService.isRunnable("run-f", "u1")).thenReturn(true);
