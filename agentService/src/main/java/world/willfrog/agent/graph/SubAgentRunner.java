@@ -26,8 +26,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
@@ -43,14 +41,6 @@ import java.util.regex.Pattern;
 public class SubAgentRunner {
     /** 子代理规划最大重试次数（用于修正无效工具/格式问题）。 */
     private static final int MAX_PLAN_ATTEMPTS = 3;
-    /** 从工具输出中提取 dataset_id。 */
-    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
-    /** 从工具输出中提取数据集行数提示。 */
-    private static final Pattern ROWS_PATTERN = Pattern.compile("Rows:\\s*([^\\n]+)");
-    /** 从工具输出中提取数据时间范围提示。 */
-    private static final Pattern RANGE_PATTERN = Pattern.compile("Range:\\s*([^\\n]+)");
-    /** 从工具输出中提取字段提示。 */
-    private static final Pattern FIELDS_PATTERN = Pattern.compile("Fields:\\s*([^\\n]+)");
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
@@ -482,31 +472,14 @@ public class SubAgentRunner {
      * @return true 表示成功
      */
     private boolean isStepSuccessful(String tool, String output) {
-        if (output == null) {
+        if (output == null || output.isBlank()) {
             return false;
         }
-        if (output.startsWith("Tool invocation error")) {
+        JsonNode root = parseJson(output);
+        if (root == null || !root.isObject()) {
             return false;
         }
-        if (output.startsWith("Unsupported tool")) {
-            return false;
-        }
-        if (output.contains("Invalid date range")) {
-            return false;
-        }
-        if (output.contains("No daily index data found")) {
-            return false;
-        }
-        if (output.contains("No daily data found")) {
-            return false;
-        }
-        if (output.startsWith("Task PENDING (Timeout)")) {
-            return false;
-        }
-        if ("executePython".equals(tool) && (output.startsWith("Exit Code:") || output.contains("STDERR:"))) {
-            return false;
-        }
-        return true;
+        return root.path("ok").asBoolean(false);
     }
 
     /**
@@ -519,9 +492,26 @@ public class SubAgentRunner {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
         for (Map<String, Object> step : executedSteps) {
             String output = firstNonBlank(step.get("output"));
-            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-            while (matcher.find()) {
-                ids.add(matcher.group(1));
+            JsonNode root = parseJson(output);
+            if (root == null || !root.path("ok").asBoolean(false)) {
+                continue;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isObject()) {
+                continue;
+            }
+            String datasetId = firstNonBlank(data.path("dataset_id").asText(""));
+            if (!datasetId.isBlank()) {
+                ids.add(datasetId);
+            }
+            JsonNode datasetIds = data.path("dataset_ids");
+            if (datasetIds.isArray()) {
+                for (JsonNode item : datasetIds) {
+                    String id = firstNonBlank(item.asText(""));
+                    if (!id.isBlank()) {
+                        ids.add(id);
+                    }
+                }
             }
         }
         return new ArrayList<>(ids);
@@ -624,20 +614,53 @@ public class SubAgentRunner {
             if (output.isBlank()) {
                 continue;
             }
-            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-            while (matcher.find()) {
-                String id = matcher.group(1);
-                String tool = firstNonBlank(step.get("tool"));
-                Map<String, Object> stepArgs = toMap(step.get("args"));
-                String tsCode = firstNonBlank(stepArgs.get("tsCode"), stepArgs.get("ts_code"), stepArgs.get("code"));
-                String rows = extractFirstGroup(ROWS_PATTERN, output);
-                String range = extractFirstGroup(RANGE_PATTERN, output);
-                String fields = extractFirstGroup(FIELDS_PATTERN, output);
+            JsonNode root = parseJson(output);
+            if (root == null || !root.path("ok").asBoolean(false)) {
+                continue;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isObject()) {
+                continue;
+            }
+
+            List<String> datasetIds = new ArrayList<>();
+            String datasetId = firstNonBlank(data.path("dataset_id").asText(""));
+            if (!datasetId.isBlank()) {
+                datasetIds.add(datasetId);
+            }
+            JsonNode idsNode = data.path("dataset_ids");
+            if (idsNode.isArray()) {
+                for (JsonNode item : idsNode) {
+                    String id = firstNonBlank(item.asText(""));
+                    if (!id.isBlank() && !datasetIds.contains(id)) {
+                        datasetIds.add(id);
+                    }
+                }
+            }
+
+            if (datasetIds.isEmpty()) {
+                continue;
+            }
+
+            String tool = firstNonBlank(step.get("tool"));
+            Map<String, Object> stepArgs = toMap(step.get("args"));
+            String tsCode = firstNonBlank(
+                    data.path("ts_code").asText(""),
+                    stepArgs.get("tsCode"),
+                    stepArgs.get("ts_code"),
+                    stepArgs.get("code")
+            );
+            String rows = data.path("rows").asText("");
+            String startDate = data.path("start_date").asText("");
+            String endDate = data.path("end_date").asText("");
+            String fields = data.path("fields").isArray() ? data.path("fields").toString() : "";
+
+            for (String id : datasetIds) {
                 String line = "- dataset_id=" + id
                         + (tool.isBlank() ? "" : " (tool=" + tool + ")")
                         + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")")
                         + (rows.isBlank() ? "" : " (rows=" + rows + ")")
-                        + (range.isBlank() ? "" : " (range=" + range + ")")
+                        + ((startDate.isBlank() || endDate.isBlank()) ? "" : " (range=" + startDate + "~" + endDate + ")")
                         + (fields.isBlank() ? "" : " (fields=" + fields + ")");
                 if (!hints.contains(line)) {
                     hints.add(line);
@@ -647,15 +670,15 @@ public class SubAgentRunner {
         return String.join("\n", hints);
     }
 
-    private String extractFirstGroup(Pattern pattern, String text) {
-        if (pattern == null || text == null || text.isBlank()) {
-            return "";
+    private JsonNode parseJson(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
         }
-        Matcher matcher = pattern.matcher(text);
-        if (!matcher.find()) {
-            return "";
+        try {
+            return objectMapper.readTree(text);
+        } catch (Exception e) {
+            return null;
         }
-        return firstNonBlank(matcher.group(1));
     }
 
     @SuppressWarnings("unchecked")

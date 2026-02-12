@@ -424,28 +424,12 @@ public class PythonCodeRefinementNode {
         if (output == null || output.isBlank()) {
             return false;
         }
-        if (output.startsWith("Tool invocation error")) {
+        try {
+            JsonNode root = objectMapper.readTree(output);
+            return root.path("ok").asBoolean(false);
+        } catch (Exception e) {
             return false;
         }
-        if (output.startsWith("Tool Execution Error")) {
-            return false;
-        }
-        if (output.startsWith("Failed to create task")) {
-            return false;
-        }
-        if (output.startsWith("Task FAILED")) {
-            return false;
-        }
-        if (output.startsWith("Task CANCELED")) {
-            return false;
-        }
-        if (output.startsWith("Task PENDING (Timeout)")) {
-            return false;
-        }
-        if (output.startsWith("Exit Code:")) {
-            return false;
-        }
-        return !output.contains("STDERR:");
     }
 
     private int resolveMaxAttempts() {

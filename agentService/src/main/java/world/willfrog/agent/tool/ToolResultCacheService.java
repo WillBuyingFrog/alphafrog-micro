@@ -87,7 +87,7 @@ public class ToolResultCacheService {
         ToolExecutionOutcome loaded = loader.get();
         if (loaded == null) {
             loaded = ToolExecutionOutcome.builder()
-                    .result("Tool invocation error: empty loader result")
+                    .result(fallbackToolErrorJson(toolName, "EMPTY_LOADER_RESULT", "Tool invocation error: empty loader result"))
                     .durationMs(0L)
                     .success(false)
                     .build();
@@ -387,7 +387,25 @@ public class ToolResultCacheService {
         if (blank(result)) {
             return false;
         }
-        return result.startsWith("DATASET_REUSED:");
+        try {
+            Map<?, ?> root = objectMapper.readValue(result, Map.class);
+            Object ok = root.get("ok");
+            if (!(ok instanceof Boolean) || !((Boolean) ok)) {
+                return false;
+            }
+            Object dataObj = root.get("data");
+            if (!(dataObj instanceof Map<?, ?> data)) {
+                return false;
+            }
+            Object cacheHit = data.get("cache_hit");
+            if (cacheHit instanceof Boolean b) {
+                return b;
+            }
+            Object source = data.get("source");
+            return source != null && "reused".equalsIgnoreCase(String.valueOf(source));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     private long ttlRemainingMs(String key) {
@@ -433,6 +451,19 @@ public class ToolResultCacheService {
 
     private boolean blank(String text) {
         return text == null || text.isBlank();
+    }
+
+    private String fallbackToolErrorJson(String toolName, String code, String message) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("ok", false);
+        payload.put("tool", nvl(toolName));
+        payload.put("data", Map.of());
+        payload.put("error", Map.of(
+                "code", nvl(code),
+                "message", nvl(message),
+                "details", Map.of()
+        ));
+        return safeWrite(payload);
     }
 
     private String nvl(String text) {

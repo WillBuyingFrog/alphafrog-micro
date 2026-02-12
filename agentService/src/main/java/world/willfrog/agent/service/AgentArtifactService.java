@@ -1,5 +1,6 @@
 package world.willfrog.agent.service;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Getter;
@@ -28,7 +29,6 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 @Service
@@ -36,8 +36,6 @@ import java.util.regex.Pattern;
 @Slf4j
 public class AgentArtifactService {
 
-    private static final Pattern DATASET_RESULT_PATTERN =
-            Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([A-Za-z0-9._-]+)");
     private static final Pattern DATASET_ID_PATTERN = Pattern.compile("^[A-Za-z0-9._-]+$");
     private static final DateTimeFormatter TIME_FORMATTER = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
 
@@ -261,15 +259,16 @@ public class AgentArtifactService {
                     continue;
                 }
                 String preview = readAsString(payload.get("result_preview"));
+                JsonNode outputNode = parseToolOutput(preview);
                 if (!pendingToolRefs.isEmpty()) {
                     String ref = pendingToolRefs.remove(0);
                     MutableInvocation invocation = invocationByRef.get(ref);
                     if (invocation != null) {
                         invocation.success = toNullableBoolean(payload.get("success"));
                         if (invocation.success == null) {
-                            invocation.success = inferPythonSuccess(preview);
+                            invocation.success = isToolOutputSuccess(outputNode);
                         }
-                        invocation.datasetIds.addAll(extractDatasetIdsFromText(preview));
+                        invocation.datasetIds.addAll(extractDatasetIdsFromToolOutput(outputNode));
                     }
                 }
                 continue;
@@ -300,15 +299,16 @@ public class AgentArtifactService {
             if ("PARALLEL_TASK_FINISHED".equals(eventType)) {
                 String taskId = readAsString(payload.get("task_id"));
                 String preview = readAsString(payload.get("output_preview"));
+                JsonNode outputNode = parseToolOutput(preview);
                 String ref = pendingParallelRefsByTask.remove(taskId);
                 if (ref != null) {
                     MutableInvocation invocation = invocationByRef.get(ref);
                     if (invocation != null) {
                         invocation.success = toNullableBoolean(payload.get("success"));
                         if (invocation.success == null) {
-                            invocation.success = inferPythonSuccess(preview);
+                            invocation.success = isToolOutputSuccess(outputNode);
                         }
-                        invocation.datasetIds.addAll(extractDatasetIdsFromText(preview));
+                        invocation.datasetIds.addAll(extractDatasetIdsFromToolOutput(outputNode));
                     }
                 }
                 continue;
@@ -329,7 +329,7 @@ public class AgentArtifactService {
                     );
                     LinkedHashSet<String> datasetIds = new LinkedHashSet<>(extractDatasetIds(runArgs));
                     String outputPreview = readAsString(trace.get("output_preview"));
-                    datasetIds.addAll(extractDatasetIdsFromText(outputPreview));
+                    datasetIds.addAll(extractDatasetIdsFromToolOutput(parseToolOutput(outputPreview)));
 
                     int attempt = toInt(trace.get("attempt"), 0);
                     MutableInvocation invocation = createInvocation(
@@ -482,7 +482,7 @@ public class AgentArtifactService {
         if (target == null || text == null || text.isBlank()) {
             return;
         }
-        target.addAll(extractDatasetIdsFromText(text));
+        target.addAll(extractDatasetIdsFromToolOutput(parseToolOutput(text)));
     }
 
     private LinkedHashSet<String> extractDatasetIds(Map<String, Object> args) {
@@ -513,33 +513,86 @@ public class AgentArtifactService {
         );
     }
 
-    private LinkedHashSet<String> extractDatasetIdsFromText(String text) {
+    private LinkedHashSet<String> extractDatasetIdsFromToolOutput(JsonNode root) {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
-        if (text == null || text.isBlank()) {
+        if (root == null || root.isMissingNode() || root.isNull()) {
             return ids;
         }
-        Matcher matcher = DATASET_RESULT_PATTERN.matcher(text);
-        while (matcher.find()) {
-            String datasetId = matcher.group(1);
-            if (datasetId != null && !datasetId.isBlank()) {
-                String cleaned = datasetId.trim();
-                if (DATASET_ID_PATTERN.matcher(cleaned).matches()) {
-                    ids.add(cleaned);
+        JsonNode data = root.path("data");
+        if (!data.isObject()) {
+            return ids;
+        }
+
+        String primary = readDatasetId(data.path("dataset_id"));
+        if (!primary.isBlank()) {
+            ids.add(primary);
+        }
+
+        JsonNode datasetIdsNode = data.path("dataset_ids");
+        if (datasetIdsNode.isArray()) {
+            for (JsonNode item : datasetIdsNode) {
+                String id = readDatasetId(item);
+                if (!id.isBlank()) {
+                    ids.add(id);
                 }
             }
+        } else if (datasetIdsNode.isTextual()) {
+            ids.addAll(mergeDatasetIds("", datasetIdsNode.asText("")));
         }
         return ids;
     }
 
-    private Boolean toNullableBoolean(Object value) {
-        if (value == null) {
+    private String readDatasetId(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return "";
+        }
+        String id = node.asText("");
+        if (id == null || id.isBlank()) {
+            return "";
+        }
+        String cleaned = id.trim();
+        if (!DATASET_ID_PATTERN.matcher(cleaned).matches()) {
+            return "";
+        }
+        return cleaned;
+    }
+
+    private JsonNode parseToolOutput(String text) {
+        if (text == null || text.isBlank()) {
+            return objectMapper.getNodeFactory().missingNode();
+        }
+        try {
+            return objectMapper.readTree(text);
+        } catch (Exception e) {
+            return objectMapper.getNodeFactory().missingNode();
+        }
+    }
+
+    private boolean isToolOutputSuccess(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            return false;
+        }
+        if (!root.has("ok")) {
+            return false;
+        }
+        return root.path("ok").asBoolean(false);
+    }
+
+    private Boolean toNullableBoolean(JsonNode node) {
+        if (node == null || node.isNull() || node.isMissingNode()) {
             return null;
         }
-        if (value instanceof Boolean b) {
-            return b;
+        if (node.isBoolean()) {
+            return node.asBoolean();
         }
-        String text = String.valueOf(value).trim();
-        if (text.isBlank()) {
+        if (node.isTextual()) {
+            return toNullableBoolean(node.asText(""));
+        }
+        return null;
+    }
+
+    private Boolean toNullableBoolean(String text) {
+        if (text == null || text.isBlank()) {
             return null;
         }
         if ("true".equalsIgnoreCase(text) || "1".equals(text)) {
@@ -551,32 +604,17 @@ public class AgentArtifactService {
         return null;
     }
 
-    private boolean inferPythonSuccess(String output) {
-        if (output == null || output.isBlank()) {
-            return false;
+    private Boolean toNullableBoolean(Object value) {
+        if (value instanceof JsonNode node) {
+            return toNullableBoolean(node);
         }
-        if (output.startsWith("Tool invocation error")) {
-            return false;
+        if (value == null) {
+            return null;
         }
-        if (output.startsWith("Tool Execution Error")) {
-            return false;
+        if (value instanceof Boolean b) {
+            return b;
         }
-        if (output.startsWith("Failed to create task")) {
-            return false;
-        }
-        if (output.startsWith("Task FAILED")) {
-            return false;
-        }
-        if (output.startsWith("Task CANCELED")) {
-            return false;
-        }
-        if (output.startsWith("Task PENDING (Timeout)")) {
-            return false;
-        }
-        if (output.startsWith("Exit Code:")) {
-            return false;
-        }
-        return !output.contains("STDERR:");
+        return toNullableBoolean(String.valueOf(value).trim());
     }
 
     private int safeSeq(AgentRunEvent event) {

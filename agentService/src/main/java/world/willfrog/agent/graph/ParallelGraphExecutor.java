@@ -755,7 +755,9 @@ public class ParallelGraphExecutor {
                         Rules:
                         1) Patch only unresolved downstream region.
                         2) Keep plan executable and dependency-safe.
-                        3) Do not output markdown.
+                        3) Placeholder protocol must be ${task_id.output} or ${task_id.output.path.to.field} only.
+                        4) Never output {{...}}, {...}, task.output style placeholders.
+                        5) Do not output markdown.
                         """;
             }
             String userPrompt = "Goal:\n" + safe(userGoal)

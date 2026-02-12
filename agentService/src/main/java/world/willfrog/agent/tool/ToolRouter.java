@@ -1,5 +1,7 @@
 package world.willfrog.agent.tool;
 
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -7,6 +9,7 @@ import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 
@@ -18,6 +21,7 @@ public class ToolRouter {
     private final PythonSandboxTools pythonSandboxTools;
     private final ToolResultCacheService toolResultCacheService;
     private final AgentObservabilityService observabilityService;
+    private final ObjectMapper objectMapper;
 
     public String invoke(String toolName, Map<String, Object> params) {
         return invokeWithMeta(toolName, params).getOutput();
@@ -104,10 +108,10 @@ public class ToolRouter {
                         str(params.get("libraries"), params.get("arg3")),
                         toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
                 );
-                default -> "Unsupported tool: " + toolName;
+                default -> unsupported(toolName);
             };
         } catch (Exception e) {
-            result = "Tool invocation error: " + e.getMessage();
+            result = invocationError(toolName, e.getMessage());
         }
         return ToolResultCacheService.ToolExecutionOutcome.builder()
                 .result(result)
@@ -146,7 +150,6 @@ public class ToolRouter {
         if (raw.isEmpty()) {
             return "";
         }
-        // 兼容 yyyy-MM-dd / yyyy/MM/dd / yyyyMMdd 三类常见入参
         String digits = raw.replaceAll("[^0-9]", "");
         if (digits.length() == 8 || digits.length() == 13) {
             return digits;
@@ -184,48 +187,58 @@ public class ToolRouter {
         if (result == null || result.isBlank()) {
             return false;
         }
-        Integer exitCode = parseLeadingExitCode(result);
-        if (exitCode != null) {
-            return exitCode == 0;
-        }
-        if (result.startsWith("Tool invocation error")) {
+        try {
+            JsonNode node = objectMapper.readTree(result);
+            return node.path("ok").asBoolean(false);
+        } catch (Exception e) {
             return false;
         }
-        if (result.startsWith("Unsupported tool")) {
-            return false;
-        }
-        if (result.startsWith("Tool Execution Error")) {
-            return false;
-        }
-        if (result.startsWith("Failed to create task")) {
-            return false;
-        }
-        if (result.startsWith("Task FAILED")) {
-            return false;
-        }
-        if (result.startsWith("Task PENDING")) {
-            return false;
-        }
-        return !result.startsWith("Task CANCELED");
     }
 
-    private Integer parseLeadingExitCode(String result) {
-        String trimmed = result == null ? "" : result.trim();
-        if (!trimmed.startsWith("Exit Code:")) {
-            return null;
-        }
-        int lineEnd = trimmed.indexOf('\n');
-        String firstLine = lineEnd >= 0 ? trimmed.substring(0, lineEnd) : trimmed;
-        String value = firstLine.substring("Exit Code:".length()).trim();
-        if (value.isEmpty()) {
-            return null;
-        }
-        int spaceIdx = value.indexOf(' ');
-        String candidate = spaceIdx > 0 ? value.substring(0, spaceIdx) : value;
+    private String unsupported(String toolName) {
+        return writeJson(Map.of(
+                "ok", false,
+                "tool", nvl(toolName),
+                "data", Map.of(),
+                "error", Map.of(
+                        "code", "UNSUPPORTED_TOOL",
+                        "message", "Unsupported tool",
+                        "details", Map.of("tool", nvl(toolName))
+                )
+        ));
+    }
+
+    private String invocationError(String toolName, String message) {
+        return writeJson(Map.of(
+                "ok", false,
+                "tool", nvl(toolName),
+                "data", Map.of(),
+                "error", Map.of(
+                        "code", "TOOL_INVOCATION_ERROR",
+                        "message", nvl(message),
+                        "details", Map.of()
+                )
+        ));
+    }
+
+    private String writeJson(Object payload) {
         try {
-            return Integer.parseInt(candidate);
-        } catch (NumberFormatException e) {
-            return null;
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            Map<String, Object> fallback = new LinkedHashMap<>();
+            fallback.put("ok", false);
+            fallback.put("tool", "unknown");
+            fallback.put("data", Map.of());
+            fallback.put("error", Map.of(
+                    "code", "JSON_SERIALIZE_ERROR",
+                    "message", nvl(e.getMessage()),
+                    "details", Map.of()
+            ));
+            try {
+                return objectMapper.writeValueAsString(fallback);
+            } catch (Exception ignored) {
+                return "{\"ok\":false}";
+            }
         }
     }
 

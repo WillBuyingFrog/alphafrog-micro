@@ -1,12 +1,15 @@
 package world.willfrog.agent.graph;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentRunStateStore;
-import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.ArrayList;
@@ -19,49 +22,24 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
-import java.util.stream.Collectors;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
+import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
 @Slf4j
-/**
- * 并行任务执行器。
- * <p>
- * 职责：
- * 1. 依据 dependsOn 做批次调度；
- * 2. 将同一批 ready 任务投递到线程池并发执行；
- * 3. 持续写入任务级事件与状态，供前端/调试脚本观测。
- */
 public class ParallelTaskExecutor {
-    /** 从工具输出中提取 dataset_id。 */
-    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
 
-    /** 工具调用统一路由。 */
+    private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([A-Za-z0-9_-]+)\\.output(?:\\.([A-Za-z0-9_.-]+))?}");
+
     private final ToolRouter toolRouter;
-    /** 子代理执行器。 */
     private final SubAgentRunner subAgentRunner;
-    /** 事件写入服务。 */
     private final AgentEventService eventService;
-    /** run 的计划/任务状态缓存。 */
     private final AgentRunStateStore stateStore;
-    /** 并行执行线程池。 */
     private final ExecutorService parallelExecutor;
+    private final ObjectMapper objectMapper;
 
-    /**
-     * 执行并行计划任务。
-     *
-     * @param plan             并行计划
-     * @param runId            任务 ID
-     * @param userId           用户 ID
-     * @param toolWhitelist    工具白名单
-     * @param subAgentMaxSteps 子代理最大步数
-     * @param context          全局上下文
-     * @param model            聊天模型
-     * @param existingResults  已有任务结果（断点续跑场景）
-     * @return 全量任务结果映射
-     */
     public Map<String, ParallelTaskResult> execute(ParallelPlan plan,
                                                    String runId,
                                                    String userId,
@@ -84,7 +62,6 @@ public class ParallelTaskExecutor {
                 .filter(task -> !results.containsKey(task.getId()))
                 .collect(Collectors.toCollection(ArrayList::new));
 
-        // 逐批执行：每轮只并发执行“依赖已经满足”的 ready 任务。
         while (!pending.isEmpty()) {
             if (!eventService.isRunnable(runId, userId)) {
                 break;
@@ -103,7 +80,6 @@ public class ParallelTaskExecutor {
                 break;
             }
 
-            // 当前批次任务并发执行，批次内通过 allOf 等待结束。
             List<CompletableFuture<Void>> futures = new ArrayList<>();
             for (ParallelPlan.PlanTask task : ready) {
                 futures.add(CompletableFuture.runAsync(() -> {
@@ -111,7 +87,7 @@ public class ParallelTaskExecutor {
                         AgentContext.setRunId(runId);
                         AgentContext.setUserId(userId);
                         AgentContext.setPhase(AgentObservabilityService.PHASE_PARALLEL_EXECUTION);
-                        Map<String, Object> startPayload = new java.util.HashMap<>();
+                        Map<String, Object> startPayload = new LinkedHashMap<>();
                         startPayload.put("task_id", task.getId());
                         startPayload.put("type", nvl(task.getType()));
                         startPayload.put("tool", nvl(task.getTool()));
@@ -134,20 +110,20 @@ public class ParallelTaskExecutor {
                         );
                         results.put(task.getId(), result);
                         stateStore.saveTaskResult(runId, task.getId(), result);
-                        Map<String, Object> finishPayload = new java.util.HashMap<>();
+                        Map<String, Object> finishPayload = new LinkedHashMap<>();
                         finishPayload.put("task_id", task.getId());
                         finishPayload.put("success", result.isSuccess());
                         finishPayload.put("output_preview", preview(result.getOutput()));
                         finishPayload.put("cache", result.getCache() == null ? Map.of() : result.getCache());
                         eventService.append(runId, userId, "PARALLEL_TASK_FINISHED", finishPayload);
                     } catch (Exception e) {
-                        // 线程内异常不再外抛，统一转换成失败任务并记录内部错误事件。
                         log.warn("Parallel task execution failed: runId={}, taskId={}", runId, task.getId(), e);
                         ParallelTaskResult failed = ParallelTaskResult.builder()
                                 .taskId(task.getId())
                                 .type(nvl(task.getType()))
                                 .success(false)
                                 .error(e.getMessage())
+                                .output(internalFailure(nvl(task.getTool()), "INTERNAL_ERROR", nvl(e.getMessage()), Map.of()))
                                 .build();
                         results.put(task.getId(), failed);
                         stateStore.saveTaskResult(runId, task.getId(), failed);
@@ -166,18 +142,6 @@ public class ParallelTaskExecutor {
         return results;
     }
 
-    /**
-     * 执行单个任务。
-     *
-     * @param task             任务定义
-     * @param runId            任务 ID
-     * @param userId           用户 ID
-     * @param toolWhitelist    工具白名单
-     * @param subAgentMaxSteps 子代理最大步数
-     * @param context          任务上下文
-     * @param model            聊天模型
-     * @return 单任务结果
-     */
     private ParallelTaskResult executeTask(ParallelPlan.PlanTask task,
                                            String runId,
                                            String userId,
@@ -190,9 +154,24 @@ public class ParallelTaskExecutor {
                                            String endpointBaseUrl,
                                            String modelName) {
         String type = task.getType() == null ? "" : task.getType().trim().toLowerCase();
-        if (type.equals("tool")) {
-            Map<String, Object> toolArgs = normalizeToolArgs(task, knownResults);
-            ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(task.getTool(), toolArgs);
+        if ("tool".equals(type)) {
+            NormalizeResult normalize = normalizeToolArgs(task, knownResults);
+            if (!normalize.unresolvedPlaceholders().isEmpty()) {
+                String msg = "Unresolved placeholders: " + String.join(",", normalize.unresolvedPlaceholders());
+                return ParallelTaskResult.builder()
+                        .taskId(task.getId())
+                        .type("tool")
+                        .success(false)
+                        .output(internalFailure(nvl(task.getTool()), "UNRESOLVED_PLACEHOLDER", msg, Map.of(
+                                "task_id", task.getId(),
+                                "placeholders", normalize.unresolvedPlaceholders()
+                        )))
+                        .error(msg)
+                        .cache(toolRouter.toEventCachePayload(null))
+                        .build();
+            }
+
+            ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(task.getTool(), normalize.args());
             String output = invokeResult.getOutput();
             return ParallelTaskResult.builder()
                     .taskId(task.getId())
@@ -202,7 +181,7 @@ public class ParallelTaskExecutor {
                     .cache(toolRouter.toEventCachePayload(invokeResult))
                     .build();
         }
-        if (type.equals("sub_agent")) {
+        if ("sub_agent".equals(type)) {
             SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
                     .runId(runId)
                     .userId(userId)
@@ -230,17 +209,11 @@ public class ParallelTaskExecutor {
                 .type(type)
                 .success(false)
                 .error("unsupported task type")
+                .output(internalFailure(nvl(task.getTool()), "UNSUPPORTED_TASK_TYPE", "Unsupported task type", Map.of("type", type)))
                 .cache(toolRouter.toEventCachePayload(null))
                 .build();
     }
 
-    /**
-     * 判断任务依赖是否全部满足。
-     *
-     * @param task 当前任务
-     * @param done 已完成任务 ID 集合
-     * @return true 表示可执行
-     */
     private boolean depsSatisfied(ParallelPlan.PlanTask task, Set<String> done) {
         List<String> deps = task.getDependsOn();
         if (deps == null || deps.isEmpty()) {
@@ -249,74 +222,102 @@ public class ParallelTaskExecutor {
         return done.containsAll(deps);
     }
 
-    /**
-     * 参数空安全处理。
-     *
-     * @param args 原始参数
-     * @return 非空参数 map
-     */
     private Map<String, Object> safeArgs(Map<String, Object> args) {
         return args == null ? Collections.emptyMap() : args;
     }
 
-    private Map<String, Object> normalizeToolArgs(ParallelPlan.PlanTask task,
-                                                  Map<String, ParallelTaskResult> knownResults) {
+    private NormalizeResult normalizeToolArgs(ParallelPlan.PlanTask task,
+                                              Map<String, ParallelTaskResult> knownResults) {
         Map<String, Object> args = new LinkedHashMap<>(safeArgs(task.getArgs()));
         String tool = nvl(task.getTool());
-        if (!"executePython".equals(tool)) {
-            return args;
-        }
-        return normalizeExecutePythonArgs(task, args, knownResults);
-    }
 
-    private Map<String, Object> normalizeExecutePythonArgs(ParallelPlan.PlanTask task,
-                                                           Map<String, Object> args,
-                                                           Map<String, ParallelTaskResult> knownResults) {
-        LinkedHashMap<String, String> refToDataset = new LinkedHashMap<>();
-        LinkedHashSet<String> discoveredDatasets = new LinkedHashSet<>();
+        applyCommonAliases(tool, args);
 
         List<String> deps = task.getDependsOn() == null ? List.of() : task.getDependsOn();
+        Map<String, JsonNode> depOutputs = new LinkedHashMap<>();
         for (String dep : deps) {
-            ParallelTaskResult depResult = knownResults == null ? null : knownResults.get(dep);
-            if (depResult == null) {
-                continue;
-            }
-            List<String> ids = extractDatasetIds(depResult.getOutput());
-            if (!ids.isEmpty()) {
-                refToDataset.put(dep, ids.get(0));
-                discoveredDatasets.addAll(ids);
-            }
+            ParallelTaskResult result = knownResults == null ? null : knownResults.get(dep);
+            depOutputs.put(dep, parseOutputJson(result == null ? "" : result.getOutput()));
         }
 
-        LinkedHashSet<String> resolvedDatasets = new LinkedHashSet<>();
-        for (String ref : extractDatasetRefs(args.get("datasets"))) {
-            String resolved = resolveDatasetRef(ref, refToDataset);
-            if (!resolved.isBlank()) {
-                resolvedDatasets.add(resolved);
-            }
-        }
-        for (String ref : extractDatasetRefs(args.get("dataset_refs"))) {
-            String resolved = resolveDatasetRef(ref, refToDataset);
-            if (!resolved.isBlank()) {
-                resolvedDatasets.add(resolved);
-            }
+        Object resolved = resolveValue(args, depOutputs);
+        Map<String, Object> resolvedArgs = toMap(resolved);
+
+        if ("executePython".equals(tool)) {
+            resolvedArgs = normalizeExecutePythonArgs(resolvedArgs, depOutputs);
         }
 
-        String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
-        datasetId = resolveDatasetRef(datasetId, refToDataset);
-        if (datasetId.isBlank() && !resolvedDatasets.isEmpty()) {
-            datasetId = resolvedDatasets.iterator().next();
+        List<String> unresolved = new ArrayList<>();
+        collectUnresolvedPlaceholders(resolvedArgs, unresolved);
+
+        return new NormalizeResult(resolvedArgs, unresolved);
+    }
+
+    private void applyCommonAliases(String tool, Map<String, Object> args) {
+        if ("searchIndex".equals(tool) || "searchStock".equals(tool) || "searchFund".equals(tool)) {
+            String keyword = firstNonBlank(args.get("keyword"), args.get("query"), args.get("q"), args.get("name"), args.get("arg0"));
+            if (!keyword.isBlank()) {
+                args.put("keyword", keyword);
+            }
+            return;
         }
-        if (datasetId.isBlank() && !discoveredDatasets.isEmpty()) {
-            datasetId = discoveredDatasets.iterator().next();
+
+        if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool) || "getStockInfo".equals(tool) || "getIndexInfo".equals(tool)) {
+            String tsCode = firstNonBlank(args.get("tsCode"), args.get("ts_code"), args.get("code"), args.get("stock_code"), args.get("index_code"), args.get("arg0"));
+            if (!tsCode.isBlank()) {
+                args.put("tsCode", tsCode);
+            }
+            if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool)) {
+                String startDateStr = compactDate(firstNonBlank(args.get("startDateStr"), args.get("startDate"), args.get("start_date"), args.get("arg1")));
+                String endDateStr = compactDate(firstNonBlank(args.get("endDateStr"), args.get("endDate"), args.get("end_date"), args.get("arg2")));
+                if (!startDateStr.isBlank()) {
+                    args.put("startDateStr", startDateStr);
+                }
+                if (!endDateStr.isBlank()) {
+                    args.put("endDateStr", endDateStr);
+                }
+            }
+            return;
         }
+
+        if ("executePython".equals(tool)) {
+            String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            if (!code.isBlank()) {
+                args.put("code", code);
+            }
+            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            if (!datasetId.isBlank()) {
+                args.put("dataset_id", datasetId);
+            }
+            String datasetIds = firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("datasets"), args.get("dataset_refs"), args.get("datasetRefs"), args.get("arg2"));
+            if (!datasetIds.isBlank()) {
+                args.put("dataset_ids", datasetIds);
+            }
+        }
+    }
+
+    private Map<String, Object> normalizeExecutePythonArgs(Map<String, Object> args,
+                                                           Map<String, JsonNode> depOutputs) {
+        LinkedHashSet<String> depDatasetIds = new LinkedHashSet<>();
+        for (JsonNode output : depOutputs.values()) {
+            depDatasetIds.addAll(extractDatasetIds(output));
+        }
+
+        String datasetId = normalizeDatasetId(firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1")));
+        if (datasetId.isBlank() && !depDatasetIds.isEmpty()) {
+            datasetId = depDatasetIds.iterator().next();
+        }
+
+        LinkedHashSet<String> allDatasetIds = new LinkedHashSet<>();
+        allDatasetIds.addAll(parseDatasetIds(args.get("dataset_ids")));
+        allDatasetIds.addAll(parseDatasetIds(args.get("datasetIds")));
+        allDatasetIds.addAll(parseDatasetIds(args.get("datasets")));
+        allDatasetIds.addAll(parseDatasetIds(args.get("dataset_refs")));
+        allDatasetIds.addAll(parseDatasetIds(args.get("datasetRefs")));
+        allDatasetIds.addAll(depDatasetIds);
+
         if (!datasetId.isBlank()) {
             args.put("dataset_id", datasetId);
-        }
-
-        LinkedHashSet<String> allDatasetIds = new LinkedHashSet<>(resolvedDatasets);
-        allDatasetIds.addAll(discoveredDatasets);
-        if (!datasetId.isBlank()) {
             allDatasetIds.remove(datasetId);
         }
         if (!allDatasetIds.isEmpty()) {
@@ -325,156 +326,292 @@ public class ParallelTaskExecutor {
 
         String code = firstNonBlank(args.get("code"), args.get("arg0"));
         if (!code.isBlank()) {
-            String rewritten = rewriteCodeDatasetRefs(code, refToDataset, allDatasetIds, datasetId);
-            if (!rewritten.equals(code)) {
-                args.put("code", rewritten);
-            }
+            String rewritten = rewriteCodeDatasetPath(code, datasetId, allDatasetIds);
+            args.put("code", rewritten);
         }
+
         return args;
     }
 
-    private List<String> extractDatasetIds(String output) {
+    private Object resolveValue(Object input, Map<String, JsonNode> depOutputs) {
+        if (input == null) {
+            return null;
+        }
+
+        if (input instanceof Map<?, ?> raw) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), resolveValue(entry.getValue(), depOutputs));
+            }
+            return out;
+        }
+
+        if (input instanceof List<?> rawList) {
+            List<Object> out = new ArrayList<>();
+            for (Object item : rawList) {
+                out.add(resolveValue(item, depOutputs));
+            }
+            return out;
+        }
+
+        if (!(input instanceof String text) || text.isBlank()) {
+            return input;
+        }
+
+        Matcher fullMatcher = PLACEHOLDER_PATTERN.matcher(text.trim());
+        if (fullMatcher.matches()) {
+            Object resolved = resolvePlaceholder(fullMatcher.group(1), fullMatcher.group(2), depOutputs);
+            return resolved == null ? text : resolved;
+        }
+
+        Matcher matcher = PLACEHOLDER_PATTERN.matcher(text);
+        StringBuffer sb = new StringBuffer();
+        boolean found = false;
+        while (matcher.find()) {
+            found = true;
+            Object resolved = resolvePlaceholder(matcher.group(1), matcher.group(2), depOutputs);
+            String replacement = resolved == null ? matcher.group(0) : stringifyInline(resolved);
+            matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
+        }
+        if (!found) {
+            return text;
+        }
+        matcher.appendTail(sb);
+        return sb.toString();
+    }
+
+    private Object resolvePlaceholder(String taskId,
+                                      String rawPath,
+                                      Map<String, JsonNode> depOutputs) {
+        JsonNode root = depOutputs.get(taskId);
+        if (root == null || root.isMissingNode() || root.isNull()) {
+            return null;
+        }
+
+        if (rawPath == null || rawPath.isBlank()) {
+            return jsonNodeToObject(root);
+        }
+
+        JsonNode current = root;
+        String[] parts = rawPath.split("\\.");
+        for (String part : parts) {
+            String token = nvl(part).trim();
+            if (token.isBlank()) {
+                return null;
+            }
+            if (current.isArray()) {
+                if (!token.matches("\\d+")) {
+                    return null;
+                }
+                int idx = Integer.parseInt(token);
+                if (idx < 0 || idx >= current.size()) {
+                    return null;
+                }
+                current = current.get(idx);
+                continue;
+            }
+            if (!current.isObject()) {
+                return null;
+            }
+            current = current.get(token);
+            if (current == null || current.isMissingNode() || current.isNull()) {
+                return null;
+            }
+        }
+        return jsonNodeToObject(current);
+    }
+
+    private JsonNode parseOutputJson(String output) {
         if (output == null || output.isBlank()) {
+            return objectMapper.getNodeFactory().missingNode();
+        }
+        try {
+            return objectMapper.readTree(output);
+        } catch (Exception e) {
+            return objectMapper.getNodeFactory().missingNode();
+        }
+    }
+
+    private Map<String, Object> toMap(Object value) {
+        if (value instanceof Map<?, ?> raw) {
+            Map<String, Object> out = new LinkedHashMap<>();
+            for (Map.Entry<?, ?> entry : raw.entrySet()) {
+                out.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return out;
+        }
+        return new LinkedHashMap<>();
+    }
+
+    private List<String> extractDatasetIds(JsonNode output) {
+        if (output == null || !output.path("ok").asBoolean(false)) {
+            return List.of();
+        }
+        JsonNode data = output.path("data");
+        if (!data.isObject()) {
             return List.of();
         }
         LinkedHashSet<String> ids = new LinkedHashSet<>();
-        Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-        while (matcher.find()) {
-            String id = nvl(matcher.group(1));
-            if (!id.isBlank()) {
-                ids.add(id);
+        String datasetId = normalizeDatasetId(data.path("dataset_id").asText(""));
+        if (!datasetId.isBlank()) {
+            ids.add(datasetId);
+        }
+        JsonNode datasetIdsNode = data.path("dataset_ids");
+        if (datasetIdsNode.isArray()) {
+            for (JsonNode item : datasetIdsNode) {
+                String id = normalizeDatasetId(item.asText(""));
+                if (!id.isBlank()) {
+                    ids.add(id);
+                }
             }
+        } else if (datasetIdsNode.isTextual()) {
+            ids.addAll(parseDatasetIds(datasetIdsNode.asText("")));
         }
         return new ArrayList<>(ids);
     }
 
-    private List<String> extractDatasetRefs(Object raw) {
+    private LinkedHashSet<String> parseDatasetIds(Object raw) {
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
         if (raw == null) {
-            return List.of();
+            return ids;
         }
-        LinkedHashSet<String> refs = new LinkedHashSet<>();
+
         if (raw instanceof Iterable<?> iterable) {
             for (Object item : iterable) {
-                String ref = nvl(String.valueOf(item)).trim();
-                if (!ref.isBlank()) {
-                    refs.add(ref);
+                String id = normalizeDatasetId(String.valueOf(item));
+                if (!id.isBlank()) {
+                    ids.add(id);
                 }
             }
-            return new ArrayList<>(refs);
+            return ids;
         }
+
         String text = nvl(String.valueOf(raw)).trim();
         if (text.isBlank()) {
-            return List.of();
+            return ids;
         }
         if (text.startsWith("[") && text.endsWith("]")) {
             text = text.substring(1, text.length() - 1);
         }
         for (String part : text.split(",")) {
-            String ref = nvl(part).trim();
-            if (!ref.isBlank()) {
-                refs.add(ref);
+            String token = nvl(part).trim();
+            if (token.startsWith("\"") && token.endsWith("\"") && token.length() >= 2) {
+                token = token.substring(1, token.length() - 1).trim();
+            }
+            String id = normalizeDatasetId(token);
+            if (!id.isBlank()) {
+                ids.add(id);
             }
         }
-        return new ArrayList<>(refs);
+        return ids;
     }
 
-    private String resolveDatasetRef(String rawRef, Map<String, String> refToDataset) {
-        String ref = nvl(rawRef).trim();
-        if (ref.isBlank()) {
+    private String normalizeDatasetId(String datasetId) {
+        String id = nvl(datasetId).trim();
+        if (id.isBlank()) {
             return "";
         }
-        String token = unwrapDatasetRefToken(ref);
-        String resolved = resolveDatasetByTaskRef(token, refToDataset);
-        if (!resolved.isBlank()) {
-            return resolved;
-        }
-        resolved = resolveDatasetByTaskRef(ref, refToDataset);
-        if (!resolved.isBlank()) {
-            return resolved;
-        }
-        if (looksLikeTaskDatasetPlaceholder(ref) || looksLikeTaskDatasetPlaceholder(token)) {
+        if (!id.matches("[A-Za-z0-9._-]+")) {
             return "";
         }
-        return token;
+        return id;
     }
 
-    private String unwrapDatasetRefToken(String raw) {
-        String token = nvl(raw).trim();
-        if (token.startsWith("${") && token.endsWith("}") && token.length() > 3) {
-            return token.substring(2, token.length() - 1).trim();
-        }
-        if (token.startsWith("{") && token.endsWith("}") && token.length() > 2) {
-            return token.substring(1, token.length() - 1).trim();
-        }
-        return token;
-    }
-
-    private String resolveDatasetByTaskRef(String raw, Map<String, String> refToDataset) {
-        String ref = nvl(raw).trim();
-        if (ref.isBlank()) {
-            return "";
-        }
-        String direct = nvl(refToDataset.get(ref)).trim();
-        if (!direct.isBlank()) {
-            return direct;
-        }
-        int dotIndex = ref.indexOf('.');
-        if (dotIndex > 0) {
-            String prefix = ref.substring(0, dotIndex).trim();
-            String suffix = ref.substring(dotIndex + 1).trim().toLowerCase();
-            if ((suffix.equals("dataset_id") || suffix.equals("datasetid")) && !prefix.isBlank()) {
-                return nvl(refToDataset.get(prefix)).trim();
-            }
-        }
-        return "";
-    }
-
-    private boolean looksLikeTaskDatasetPlaceholder(String raw) {
-        String text = nvl(raw).trim();
-        if (text.isBlank()) {
-            return false;
-        }
-        String token = unwrapDatasetRefToken(text).trim();
-        if (token.matches("[A-Za-z0-9_-]+")) {
-            return false;
-        }
-        if (token.matches("[A-Za-z0-9_-]+\\.(dataset_id|datasetId)")) {
-            return true;
-        }
-        return text.startsWith("${") || text.startsWith("{");
-    }
-
-    private String rewriteCodeDatasetRefs(String code,
-                                          Map<String, String> refToDataset,
-                                          Set<String> allDatasetIds,
-                                          String primaryDatasetId) {
+    private String rewriteCodeDatasetPath(String code,
+                                          String primaryDatasetId,
+                                          Set<String> allDatasetIds) {
         String rewritten = code;
-        for (Map.Entry<String, String> entry : refToDataset.entrySet()) {
-            String ref = entry.getKey();
-            String realId = entry.getValue();
-            rewritten = rewritten.replace("${" + ref + ".dataset_id}", realId);
-            rewritten = rewritten.replace("{" + ref + ".dataset_id}", realId);
-            rewritten = rewritten.replace("${" + ref + ".datasetId}", realId);
-            rewritten = rewritten.replace("{" + ref + ".datasetId}", realId);
-            rewritten = rewritten.replace("${" + ref + "}", realId);
-            rewritten = rewritten.replace("{" + ref + "}", realId);
-            rewritten = rewritten.replace("/sandbox/input/" + ref + "/", "/sandbox/input/" + realId + "/");
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        if (primaryDatasetId != null && !primaryDatasetId.isBlank()) {
+            ids.add(primaryDatasetId);
         }
-
-        LinkedHashSet<String> idsForRewrite = new LinkedHashSet<>();
-        if (!primaryDatasetId.isBlank()) {
-            idsForRewrite.add(primaryDatasetId);
-        }
-        idsForRewrite.addAll(allDatasetIds);
-        for (String datasetId : idsForRewrite) {
+        ids.addAll(allDatasetIds == null ? Set.of() : allDatasetIds);
+        for (String datasetId : ids) {
             if (datasetId == null || datasetId.isBlank()) {
                 continue;
             }
-            String canonicalPath = "/sandbox/input/" + datasetId + "/data.csv";
+            String canonicalPath = "/sandbox/input/" + datasetId + "/" + datasetId + ".csv";
             rewritten = rewritten.replace("pd.read_csv('" + datasetId + "')", "pd.read_csv('" + canonicalPath + "')");
             rewritten = rewritten.replace("pd.read_csv(\"" + datasetId + "\")", "pd.read_csv(\"" + canonicalPath + "\")");
         }
         return rewritten;
+    }
+
+    private void collectUnresolvedPlaceholders(Object value, List<String> unresolved) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Object item : map.values()) {
+                collectUnresolvedPlaceholders(item, unresolved);
+            }
+            return;
+        }
+        if (value instanceof Iterable<?> iterable) {
+            for (Object item : iterable) {
+                collectUnresolvedPlaceholders(item, unresolved);
+            }
+            return;
+        }
+        if (!(value instanceof String text) || text.isBlank()) {
+            return;
+        }
+        Matcher matcher = PLACEHOLDER_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String placeholder = matcher.group(0);
+            if (!unresolved.contains(placeholder)) {
+                unresolved.add(placeholder);
+            }
+        }
+    }
+
+    private Object jsonNodeToObject(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        try {
+            return objectMapper.convertValue(node, new TypeReference<Object>() {
+            });
+        } catch (Exception e) {
+            return node.asText("");
+        }
+    }
+
+    private String stringifyInline(Object value) {
+        if (value == null) {
+            return "";
+        }
+        if (value instanceof String s) {
+            return s;
+        }
+        if (value instanceof Number || value instanceof Boolean) {
+            return String.valueOf(value);
+        }
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private String internalFailure(String tool,
+                                   String code,
+                                   String message,
+                                   Map<String, Object> details) {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("ok", false);
+        payload.put("tool", tool);
+        payload.put("data", Map.of());
+        Map<String, Object> err = new LinkedHashMap<>();
+        err.put("code", nvl(code));
+        err.put("message", nvl(message));
+        err.put("details", details == null ? Map.of() : details);
+        payload.put("error", err);
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception e) {
+            return "{\"ok\":false}";
+        }
     }
 
     private String firstNonBlank(Object... values) {
@@ -490,14 +627,17 @@ public class ParallelTaskExecutor {
         return "";
     }
 
-    /**
-     * 为有依赖的任务构建上下文，附加依赖任务结果摘要。
-     *
-     * @param task       当前任务
-     * @param baseContext 全局上下文
-     * @param results    当前已产出的任务结果
-     * @return 拼接后的上下文字符串
-     */
+    private String compactDate(String raw) {
+        if (raw == null) {
+            return "";
+        }
+        String digits = raw.replaceAll("[^0-9]", "");
+        if (digits.length() == 8 || digits.length() == 13) {
+            return digits;
+        }
+        return raw.trim();
+    }
+
     private String buildContext(ParallelPlan.PlanTask task, String baseContext, Map<String, ParallelTaskResult> results) {
         if (task.getDependsOn() == null || task.getDependsOn().isEmpty()) {
             return baseContext;
@@ -511,20 +651,14 @@ public class ParallelTaskExecutor {
                 continue;
             }
             sb.append(dep).append(": ")
-              .append(result.isSuccess() ? "ok" : "failed")
-              .append(" -> ")
-              .append(preview(result.getOutput()))
-              .append("\n");
+                    .append(result.isSuccess() ? "ok" : "failed")
+                    .append(" -> ")
+                    .append(preview(result.getOutput()))
+                    .append("\n");
         }
         return sb.toString();
     }
 
-    /**
-     * 文本预览裁剪，避免事件 payload 过大。
-     *
-     * @param text 原始文本
-     * @return 预览文本
-     */
     private String preview(String text) {
         if (text == null) {
             return "";
@@ -535,13 +669,10 @@ public class ParallelTaskExecutor {
         return text;
     }
 
-    /**
-     * 空值转空字符串，便于事件 payload 处理。
-     *
-     * @param text 原始文本
-     * @return 非空文本
-     */
     private String nvl(String text) {
         return text == null ? "" : text;
+    }
+
+    private record NormalizeResult(Map<String, Object> args, List<String> unresolvedPlaceholders) {
     }
 }
