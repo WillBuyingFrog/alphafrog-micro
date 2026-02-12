@@ -255,6 +255,7 @@ public class AgentLlmProperties {
         private String mode;
         private Integer maxToolCalls;
         private Integer maxToolCallsPerSubAgent;
+        private Integer maxRetriesPerTodo;
         private Boolean failFast;
         private String defaultExecutionMode;
 
@@ -280,6 +281,14 @@ public class AgentLlmProperties {
 
         public void setMaxToolCallsPerSubAgent(Integer maxToolCallsPerSubAgent) {
             this.maxToolCallsPerSubAgent = maxToolCallsPerSubAgent;
+        }
+
+        public Integer getMaxRetriesPerTodo() {
+            return maxRetriesPerTodo;
+        }
+
+        public void setMaxRetriesPerTodo(Integer maxRetriesPerTodo) {
+            this.maxRetriesPerTodo = maxRetriesPerTodo;
         }
 
         public Boolean getFailFast() {
@@ -408,6 +417,7 @@ public class AgentLlmProperties {
         private String agentRunSystemPrompt;
         private String todoPlannerSystemPromptTemplate;
         private String workflowFinalSystemPrompt;
+        private String workflowTodoRecoverySystemPrompt;
         private String parallelPlannerSystemPromptTemplate;
         private String parallelFinalSystemPrompt;
         private String parallelPatchPlannerSystemPromptTemplate;
@@ -443,6 +453,14 @@ public class AgentLlmProperties {
 
         public void setWorkflowFinalSystemPrompt(String workflowFinalSystemPrompt) {
             this.workflowFinalSystemPrompt = workflowFinalSystemPrompt;
+        }
+
+        public String getWorkflowTodoRecoverySystemPrompt() {
+            return workflowTodoRecoverySystemPrompt;
+        }
+
+        public void setWorkflowTodoRecoverySystemPrompt(String workflowTodoRecoverySystemPrompt) {
+            this.workflowTodoRecoverySystemPrompt = workflowTodoRecoverySystemPrompt;
         }
 
         public String getParallelPlannerSystemPromptTemplate() {

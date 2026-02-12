@@ -83,6 +83,7 @@ class LinearWorkflowExecutorTest {
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
         ReflectionTestUtils.setField(executor, "defaultMaxToolCallsPerSubAgent", 10);
+        ReflectionTestUtils.setField(executor, "defaultMaxRetriesPerTodo", 3);
         ReflectionTestUtils.setField(executor, "defaultFailFast", false);
         ReflectionTestUtils.setField(executor, "defaultExecutionMode", "AUTO");
         ReflectionTestUtils.setField(executor, "defaultSubAgentEnabled", true);
@@ -92,6 +93,7 @@ class LinearWorkflowExecutorTest {
         lenient().when(stateStore.getToolCallCount(anyString())).thenReturn(0);
         lenient().when(stateStore.incrementToolCallCount(anyString(), anyInt())).thenReturn(1);
         lenient().when(promptService.workflowFinalSystemPrompt()).thenReturn("final");
+        lenient().when(promptService.workflowTodoRecoverySystemPrompt()).thenReturn("recovery");
         lenient().when(localConfigLoader.current()).thenReturn(Optional.empty());
         lenient().when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))
                 .thenReturn(Map.of());

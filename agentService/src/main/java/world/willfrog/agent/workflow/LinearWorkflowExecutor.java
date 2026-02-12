@@ -72,6 +72,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     @Value("${agent.flow.workflow.sub-agent-max-steps:6}")
     private int defaultSubAgentMaxSteps;
 
+    @Value("${agent.flow.workflow.max-retries-per-todo:3}")
+    private int defaultMaxRetriesPerTodo;
+
     @Override
     public WorkflowExecutionResult execute(WorkflowRequest request) {
         AgentRun run = request.getRun();
@@ -93,6 +96,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         List<TodoItem> items = request.getTodoPlan().getItems() == null ? List.of() : request.getTodoPlan().getItems();
         List<TodoItem> completed = new ArrayList<>(state.getCompletedItems());
+        List<TodoItem> allProcessedItems = new ArrayList<>(completed);
         Map<String, TodoExecutionRecord> context = new LinkedHashMap<>(state.getContext());
         boolean hasFailure = false;
 
@@ -115,28 +119,22 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         .success(false)
                         .failureReason("")
                         .finalAnswer("")
-                        .completedItems(completed)
+                        .completedItems(allProcessedItems)
                         .context(context)
                         .toolCallsUsed(toolCallCounter.get(runId))
                         .build();
             }
 
             TodoItem item = items.get(idx);
-            item.setStatus(TodoStatus.RUNNING);
-            eventService.append(runId, userId, "TODO_STARTED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "sequence", item.getSequence(),
-                    "type", item.getType() == null ? "" : item.getType().name(),
-                    "tool", nvl(item.getToolName())
-            ));
-
-            TodoExecutionRecord record = executeItem(request, item, context, config);
+            TodoExecutionRecord record = executeTodoWithRetry(request, item, context, allProcessedItems, config);
             item.setCompletedAt(Instant.now());
             item.setResultSummary(nvl(record.getSummary()));
             item.setOutput(nvl(record.getOutput()));
 
             if (record.isSuccess()) {
                 item.setStatus(TodoStatus.COMPLETED);
+                completed.add(item);
+                context.put(item.getId(), record);
                 eventService.append(runId, userId, "TODO_FINISHED", Map.of(
                         "todo_id", nvl(item.getId()),
                         "success", true,
@@ -155,9 +153,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         "tool_calls_used", toolCallCounter.get(runId)
                 ));
             }
+            allProcessedItems.add(item);
 
-            completed.add(item);
-            context.put(item.getId(), record);
             WorkflowState checkpoint = WorkflowState.builder()
                     .currentIndex(idx + 1)
                     .completedItems(completed)
@@ -168,13 +165,13 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             stateStore.saveWorkflowState(runId, checkpoint);
 
             if (!record.isSuccess() && config.failFast()) {
-                String finalAnswer = generateFinalAnswer(request, completed, context);
+                String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
                 return WorkflowExecutionResult.builder()
                         .paused(false)
                         .success(false)
                         .failureReason("todo_failed:" + nvl(item.getId()))
                         .finalAnswer(finalAnswer)
-                        .completedItems(completed)
+                        .completedItems(allProcessedItems)
                         .context(context)
                         .toolCallsUsed(toolCallCounter.get(runId))
                         .build();
@@ -182,14 +179,14 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
 
         stateStore.clearWorkflowState(runId);
-        String finalAnswer = generateFinalAnswer(request, completed, context);
+        String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
         if (hasFailure) {
             return WorkflowExecutionResult.builder()
                     .paused(false)
                     .success(false)
                     .failureReason("todo_partial_failed")
                     .finalAnswer(finalAnswer)
-                    .completedItems(completed)
+                    .completedItems(allProcessedItems)
                     .context(context)
                     .toolCallsUsed(toolCallCounter.get(runId))
                     .build();
@@ -199,10 +196,165 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 .success(true)
                 .failureReason("")
                 .finalAnswer(finalAnswer)
-                .completedItems(completed)
+                .completedItems(allProcessedItems)
                 .context(context)
                 .toolCallsUsed(toolCallCounter.get(runId))
                 .build();
+    }
+
+    private TodoExecutionRecord executeTodoWithRetry(WorkflowRequest request,
+                                                     TodoItem item,
+                                                     Map<String, TodoExecutionRecord> context,
+                                                     List<TodoItem> allProcessedItems,
+                                                     WorkflowConfig config) {
+        String runId = request.getRun().getId();
+        String userId = request.getUserId();
+        TodoType type = item.getType() == null ? TodoType.TOOL_CALL : item.getType();
+
+        if (type == TodoType.THOUGHT || type == TodoType.SUB_AGENT) {
+            item.setStatus(TodoStatus.RUNNING);
+            eventService.append(runId, userId, "TODO_STARTED", Map.of(
+                    "todo_id", nvl(item.getId()),
+                    "sequence", item.getSequence(),
+                    "type", type.name(),
+                    "tool", nvl(item.getToolName())
+            ));
+            return executeItem(request, item, context, config);
+        }
+
+        int attempt = 0;
+        TodoExecutionRecord record;
+        while (true) {
+            item.setStatus(TodoStatus.RUNNING);
+            eventService.append(runId, userId, "TODO_STARTED", Map.of(
+                    "todo_id", nvl(item.getId()),
+                    "sequence", item.getSequence(),
+                    "type", type.name(),
+                    "tool", nvl(item.getToolName()),
+                    "attempt", attempt + 1
+            ));
+
+            record = executeItem(request, item, context, config);
+
+            if (record.isSuccess()) {
+                return record;
+            }
+
+            attempt++;
+            if (attempt >= config.maxRetriesPerTodo()) {
+                log.debug("Todo {} failed after {} attempts, giving up", item.getId(), attempt);
+                return record;
+            }
+            if (toolCallCounter.isLimitReached(runId, config.maxToolCalls())) {
+                log.debug("Tool call limit reached, cannot retry todo {}", item.getId());
+                return record;
+            }
+
+            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context);
+            if (recovery == null) {
+                return record;
+            }
+
+            @SuppressWarnings("unchecked")
+            Map<String, Object> newParams = (Map<String, Object>) recovery.get("params");
+            if (newParams == null || newParams.isEmpty()) {
+                return record;
+            }
+
+            item.setParams(newParams);
+            eventService.append(runId, userId, "TODO_RETRY", Map.of(
+                    "todo_id", nvl(item.getId()),
+                    "attempt", attempt + 1,
+                    "tool_calls_used", toolCallCounter.get(runId)
+            ));
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> requestRecoveryParams(WorkflowRequest request,
+                                                      TodoItem item,
+                                                      TodoExecutionRecord failedRecord,
+                                                      Map<String, TodoExecutionRecord> context) {
+        String runId = request.getRun().getId();
+        String userId = request.getUserId();
+
+        eventService.append(runId, userId, "TODO_RECOVERY_STARTED", Map.of(
+                "todo_id", nvl(item.getId()),
+                "tool", nvl(item.getToolName()),
+                "error_preview", preview(failedRecord.getSummary())
+        ));
+
+        Map<String, Object> userPayload = new LinkedHashMap<>();
+        userPayload.put("user_goal", nvl(request.getUserGoal()));
+        userPayload.put("failed_todo", Map.of(
+                "id", nvl(item.getId()),
+                "tool", nvl(item.getToolName()),
+                "params", item.getParams() == null ? Map.of() : item.getParams(),
+                "reasoning", nvl(item.getReasoning()),
+                "error", nvl(failedRecord.getSummary())
+        ));
+        userPayload.put("context", context == null ? Map.of() : context);
+
+        List<ChatMessage> messages = List.of(
+                new SystemMessage(promptService.workflowTodoRecoverySystemPrompt()),
+                new UserMessage(safeWrite(userPayload))
+        );
+
+        Response<AiMessage> response = request.getModel().generate(messages);
+        String text = response.content() == null ? "" : nvl(response.content().text());
+
+        Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                request.getEndpointName(),
+                request.getEndpointBaseUrl(),
+                request.getModelName(),
+                messages,
+                request.getToolSpecifications(),
+                Map.of("stage", "workflow_todo_recovery")
+        );
+        observabilityService.recordLlmCall(
+                runId,
+                AgentObservabilityService.PHASE_SUMMARIZING,
+                response.tokenUsage(),
+                0L,
+                request.getEndpointName(),
+                request.getModelName(),
+                null,
+                llmRequestSnapshot,
+                text
+        );
+
+        eventService.append(runId, userId, "TODO_RECOVERY_COMPLETED", Map.of(
+                "todo_id", nvl(item.getId()),
+                "response_preview", preview(text)
+        ));
+
+        String json = extractJsonFromResponse(text);
+        if (json == null || json.isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
+            if (Boolean.TRUE.equals(parsed.get("abandon"))) {
+                return null;
+            }
+            return parsed;
+        } catch (Exception e) {
+            log.warn("Failed to parse recovery response: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private String extractJsonFromResponse(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        String trimmed = text.trim();
+        int start = trimmed.indexOf('{');
+        int end = trimmed.lastIndexOf('}');
+        if (start >= 0 && end > start) {
+            return trimmed.substring(start, end + 1);
+        }
+        return null;
     }
 
     private TodoExecutionRecord executeItem(WorkflowRequest request,
@@ -433,7 +585,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 defaultSubAgentMaxSteps
         ), 1, 20);
 
-        return new WorkflowConfig(maxToolCalls, maxPerSubAgent, failFast, executionMode, subAgentEnabled, subAgentMaxSteps);
+        int maxRetriesPerTodo = clampInt(firstPositive(
+                execution == null ? null : execution.getMaxRetriesPerTodo(),
+                defaultMaxRetriesPerTodo
+        ), 1, 10);
+        return new WorkflowConfig(maxToolCalls, maxPerSubAgent, maxRetriesPerTodo, failFast, executionMode, subAgentEnabled, subAgentMaxSteps);
     }
 
     private int firstPositive(Integer value, int fallback) {
@@ -490,6 +646,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
     private record WorkflowConfig(int maxToolCalls,
                                   int maxToolCallsPerSubAgent,
+                                  int maxRetriesPerTodo,
                                   boolean failFast,
                                   ExecutionMode defaultExecutionMode,
                                   boolean subAgentEnabled,
