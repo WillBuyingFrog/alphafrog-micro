@@ -37,10 +37,29 @@ public interface UserDao {
     @ResultMap("userResultMap")
     User getUserById(@Param("userId") Long userId);
 
+    @Select("SELECT * " +
+            "FROM alphafrog_user " +
+            "WHERE email = #{email} " +
+            "LIMIT 1")
+    @ResultMap("userResultMap")
+    List<User> getUserByEmail(@Param("email") String email);
+
     @Update("UPDATE alphafrog_user " +
             "SET credit = COALESCE(credit, 0) + #{delta} " +
             "WHERE user_id = #{userId}")
     int increaseCreditByUserId(@Param("userId") Long userId, @Param("delta") int delta);
+
+    @Update("UPDATE alphafrog_user " +
+            "SET password = #{encodedPassword} " +
+            "WHERE user_id = #{userId}")
+    int updatePasswordByUserId(@Param("userId") Long userId, @Param("encodedPassword") String encodedPassword);
+
+    @Update("UPDATE alphafrog_user " +
+            "SET username = #{username}, email = #{email} " +
+            "WHERE user_id = #{userId}")
+    int updateProfileByUserId(@Param("userId") Long userId,
+                              @Param("username") String username,
+                              @Param("email") String email);
 
     @Delete("DELETE FROM alphafrog_user WHERE username = #{username} AND user_type = #{userType}")
     int deleteUserByUsernameAndType(@Param("username") String username, @Param("userType") int userType);

@@ -6,13 +6,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.RedisTemplate;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.interceptor.TransactionAspectSupport;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
+import world.willfrog.alphafrogmicro.common.dao.user.UserInviteCodeDao;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
+import world.willfrog.alphafrogmicro.common.pojo.user.UserInviteCode;
 import world.willfrog.alphafrogmicro.frontend.config.JwtConfig;
 
 import javax.crypto.SecretKey;
+import java.time.OffsetDateTime;
 import java.util.Date;
 import java.util.List;
+import java.util.Locale;
+import java.util.UUID;
 import java.util.concurrent.TimeUnit;
 
 @Service
@@ -23,10 +30,21 @@ public class AuthService {
     private final JwtConfig jwtConfig;
     private final SecretKey secretKey;
     private final UserDao userDao;
+    private final UserInviteCodeDao userInviteCodeDao;
     private final RedisTemplate<String, Object> redisTemplate;
     private final PasswordEncoder passwordEncoder;
 
     private static final String LOGIN_STATUS_PREFIX = "login_status:";
+    private static final String PASSWORD_RESET_PREFIX = "password_reset:";
+    private static final long PASSWORD_RESET_TTL_MINUTES = 30L;
+
+    public static final int RESULT_SUCCESS = 1;
+    public static final int RESULT_ERROR = -1;
+    public static final int RESULT_WEAK_PASSWORD = -2;
+    public static final int RESULT_INVALID_INVITE_CODE = -3;
+    public static final int RESULT_DUPLICATED_USER = -4;
+    public static final int RESULT_INVALID_TOKEN = -5;
+    public static final int RESULT_INVALID_OLD_PASSWORD = -6;
 
     // 为登录成功的用户生成token
     public String generateToken(String username) {
@@ -56,6 +74,13 @@ public class AuthService {
         return matchedUsers.get(0);
     }
 
+    public User getUserByEmail(String email) {
+        List<User> matchedUsers = userDao.getUserByEmail(email);
+        if (matchedUsers.isEmpty()) {
+            return null;
+        }
+        return matchedUsers.get(0);
+    }
 
     // 标记、判断每个用户是否登录的工具函数
 
@@ -91,11 +116,20 @@ public class AuthService {
     }
 
     // 注册用户
-    public int register(String username, String password, String email) {
+    @Transactional
+    public int register(String username, String password, String email, String inviteCode) {
         // 密码安全检查
         if (!isPasswordStrong(password)) {
             log.warn("Weak password attempt for user: {}", username);
-            return -2; // 密码强度不够
+            return RESULT_WEAK_PASSWORD;
+        }
+
+        if (inviteCode == null || inviteCode.trim().isEmpty()) {
+            return RESULT_INVALID_INVITE_CODE;
+        }
+
+        if (getUserByUsername(username) != null || getUserByEmail(email) != null) {
+            return RESULT_DUPLICATED_USER;
         }
 
         long currentTimeMillis = System.currentTimeMillis();
@@ -108,11 +142,143 @@ public class AuthService {
         user.setRegisterTime(currentTimeMillis);
 
         try{
-            return userDao.insertUser(user);
+            int insertResult = userDao.insertUser(user);
+            if (insertResult <= 0) {
+                return RESULT_ERROR;
+            }
+
+            User savedUser = getUserByUsername(username);
+            if (savedUser == null || savedUser.getUserId() == null) {
+                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+                return RESULT_ERROR;
+            }
+
+            int consumeResult = userInviteCodeDao.consumeInviteCode(inviteCode.trim(), savedUser.getUserId());
+            if (consumeResult <= 0) {
+                TransactionAspectSupport.currentTransactionStatus().setRollbackOnly();
+                return RESULT_INVALID_INVITE_CODE;
+            }
+            return RESULT_SUCCESS;
         } catch (Exception e) {
             log.error("Failed to register user: {}", username, e);
-            return -1;
+            return RESULT_ERROR;
         }
+    }
+
+    public String createInviteCode(Long createdBy, Integer expiresInHours) {
+        for (int i = 0; i < 5; i++) {
+            String inviteCode = generateInviteCode();
+            UserInviteCode record = new UserInviteCode();
+            record.setInviteCode(inviteCode);
+            record.setCreatedBy(createdBy);
+            record.setExt("{}");
+            if (expiresInHours != null && expiresInHours > 0) {
+                record.setExpiresAt(OffsetDateTime.now().plusHours(expiresInHours));
+            }
+            try {
+                int affected = userInviteCodeDao.insert(record);
+                if (affected > 0) {
+                    return inviteCode;
+                }
+            } catch (Exception e) {
+                log.warn("Insert invite code failed, retrying. code={}", inviteCode, e);
+            }
+        }
+        throw new IllegalStateException("failed to create invite code");
+    }
+
+    public String createPasswordResetToken(String usernameOrEmail) {
+        User user = resolveUser(usernameOrEmail);
+        if (user == null || user.getUsername() == null || user.getUsername().isBlank()) {
+            return null;
+        }
+        String token = UUID.randomUUID().toString().replace("-", "");
+        redisTemplate.opsForValue().set(
+                PASSWORD_RESET_PREFIX + token,
+                user.getUsername(),
+                PASSWORD_RESET_TTL_MINUTES,
+                TimeUnit.MINUTES
+        );
+        return token;
+    }
+
+    public boolean verifyResetToken(String token) {
+        if (token == null || token.isBlank()) {
+            return false;
+        }
+        return Boolean.TRUE.equals(redisTemplate.hasKey(PASSWORD_RESET_PREFIX + token));
+    }
+
+    public int resetPassword(String token, String newPassword) {
+        if (!isPasswordStrong(newPassword)) {
+            return RESULT_WEAK_PASSWORD;
+        }
+        if (!verifyResetToken(token)) {
+            return RESULT_INVALID_TOKEN;
+        }
+        Object value = redisTemplate.opsForValue().get(PASSWORD_RESET_PREFIX + token);
+        if (!(value instanceof String username) || username.isBlank()) {
+            return RESULT_INVALID_TOKEN;
+        }
+        User user = getUserByUsername(username);
+        if (user == null || user.getUserId() == null) {
+            return RESULT_ERROR;
+        }
+        int updated = userDao.updatePasswordByUserId(user.getUserId(), passwordEncoder.encode(newPassword));
+        if (updated > 0) {
+            redisTemplate.delete(PASSWORD_RESET_PREFIX + token);
+            return RESULT_SUCCESS;
+        }
+        return RESULT_ERROR;
+    }
+
+    public int changePassword(String username, String oldPassword, String newPassword) {
+        User user = getUserByUsername(username);
+        if (user == null || user.getUserId() == null) {
+            return RESULT_ERROR;
+        }
+        if (!passwordEncoder.matches(oldPassword, user.getPassword())) {
+            return RESULT_INVALID_OLD_PASSWORD;
+        }
+        if (!isPasswordStrong(newPassword)) {
+            return RESULT_WEAK_PASSWORD;
+        }
+        int updated = userDao.updatePasswordByUserId(user.getUserId(), passwordEncoder.encode(newPassword));
+        return updated > 0 ? RESULT_SUCCESS : RESULT_ERROR;
+    }
+
+    public int updateProfile(String currentUsername, String newUsername, String newEmail) {
+        User currentUser = getUserByUsername(currentUsername);
+        if (currentUser == null || currentUser.getUserId() == null) {
+            return RESULT_ERROR;
+        }
+
+        User userWithSameName = getUserByUsername(newUsername);
+        if (userWithSameName != null && !userWithSameName.getUserId().equals(currentUser.getUserId())) {
+            return RESULT_DUPLICATED_USER;
+        }
+        User userWithSameEmail = getUserByEmail(newEmail);
+        if (userWithSameEmail != null && !userWithSameEmail.getUserId().equals(currentUser.getUserId())) {
+            return RESULT_DUPLICATED_USER;
+        }
+
+        int updated = userDao.updateProfileByUserId(currentUser.getUserId(), newUsername, newEmail);
+        return updated > 0 ? RESULT_SUCCESS : RESULT_ERROR;
+    }
+
+    private User resolveUser(String usernameOrEmail) {
+        if (usernameOrEmail == null || usernameOrEmail.isBlank()) {
+            return null;
+        }
+        String trimmed = usernameOrEmail.trim();
+        if (trimmed.contains("@")) {
+            return getUserByEmail(trimmed);
+        }
+        return getUserByUsername(trimmed);
+    }
+
+    private String generateInviteCode() {
+        return "AF-" + UUID.randomUUID().toString().replace("-", "").substring(0, 12).toUpperCase(Locale.ROOT);
     }
 
     private boolean isPasswordStrong(String password) {

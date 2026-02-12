@@ -153,6 +153,26 @@ public class AdminController {
         return ResponseEntity.badRequest().body("Admin not logged in");
     }
 
+    @PostMapping("/invite-codes")
+    public ResponseEntity<Map<String, Object>> createInviteCode(Authentication authentication,
+                                                                @RequestBody(required = false) Map<String, Object> request) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).build();
+        }
+        Integer expiresInHours = null;
+        if (request != null && request.get("expiresInHours") instanceof Number hours) {
+            expiresInHours = hours.intValue();
+        }
+
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        Long createdBy = adminUser == null ? null : adminUser.getUserId();
+        String inviteCode = authService.createInviteCode(createdBy, expiresInHours);
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("inviteCode", inviteCode);
+        payload.put("expiresInHours", expiresInHours);
+        return ResponseEntity.ok(payload);
+    }
+
     @GetMapping("/overall")
     public ResponseEntity<Map<String, Long>> overall(Authentication authentication) {
         if (!isAdmin(authentication)) {

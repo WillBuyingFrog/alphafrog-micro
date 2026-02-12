@@ -184,6 +184,18 @@ CREATE TABLE IF NOT EXISTS alphafrog_user (
     UNIQUE (email)
 );
 
+CREATE TABLE IF NOT EXISTS alphafrog_user_invite_code (
+    id BIGSERIAL PRIMARY KEY,
+    invite_code VARCHAR(64) NOT NULL UNIQUE,
+    created_by BIGINT,
+    used_by BIGINT,
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    ext JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    expires_at TIMESTAMPTZ,
+    used_at TIMESTAMPTZ
+);
+
 -- ==================
 -- 2) Portfolio tables
 -- ==================
@@ -378,6 +390,8 @@ CREATE INDEX IF NOT EXISTS idx_trade_calendar_is_open ON alphafrog_trade_calenda
 
 CREATE INDEX IF NOT EXISTS idx_user_username ON alphafrog_user(username);
 CREATE INDEX IF NOT EXISTS idx_user_email ON alphafrog_user(email);
+CREATE INDEX IF NOT EXISTS idx_user_invite_code_status ON alphafrog_user_invite_code(status);
+CREATE INDEX IF NOT EXISTS idx_user_invite_code_expires ON alphafrog_user_invite_code(expires_at);
 
 CREATE INDEX IF NOT EXISTS idx_portfolio_holding_portfolio ON alphafrog_portfolio_holding(portfolio_id);
 CREATE INDEX IF NOT EXISTS idx_portfolio_holding_symbol ON alphafrog_portfolio_holding(symbol);
