@@ -119,9 +119,17 @@ public class AgentRunExecutor {
             String modelName = resolvedLlm.modelName();
             String endpointBaseUrl = resolvedLlm.baseUrl();
             boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            // run 级调试开关：仅本次 run 生效，通过 ThreadLocal 向下游链路透传。
+            boolean debugMode = eventService.extractDebugMode(run.getExt());
+            AgentContext.setDebugMode(debugMode);
             var providerOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
+            if (debugMode) {
+                // 调试模式仅输出中间态摘要，避免常规运行日志被噪音淹没。
+                log.info("[agent-debug] run started: runId={}, endpoint={}, model={}, providerOrder={}",
+                        runId, endpointName, modelName, providerOrder);
+            }
 
             String userGoal = eventService.extractUserGoal(run.getExt());
             
@@ -175,6 +183,10 @@ public class AgentRunExecutor {
                 Response<AiMessage> response = chatModel.generate(messages, toolSpecifications);
                 long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
                 AiMessage aiMessage = response.content();
+                if (debugMode) {
+                    log.info("[agent-debug] llm step done: runId={}, step={}, durationMs={}, hasToolCalls={}",
+                            runId, i, llmDurationMs, aiMessage != null && aiMessage.hasToolExecutionRequests());
+                }
                 messages.add(aiMessage);
                 String llmPhase = "tool_execution";
                 if (i == 0) {
@@ -218,6 +230,10 @@ public class AgentRunExecutor {
                          eventService.append(runId, userId, "TOOL_CALL_STARTED", startPayload);
                          
                          Map<String, Object> params = jsonToMap(argsJson);
+                         if (debugMode) {
+                             log.info("[agent-debug] tool invoke start: runId={}, step={}, tool={}, params={}",
+                                     runId, i, toolName, safeJsonForLog(params));
+                         }
                          String result;
                          world.willfrog.agent.tool.ToolRouter.ToolInvocationResult invokeResult = null;
                          AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
@@ -234,6 +250,15 @@ public class AgentRunExecutor {
                          finishPayload.put("result_preview", result);
                          finishPayload.put("cache", toolRouter.toEventCachePayload(invokeResult));
                          eventService.append(runId, userId, "TOOL_CALL_FINISHED", finishPayload);
+                         if (debugMode) {
+                             log.info("[agent-debug] tool invoke done: runId={}, step={}, tool={}, success={}, cache={}, resultPreview={}",
+                                     runId,
+                                     i,
+                                     toolName,
+                                     invokeResult != null && invokeResult.isSuccess(),
+                                     toolRouter.toEventCachePayload(invokeResult),
+                                     preview(result));
+                         }
 
                          messages.add(ToolExecutionResultMessage.from(toolRequest, result));
                          executionLog += "Tool: " + toolName + "\nResult: " + result + "\n\n";
@@ -338,6 +363,24 @@ public class AgentRunExecutor {
         } catch (Exception e) {
             return jsonText;
         }
+    }
+
+    private String safeJsonForLog(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private String preview(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() > 300) {
+            return text.substring(0, 300);
+        }
+        return text;
     }
 
     /**

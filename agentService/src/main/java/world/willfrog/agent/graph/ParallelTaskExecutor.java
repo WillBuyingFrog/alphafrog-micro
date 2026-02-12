@@ -31,7 +31,12 @@ import java.util.stream.Collectors;
 @Slf4j
 public class ParallelTaskExecutor {
 
+    // 新占位符协议：${taskId.output.path}
     private static final Pattern PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{([A-Za-z0-9_-]+)\\.output(?:\\.([A-Za-z0-9_.-]+))?}");
+    // 旧协议：继续识别并主动报错，避免静默透传到下游执行器。
+    private static final Pattern LEGACY_RESULT_PATTERN = Pattern.compile("#[A-Za-z0-9_-]+\\.result");
+    private static final Pattern LEGACY_MUSTACHE_PATTERN = Pattern.compile("\\{\\{[^}]+}}");
+    private static final Pattern LEGACY_TASK_OUTPUT_PATTERN = Pattern.compile("\\btask\\.output\\b");
 
     private final ToolRouter toolRouter;
     private final SubAgentRunner subAgentRunner;
@@ -66,9 +71,15 @@ public class ParallelTaskExecutor {
             if (!eventService.isRunnable(runId, userId)) {
                 break;
             }
+            boolean debugMode = AgentContext.isDebugMode();
             List<ParallelPlan.PlanTask> ready = pending.stream()
                     .filter(task -> depsSatisfied(task, results.keySet()))
                     .collect(Collectors.toList());
+            debugLog("ready tasks resolved: runId={}, pending={}, ready={}, finished={}",
+                    runId,
+                    pending.stream().map(ParallelPlan.PlanTask::getId).collect(Collectors.toList()),
+                    ready.stream().map(ParallelPlan.PlanTask::getId).collect(Collectors.toList()),
+                    new ArrayList<>(results.keySet()));
 
             if (ready.isEmpty()) {
                 eventService.append(runId, userId, "PARALLEL_EXECUTION_BLOCKED", Map.of(
@@ -86,7 +97,14 @@ public class ParallelTaskExecutor {
                     try {
                         AgentContext.setRunId(runId);
                         AgentContext.setUserId(userId);
+                        AgentContext.setDebugMode(debugMode);
                         AgentContext.setPhase(AgentObservabilityService.PHASE_PARALLEL_EXECUTION);
+                        debugLog("task execution started: runId={}, taskId={}, type={}, tool={}, rawArgs={}",
+                                runId,
+                                task.getId(),
+                                nvl(task.getType()),
+                                nvl(task.getTool()),
+                                safeJson(task.getArgs()));
                         Map<String, Object> startPayload = new LinkedHashMap<>();
                         startPayload.put("task_id", task.getId());
                         startPayload.put("type", nvl(task.getType()));
@@ -116,6 +134,12 @@ public class ParallelTaskExecutor {
                         finishPayload.put("output_preview", preview(result.getOutput()));
                         finishPayload.put("cache", result.getCache() == null ? Map.of() : result.getCache());
                         eventService.append(runId, userId, "PARALLEL_TASK_FINISHED", finishPayload);
+                        debugLog("task execution finished: runId={}, taskId={}, success={}, cache={}, outputPreview={}",
+                                runId,
+                                task.getId(),
+                                result.isSuccess(),
+                                result.getCache() == null ? Map.of() : result.getCache(),
+                                preview(result.getOutput()));
                     } catch (Exception e) {
                         log.warn("Parallel task execution failed: runId={}, taskId={}", runId, task.getId(), e);
                         ParallelTaskResult failed = ParallelTaskResult.builder()
@@ -131,6 +155,8 @@ public class ParallelTaskExecutor {
                                 "task_id", task.getId(),
                                 "error", e.getClass().getSimpleName() + ": " + nvl(e.getMessage())
                         ));
+                        debugLog("task execution internal error: runId={}, taskId={}, error={}",
+                                runId, task.getId(), e.getClass().getSimpleName() + ": " + nvl(e.getMessage()));
                     } finally {
                         AgentContext.clear();
                     }
@@ -158,6 +184,8 @@ public class ParallelTaskExecutor {
             NormalizeResult normalize = normalizeToolArgs(task, knownResults);
             if (!normalize.unresolvedPlaceholders().isEmpty()) {
                 String msg = "Unresolved placeholders: " + String.join(",", normalize.unresolvedPlaceholders());
+                debugLog("task unresolved placeholders: runId={}, taskId={}, tool={}, placeholders={}",
+                        AgentContext.getRunId(), task.getId(), nvl(task.getTool()), normalize.unresolvedPlaceholders());
                 return ParallelTaskResult.builder()
                         .taskId(task.getId())
                         .type("tool")
@@ -170,6 +198,8 @@ public class ParallelTaskExecutor {
                         .cache(toolRouter.toEventCachePayload(null))
                         .build();
             }
+            debugLog("task args normalized: runId={}, taskId={}, tool={}, normalizedArgs={}",
+                    AgentContext.getRunId(), task.getId(), nvl(task.getTool()), safeJson(normalize.args()));
 
             ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(task.getTool(), normalize.args());
             String output = invokeResult.getOutput();
@@ -231,6 +261,7 @@ public class ParallelTaskExecutor {
         Map<String, Object> args = new LinkedHashMap<>(safeArgs(task.getArgs()));
         String tool = nvl(task.getTool());
 
+        // 第一步：把常见别名参数归一为工具标准参数名，减少模型输出波动造成的失败。
         applyCommonAliases(tool, args);
 
         List<String> deps = task.getDependsOn() == null ? List.of() : task.getDependsOn();
@@ -244,6 +275,7 @@ public class ParallelTaskExecutor {
         Map<String, Object> resolvedArgs = toMap(resolved);
 
         if ("executePython".equals(tool)) {
+            // Python 工具额外做 dataset_id 推导与代码路径重写。
             resolvedArgs = normalizeExecutePythonArgs(resolvedArgs, depOutputs);
         }
 
@@ -323,11 +355,18 @@ public class ParallelTaskExecutor {
         if (!allDatasetIds.isEmpty()) {
             args.put("dataset_ids", String.join(",", allDatasetIds));
         }
+        debugLog("executePython dataset normalization: runId={}, primaryDatasetId={}, extraDatasetIds={}",
+                AgentContext.getRunId(), datasetId, allDatasetIds);
 
         String code = firstNonBlank(args.get("code"), args.get("arg0"));
         if (!code.isBlank()) {
             String rewritten = rewriteCodeDatasetPath(code, datasetId, allDatasetIds);
+            rewritten = rewriteCodeDatasetAccess(rewritten, datasetId, allDatasetIds);
             args.put("code", rewritten);
+            if (!rewritten.equals(code)) {
+                debugLog("executePython code rewritten: runId={}, beforePreview={}, afterPreview={}",
+                        AgentContext.getRunId(), preview(code), preview(rewritten));
+            }
         }
 
         return args;
@@ -360,6 +399,7 @@ public class ParallelTaskExecutor {
 
         Matcher fullMatcher = PLACEHOLDER_PATTERN.matcher(text.trim());
         if (fullMatcher.matches()) {
+            // 纯占位符场景保持原始类型（对象/数组/数字），不要强转成字符串。
             Object resolved = resolvePlaceholder(fullMatcher.group(1), fullMatcher.group(2), depOutputs);
             return resolved == null ? text : resolved;
         }
@@ -369,6 +409,7 @@ public class ParallelTaskExecutor {
         boolean found = false;
         while (matcher.find()) {
             found = true;
+            // 混合文本场景用字符串内联替换。
             Object resolved = resolvePlaceholder(matcher.group(1), matcher.group(2), depOutputs);
             String replacement = resolved == null ? matcher.group(0) : stringifyInline(resolved);
             matcher.appendReplacement(sb, Matcher.quoteReplacement(replacement));
@@ -537,6 +578,43 @@ public class ParallelTaskExecutor {
         return rewritten;
     }
 
+    private String rewriteCodeDatasetAccess(String code,
+                                            String primaryDatasetId,
+                                            Set<String> allDatasetIds) {
+        String rewritten = nvl(code);
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        if (primaryDatasetId != null && !primaryDatasetId.isBlank()) {
+            ids.add(primaryDatasetId);
+        }
+        ids.addAll(allDatasetIds == null ? Set.of() : allDatasetIds);
+
+        for (String datasetId : ids) {
+            if (datasetId == null || datasetId.isBlank()) {
+                continue;
+            }
+            String canonicalCsv = "/sandbox/input/" + datasetId + "/" + datasetId + ".csv";
+            String legacyCsv = "/sandbox/input/" + datasetId + "/data.csv";
+            String legacyParquet = "/sandbox/input/" + datasetId + "/data.parquet";
+            rewritten = rewritten.replace("get_dataset('" + datasetId + "')", "pd.read_csv('" + canonicalCsv + "')");
+            rewritten = rewritten.replace("get_dataset(\"" + datasetId + "\")", "pd.read_csv(\"" + canonicalCsv + "\")");
+            rewritten = rewritten.replace(legacyCsv, canonicalCsv);
+            rewritten = rewritten.replace(legacyParquet, canonicalCsv);
+        }
+
+        rewritten = rewritten.replace("/{dataset_id}/data.csv", "/{dataset_id}/{dataset_id}.csv");
+        rewritten = rewritten.replace("/{dataset_id}/data.parquet", "/{dataset_id}/{dataset_id}.csv");
+        rewritten = rewritten.replace("pd.read_parquet(", "pd.read_csv(");
+
+        if (rewritten.contains("get_dataset(") && !rewritten.contains("def get_dataset(")) {
+            String helper = "import pandas as pd\n"
+                    + "def get_dataset(dataset_id):\n"
+                    + "    dataset_id = str(dataset_id).strip()\n"
+                    + "    return pd.read_csv(f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\")\n\n";
+            rewritten = helper + rewritten;
+        }
+        return rewritten;
+    }
+
     private void collectUnresolvedPlaceholders(Object value, List<String> unresolved) {
         if (value == null) {
             return;
@@ -561,6 +639,23 @@ public class ParallelTaskExecutor {
             String placeholder = matcher.group(0);
             if (!unresolved.contains(placeholder)) {
                 unresolved.add(placeholder);
+            }
+        }
+        // 历史语法统一纳入未解析列表，强制走失败分支，避免带着脏参数进入 sandbox。
+        collectLegacyTokens(text, LEGACY_RESULT_PATTERN, unresolved);
+        collectLegacyTokens(text, LEGACY_MUSTACHE_PATTERN, unresolved);
+        collectLegacyTokens(text, LEGACY_TASK_OUTPUT_PATTERN, unresolved);
+    }
+
+    private void collectLegacyTokens(String text, Pattern pattern, List<String> unresolved) {
+        if (text == null || text.isBlank() || pattern == null) {
+            return;
+        }
+        Matcher matcher = pattern.matcher(text);
+        while (matcher.find()) {
+            String token = matcher.group(0);
+            if (!unresolved.contains(token)) {
+                unresolved.add(token);
             }
         }
     }
@@ -667,6 +762,21 @@ public class ParallelTaskExecutor {
             return text.substring(0, 300);
         }
         return text;
+    }
+
+    private String safeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private void debugLog(String pattern, Object... args) {
+        if (!AgentContext.isDebugMode()) {
+            return;
+        }
+        log.info("[agent-debug] " + pattern, args);
     }
 
     private String nvl(String text) {

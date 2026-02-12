@@ -81,11 +81,18 @@ public class AgentController {
                     ? new HashMap<>()
                     : new HashMap<>(request.context());
             boolean captureLlmRequests = Boolean.TRUE.equals(request.captureLlmRequests());
+            boolean debugMode = Boolean.TRUE.equals(request.debugMode())
+                    || toBoolean(contextMap.get("debugMode"))
+                    || toBoolean(contextMap.get("debug_mode"));
             String provider = nvl(request.provider());
             Integer plannerCandidateCount = request.plannerCandidateCount();
             boolean admin = isAdmin(authentication);
             if (captureLlmRequests) {
                 contextMap.put("captureLlmRequests", true);
+            }
+            if (debugMode) {
+                // 兼容 agentService 侧 ext/context 两种读取方式。
+                contextMap.put("debugMode", true);
             }
             if (!provider.isBlank()) {
                 contextMap.put("provider", provider);
@@ -110,6 +117,7 @@ public class AgentController {
                             .setCaptureLlmRequests(captureLlmRequests)
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
+                            .setDebugMode(debugMode)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));
@@ -540,6 +548,16 @@ public class AgentController {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private boolean toBoolean(Object value) {
+        if (value == null) {
+            return false;
+        }
+        if (value instanceof Boolean boolValue) {
+            return boolValue;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
     }
 
     private String emptyToNull(String value) {

@@ -10,6 +10,7 @@ public record AgentRunCreateRequest(
         String endpointName,
         Boolean captureLlmRequests,
         String provider,
-        Integer plannerCandidateCount
+        Integer plannerCandidateCount,
+        Boolean debugMode
 ) {
 }

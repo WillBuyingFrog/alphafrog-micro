@@ -5,6 +5,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -15,6 +16,7 @@ import java.util.Set;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class ToolRouter {
 
     private final MarketDataTools marketDataTools;
@@ -28,6 +30,8 @@ public class ToolRouter {
     }
 
     public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
+        debugLog("tool invoke request: runId={}, tool={}, params={}",
+                AgentContext.getRunId(), nvl(toolName), safeJson(params));
         ToolResultCacheService.CachedToolCallResult cached = toolResultCacheService.executeWithCache(
                 toolName,
                 params,
@@ -39,6 +43,13 @@ public class ToolRouter {
         long durationMs = Math.max(0L, cached.getDurationMs());
         ToolResultCacheService.CacheMeta cacheMeta = cached.getCacheMeta();
         recordObservability(toolName, result, durationMs, success, cacheMeta);
+        debugLog("tool invoke response: runId={}, tool={}, success={}, durationMs={}, cache={}, resultPreview={}",
+                AgentContext.getRunId(),
+                nvl(toolName),
+                success,
+                durationMs,
+                toolResultCacheService.toPayload(cacheMeta),
+                preview(result));
         return ToolInvocationResult.builder()
                 .output(result)
                 .success(success)
@@ -68,6 +79,7 @@ public class ToolRouter {
         long startedAt = System.currentTimeMillis();
         String result;
         try {
+            // 统一入口负责兼容参数别名（ts_code/code 等），工具实现层只接收标准参数。
             result = switch (toolName) {
                 case "getStockInfo" -> marketDataTools.getStockInfo(
                         str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("stock_code"), params.get("arg0"))
@@ -111,6 +123,8 @@ public class ToolRouter {
                 default -> unsupported(toolName);
             };
         } catch (Exception e) {
+            debugLog("tool invoke exception: runId={}, tool={}, error={}",
+                    AgentContext.getRunId(), nvl(toolName), nvl(e.getMessage()));
             result = invocationError(toolName, e.getMessage());
         }
         return ToolResultCacheService.ToolExecutionOutcome.builder()
@@ -252,6 +266,31 @@ public class ToolRouter {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private String preview(String text) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() > 300) {
+            return text.substring(0, 300);
+        }
+        return text;
+    }
+
+    private String safeJson(Object value) {
+        try {
+            return objectMapper.writeValueAsString(value);
+        } catch (Exception e) {
+            return String.valueOf(value);
+        }
+    }
+
+    private void debugLog(String pattern, Object... args) {
+        if (!AgentContext.isDebugMode()) {
+            return;
+        }
+        log.info("[agent-debug] " + pattern, args);
     }
 
     @Data

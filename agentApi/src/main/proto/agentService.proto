@@ -34,6 +34,7 @@ message CreateAgentRunRequest {
   bool capture_llm_requests = 7;
   string provider = 8;
   int32 planner_candidate_count = 9;
+  bool debug_mode = 10;
 }
 
 message GetAgentRunRequest {

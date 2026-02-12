@@ -9,6 +9,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 
 import java.nio.charset.StandardCharsets;
@@ -59,31 +60,41 @@ public class ToolResultCacheService {
                                                  String scope,
                                                  Supplier<ToolExecutionOutcome> loader) {
         CachePlan plan = buildPlan(toolName, params, scope);
+        debugLog("cache plan resolved: runId={}, tool={}, mode={}, key={}, ttlSeconds={}, scope={}",
+                AgentContext.getRunId(), nvl(toolName), plan.getMode(), plan.getKey(), plan.getTtlSeconds(), nvl(scope));
         long lookupStartedAt = System.currentTimeMillis();
 
         if (plan.getMode() == CacheMode.REDIS && plan.getTtlSeconds() > 0) {
             CachePayload cached = readCache(plan.getKey());
             if (cached != null && cached.getResult() != null) {
-                long durationMs = Math.max(0L, System.currentTimeMillis() - lookupStartedAt);
-                long ttlRemainingMs = ttlRemainingMs(plan.getKey());
-                long savedDurationMs = Math.max(0L, cached.getOriginalDurationMs() - durationMs);
-                CacheMeta meta = CacheMeta.builder()
-                        .eligible(true)
-                        .hit(true)
-                        .key(plan.getKey())
-                        .ttlRemainingMs(ttlRemainingMs)
-                        .source(SOURCE_REDIS)
-                        .estimatedSavedDurationMs(savedDurationMs)
-                        .build();
-                return CachedToolCallResult.builder()
-                        .result(cached.getResult())
-                        .durationMs(durationMs)
-                        .success(true)
-                        .cacheMeta(meta)
-                        .build();
+                if (!isStructuredToolResult(cached.getResult())) {
+                    redisTemplate.delete(plan.getKey());
+                    log.info("Ignore legacy tool cache payload, key={}", plan.getKey());
+                } else {
+                    long durationMs = Math.max(0L, System.currentTimeMillis() - lookupStartedAt);
+                    long ttlRemainingMs = ttlRemainingMs(plan.getKey());
+                    long savedDurationMs = Math.max(0L, cached.getOriginalDurationMs() - durationMs);
+                    CacheMeta meta = CacheMeta.builder()
+                            .eligible(true)
+                            .hit(true)
+                            .key(plan.getKey())
+                            .ttlRemainingMs(ttlRemainingMs)
+                            .source(SOURCE_REDIS)
+                            .estimatedSavedDurationMs(savedDurationMs)
+                            .build();
+                    debugLog("cache hit: runId={}, tool={}, key={}, ttlRemainingMs={}, savedMs={}",
+                            AgentContext.getRunId(), nvl(toolName), plan.getKey(), ttlRemainingMs, savedDurationMs);
+                    return CachedToolCallResult.builder()
+                            .result(cached.getResult())
+                            .durationMs(durationMs)
+                            .success(true)
+                            .cacheMeta(meta)
+                            .build();
+                }
             }
         }
 
+        // 未命中缓存时才执行真实工具调用（loader）。
         ToolExecutionOutcome loaded = loader.get();
         if (loaded == null) {
             loaded = ToolExecutionOutcome.builder()
@@ -104,8 +115,10 @@ public class ToolResultCacheService {
                     .estimatedSavedDurationMs(0L)
                     .build();
         } else if (plan.getMode() == CacheMode.REDIS) {
-            if (loaded.isSuccess() && plan.getTtlSeconds() > 0 && !blank(loaded.getResult())) {
+            if (loaded.isSuccess() && plan.getTtlSeconds() > 0 && isStructuredToolResult(loaded.getResult())) {
                 writeCache(plan.getKey(), loaded.getResult(), loaded.getDurationMs(), plan.getTtlSeconds());
+                debugLog("cache write: runId={}, tool={}, key={}, ttlSeconds={}, durationMs={}",
+                        AgentContext.getRunId(), nvl(toolName), plan.getKey(), plan.getTtlSeconds(), loaded.getDurationMs());
             }
             meta = CacheMeta.builder()
                     .eligible(true)
@@ -408,6 +421,25 @@ public class ToolResultCacheService {
         }
     }
 
+    private boolean isStructuredToolResult(String result) {
+        if (blank(result)) {
+            return false;
+        }
+        try {
+            // 统一工具输出协议：必须含 ok + (data|error) 结构。
+            Map<?, ?> root = objectMapper.readValue(result, Map.class);
+            Object ok = root.get("ok");
+            if (!(ok instanceof Boolean)) {
+                return false;
+            }
+            Object data = root.get("data");
+            Object error = root.get("error");
+            return data instanceof Map<?, ?> || error instanceof Map<?, ?>;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
     private long ttlRemainingMs(String key) {
         if (blank(key)) {
             return -1L;
@@ -468,6 +500,13 @@ public class ToolResultCacheService {
 
     private String nvl(String text) {
         return text == null ? "" : text;
+    }
+
+    private void debugLog(String pattern, Object... args) {
+        if (!AgentContext.isDebugMode()) {
+            return;
+        }
+        log.info("[agent-debug] " + pattern, args);
     }
 
     private enum CacheMode {

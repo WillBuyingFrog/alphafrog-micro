@@ -71,6 +71,7 @@ public class AgentEventService {
      * @param idempotencyKey 幂等键
      * @param modelName      模型名（可为空，后续会用默认）
      * @param endpointName   端点名（可为空，后续会用默认）
+     * @param debugMode      run 级调试模式开关
      * @return 创建后的 run
      */
     public AgentRun createRun(String userId,
@@ -81,7 +82,8 @@ public class AgentEventService {
                               String endpointName,
                               boolean captureLlmRequests,
                               String provider,
-                              int plannerCandidateCount) {
+                              int plannerCandidateCount,
+                              boolean debugMode) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -91,6 +93,7 @@ public class AgentEventService {
         ext.put("model_name", modelName == null ? "" : modelName);
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
         ext.put("capture_llm_requests", captureLlmRequests);
+        ext.put("debug_mode", debugMode);
         ext.put("provider", provider == null ? "" : provider.trim());
         if (plannerCandidateCount > 0) {
             ext.put("planner_candidate_count", plannerCandidateCount);
@@ -217,35 +220,20 @@ public class AgentEventService {
         return extractField(extJson, "endpoint_name");
     }
 
+    /**
+     * run 级开关：是否抓取 LLM 原始请求。
+     * 支持 ext 明文字段与 context_json 回退读取。
+     */
     public boolean extractCaptureLlmRequests(String extJson) {
-        if (extJson == null || extJson.isBlank()) {
-            return false;
-        }
-        try {
-            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
-            Object value = map.get("capture_llm_requests");
-            if (value instanceof Boolean boolVal) {
-                return boolVal;
-            }
-            if (value != null) {
-                return Boolean.parseBoolean(String.valueOf(value));
-            }
-            Object contextRaw = map.get("context_json");
-            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
-                return false;
-            }
-            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
-            Object contextValue = contextMap.get("captureLlmRequests");
-            if (contextValue == null) {
-                contextValue = contextMap.get("capture_llm_requests");
-            }
-            if (contextValue instanceof Boolean boolCtx) {
-                return boolCtx;
-            }
-            return contextValue != null && Boolean.parseBoolean(String.valueOf(contextValue));
-        } catch (Exception e) {
-            return false;
-        }
+        return extractBooleanFromExt(extJson, "capture_llm_requests", "captureLlmRequests", "capture_llm_requests");
+    }
+
+    /**
+     * run 级调试模式：
+     * 开启后会把关键中间态写入微服务日志，便于线上问题复盘。
+     */
+    public boolean extractDebugMode(String extJson) {
+        return extractBooleanFromExt(extJson, "debug_mode", "debugMode", "debug_mode");
     }
 
     public List<String> extractOpenRouterProviderOrder(String extJson) {
@@ -309,6 +297,44 @@ public class AgentEventService {
             }
         }
         return providers;
+    }
+
+    private boolean extractBooleanFromExt(String extJson,
+                                          String extKey,
+                                          String contextKeyCamel,
+                                          String contextKeySnake) {
+        if (extJson == null || extJson.isBlank()) {
+            return false;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Boolean direct = toBoolean(map.get(extKey));
+            if (Boolean.TRUE.equals(direct)) {
+                return true;
+            }
+            Object contextRaw = map.get("context_json");
+            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
+                return Boolean.TRUE.equals(direct);
+            }
+            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
+            Boolean contextValue = toBoolean(contextMap.get(contextKeyCamel));
+            if (contextValue != null) {
+                return contextValue || Boolean.TRUE.equals(direct);
+            }
+            return Boolean.TRUE.equals(direct) || Boolean.TRUE.equals(toBoolean(contextMap.get(contextKeySnake)));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private Boolean toBoolean(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean boolValue) {
+            return boolValue;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
     }
 
     /**
