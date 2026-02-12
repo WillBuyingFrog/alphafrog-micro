@@ -2,6 +2,7 @@ package world.willfrog.agent.graph;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -86,7 +87,7 @@ public class PlanJudgeService {
                                 resolved.baseUrl(),
                                 resolved.modelName(),
                                 messages,
-                                null,
+                                request.getToolSpecifications(),
                                 Map.of("stage", "parallel_plan_judge")
                         );
                         observabilityService.recordLlmCall(
@@ -291,6 +292,7 @@ public class PlanJudgeService {
         private double complexityPenalty;
         private double structuralScoreWeight;
         private double llmJudgeScoreWeight;
+        private List<ToolSpecification> toolSpecifications;
     }
 
     @Data

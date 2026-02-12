@@ -2,6 +2,7 @@ package world.willfrog.agent.graph;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -73,8 +74,12 @@ public class SubAgentRunner {
         private String goal;
         /** 上下文补充。 */
         private String context;
+        /** 上游透传的初始参数（已完成占位符解析）。 */
+        private Map<String, Object> seedArgs;
         /** 可用工具白名单。 */
         private Set<String> toolWhitelist;
+        /** 工具规格列表（用于 LLM 请求记录）。 */
+        private List<ToolSpecification> toolSpecifications;
         /** 允许的最大步骤数。 */
         private int maxSteps;
         /** 端点名。 */
@@ -140,7 +145,7 @@ public class SubAgentRunner {
                         request.getEndpointBaseUrl(),
                         request.getModelName(),
                         planMessages,
-                        null,
+                        request.getToolSpecifications(),
                         Map.of(
                                 "stage", "sub_agent_plan",
                                 "attempt", attempt
@@ -225,7 +230,7 @@ public class SubAgentRunner {
                 }
                 JsonNode argsNode = stepNode.path("args");
                 Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
-                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps);
+                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps, request.getSeedArgs());
 
                 int stepIndex = executedSteps.size();
                 emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
@@ -316,7 +321,7 @@ public class SubAgentRunner {
                     request.getEndpointBaseUrl(),
                     request.getModelName(),
                     summaryMessages,
-                    null,
+                    request.getToolSpecifications(),
                     Map.of("stage", "sub_agent_summary")
             );
             observabilityService.recordLlmCall(
@@ -396,7 +401,8 @@ public class SubAgentRunner {
      */
     private Map<String, Object> normalizeStepArgs(String tool,
                                                   Map<String, Object> rawArgs,
-                                                  List<Map<String, Object>> executedSteps) {
+                                                  List<Map<String, Object>> executedSteps,
+                                                  Map<String, Object> seedArgs) {
         Map<String, Object> args = new HashMap<>();
         if (rawArgs != null) {
             args.putAll(rawArgs);
@@ -442,21 +448,49 @@ public class SubAgentRunner {
         }
 
         if ("executePython".equals(tool)) {
-            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            Map<String, Object> effectiveSeedArgs = seedArgs == null ? Map.of() : seedArgs;
+            String seedDatasetId = firstNonBlank(
+                    effectiveSeedArgs.get("dataset_id"),
+                    effectiveSeedArgs.get("datasetId"),
+                    effectiveSeedArgs.get("arg1")
+            );
+            List<String> seedDatasetIds = parseDatasetIds(firstNonBlank(
+                    effectiveSeedArgs.get("dataset_ids"),
+                    effectiveSeedArgs.get("datasetIds"),
+                    effectiveSeedArgs.get("arg2")
+            ));
             List<String> discoveredDatasetIds = extractDatasetIds(executedSteps);
+
+            LinkedHashSet<String> availableDatasetIds = new LinkedHashSet<>();
+            if (!seedDatasetId.isBlank()) {
+                availableDatasetIds.add(seedDatasetId);
+            }
+            availableDatasetIds.addAll(seedDatasetIds);
+            availableDatasetIds.addAll(discoveredDatasetIds);
+
+            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            if (!datasetId.isBlank() && !availableDatasetIds.isEmpty() && !availableDatasetIds.contains(datasetId)) {
+                datasetId = availableDatasetIds.iterator().next();
+            }
             if (datasetId.isBlank()) {
-                datasetId = discoveredDatasetIds.isEmpty() ? "" : discoveredDatasetIds.get(0);
+                datasetId = availableDatasetIds.isEmpty() ? "" : availableDatasetIds.iterator().next();
             }
             if (!datasetId.isBlank()) {
                 args.put("dataset_id", datasetId);
             }
-            if (args.get("dataset_ids") == null && !discoveredDatasetIds.isEmpty()) {
-                String all = discoveredDatasetIds.stream().collect(Collectors.joining(","));
-                if (!all.isBlank()) {
-                    args.put("dataset_ids", all);
-                }
+
+            LinkedHashSet<String> mergedDatasetIds = new LinkedHashSet<>();
+            mergedDatasetIds.addAll(parseDatasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2"))));
+            mergedDatasetIds.addAll(availableDatasetIds);
+            mergedDatasetIds.remove(datasetId);
+            if (!mergedDatasetIds.isEmpty()) {
+                args.put("dataset_ids", String.join(",", mergedDatasetIds));
             }
+
             String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            if (code.isBlank()) {
+                code = firstNonBlank(effectiveSeedArgs.get("code"), effectiveSeedArgs.get("arg0"));
+            }
             if (!code.isBlank()) {
                 args.put("code", code);
             }
@@ -699,6 +733,27 @@ public class SubAgentRunner {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private List<String> parseDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return List.of();
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String value = nvl(part).trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1).trim();
+            }
+            if (!value.isBlank()) {
+                ids.add(value);
+            }
+        }
+        return new ArrayList<>(ids);
     }
 
     private String compactDate(String raw) {

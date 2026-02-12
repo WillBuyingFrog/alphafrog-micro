@@ -2,6 +2,7 @@ package world.willfrog.agent.graph;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -87,6 +88,7 @@ public class DagTaskExecutor {
                     runId,
                     userId,
                     request.getToolWhitelist(),
+                    request.getToolSpecifications(),
                     subAgentMaxSteps,
                     request.getUserGoal(),
                     request.getModel(),
@@ -224,7 +226,7 @@ public class DagTaskExecutor {
                 request.getEndpointBaseUrl(),
                 request.getModelName(),
                 finalMessages,
-                null,
+                request.getToolSpecifications(),
                 Map.of("stage", "parallel_final")
         );
         observabilityService.recordLlmCall(
@@ -277,7 +279,7 @@ public class DagTaskExecutor {
                     request.getEndpointBaseUrl(),
                     request.getModelName(),
                     messages,
-                    null,
+                    request.getToolSpecifications(),
                     Map.of("stage", "parallel_patch_plan")
             );
             observabilityService.recordLlmCall(
@@ -514,6 +516,7 @@ public class DagTaskExecutor {
         private ParallelPlan plan;
         private ChatLanguageModel model;
         private Set<String> toolWhitelist;
+        private List<ToolSpecification> toolSpecifications;
         private String endpointName;
         private String endpointBaseUrl;
         private String modelName;

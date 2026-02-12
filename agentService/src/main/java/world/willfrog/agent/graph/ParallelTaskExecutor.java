@@ -3,6 +3,7 @@ package world.willfrog.agent.graph;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -49,6 +50,7 @@ public class ParallelTaskExecutor {
                                                    String runId,
                                                    String userId,
                                                    Set<String> toolWhitelist,
+                                                   List<ToolSpecification> toolSpecifications,
                                                    int subAgentMaxSteps,
                                                    String context,
                                                    dev.langchain4j.model.chat.ChatLanguageModel model,
@@ -212,13 +214,16 @@ public class ParallelTaskExecutor {
                     .build();
         }
         if ("sub_agent".equals(type)) {
+            Map<String, Object> seedArgs = resolveSubAgentSeedArgs(task, knownResults);
             SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
                     .runId(runId)
                     .userId(userId)
                     .taskId(task.getId())
                     .goal(task.getGoal())
                     .context(context)
+                    .seedArgs(seedArgs)
                     .toolWhitelist(toolWhitelist)
+                    .toolSpecifications(toolSpecifications)
                     .maxSteps(task.getMaxSteps() != null ? Math.min(task.getMaxSteps(), subAgentMaxSteps) : subAgentMaxSteps)
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
@@ -254,6 +259,33 @@ public class ParallelTaskExecutor {
 
     private Map<String, Object> safeArgs(Map<String, Object> args) {
         return args == null ? Collections.emptyMap() : args;
+    }
+
+    private Map<String, Object> resolveSubAgentSeedArgs(ParallelPlan.PlanTask task,
+                                                        Map<String, ParallelTaskResult> knownResults) {
+        Map<String, Object> args = new LinkedHashMap<>(safeArgs(task.getArgs()));
+        if (args.isEmpty()) {
+            return Map.of();
+        }
+
+        String tool = nvl(task.getTool());
+        if (!tool.isBlank()) {
+            applyCommonAliases(tool, args);
+        }
+
+        List<String> deps = task.getDependsOn() == null ? List.of() : task.getDependsOn();
+        Map<String, JsonNode> depOutputs = new LinkedHashMap<>();
+        for (String dep : deps) {
+            ParallelTaskResult result = knownResults == null ? null : knownResults.get(dep);
+            depOutputs.put(dep, parseOutputJson(result == null ? "" : result.getOutput()));
+        }
+
+        Object resolved = resolveValue(args, depOutputs);
+        Map<String, Object> resolvedArgs = toMap(resolved);
+        if ("executePython".equals(tool)) {
+            resolvedArgs = normalizeExecutePythonArgs(resolvedArgs, depOutputs);
+        }
+        return resolvedArgs;
     }
 
     private NormalizeResult normalizeToolArgs(ParallelPlan.PlanTask task,

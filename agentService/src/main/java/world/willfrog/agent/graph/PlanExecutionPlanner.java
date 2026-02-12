@@ -1,6 +1,7 @@
 package world.willfrog.agent.graph;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
@@ -125,7 +126,7 @@ public class PlanExecutionPlanner {
                         request.getEndpointBaseUrl(),
                         request.getModelName(),
                         plannerMessages,
-                        null,
+                        request.getToolSpecifications(),
                         Map.of("stage", "parallel_plan_candidate", "candidate_index", i)
                 );
                 observabilityService.recordLlmCall(
@@ -166,6 +167,7 @@ public class PlanExecutionPlanner {
                                 .complexityPenalty(complexity.getPenalty())
                                 .structuralScoreWeight(1D)
                                 .llmJudgeScoreWeight(1D)
+                                .toolSpecifications(request.getToolSpecifications())
                                 .build()
                 );
 
@@ -412,6 +414,7 @@ public class PlanExecutionPlanner {
         private String userGoal;
         private ChatLanguageModel model;
         private Set<String> toolWhitelist;
+        private List<ToolSpecification> toolSpecifications;
         private String endpointName;
         private String endpointBaseUrl;
         private String modelName;
