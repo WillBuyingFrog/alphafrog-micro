@@ -597,6 +597,8 @@ public class ParallelTaskExecutor {
             String legacyParquet = "/sandbox/input/" + datasetId + "/data.parquet";
             rewritten = rewritten.replace("get_dataset('" + datasetId + "')", "pd.read_csv('" + canonicalCsv + "')");
             rewritten = rewritten.replace("get_dataset(\"" + datasetId + "\")", "pd.read_csv(\"" + canonicalCsv + "\")");
+            rewritten = rewritten.replace("load_dataset('" + datasetId + "')", "pd.read_csv('" + canonicalCsv + "')");
+            rewritten = rewritten.replace("load_dataset(\"" + datasetId + "\")", "pd.read_csv(\"" + canonicalCsv + "\")");
             rewritten = rewritten.replace(legacyCsv, canonicalCsv);
             rewritten = rewritten.replace(legacyParquet, canonicalCsv);
         }
@@ -605,9 +607,18 @@ public class ParallelTaskExecutor {
         rewritten = rewritten.replace("/{dataset_id}/data.parquet", "/{dataset_id}/{dataset_id}.csv");
         rewritten = rewritten.replace("pd.read_parquet(", "pd.read_csv(");
 
+        // Inject helper function for get_dataset if still used and not defined
         if (rewritten.contains("get_dataset(") && !rewritten.contains("def get_dataset(")) {
             String helper = "import pandas as pd\n"
                     + "def get_dataset(dataset_id):\n"
+                    + "    dataset_id = str(dataset_id).strip()\n"
+                    + "    return pd.read_csv(f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\")\n\n";
+            rewritten = helper + rewritten;
+        }
+        // Inject helper function for load_dataset if still used and not defined
+        if (rewritten.contains("load_dataset(") && !rewritten.contains("def load_dataset(")) {
+            String helper = "import pandas as pd\n"
+                    + "def load_dataset(dataset_id):\n"
                     + "    dataset_id = str(dataset_id).strip()\n"
                     + "    return pd.read_csv(f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\")\n\n";
             rewritten = helper + rewritten;

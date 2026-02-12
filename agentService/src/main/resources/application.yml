@@ -128,7 +128,7 @@ agent:
         - 你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids。
         - 代码中不要假设未定义变量，直接按可访问文件路径读取数据。
         - 数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv。
-        - 若存在 dataset_ids，请逐个读取对应 csv，不要写死 /mnt/data 等路径。
+        - 读取数据时必须使用 pd.read_csv(f"/sandbox/input/{dataset_id}/{dataset_id}.csv")，禁止使用未定义的函数如 load_dataset() 或 get_dataset()。
         - 日期字段请先排序后再取首尾行，不要硬编码某个交易日一定存在。
         - trade_date 常见为 YYYYMMDD 数字串；优先使用 astype(str) 后提取 8 位数字并按字符串排序。
         - 非必要不要使用 pd.to_datetime；若上轮出现 to_datetime/Overflow/unconverted 错误，本轮必须改为字符串排序方案。
