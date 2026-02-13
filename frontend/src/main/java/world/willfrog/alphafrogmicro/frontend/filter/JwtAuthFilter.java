@@ -36,12 +36,16 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                                     FilterChain chain) throws ServletException, IOException {
         String token = resolveToken(request);
         String requestUri = request.getRequestURI();
+        log.info("JwtAuthFilter processing: uri={}, tokenResolved={}", requestUri, token != null);
         if(token != null && validateToken(token)) {
             Authentication authentication = getAuthentication(token);
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.debug("JWT authentication successful for {}: principal={}", requestUri, authentication.getName());
+            log.info("JWT authentication successful for {}: principal={}, authenticated={}", 
+                    requestUri, authentication.getName(), authentication.isAuthenticated());
         } else if (token != null) {
             log.warn("JWT token validation failed for {}", requestUri);
+        } else {
+            log.info("No JWT token found in request: {}", requestUri);
         }
         chain.doFilter(request, response);
     }
