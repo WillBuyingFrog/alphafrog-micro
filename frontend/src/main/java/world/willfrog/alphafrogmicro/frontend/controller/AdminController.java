@@ -16,6 +16,7 @@ import world.willfrog.alphafrogmicro.frontend.service.RateLimitingService;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @Controller
 @RequestMapping("/admin")
@@ -206,8 +207,13 @@ public class AdminController {
             return ResponseEntity.badRequest().body(Map.of("error", response.getMessage()));
         }
 
+        // 将 Protobuf 对象转换为普通 Map，避免 Jackson 序列化问题
+        List<Map<String, Object>> applicationsList = response.getApplicationsList().stream()
+                .map(this::convertCreditApplicationToMap)
+                .collect(Collectors.toList());
+
         Map<String, Object> payload = new HashMap<>();
-        payload.put("applications", response.getApplicationsList());
+        payload.put("applications", applicationsList);
         payload.put("total", response.getTotal());
         payload.put("page", response.getPage());
         payload.put("pageSize", response.getPageSize());
@@ -235,7 +241,7 @@ public class AdminController {
         }
 
         Map<String, Object> payload = new HashMap<>();
-        payload.put("application", response.getApplication());
+        payload.put("application", convertCreditApplicationToMap(response.getApplication()));
         payload.put("message", response.getMessage());
         return ResponseEntity.ok(payload);
     }
@@ -261,9 +267,37 @@ public class AdminController {
         }
 
         Map<String, Object> payload = new HashMap<>();
-        payload.put("application", response.getApplication());
+        payload.put("application", convertCreditApplicationToMap(response.getApplication()));
         payload.put("message", response.getMessage());
         return ResponseEntity.ok(payload);
+    }
+
+    /**
+     * 将 Protobuf CreditApplication 转换为普通 Map，避免 Jackson 序列化问题
+     */
+    private Map<String, Object> convertCreditApplicationToMap(CreditApplication app) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("applicationId", app.getApplicationId());
+        map.put("userId", app.getUserId());
+        map.put("amount", app.getAmount());
+        map.put("status", app.getStatus());
+        String reason = app.getReason();
+        if (reason != null && !reason.isEmpty()) {
+            map.put("reason", reason);
+        }
+        String contact = app.getContact();
+        if (contact != null && !contact.isEmpty()) {
+            map.put("contact", contact);
+        }
+        String createdAt = app.getCreatedAt();
+        if (createdAt != null && !createdAt.isEmpty()) {
+            map.put("createdAt", createdAt);
+        }
+        String processedAt = app.getProcessedAt();
+        if (processedAt != null && !processedAt.isEmpty()) {
+            map.put("processedAt", processedAt);
+        }
+        return map;
     }
 
     private boolean isAdmin(Authentication authentication) {
