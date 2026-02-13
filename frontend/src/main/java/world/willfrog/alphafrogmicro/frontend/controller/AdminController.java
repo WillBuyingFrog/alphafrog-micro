@@ -6,18 +6,8 @@ import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.stereotype.Controller;
-import org.springframework.web.bind.annotation.GetMapping;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
-import world.willfrog.alphafrogmicro.admin.idl.AdminActionResponse;
-import world.willfrog.alphafrogmicro.admin.idl.AdminCreateRequest;
-import world.willfrog.alphafrogmicro.admin.idl.AdminDeleteRequest;
-import world.willfrog.alphafrogmicro.admin.idl.AdminLoginRequest;
-import world.willfrog.alphafrogmicro.admin.idl.AdminLoginResponse;
-import world.willfrog.alphafrogmicro.admin.idl.AdminOverallRequest;
-import world.willfrog.alphafrogmicro.admin.idl.AdminOverallResponse;
-import world.willfrog.alphafrogmicro.admin.idl.AdminService;
+import org.springframework.web.bind.annotation.*;
+import world.willfrog.alphafrogmicro.admin.idl.*;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
@@ -187,6 +177,88 @@ public class AdminController {
         payload.put("fundNavCount", response.getFundNavCount());
         payload.put("indexDailyCount", response.getIndexDailyCount());
         payload.put("stockDailyCount", response.getStockDailyCount());
+        return ResponseEntity.ok(payload);
+    }
+
+    // ==================== 额度申请管理 ====================
+
+    @GetMapping("/credit-applications")
+    public ResponseEntity<?> listCreditApplications(Authentication authentication,
+                                                    @RequestParam(required = false) String status,
+                                                    @RequestParam(required = false, defaultValue = "1") Integer page,
+                                                    @RequestParam(required = false, defaultValue = "20") Integer pageSize) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        ListCreditApplicationsRequest request = ListCreditApplicationsRequest.newBuilder()
+                .setStatus(status == null ? "" : status)
+                .setPage(page == null ? 1 : page)
+                .setPageSize(pageSize == null ? 20 : Math.min(pageSize, 100))
+                .build();
+
+        ListCreditApplicationsResponse response = adminService.listCreditApplications(request);
+        if (!response.getSuccess()) {
+            return ResponseEntity.badRequest().body(Map.of("error", response.getMessage()));
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("applications", response.getApplicationsList());
+        payload.put("total", response.getTotal());
+        payload.put("page", response.getPage());
+        payload.put("pageSize", response.getPageSize());
+        return ResponseEntity.ok(payload);
+    }
+
+    @PostMapping("/credit-applications/{applicationId}/approve")
+    public ResponseEntity<?> approveCreditApplication(Authentication authentication,
+                                                      @PathVariable String applicationId) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        String adminId = adminUser == null ? "" : String.valueOf(adminUser.getUserId());
+
+        ProcessCreditApplicationRequest request = ProcessCreditApplicationRequest.newBuilder()
+                .setApplicationId(applicationId)
+                .setAdminId(adminId)
+                .build();
+
+        ProcessCreditApplicationResponse response = adminService.approveCreditApplication(request);
+        if (!response.getSuccess()) {
+            return ResponseEntity.badRequest().body(Map.of("error", response.getMessage()));
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("application", response.getApplication());
+        payload.put("message", response.getMessage());
+        return ResponseEntity.ok(payload);
+    }
+
+    @PostMapping("/credit-applications/{applicationId}/reject")
+    public ResponseEntity<?> rejectCreditApplication(Authentication authentication,
+                                                     @PathVariable String applicationId) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        String adminId = adminUser == null ? "" : String.valueOf(adminUser.getUserId());
+
+        ProcessCreditApplicationRequest request = ProcessCreditApplicationRequest.newBuilder()
+                .setApplicationId(applicationId)
+                .setAdminId(adminId)
+                .build();
+
+        ProcessCreditApplicationResponse response = adminService.rejectCreditApplication(request);
+        if (!response.getSuccess()) {
+            return ResponseEntity.badRequest().body(Map.of("error", response.getMessage()));
+        }
+
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("application", response.getApplication());
+        payload.put("message", response.getMessage());
         return ResponseEntity.ok(payload);
     }
 

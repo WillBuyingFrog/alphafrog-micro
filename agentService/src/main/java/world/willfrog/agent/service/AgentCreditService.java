@@ -62,11 +62,7 @@ public class AgentCreditService {
             throw new IllegalArgumentException("user not found");
         }
 
-        int updated = userDao.increaseCreditByUserId(userIdLong, amount);
-        if (updated <= 0) {
-            throw new IllegalStateException("failed to increase user credits");
-        }
-
+        // 创建 PENDING 状态的申请，不立即增加额度
         String applicationId = UUID.randomUUID().toString().replace("-", "");
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
         AgentCreditApplication application = new AgentCreditApplication();
@@ -75,9 +71,9 @@ public class AgentCreditService {
         application.setAmount(amount);
         application.setReason(nvl(reason));
         application.setContact(nvl(contact));
-        application.setStatus("APPROVED");
+        application.setStatus("PENDING");
         application.setExt("{}");
-        application.setProcessedAt(now);
+        application.setProcessedAt(null); // 待审批
         creditApplicationDao.insert(application);
 
         CreditSummary summary = getUserCredits(userId);
@@ -86,7 +82,7 @@ public class AgentCreditService {
                 summary.totalCredits(),
                 summary.remainingCredits(),
                 summary.usedCredits(),
-                "APPROVED",
+                "PENDING",
                 now.truncatedTo(ChronoUnit.SECONDS).toString()
         );
     }
@@ -288,6 +284,64 @@ public class AgentCreditService {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    /**
+     * 批准额度申请
+     */
+    public ApplyCreditSummary approveApplication(String applicationId, String adminId) {
+        AgentCreditApplication application = creditApplicationDao.getByApplicationId(applicationId);
+        if (application == null) {
+            throw new IllegalArgumentException("application not found");
+        }
+        if (!"PENDING".equals(application.getStatus())) {
+            throw new IllegalStateException("application is not pending: " + application.getStatus());
+        }
+
+        Long userIdLong = parseUserId(application.getUserId());
+        int updated = userDao.increaseCreditByUserId(userIdLong, application.getAmount());
+        if (updated <= 0) {
+            throw new IllegalStateException("failed to increase user credits");
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        creditApplicationDao.updateStatus(applicationId, "APPROVED", now);
+
+        CreditSummary summary = getUserCredits(application.getUserId());
+        return new ApplyCreditSummary(
+                applicationId,
+                summary.totalCredits(),
+                summary.remainingCredits(),
+                summary.usedCredits(),
+                "APPROVED",
+                now.truncatedTo(ChronoUnit.SECONDS).toString()
+        );
+    }
+
+    /**
+     * 拒绝额度申请
+     */
+    public ApplyCreditSummary rejectApplication(String applicationId, String adminId) {
+        AgentCreditApplication application = creditApplicationDao.getByApplicationId(applicationId);
+        if (application == null) {
+            throw new IllegalArgumentException("application not found");
+        }
+        if (!"PENDING".equals(application.getStatus())) {
+            throw new IllegalStateException("application is not pending: " + application.getStatus());
+        }
+
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        creditApplicationDao.updateStatus(applicationId, "REJECTED", now);
+
+        CreditSummary summary = getUserCredits(application.getUserId());
+        return new ApplyCreditSummary(
+                applicationId,
+                summary.totalCredits(),
+                summary.remainingCredits(),
+                summary.usedCredits(),
+                "REJECTED",
+                now.truncatedTo(ChronoUnit.SECONDS).toString()
+        );
     }
 
     public record CreditSummary(

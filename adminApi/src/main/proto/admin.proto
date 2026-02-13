@@ -55,9 +55,52 @@ message AdminOverallResponse {
   int64 stock_daily_count = 6;
 }
 
+// 额度申请相关消息
+message CreditApplication {
+  string application_id = 1;
+  string user_id = 2;
+  int32 amount = 3;
+  string reason = 4;
+  string contact = 5;
+  string status = 6;
+  string created_at = 7;
+  string processed_at = 8;
+}
+
+message ListCreditApplicationsRequest {
+  string status = 1;  // PENDING, APPROVED, REJECTED, 空表示全部
+  int32 page = 2;
+  int32 page_size = 3;
+}
+
+message ListCreditApplicationsResponse {
+  bool success = 1;
+  string message = 2;
+  repeated CreditApplication applications = 3;
+  int32 total = 4;
+  int32 page = 5;
+  int32 page_size = 6;
+}
+
+message ProcessCreditApplicationRequest {
+  string application_id = 1;
+  string admin_id = 2;
+}
+
+message ProcessCreditApplicationResponse {
+  bool success = 1;
+  string message = 2;
+  CreditApplication application = 3;
+}
+
 service AdminService {
   rpc validateAdminLogin(AdminLoginRequest) returns (AdminLoginResponse);
   rpc createAdmin(AdminCreateRequest) returns (AdminActionResponse);
   rpc deleteAdmin(AdminDeleteRequest) returns (AdminActionResponse);
   rpc getAdminOverall(AdminOverallRequest) returns (AdminOverallResponse);
+  
+  // 额度申请管理
+  rpc listCreditApplications(ListCreditApplicationsRequest) returns (ListCreditApplicationsResponse);
+  rpc approveCreditApplication(ProcessCreditApplicationRequest) returns (ProcessCreditApplicationResponse);
+  rpc rejectCreditApplication(ProcessCreditApplicationRequest) returns (ProcessCreditApplicationResponse);
 }
