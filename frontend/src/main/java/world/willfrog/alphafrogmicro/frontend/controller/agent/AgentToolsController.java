@@ -10,27 +10,17 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.PostMapping;
-import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
-import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
-import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
-import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsRequest;
 import world.willfrog.alphafrogmicro.common.dto.ResponseCode;
 import world.willfrog.alphafrogmicro.common.dto.ResponseWrapper;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
-import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsApplyRequest;
-import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsApplyResponse;
-import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentConfigResponse;
-import world.willfrog.alphafrogmicro.frontend.model.agent.AgentModelListResponse;
-import world.willfrog.alphafrogmicro.frontend.model.agent.AgentModelResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentToolResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
@@ -102,100 +92,6 @@ public class AgentToolsController {
         } catch (Exception e) {
             log.error("查询 agent config 失败", e);
             return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, "查询 agent config 失败");
-        }
-    }
-
-    @GetMapping("/models")
-    public ResponseWrapper<AgentModelListResponse> models(Authentication authentication) {
-        String userId = resolveUserId(authentication);
-        if (userId == null) {
-            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
-        }
-        try {
-            var resp = agentDubboService.listModels(
-                    ListAgentModelsRequest.newBuilder().setUserId(userId).build()
-            );
-            List<AgentModelResponse> models = new ArrayList<>();
-            for (var model : resp.getModelsList()) {
-                models.add(new AgentModelResponse(
-                        model.getId(),
-                        model.getDisplayName(),
-                        model.getEndpoint(),
-                        model.getCompositeId(),
-                        model.getBaseRate(),
-                        model.getFeaturesList()
-                ));
-            }
-            return ResponseWrapper.success(new AgentModelListResponse(models));
-        } catch (RpcException e) {
-            log.error("查询模型列表失败: {}", e.getMessage());
-            return ResponseWrapper.error(ResponseCode.EXTERNAL_SERVICE_ERROR, "查询模型列表失败");
-        } catch (Exception e) {
-            log.error("查询模型列表失败", e);
-            return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, "查询模型列表失败");
-        }
-    }
-
-    @GetMapping("/credits")
-    public ResponseWrapper<AgentCreditsResponse> credits(Authentication authentication) {
-        String userId = resolveUserId(authentication);
-        if (userId == null) {
-            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
-        }
-        try {
-            var resp = agentDubboService.getCredits(
-                    GetAgentCreditsRequest.newBuilder().setUserId(userId).build()
-            );
-            return ResponseWrapper.success(new AgentCreditsResponse(
-                    resp.getTotalCredits(),
-                    resp.getRemainingCredits(),
-                    resp.getUsedCredits(),
-                    resp.getResetCycle(),
-                    resp.getNextResetAt()
-            ));
-        } catch (RpcException e) {
-            log.error("查询 credit 失败: {}", e.getMessage());
-            return ResponseWrapper.error(ResponseCode.EXTERNAL_SERVICE_ERROR, "查询 credit 失败");
-        } catch (Exception e) {
-            log.error("查询 credit 失败", e);
-            return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, "查询 credit 失败");
-        }
-    }
-
-    @PostMapping("/credits/apply")
-    public ResponseWrapper<AgentCreditsApplyResponse> applyCredits(Authentication authentication,
-                                                                   @RequestBody(required = false) AgentCreditsApplyRequest request) {
-        String userId = resolveUserId(authentication);
-        if (userId == null) {
-            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
-        }
-        int amount = request == null || request.amount() == null ? 0 : request.amount();
-        if (amount <= 0) {
-            return ResponseWrapper.paramError("amount 必须大于 0");
-        }
-        try {
-            var resp = agentDubboService.applyCredits(
-                    ApplyAgentCreditsRequest.newBuilder()
-                            .setUserId(userId)
-                            .setAmount(amount)
-                            .setReason(request.reason() == null ? "" : request.reason())
-                            .setContact(request.contact() == null ? "" : request.contact())
-                            .build()
-            );
-            return ResponseWrapper.success(new AgentCreditsApplyResponse(
-                    resp.getApplicationId(),
-                    resp.getTotalCredits(),
-                    resp.getRemainingCredits(),
-                    resp.getUsedCredits(),
-                    resp.getStatus(),
-                    resp.getAppliedAt()
-            ));
-        } catch (RpcException e) {
-            log.error("申请额度失败: {}", e.getMessage());
-            return ResponseWrapper.error(ResponseCode.EXTERNAL_SERVICE_ERROR, "申请额度失败");
-        } catch (Exception e) {
-            log.error("申请额度失败", e);
-            return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, "申请额度失败");
         }
     }
 
