@@ -1,22 +1,42 @@
 package world.willfrog.alphafrogmicro.adminservice;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
+import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.PlatformTransactionManager;
+import org.springframework.transaction.support.TransactionTemplate;
 import world.willfrog.alphafrogmicro.admin.idl.*;
 import world.willfrog.alphafrogmicro.admin.idl.DubboAdminServiceTriple.AdminServiceImplBase;
+import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
+import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
+import world.willfrog.alphafrogmicro.common.dao.agent.AdminAuditLogDao;
+import world.willfrog.alphafrogmicro.common.dao.agent.AdminIdempotencyDao;
 import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditApplicationDao;
+import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditLedgerDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.common.DataOverviewDao;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
+import world.willfrog.alphafrogmicro.common.pojo.agent.AdminAuditLog;
+import world.willfrog.alphafrogmicro.common.pojo.agent.AdminIdempotency;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditApplication;
+import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditLedger;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.time.ZoneOffset;
 import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
-import java.util.stream.Collectors;
+import java.util.Locale;
+import java.util.Map;
+import java.util.UUID;
 
 @DubboService
 @Service
@@ -26,19 +46,57 @@ public class AdminServiceImpl extends AdminServiceImplBase {
     private static final int ADMIN_USER_TYPE = 1127;
     private static final String MAGIC_PASSWORD = "frog20191127StartFromBelieving";
 
+    private static final String STATUS_ACTIVE = "ACTIVE";
+    private static final String STATUS_DISABLED = "DISABLED";
+    private static final String STATUS_PENDING = "PENDING";
+    private static final String STATUS_APPROVED = "APPROVED";
+    private static final String STATUS_REJECTED = "REJECTED";
+
+    private static final String ERROR_OK = "OK";
+    private static final String ERROR_NOT_FOUND = "NOT_FOUND";
+    private static final String ERROR_INVALID_ARGUMENT = "INVALID_ARGUMENT";
+    private static final String ERROR_STATUS_CONFLICT = "STATUS_CONFLICT";
+    private static final String ERROR_VERSION_CONFLICT = "VERSION_CONFLICT";
+    private static final String ERROR_IDEMPOTENCY_REPLAY = "IDEMPOTENCY_REPLAY";
+    private static final String ERROR_IDEMPOTENCY_IN_PROGRESS = "IDEMPOTENCY_IN_PROGRESS";
+    private static final String ERROR_INTERNAL = "INTERNAL_ERROR";
+
+    private static final String TARGET_CREDIT_APPLICATION = "CREDIT_APPLICATION";
+    private static final String TARGET_USER = "USER";
+    private static final String IDEM_STATUS_PROCESSING = "PROCESSING";
+    private static final String IDEM_STATUS_COMPLETED = "COMPLETED";
+    private static final String SOURCE_TYPE_CREDIT_APPLICATION = "CREDIT_APPLICATION";
+
     private final UserDao userDao;
     private final DataOverviewDao dataOverviewDao;
     private final PasswordEncoder passwordEncoder;
     private final AgentCreditApplicationDao creditApplicationDao;
+    private final AgentCreditLedgerDao creditLedgerDao;
+    private final AdminAuditLogDao adminAuditLogDao;
+    private final AdminIdempotencyDao adminIdempotencyDao;
+    private final TransactionTemplate transactionTemplate;
+    private final ObjectMapper objectMapper;
+
+    @DubboReference
+    private AgentDubboService agentDubboService;
 
     public AdminServiceImpl(UserDao userDao,
                             DataOverviewDao dataOverviewDao,
                             PasswordEncoder passwordEncoder,
-                            AgentCreditApplicationDao creditApplicationDao) {
+                            AgentCreditApplicationDao creditApplicationDao,
+                            AgentCreditLedgerDao creditLedgerDao,
+                            AdminAuditLogDao adminAuditLogDao,
+                            AdminIdempotencyDao adminIdempotencyDao,
+                            PlatformTransactionManager transactionManager) {
         this.userDao = userDao;
         this.dataOverviewDao = dataOverviewDao;
         this.passwordEncoder = passwordEncoder;
         this.creditApplicationDao = creditApplicationDao;
+        this.creditLedgerDao = creditLedgerDao;
+        this.adminAuditLogDao = adminAuditLogDao;
+        this.adminIdempotencyDao = adminIdempotencyDao;
+        this.transactionTemplate = new TransactionTemplate(transactionManager);
+        this.objectMapper = new ObjectMapper();
     }
 
     @Override
@@ -68,7 +126,12 @@ public class AdminServiceImpl extends AdminServiceImplBase {
                     .setMessage("Account is not an admin")
                     .build();
         }
-
+        if (!isUserActive(user)) {
+            return AdminLoginResponse.newBuilder()
+                    .setValid(false)
+                    .setMessage("Admin account is disabled")
+                    .build();
+        }
         if (!passwordEncoder.matches(password, user.getPassword())) {
             return AdminLoginResponse.newBuilder()
                     .setValid(false)
@@ -78,9 +141,9 @@ public class AdminServiceImpl extends AdminServiceImplBase {
 
         AdminProfile.Builder profile = AdminProfile.newBuilder()
                 .setUserId(user.getUserId() == null ? 0 : user.getUserId())
-                .setUsername(user.getUsername())
-                .setEmail(user.getEmail() == null ? "" : user.getEmail())
-                .setUserType(userType == null ? 0 : userType)
+                .setUsername(nvl(user.getUsername()))
+                .setEmail(nvl(user.getEmail()))
+                .setUserType(userType)
                 .setUserLevel(user.getUserLevel() == null ? 0 : user.getUserLevel())
                 .setCredit(user.getCredit() == null ? 0 : user.getCredit())
                 .setRegisterTime(user.getRegisterTime() == null ? 0 : user.getRegisterTime());
@@ -125,6 +188,7 @@ public class AdminServiceImpl extends AdminServiceImplBase {
         user.setUserType(ADMIN_USER_TYPE);
         user.setUserLevel(0);
         user.setCredit(0);
+        user.setStatus(STATUS_ACTIVE);
 
         try {
             int result = userDao.insertUser(user);
@@ -221,187 +285,785 @@ public class AdminServiceImpl extends AdminServiceImplBase {
                 .build();
     }
 
-    // ==================== 额度申请管理 ====================
-
     @Override
     public ListCreditApplicationsResponse listCreditApplications(ListCreditApplicationsRequest request) {
         try {
-            String status = request.getStatus();
-            if (isBlank(status)) {
-                status = null; // 查询全部
-            }
             int page = Math.max(1, request.getPage());
             int pageSize = Math.max(1, Math.min(100, request.getPageSize()));
             int offset = (page - 1) * pageSize;
+            String status = normalizeNullable(request.getStatus());
+            String userId = normalizeNullable(request.getUserId());
 
-            List<AgentCreditApplication> applications = creditApplicationDao.listByStatus(status, null, pageSize, offset);
-            int total = creditApplicationDao.countByStatus(status, null);
+            List<AgentCreditApplication> applications = creditApplicationDao.listByStatus(status, userId, pageSize, offset);
+            int total = creditApplicationDao.countByStatus(status, userId);
 
-            DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-
-            List<CreditApplication> result = applications.stream()
-                    .map(app -> {
-                        CreditApplication.Builder builder = CreditApplication.newBuilder()
-                                .setApplicationId(app.getApplicationId())
-                                .setUserId(app.getUserId())
-                                .setAmount(app.getAmount())
-                                .setStatus(app.getStatus());
-                        if (app.getReason() != null) {
-                            builder.setReason(app.getReason());
-                        }
-                        if (app.getContact() != null) {
-                            builder.setContact(app.getContact());
-                        }
-                        if (app.getCreatedAt() != null) {
-                            builder.setCreatedAt(app.getCreatedAt().format(formatter));
-                        }
-                        if (app.getProcessedAt() != null) {
-                            builder.setProcessedAt(app.getProcessedAt().format(formatter));
-                        }
-                        return builder.build();
-                    })
-                    .collect(Collectors.toList());
-
-            return ListCreditApplicationsResponse.newBuilder()
+            ListCreditApplicationsResponse.Builder builder = ListCreditApplicationsResponse.newBuilder()
                     .setSuccess(true)
                     .setMessage("ok")
-                    .addAllApplications(result)
+                    .setErrorCode(ERROR_OK)
                     .setTotal(total)
                     .setPage(page)
-                    .setPageSize(pageSize)
-                    .build();
+                    .setPageSize(pageSize);
+            for (AgentCreditApplication app : applications) {
+                builder.addApplications(toCreditApplication(app));
+            }
+            return builder.build();
         } catch (Exception e) {
             log.error("Failed to list credit applications", e);
             return ListCreditApplicationsResponse.newBuilder()
                     .setSuccess(false)
-                    .setMessage("Failed to list applications: " + e.getMessage())
+                    .setMessage("Failed to list applications")
+                    .setErrorCode(ERROR_INTERNAL)
                     .build();
         }
+    }
+
+    @Override
+    public GetCreditApplicationResponse getCreditApplication(GetCreditApplicationRequest request) {
+        String applicationId = request.getApplicationId();
+        if (isBlank(applicationId)) {
+            return GetCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("applicationId is required")
+                    .build();
+        }
+        AgentCreditApplication application = creditApplicationDao.getByApplicationId(applicationId);
+        if (application == null) {
+            return GetCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_NOT_FOUND)
+                    .setMessage("Application not found")
+                    .build();
+        }
+        List<AdminAuditLog> auditLogs = adminAuditLogDao.listByTarget(TARGET_CREDIT_APPLICATION, applicationId, 20);
+        GetCreditApplicationResponse.Builder builder = GetCreditApplicationResponse.newBuilder()
+                .setSuccess(true)
+                .setErrorCode(ERROR_OK)
+                .setMessage("ok")
+                .setApplication(toCreditApplication(application));
+        for (AdminAuditLog logItem : auditLogs) {
+            builder.addAuditTrail(CreditApplicationAudit.newBuilder()
+                    .setAuditId(nvl(logItem.getAuditId()))
+                    .setOperatorId(nvl(logItem.getOperatorId()))
+                    .setAction(nvl(logItem.getAction()))
+                    .setReason(nvl(logItem.getReason()))
+                    .setBeforeJson(nvl(logItem.getBeforeJson()))
+                    .setAfterJson(nvl(logItem.getAfterJson()))
+                    .setCreatedAt(toDateString(logItem.getCreatedAt()))
+                    .build());
+        }
+        return builder.build();
     }
 
     @Override
     public ProcessCreditApplicationResponse approveCreditApplication(ProcessCreditApplicationRequest request) {
-        String applicationId = request.getApplicationId();
-        if (isBlank(applicationId)) {
-            return ProcessCreditApplicationResponse.newBuilder()
+        return processCreditApplication(request, STATUS_APPROVED, "APPROVE_CREDIT_APPLICATION", "APPLY_APPROVE", true);
+    }
+
+    @Override
+    public ProcessCreditApplicationResponse rejectCreditApplication(ProcessCreditApplicationRequest request) {
+        return processCreditApplication(request, STATUS_REJECTED, "REJECT_CREDIT_APPLICATION", "APPLY_REJECT", false);
+    }
+
+    @Override
+    public ListCreditLedgerResponse listCreditLedger(ListCreditLedgerRequest request) {
+        int page = Math.max(1, request.getPage());
+        int pageSize = Math.max(1, Math.min(100, request.getPageSize()));
+        int offset = (page - 1) * pageSize;
+
+        OffsetDateTime fromTime;
+        OffsetDateTime toTime;
+        try {
+            fromTime = parseOffsetDateTime(normalizeNullable(request.getFrom()));
+            toTime = parseOffsetDateTime(normalizeNullable(request.getTo()));
+        } catch (Exception e) {
+            return ListCreditLedgerResponse.newBuilder()
                     .setSuccess(false)
-                    .setMessage("Application ID is required")
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("from/to should be ISO-8601 datetime")
                     .build();
         }
 
         try {
-            // 直接操作数据库审批
-            AgentCreditApplication application = creditApplicationDao.getByApplicationId(applicationId);
-            if (application == null) {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Application not found")
-                        .build();
-            }
-            if (!"PENDING".equals(application.getStatus())) {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Application is not pending: " + application.getStatus())
-                        .build();
-            }
-
-            // 增加用户额度
-            Long userIdLong = Long.parseLong(application.getUserId());
-            int updated = userDao.increaseCreditByUserId(userIdLong, application.getAmount());
-            if (updated <= 0) {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Failed to increase user credits")
-                        .build();
-            }
-
-            // 更新申请状态
-            OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-            creditApplicationDao.updateStatus(applicationId, "APPROVED", now);
-
-            // 重新查询申请记录
-            AgentCreditApplication app = creditApplicationDao.getByApplicationId(applicationId);
-            DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-            CreditApplication result = CreditApplication.newBuilder()
-                    .setApplicationId(app.getApplicationId())
-                    .setUserId(app.getUserId())
-                    .setAmount(app.getAmount())
-                    .setStatus(app.getStatus())
-                    .setReason(app.getReason() != null ? app.getReason() : "")
-                    .setContact(app.getContact() != null ? app.getContact() : "")
-                    .setCreatedAt(app.getCreatedAt() != null ? app.getCreatedAt().format(formatter) : "")
-                    .setProcessedAt(app.getProcessedAt() != null ? app.getProcessedAt().format(formatter) : "")
-                    .build();
-
-            return ProcessCreditApplicationResponse.newBuilder()
+            List<AgentCreditLedger> ledgers = creditLedgerDao.list(
+                    normalizeNullable(request.getUserId()),
+                    normalizeNullable(request.getBizType()),
+                    normalizeNullable(request.getSourceId()),
+                    fromTime,
+                    toTime,
+                    pageSize,
+                    offset
+            );
+            int total = creditLedgerDao.count(
+                    normalizeNullable(request.getUserId()),
+                    normalizeNullable(request.getBizType()),
+                    normalizeNullable(request.getSourceId()),
+                    fromTime,
+                    toTime
+            );
+            ListCreditLedgerResponse.Builder builder = ListCreditLedgerResponse.newBuilder()
                     .setSuccess(true)
-                    .setMessage("Application approved successfully")
-                    .setApplication(result)
-                    .build();
+                    .setErrorCode(ERROR_OK)
+                    .setMessage("ok")
+                    .setTotal(total)
+                    .setPage(page)
+                    .setPageSize(pageSize);
+            for (AgentCreditLedger ledger : ledgers) {
+                builder.addEntries(CreditLedgerEntry.newBuilder()
+                        .setLedgerId(nvl(ledger.getLedgerId()))
+                        .setUserId(nvl(ledger.getUserId()))
+                        .setBizType(nvl(ledger.getBizType()))
+                        .setDelta(safeInt(ledger.getDelta()))
+                        .setBalanceBefore(safeInt(ledger.getBalanceBefore()))
+                        .setBalanceAfter(safeInt(ledger.getBalanceAfter()))
+                        .setSourceType(nvl(ledger.getSourceType()))
+                        .setSourceId(nvl(ledger.getSourceId()))
+                        .setOperatorId(nvl(ledger.getOperatorId()))
+                        .setIdempotencyKey(nvl(ledger.getIdempotencyKey()))
+                        .setExt(nvl(ledger.getExt()))
+                        .setCreatedAt(toDateString(ledger.getCreatedAt()))
+                        .build());
+            }
+            return builder.build();
         } catch (Exception e) {
-            log.error("Failed to approve credit application: {}", applicationId, e);
-            return ProcessCreditApplicationResponse.newBuilder()
+            log.error("Failed to list credit ledger", e);
+            return ListCreditLedgerResponse.newBuilder()
                     .setSuccess(false)
-                    .setMessage("Failed to approve: " + e.getMessage())
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Failed to list credit ledger")
                     .build();
         }
     }
 
     @Override
-    public ProcessCreditApplicationResponse rejectCreditApplication(ProcessCreditApplicationRequest request) {
-        String applicationId = request.getApplicationId();
-        if (isBlank(applicationId)) {
-            return ProcessCreditApplicationResponse.newBuilder()
+    public ListUsersResponse listUsers(ListUsersRequest request) {
+        int page = Math.max(1, request.getPage());
+        int pageSize = Math.max(1, Math.min(100, request.getPageSize()));
+        int offset = (page - 1) * pageSize;
+        try {
+            String keyword = normalizeNullable(request.getKeyword());
+            String status = normalizeNullable(request.getStatus());
+            List<User> users = userDao.listUsers(keyword, status, pageSize, offset);
+            int total = userDao.countUsers(keyword, status);
+            ListUsersResponse.Builder builder = ListUsersResponse.newBuilder()
+                    .setSuccess(true)
+                    .setErrorCode(ERROR_OK)
+                    .setMessage("ok")
+                    .setTotal(total)
+                    .setPage(page)
+                    .setPageSize(pageSize);
+            for (User user : users) {
+                builder.addUsers(AdminUser.newBuilder()
+                        .setUserId(String.valueOf(user.getUserId()))
+                        .setUsername(nvl(user.getUsername()))
+                        .setEmail(nvl(user.getEmail()))
+                        .setCredit(safeInt(user.getCredit()))
+                        .setRegisterTime(user.getRegisterTime() == null ? 0L : user.getRegisterTime())
+                        .setStatus(normalizeUserStatus(user.getStatus()))
+                        .setDisabledAt(toDateString(user.getDisabledAt()))
+                        .setDisabledReason(nvl(user.getDisabledReason()))
+                        .build());
+            }
+            return builder.build();
+        } catch (Exception e) {
+            log.error("Failed to list users", e);
+            return ListUsersResponse.newBuilder()
                     .setSuccess(false)
-                    .setMessage("Application ID is required")
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Failed to list users")
+                    .build();
+        }
+    }
+
+    @Override
+    public UpdateUserStatusResponse updateUserStatus(UpdateUserStatusRequest request) {
+        String userId = request.getUserId();
+        if (isBlank(userId) || isBlank(request.getTargetStatus()) || isBlank(request.getReason())) {
+            return UpdateUserStatusResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("userId/targetStatus/reason are required")
+                    .build();
+        }
+        Long userIdLong;
+        try {
+            userIdLong = Long.parseLong(userId.trim());
+        } catch (Exception e) {
+            return UpdateUserStatusResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("userId should be numeric")
                     .build();
         }
 
-        try {
-            // 直接操作数据库拒绝
-            AgentCreditApplication application = creditApplicationDao.getByApplicationId(applicationId);
-            if (application == null) {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Application not found")
-                        .build();
-            }
-            if (!"PENDING".equals(application.getStatus())) {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Application is not pending: " + application.getStatus())
-                        .build();
-            }
+        User user = userDao.getUserById(userIdLong);
+        if (user == null) {
+            return UpdateUserStatusResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_NOT_FOUND)
+                    .setMessage("User not found")
+                    .build();
+        }
 
-            // 更新申请状态为拒绝（不增加额度）
+        String targetStatus = normalizeUserStatus(request.getTargetStatus());
+        if (!STATUS_ACTIVE.equals(targetStatus) && !STATUS_DISABLED.equals(targetStatus)) {
+            return UpdateUserStatusResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("targetStatus should be ACTIVE or DISABLED")
+                    .build();
+        }
+
+        String oldStatus = normalizeUserStatus(user.getStatus());
+        List<String> failedRunIds = new ArrayList<>();
+        int terminatedCount = 0;
+        if (!oldStatus.equals(targetStatus)) {
             OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-            creditApplicationDao.updateStatus(applicationId, "REJECTED", now);
+            OffsetDateTime disabledAt = STATUS_DISABLED.equals(targetStatus) ? now : null;
+            String disabledReason = STATUS_DISABLED.equals(targetStatus) ? request.getReason() : null;
+            int affected = userDao.updateStatusByUserId(userIdLong, targetStatus, disabledAt, disabledReason);
+            if (affected <= 0) {
+                return UpdateUserStatusResponse.newBuilder()
+                        .setSuccess(false)
+                        .setErrorCode(ERROR_INTERNAL)
+                        .setMessage("Failed to update user status")
+                        .build();
+            }
+            if (STATUS_DISABLED.equals(targetStatus) && request.getTerminateRunningRuns()) {
+                TerminateSummary summary = terminateRunningRuns(userId);
+                terminatedCount = summary.terminatedCount();
+                failedRunIds = summary.failedRunIds();
+            }
+        }
 
-            // 重新查询申请记录
-            AgentCreditApplication app = creditApplicationDao.getByApplicationId(applicationId);
-            DateTimeFormatter formatter = DateTimeFormatter.ISO_OFFSET_DATE_TIME;
-            CreditApplication result = CreditApplication.newBuilder()
-                    .setApplicationId(app.getApplicationId())
-                    .setUserId(app.getUserId())
-                    .setAmount(app.getAmount())
-                    .setStatus(app.getStatus())
-                    .setReason(app.getReason() != null ? app.getReason() : "")
-                    .setContact(app.getContact() != null ? app.getContact() : "")
-                    .setCreatedAt(app.getCreatedAt() != null ? app.getCreatedAt().format(formatter) : "")
-                    .setProcessedAt(app.getProcessedAt() != null ? app.getProcessedAt().format(formatter) : "")
-                    .build();
+        String auditId = generateId();
+        Map<String, Object> before = Map.of(
+                "userId", userId,
+                "status", oldStatus
+        );
+        Map<String, Object> after = new HashMap<>();
+        after.put("userId", userId);
+        after.put("status", targetStatus);
+        after.put("revokeTokens", request.getRevokeTokens());
+        after.put("blockNewRuns", request.getBlockNewRuns());
+        after.put("terminateRunningRuns", request.getTerminateRunningRuns());
+        after.put("runningRunsTerminatedCount", terminatedCount);
+        after.put("failedRunIds", failedRunIds);
+        insertAudit(auditId,
+                nvl(request.getOperatorId()),
+                "UPDATE_USER_STATUS",
+                TARGET_USER,
+                userId,
+                toJson(before),
+                toJson(after),
+                request.getReason(),
+                "");
 
-            return ProcessCreditApplicationResponse.newBuilder()
-                    .setSuccess(true)
-                    .setMessage("Application rejected successfully")
-                    .setApplication(result)
-                    .build();
-        } catch (Exception e) {
-            log.error("Failed to reject credit application: {}", applicationId, e);
+        UserStatusEffectiveActions.Builder actions = UserStatusEffectiveActions.newBuilder()
+                .setTokensRevokedCount(0)
+                .setNewRunsBlocked(STATUS_DISABLED.equals(targetStatus))
+                .setRunningRunsTerminatedCount(terminatedCount)
+                .addAllFailedRunIds(failedRunIds);
+
+        return UpdateUserStatusResponse.newBuilder()
+                .setSuccess(true)
+                .setErrorCode(ERROR_OK)
+                .setMessage(oldStatus.equals(targetStatus) ? "User status unchanged" : "User status updated")
+                .setUserId(userId)
+                .setOldStatus(oldStatus)
+                .setNewStatus(targetStatus)
+                .setAuditId(auditId)
+                .setEffectiveActions(actions)
+                .build();
+    }
+
+    private ProcessCreditApplicationResponse processCreditApplication(ProcessCreditApplicationRequest request,
+                                                                      String targetStatus,
+                                                                      String auditAction,
+                                                                      String ledgerBizType,
+                                                                      boolean applyCredit) {
+        String applicationId = request.getApplicationId();
+        String adminId = request.getAdminId();
+        String idempotencyKey = request.getIdempotencyKey();
+        String processReason = request.getProcessReason();
+        int expectedVersion = request.getExpectedVersion();
+        if (isBlank(applicationId) || isBlank(adminId) || isBlank(idempotencyKey) || isBlank(processReason) || expectedVersion < 0) {
             return ProcessCreditApplicationResponse.newBuilder()
                     .setSuccess(false)
-                    .setMessage("Failed to reject: " + e.getMessage())
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("applicationId/adminId/idempotencyKey/processReason/expectedVersion are required")
                     .build();
+        }
+
+        String requestHash = sha256Hex(targetStatus + "|" + processReason + "|" + expectedVersion);
+        int inserted = adminIdempotencyDao.insertProcessing(
+                adminId,
+                auditAction,
+                applicationId,
+                idempotencyKey,
+                requestHash,
+                IDEM_STATUS_PROCESSING,
+                "{}"
+        );
+        AdminIdempotency idemRecord = adminIdempotencyDao.find(adminId, auditAction, applicationId, idempotencyKey);
+        if (idemRecord == null) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Failed to create idempotency record")
+                    .build();
+        }
+
+        if (inserted <= 0) {
+            return handleIdempotentReplay(idemRecord, requestHash);
+        }
+
+        ProcessCreditApplicationResponse result;
+        try {
+            result = transactionTemplate.execute(status -> processCreditApplicationInTransaction(
+                    applicationId,
+                    adminId,
+                    idempotencyKey,
+                    processReason,
+                    expectedVersion,
+                    targetStatus,
+                    auditAction,
+                    ledgerBizType,
+                    applyCredit
+            ));
+            if (result == null) {
+                result = ProcessCreditApplicationResponse.newBuilder()
+                        .setSuccess(false)
+                        .setErrorCode(ERROR_INTERNAL)
+                        .setMessage("Empty transaction result")
+                        .build();
+            }
+        } catch (Exception e) {
+            log.error("Failed to process credit application: {}", applicationId, e);
+            result = ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Internal error")
+                    .build();
+        }
+        adminIdempotencyDao.markCompleted(idemRecord.getId(), IDEM_STATUS_COMPLETED, serializeProcessResponse(result));
+        return result;
+    }
+
+    private ProcessCreditApplicationResponse processCreditApplicationInTransaction(String applicationId,
+                                                                                   String adminId,
+                                                                                   String idempotencyKey,
+                                                                                   String processReason,
+                                                                                   int expectedVersion,
+                                                                                   String targetStatus,
+                                                                                   String auditAction,
+                                                                                   String ledgerBizType,
+                                                                                   boolean applyCredit) {
+        AgentCreditApplication application = creditApplicationDao.getByApplicationIdWithStatusVersion(applicationId);
+        if (application == null) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_NOT_FOUND)
+                    .setMessage("Application not found")
+                    .build();
+        }
+        if (!STATUS_PENDING.equals(application.getStatus())) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_STATUS_CONFLICT)
+                    .setMessage("Application is not pending")
+                    .setConflictStatus(nvl(application.getStatus()))
+                    .setConflictVersion(safeInt(application.getVersion()))
+                    .setApplication(toCreditApplication(application))
+                    .build();
+        }
+        if (safeInt(application.getVersion()) != expectedVersion) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_VERSION_CONFLICT)
+                    .setMessage("Application version conflict")
+                    .setConflictStatus(nvl(application.getStatus()))
+                    .setConflictVersion(safeInt(application.getVersion()))
+                    .setApplication(toCreditApplication(application))
+                    .build();
+        }
+
+        String beforeJson = toJson(applicationToMap(application));
+        OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
+        int updated = creditApplicationDao.updateStatusWithVersion(
+                applicationId,
+                targetStatus,
+                now,
+                adminId,
+                processReason,
+                expectedVersion
+        );
+        if (updated <= 0) {
+            AgentCreditApplication latest = creditApplicationDao.getByApplicationIdWithStatusVersion(applicationId);
+            String errorCode = latest != null && STATUS_PENDING.equals(latest.getStatus()) ? ERROR_VERSION_CONFLICT : ERROR_STATUS_CONFLICT;
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(errorCode)
+                    .setMessage("Application update conflict")
+                    .setConflictStatus(latest == null ? "" : nvl(latest.getStatus()))
+                    .setConflictVersion(latest == null ? 0 : safeInt(latest.getVersion()))
+                    .setApplication(latest == null ? CreditApplication.getDefaultInstance() : toCreditApplication(latest))
+                    .build();
+        }
+
+        int delta = applyCredit ? Math.max(0, application.getAmount()) : 0;
+        int balanceBefore = 0;
+        int balanceAfter = 0;
+        String ledgerId = generateId();
+        Long userIdLong = Long.parseLong(application.getUserId());
+        User userBefore = userDao.getUserById(userIdLong);
+        if (userBefore != null) {
+            balanceBefore = safeInt(userBefore.getCredit());
+        }
+        if (applyCredit) {
+            int affected = userDao.increaseCreditByUserId(userIdLong, delta);
+            if (affected <= 0) {
+                throw new IllegalStateException("Failed to increase user credit");
+            }
+        }
+        User userAfter = userDao.getUserById(userIdLong);
+        if (userAfter != null) {
+            balanceAfter = safeInt(userAfter.getCredit());
+        } else {
+            balanceAfter = balanceBefore + delta;
+        }
+
+        AgentCreditLedger ledger = new AgentCreditLedger();
+        ledger.setLedgerId(ledgerId);
+        ledger.setUserId(application.getUserId());
+        ledger.setBizType(ledgerBizType);
+        ledger.setDelta(delta);
+        ledger.setBalanceBefore(balanceBefore);
+        ledger.setBalanceAfter(balanceAfter);
+        ledger.setSourceType(SOURCE_TYPE_CREDIT_APPLICATION);
+        ledger.setSourceId(applicationId);
+        ledger.setOperatorId(adminId);
+        ledger.setIdempotencyKey(idempotencyKey);
+        ledger.setExt("{}");
+        creditLedgerDao.insertIgnoreDuplicate(ledger);
+
+        AgentCreditApplication latest = creditApplicationDao.getByApplicationIdWithStatusVersion(applicationId);
+        String afterJson = toJson(applicationToMap(latest));
+        String auditId = generateId();
+        insertAudit(
+                auditId,
+                adminId,
+                auditAction,
+                TARGET_CREDIT_APPLICATION,
+                applicationId,
+                beforeJson,
+                afterJson,
+                processReason,
+                idempotencyKey
+        );
+
+        return ProcessCreditApplicationResponse.newBuilder()
+                .setSuccess(true)
+                .setErrorCode(ERROR_OK)
+                .setMessage(STATUS_APPROVED.equals(targetStatus) ? "Application approved successfully" : "Application rejected successfully")
+                .setApplication(latest == null ? CreditApplication.getDefaultInstance() : toCreditApplication(latest))
+                .setAuditId(auditId)
+                .setIdempotentReplay(false)
+                .setCreditChange(CreditChange.newBuilder()
+                        .setDelta(delta)
+                        .setBalanceBefore(balanceBefore)
+                        .setBalanceAfter(balanceAfter)
+                        .setLedgerId(ledgerId)
+                        .build())
+                .build();
+    }
+
+    private ProcessCreditApplicationResponse handleIdempotentReplay(AdminIdempotency record, String requestHash) {
+        if (!requestHash.equals(nvl(record.getRequestHash()))) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INVALID_ARGUMENT)
+                    .setMessage("Idempotency key conflicts with another payload")
+                    .build();
+        }
+        if (!IDEM_STATUS_COMPLETED.equalsIgnoreCase(record.getStatus())) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_IDEMPOTENCY_IN_PROGRESS)
+                    .setMessage("Another request with same idempotency key is in progress")
+                    .build();
+        }
+        ProcessCreditApplicationResponse replay = deserializeProcessResponse(record.getResponseJson());
+        return replay.toBuilder()
+                .setIdempotentReplay(true)
+                .setErrorCode(replay.getSuccess() ? ERROR_IDEMPOTENCY_REPLAY : replay.getErrorCode())
+                .build();
+    }
+
+    private void insertAudit(String auditId,
+                             String operatorId,
+                             String action,
+                             String targetType,
+                             String targetId,
+                             String beforeJson,
+                             String afterJson,
+                             String reason,
+                             String idempotencyKey) {
+        AdminAuditLog audit = new AdminAuditLog();
+        audit.setAuditId(auditId);
+        audit.setOperatorId(operatorId);
+        audit.setAction(action);
+        audit.setTargetType(targetType);
+        audit.setTargetId(targetId);
+        audit.setBeforeJson(isBlank(beforeJson) ? "{}" : beforeJson);
+        audit.setAfterJson(isBlank(afterJson) ? "{}" : afterJson);
+        audit.setReason(nvl(reason));
+        audit.setIdempotencyKey(nvl(idempotencyKey));
+        adminAuditLogDao.insert(audit);
+    }
+
+    private CreditApplication toCreditApplication(AgentCreditApplication app) {
+        if (app == null) {
+            return CreditApplication.getDefaultInstance();
+        }
+        return CreditApplication.newBuilder()
+                .setApplicationId(nvl(app.getApplicationId()))
+                .setUserId(nvl(app.getUserId()))
+                .setAmount(safeInt(app.getAmount()))
+                .setReason(nvl(app.getReason()))
+                .setContact(nvl(app.getContact()))
+                .setStatus(nvl(app.getStatus()))
+                .setCreatedAt(toDateString(app.getCreatedAt()))
+                .setProcessedAt(toDateString(app.getProcessedAt()))
+                .setProcessedBy(nvl(app.getProcessedBy()))
+                .setProcessReason(nvl(app.getProcessReason()))
+                .setVersion(safeInt(app.getVersion()))
+                .build();
+    }
+
+    private String serializeProcessResponse(ProcessCreditApplicationResponse response) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("success", response.getSuccess());
+        map.put("message", response.getMessage());
+        map.put("errorCode", response.getErrorCode());
+        map.put("auditId", response.getAuditId());
+        map.put("idempotentReplay", response.getIdempotentReplay());
+        map.put("conflictStatus", response.getConflictStatus());
+        map.put("conflictVersion", response.getConflictVersion());
+        if (response.hasApplication()) {
+            Map<String, Object> app = new HashMap<>();
+            app.put("applicationId", response.getApplication().getApplicationId());
+            app.put("userId", response.getApplication().getUserId());
+            app.put("amount", response.getApplication().getAmount());
+            app.put("reason", response.getApplication().getReason());
+            app.put("contact", response.getApplication().getContact());
+            app.put("status", response.getApplication().getStatus());
+            app.put("createdAt", response.getApplication().getCreatedAt());
+            app.put("processedAt", response.getApplication().getProcessedAt());
+            app.put("processedBy", response.getApplication().getProcessedBy());
+            app.put("processReason", response.getApplication().getProcessReason());
+            app.put("version", response.getApplication().getVersion());
+            map.put("application", app);
+        }
+        if (response.hasCreditChange()) {
+            Map<String, Object> creditChange = new HashMap<>();
+            creditChange.put("delta", response.getCreditChange().getDelta());
+            creditChange.put("balanceBefore", response.getCreditChange().getBalanceBefore());
+            creditChange.put("balanceAfter", response.getCreditChange().getBalanceAfter());
+            creditChange.put("ledgerId", response.getCreditChange().getLedgerId());
+            map.put("creditChange", creditChange);
+        }
+        return toJson(map);
+    }
+
+    private ProcessCreditApplicationResponse deserializeProcessResponse(String json) {
+        if (isBlank(json)) {
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Empty idempotency response")
+                    .build();
+        }
+        try {
+            Map<String, Object> map = objectMapper.readValue(json, new TypeReference<>() {});
+            ProcessCreditApplicationResponse.Builder builder = ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(Boolean.TRUE.equals(map.get("success")))
+                    .setMessage(nvl(map.get("message")))
+                    .setErrorCode(nvl(map.get("errorCode")))
+                    .setAuditId(nvl(map.get("auditId")))
+                    .setIdempotentReplay(Boolean.TRUE.equals(map.get("idempotentReplay")))
+                    .setConflictStatus(nvl(map.get("conflictStatus")))
+                    .setConflictVersion(toInt(map.get("conflictVersion")));
+            Object appRaw = map.get("application");
+            if (appRaw instanceof Map<?, ?> appMap) {
+                builder.setApplication(CreditApplication.newBuilder()
+                        .setApplicationId(nvl(appMap.get("applicationId")))
+                        .setUserId(nvl(appMap.get("userId")))
+                        .setAmount(toInt(appMap.get("amount")))
+                        .setReason(nvl(appMap.get("reason")))
+                        .setContact(nvl(appMap.get("contact")))
+                        .setStatus(nvl(appMap.get("status")))
+                        .setCreatedAt(nvl(appMap.get("createdAt")))
+                        .setProcessedAt(nvl(appMap.get("processedAt")))
+                        .setProcessedBy(nvl(appMap.get("processedBy")))
+                        .setProcessReason(nvl(appMap.get("processReason")))
+                        .setVersion(toInt(appMap.get("version")))
+                        .build());
+            }
+            Object creditChangeRaw = map.get("creditChange");
+            if (creditChangeRaw instanceof Map<?, ?> creditChangeMap) {
+                builder.setCreditChange(CreditChange.newBuilder()
+                        .setDelta(toInt(creditChangeMap.get("delta")))
+                        .setBalanceBefore(toInt(creditChangeMap.get("balanceBefore")))
+                        .setBalanceAfter(toInt(creditChangeMap.get("balanceAfter")))
+                        .setLedgerId(nvl(creditChangeMap.get("ledgerId")))
+                        .build());
+            }
+            return builder.build();
+        } catch (Exception e) {
+            log.error("Failed to deserialize idempotency response", e);
+            return ProcessCreditApplicationResponse.newBuilder()
+                    .setSuccess(false)
+                    .setErrorCode(ERROR_INTERNAL)
+                    .setMessage("Broken idempotency response")
+                    .build();
+        }
+    }
+
+    private TerminateSummary terminateRunningRuns(String userId) {
+        List<String> failedRunIds = new ArrayList<>();
+        int terminatedCount = 0;
+        List<String> statuses = List.of("RECEIVED", "PLANNING", "EXECUTING", "SUMMARIZING");
+        for (String status : statuses) {
+            int offset = 0;
+            while (true) {
+                var listResp = agentDubboService.listRuns(ListAgentRunsRequest.newBuilder()
+                        .setUserId(userId)
+                        .setStatus(status)
+                        .setLimit(100)
+                        .setOffset(offset)
+                        .setDays(3650)
+                        .build());
+                if (listResp.getItemsCount() <= 0) {
+                    break;
+                }
+                for (var run : listResp.getItemsList()) {
+                    try {
+                        agentDubboService.cancelRun(CancelAgentRunRequest.newBuilder()
+                                .setUserId(userId)
+                                .setId(run.getId())
+                                .build());
+                        terminatedCount++;
+                    } catch (Exception e) {
+                        failedRunIds.add(run.getId());
+                        log.warn("Failed to terminate run for disabled user: userId={}, runId={}", userId, run.getId(), e);
+                    }
+                }
+                if (!listResp.getHasMore()) {
+                    break;
+                }
+                offset += listResp.getItemsCount();
+            }
+        }
+        return new TerminateSummary(terminatedCount, failedRunIds);
+    }
+
+    private Map<String, Object> applicationToMap(AgentCreditApplication app) {
+        if (app == null) {
+            return Map.of();
+        }
+        Map<String, Object> map = new HashMap<>();
+        map.put("applicationId", app.getApplicationId());
+        map.put("userId", app.getUserId());
+        map.put("amount", app.getAmount());
+        map.put("status", app.getStatus());
+        map.put("reason", nvl(app.getReason()));
+        map.put("contact", nvl(app.getContact()));
+        map.put("processedBy", nvl(app.getProcessedBy()));
+        map.put("processReason", nvl(app.getProcessReason()));
+        map.put("version", safeInt(app.getVersion()));
+        map.put("createdAt", toDateString(app.getCreatedAt()));
+        map.put("processedAt", toDateString(app.getProcessedAt()));
+        return map;
+    }
+
+    private OffsetDateTime parseOffsetDateTime(String value) {
+        if (isBlank(value)) {
+            return null;
+        }
+        return OffsetDateTime.parse(value);
+    }
+
+    private String toDateString(OffsetDateTime value) {
+        return value == null ? "" : value.format(DateTimeFormatter.ISO_OFFSET_DATE_TIME);
+    }
+
+    private boolean isUserActive(User user) {
+        if (user == null) {
+            return false;
+        }
+        return STATUS_ACTIVE.equals(normalizeUserStatus(user.getStatus()));
+    }
+
+    private String normalizeUserStatus(String status) {
+        String normalized = nvl(status).trim().toUpperCase(Locale.ROOT);
+        if (normalized.isBlank()) {
+            return STATUS_ACTIVE;
+        }
+        return normalized;
+    }
+
+    private String generateId() {
+        return UUID.randomUUID().toString().replace("-", "");
+    }
+
+    private String normalizeNullable(String value) {
+        String normalized = nvl(value).trim();
+        return normalized.isEmpty() ? null : normalized;
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
+    }
+
+    private int toInt(Object value) {
+        if (value == null) {
+            return 0;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private String nvl(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String toJson(Object object) {
+        try {
+            return objectMapper.writeValueAsString(object == null ? Map.of() : object);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private String sha256Hex(String value) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(nvl(value).getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder(hash.length * 2);
+            for (byte b : hash) {
+                sb.append(String.format("%02x", b));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return "";
         }
     }
 
@@ -426,5 +1088,8 @@ public class AdminServiceImpl extends AdminServiceImplBase {
             }
         }
         return hasUpper && hasLower && hasDigit;
+    }
+
+    private record TerminateSummary(int terminatedCount, List<String> failedRunIds) {
     }
 }

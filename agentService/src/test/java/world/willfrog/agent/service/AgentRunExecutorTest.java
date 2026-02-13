@@ -110,6 +110,7 @@ class AgentRunExecutorTest {
 
         verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
         verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
+        verify(creditService).recordRunConsumeLedger(eq("run-ok"), eq("u1"), eq(0));
     }
 
     @Test

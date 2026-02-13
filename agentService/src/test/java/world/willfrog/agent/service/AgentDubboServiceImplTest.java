@@ -18,6 +18,7 @@ import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
+import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 
 import java.util.List;
 
@@ -50,6 +51,8 @@ class AgentDubboServiceImplTest {
     private AgentModelCatalogService modelCatalogService;
     @Mock
     private AgentCreditService creditService;
+    @Mock
+    private UserDao userDao;
 
     private AgentDubboServiceImpl service;
 
@@ -66,6 +69,7 @@ class AgentDubboServiceImplTest {
                 artifactService,
                 modelCatalogService,
                 creditService,
+                userDao,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
@@ -161,10 +165,10 @@ class AgentDubboServiceImplTest {
         when(creditService.applyCredits("u1", 1000, "test", "u@example.com")).thenReturn(
                 new AgentCreditService.ApplyCreditSummary(
                         "app-1",
-                        6000,
-                        3450,
+                        5000,
+                        2450,
                         2550,
-                        "APPROVED",
+                        "PENDING",
                         "2026-02-12T10:00:00Z"
                 )
         );
@@ -178,6 +182,7 @@ class AgentDubboServiceImplTest {
                         .build()
         );
         assertEquals("app-1", resp.getApplicationId());
-        assertEquals(6000, resp.getTotalCredits());
+        assertEquals(5000, resp.getTotalCredits());
+        assertEquals("PENDING", resp.getStatus());
     }
 }

@@ -52,6 +52,10 @@ public class AuthController {
             return ResponseEntity.badRequest().body("Username and password are required");
         }
 
+        if (!authService.isUserActive(username)) {
+            return ResponseEntity.status(403).body("Account is disabled");
+        }
+
         // 检查是否被锁定
         if (loginAttemptService.isBlocked(username)) {
             return ResponseEntity.status(429).body("Account temporarily locked due to too many failed login attempts");

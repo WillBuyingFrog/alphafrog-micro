@@ -52,6 +52,8 @@ import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
+import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
+import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
 import java.util.List;
@@ -72,6 +74,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentArtifactService artifactService;
     private final AgentModelCatalogService modelCatalogService;
     private final AgentCreditService creditService;
+    private final UserDao userDao;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.run.list.default-days:30}")
@@ -104,6 +107,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("user_id is required");
         }
+        ensureUserActive(userId);
         String message = request.getMessage();
         if (message == null || message.isBlank()) {
             throw new IllegalArgumentException("message is required");
@@ -819,5 +823,25 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
 
     private String nvl(String v) {
         return v == null ? "" : v;
+    }
+
+    private void ensureUserActive(String userId) {
+        Long userIdLong;
+        try {
+            userIdLong = Long.parseLong(userId.trim());
+        } catch (Exception e) {
+            throw new IllegalArgumentException("user_id must be numeric");
+        }
+        User user = userDao.getUserById(userIdLong);
+        if (user == null) {
+            throw new IllegalArgumentException("user not found");
+        }
+        String status = user.getStatus();
+        if (status == null || status.isBlank()) {
+            return;
+        }
+        if (!"ACTIVE".equalsIgnoreCase(status.trim())) {
+            throw new IllegalStateException("user disabled");
+        }
     }
 }

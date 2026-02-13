@@ -37,6 +37,7 @@ public class AuthService {
     private static final String LOGIN_STATUS_PREFIX = "login_status:";
     private static final String PASSWORD_RESET_PREFIX = "password_reset:";
     private static final long PASSWORD_RESET_TTL_MINUTES = 30L;
+    private static final String STATUS_ACTIVE = "ACTIVE";
 
     public static final int RESULT_SUCCESS = 1;
     public static final int RESULT_ERROR = -1;
@@ -80,6 +81,32 @@ public class AuthService {
             return null;
         }
         return matchedUsers.get(0);
+    }
+
+    public User getUserById(Long userId) {
+        if (userId == null) {
+            return null;
+        }
+        return userDao.getUserById(userId);
+    }
+
+    public boolean isUserActive(String username) {
+        User user = getUserByUsername(username);
+        if (user == null) {
+            return true;
+        }
+        return isUserActive(user);
+    }
+
+    public boolean isUserActive(User user) {
+        if (user == null) {
+            return false;
+        }
+        String status = user.getStatus();
+        if (status == null || status.isBlank()) {
+            return true;
+        }
+        return STATUS_ACTIVE.equalsIgnoreCase(status.trim());
     }
 
     // 标记、判断每个用户是否登录的工具函数

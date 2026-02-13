@@ -13,6 +13,7 @@ import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditApplicationDao;
+import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditLedgerDao;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
@@ -32,6 +33,8 @@ class AgentCreditServiceTest {
     @Mock
     private AgentCreditApplicationDao creditApplicationDao;
     @Mock
+    private AgentCreditLedgerDao creditLedgerDao;
+    @Mock
     private AgentRunMapper runMapper;
     @Mock
     private AgentRunEventMapper eventMapper;
@@ -45,6 +48,7 @@ class AgentCreditServiceTest {
         service = new AgentCreditService(
                 userDao,
                 creditApplicationDao,
+                creditLedgerDao,
                 runMapper,
                 eventMapper,
                 modelCatalogService,
@@ -55,30 +59,26 @@ class AgentCreditServiceTest {
     }
 
     @Test
-    void applyCredits_shouldIncreaseAndPersistApplication() {
+    void applyCredits_shouldCreatePendingApplication() {
         User before = new User();
         before.setUserId(1L);
         before.setCredit(100);
-        User after = new User();
-        after.setUserId(1L);
-        after.setCredit(1100);
-
-        when(userDao.getUserById(1L)).thenReturn(before, after);
-        when(userDao.increaseCreditByUserId(1L, 1000)).thenReturn(1);
+        when(userDao.getUserById(1L)).thenReturn(before);
         when(runMapper.sumCompletedCreditsByUser("1")).thenReturn(200);
 
         AgentCreditService.ApplyCreditSummary summary = service.applyCredits("1", 1000, "test", "u@example.com");
 
         assertNotNull(summary.applicationId());
-        assertEquals(1100, summary.totalCredits());
-        assertEquals(900, summary.remainingCredits());
+        assertEquals(100, summary.totalCredits());
+        assertEquals(0, summary.remainingCredits());
         assertEquals(200, summary.usedCredits());
-        assertEquals("APPROVED", summary.status());
+        assertEquals("PENDING", summary.status());
 
         ArgumentCaptor<world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditApplication> captor =
                 ArgumentCaptor.forClass(world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditApplication.class);
         verify(creditApplicationDao).insert(captor.capture());
         assertEquals(1000, captor.getValue().getAmount());
+        assertEquals("PENDING", captor.getValue().getStatus());
     }
 
     @Test
@@ -98,5 +98,25 @@ class AgentCreditServiceTest {
 
         int total = service.calculateRunTotalCredits(run, List.of(e1, e2), "");
         assertEquals(7, total);
+    }
+
+    @Test
+    void recordRunConsumeLedger_shouldInsertLedgerEntry() {
+        User user = new User();
+        user.setUserId(1L);
+        user.setCredit(1000);
+        when(userDao.getUserById(1L)).thenReturn(user);
+        when(runMapper.sumCompletedCreditsByUser("1")).thenReturn(250);
+
+        service.recordRunConsumeLedger("run-1", "1", 50);
+
+        ArgumentCaptor<world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditLedger> captor =
+                ArgumentCaptor.forClass(world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditLedger.class);
+        verify(creditLedgerDao).insertIgnoreDuplicate(captor.capture());
+        assertEquals("RUN_CONSUME", captor.getValue().getBizType());
+        assertEquals(-50, captor.getValue().getDelta());
+        assertEquals(800, captor.getValue().getBalanceBefore());
+        assertEquals(750, captor.getValue().getBalanceAfter());
+        assertEquals("run-1", captor.getValue().getSourceId());
     }
 }

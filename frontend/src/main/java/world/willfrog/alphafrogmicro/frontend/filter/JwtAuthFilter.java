@@ -9,7 +9,6 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
-// DEBUG VERSION 2 - FORCE REBUILD
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -17,6 +16,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.util.StringUtils;
 import org.springframework.web.filter.OncePerRequestFilter;
 import world.willfrog.alphafrogmicro.frontend.config.JwtConfig;
+import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import javax.crypto.SecretKey;
 import java.io.IOException;
@@ -30,6 +30,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private final JwtConfig jwtConfig;
     private final SecretKey secretKey;
+    private final AuthService authService;
 
     @Override
     protected void doFilterInternal(HttpServletRequest request,
@@ -40,8 +41,19 @@ public class JwtAuthFilter extends OncePerRequestFilter {
         log.info("JwtAuthFilter processing: uri={}, tokenResolved={}", requestUri, token != null);
         if(token != null && validateToken(token)) {
             Authentication authentication = getAuthentication(token);
+            String username = authentication.getName();
+            if (!authService.checkIfLoggedIn(username)) {
+                log.warn("JWT rejected because login status is missing: uri={}, username={}", requestUri, username);
+                chain.doFilter(request, response);
+                return;
+            }
+            if (!authService.isUserActive(username)) {
+                log.warn("JWT rejected because account is disabled: uri={}, username={}", requestUri, username);
+                chain.doFilter(request, response);
+                return;
+            }
             SecurityContextHolder.getContext().setAuthentication(authentication);
-            log.info("JWT authentication successful for {}: principal={}, authenticated={}", 
+            log.info("JWT authentication successful for {}: principal={}, authenticated={}",
                     requestUri, authentication.getName(), authentication.isAuthenticated());
         } else if (token != null) {
             log.warn("JWT token validation failed for {}", requestUri);

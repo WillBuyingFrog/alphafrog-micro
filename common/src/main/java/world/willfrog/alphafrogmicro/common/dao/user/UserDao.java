@@ -26,7 +26,11 @@ public interface UserDao {
             @Result(column = "register_time", property = "registerTime"),
             @Result(column = "user_type", property = "userType"),
             @Result(column = "user_level", property = "userLevel"),
-            @Result(column = "credit", property = "credit")
+            @Result(column = "credit", property = "credit"),
+            @Result(column = "status", property = "status"),
+            @Result(column = "disabled_at", property = "disabledAt"),
+            @Result(column = "disabled_reason", property = "disabledReason"),
+            @Result(column = "status_updated_at", property = "statusUpdatedAt")
     })
     List<User> getUserByUsername(@Param("username") String username);
 
@@ -63,5 +67,48 @@ public interface UserDao {
 
     @Delete("DELETE FROM alphafrog_user WHERE username = #{username} AND user_type = #{userType}")
     int deleteUserByUsernameAndType(@Param("username") String username, @Param("userType") int userType);
+
+    @Select("<script>" +
+            "SELECT * FROM alphafrog_user " +
+            "<where>" +
+            "<if test='keyword != null and keyword != \"\"'>" +
+            " AND (username ILIKE CONCAT('%', #{keyword}, '%') OR email ILIKE CONCAT('%', #{keyword}, '%'))" +
+            "</if>" +
+            "<if test='status != null and status != \"\"'>" +
+            " AND status = #{status}" +
+            "</if>" +
+            "</where>" +
+            " ORDER BY register_time DESC " +
+            " LIMIT #{limit} OFFSET #{offset}" +
+            "</script>")
+    @ResultMap("userResultMap")
+    List<User> listUsers(@Param("keyword") String keyword,
+                         @Param("status") String status,
+                         @Param("limit") int limit,
+                         @Param("offset") int offset);
+
+    @Select("<script>" +
+            "SELECT COUNT(*) FROM alphafrog_user " +
+            "<where>" +
+            "<if test='keyword != null and keyword != \"\"'>" +
+            " AND (username ILIKE CONCAT('%', #{keyword}, '%') OR email ILIKE CONCAT('%', #{keyword}, '%'))" +
+            "</if>" +
+            "<if test='status != null and status != \"\"'>" +
+            " AND status = #{status}" +
+            "</if>" +
+            "</where>" +
+            "</script>")
+    int countUsers(@Param("keyword") String keyword, @Param("status") String status);
+
+    @Update("UPDATE alphafrog_user " +
+            "SET status = #{status}, " +
+            "    disabled_at = #{disabledAt}, " +
+            "    disabled_reason = #{disabledReason}, " +
+            "    status_updated_at = CURRENT_TIMESTAMP " +
+            "WHERE user_id = #{userId}")
+    int updateStatusByUserId(@Param("userId") Long userId,
+                             @Param("status") String status,
+                             @Param("disabledAt") java.time.OffsetDateTime disabledAt,
+                             @Param("disabledReason") String disabledReason);
 
 }

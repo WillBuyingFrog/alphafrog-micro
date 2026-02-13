@@ -55,7 +55,6 @@ message AdminOverallResponse {
   int64 stock_daily_count = 6;
 }
 
-// 额度申请相关消息
 message CreditApplication {
   string application_id = 1;
   string user_id = 2;
@@ -65,32 +64,166 @@ message CreditApplication {
   string status = 6;
   string created_at = 7;
   string processed_at = 8;
+  string processed_by = 9;
+  string process_reason = 10;
+  int32 version = 11;
+}
+
+message CreditApplicationAudit {
+  string audit_id = 1;
+  string operator_id = 2;
+  string action = 3;
+  string reason = 4;
+  string before_json = 5;
+  string after_json = 6;
+  string created_at = 7;
 }
 
 message ListCreditApplicationsRequest {
-  string status = 1;  // PENDING, APPROVED, REJECTED, 空表示全部
+  string status = 1;
   int32 page = 2;
   int32 page_size = 3;
+  string user_id = 4;
 }
 
 message ListCreditApplicationsResponse {
   bool success = 1;
   string message = 2;
-  repeated CreditApplication applications = 3;
-  int32 total = 4;
-  int32 page = 5;
-  int32 page_size = 6;
+  string error_code = 3;
+  repeated CreditApplication applications = 4;
+  int32 total = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message GetCreditApplicationRequest {
+  string application_id = 1;
+}
+
+message GetCreditApplicationResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  CreditApplication application = 4;
+  repeated CreditApplicationAudit audit_trail = 5;
 }
 
 message ProcessCreditApplicationRequest {
   string application_id = 1;
   string admin_id = 2;
+  string idempotency_key = 3;
+  string process_reason = 4;
+  int32 expected_version = 5;
+}
+
+message CreditChange {
+  int32 delta = 1;
+  int32 balance_before = 2;
+  int32 balance_after = 3;
+  string ledger_id = 4;
 }
 
 message ProcessCreditApplicationResponse {
   bool success = 1;
   string message = 2;
-  CreditApplication application = 3;
+  string error_code = 3;
+  CreditApplication application = 4;
+  string audit_id = 5;
+  bool idempotent_replay = 6;
+  CreditChange credit_change = 7;
+  string conflict_status = 8;
+  int32 conflict_version = 9;
+}
+
+message CreditLedgerEntry {
+  string ledger_id = 1;
+  string user_id = 2;
+  string biz_type = 3;
+  int32 delta = 4;
+  int32 balance_before = 5;
+  int32 balance_after = 6;
+  string source_type = 7;
+  string source_id = 8;
+  string operator_id = 9;
+  string idempotency_key = 10;
+  string ext = 11;
+  string created_at = 12;
+}
+
+message ListCreditLedgerRequest {
+  string user_id = 1;
+  string biz_type = 2;
+  string from = 3;
+  string to = 4;
+  string source_id = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message ListCreditLedgerResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  repeated CreditLedgerEntry entries = 4;
+  int32 total = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message AdminUser {
+  string user_id = 1;
+  string username = 2;
+  string email = 3;
+  int32 credit = 4;
+  int64 register_time = 5;
+  string status = 6;
+  string disabled_at = 7;
+  string disabled_reason = 8;
+}
+
+message ListUsersRequest {
+  string keyword = 1;
+  string status = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+}
+
+message ListUsersResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  repeated AdminUser users = 4;
+  int32 total = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message UpdateUserStatusRequest {
+  string user_id = 1;
+  string target_status = 2;
+  string reason = 3;
+  bool revoke_tokens = 4;
+  bool block_new_runs = 5;
+  bool terminate_running_runs = 6;
+  string operator_id = 7;
+}
+
+message UserStatusEffectiveActions {
+  int32 tokens_revoked_count = 1;
+  bool new_runs_blocked = 2;
+  int32 running_runs_terminated_count = 3;
+  repeated string failed_run_ids = 4;
+}
+
+message UpdateUserStatusResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  string user_id = 4;
+  string old_status = 5;
+  string new_status = 6;
+  string audit_id = 7;
+  UserStatusEffectiveActions effective_actions = 8;
 }
 
 service AdminService {
@@ -98,9 +231,12 @@ service AdminService {
   rpc createAdmin(AdminCreateRequest) returns (AdminActionResponse);
   rpc deleteAdmin(AdminDeleteRequest) returns (AdminActionResponse);
   rpc getAdminOverall(AdminOverallRequest) returns (AdminOverallResponse);
-  
-  // 额度申请管理
+
   rpc listCreditApplications(ListCreditApplicationsRequest) returns (ListCreditApplicationsResponse);
+  rpc getCreditApplication(GetCreditApplicationRequest) returns (GetCreditApplicationResponse);
   rpc approveCreditApplication(ProcessCreditApplicationRequest) returns (ProcessCreditApplicationResponse);
   rpc rejectCreditApplication(ProcessCreditApplicationRequest) returns (ProcessCreditApplicationResponse);
+  rpc listCreditLedger(ListCreditLedgerRequest) returns (ListCreditLedgerResponse);
+  rpc listUsers(ListUsersRequest) returns (ListUsersResponse);
+  rpc updateUserStatus(UpdateUserStatusRequest) returns (UpdateUserStatusResponse);
 }

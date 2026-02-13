@@ -180,6 +180,10 @@ CREATE TABLE IF NOT EXISTS alphafrog_user (
     user_type INTEGER,
     user_level INTEGER,
     credit INTEGER,
+    status VARCHAR(16) NOT NULL DEFAULT 'ACTIVE',
+    disabled_at TIMESTAMPTZ,
+    disabled_reason TEXT,
+    status_updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE (username),
     UNIQUE (email)
 );
@@ -348,10 +352,56 @@ CREATE TABLE IF NOT EXISTS alphafrog_agent_credit_application (
     amount INTEGER NOT NULL,
     reason TEXT,
     contact VARCHAR(255),
-    status VARCHAR(32) NOT NULL DEFAULT 'APPROVED',
+    status VARCHAR(32) NOT NULL DEFAULT 'PENDING',
+    processed_by VARCHAR(64),
+    process_reason TEXT,
+    version INT NOT NULL DEFAULT 0,
     ext JSONB NOT NULL DEFAULT '{}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     processed_at TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS alphafrog_agent_credit_ledger (
+    id BIGSERIAL PRIMARY KEY,
+    ledger_id VARCHAR(64) NOT NULL UNIQUE,
+    user_id VARCHAR(64) NOT NULL,
+    biz_type VARCHAR(32) NOT NULL,
+    delta INTEGER NOT NULL,
+    balance_before INTEGER NOT NULL,
+    balance_after INTEGER NOT NULL,
+    source_type VARCHAR(32) NOT NULL,
+    source_id VARCHAR(64) NOT NULL,
+    operator_id VARCHAR(64),
+    idempotency_key VARCHAR(128),
+    ext JSONB NOT NULL DEFAULT '{}'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS alphafrog_admin_audit_log (
+    id BIGSERIAL PRIMARY KEY,
+    audit_id VARCHAR(64) NOT NULL UNIQUE,
+    operator_id VARCHAR(64) NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    target_type VARCHAR(32) NOT NULL,
+    target_id VARCHAR(64) NOT NULL,
+    before_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    after_json JSONB NOT NULL DEFAULT '{}'::jsonb,
+    reason TEXT,
+    idempotency_key VARCHAR(128),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS alphafrog_admin_idempotency (
+    id BIGSERIAL PRIMARY KEY,
+    operator_id VARCHAR(64) NOT NULL,
+    action VARCHAR(64) NOT NULL,
+    target_id VARCHAR(64) NOT NULL,
+    idempotency_key VARCHAR(128) NOT NULL,
+    request_hash VARCHAR(128) NOT NULL,
+    status VARCHAR(16) NOT NULL DEFAULT 'PROCESSING',
+    response_json TEXT NOT NULL DEFAULT '{}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
 -- ==========
@@ -412,7 +462,18 @@ CREATE INDEX IF NOT EXISTS idx_agent_run_user ON alphafrog_agent_run(user_id);
 CREATE INDEX IF NOT EXISTS idx_agent_run_status ON alphafrog_agent_run(status);
 CREATE INDEX IF NOT EXISTS idx_agent_run_updated ON alphafrog_agent_run(updated_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_event_run ON alphafrog_agent_run_event(run_id);
+CREATE INDEX IF NOT EXISTS idx_user_status ON alphafrog_user(status);
+CREATE INDEX IF NOT EXISTS idx_user_status_updated_at ON alphafrog_user(status_updated_at);
 CREATE INDEX IF NOT EXISTS idx_agent_credit_apply_user ON alphafrog_agent_credit_application(user_id);
 CREATE INDEX IF NOT EXISTS idx_agent_credit_apply_created ON alphafrog_agent_credit_application(created_at);
+CREATE INDEX IF NOT EXISTS idx_credit_app_status_created ON alphafrog_agent_credit_application(status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credit_app_user_status ON alphafrog_agent_credit_application(user_id, status);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_ledger_biz_source ON alphafrog_agent_credit_ledger(biz_type, source_id);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_user_created ON alphafrog_agent_credit_ledger(user_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_credit_ledger_biz_created ON alphafrog_agent_credit_ledger(biz_type, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_target ON alphafrog_admin_audit_log(target_type, target_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_operator_created ON alphafrog_admin_audit_log(operator_id, created_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS uniq_admin_idem ON alphafrog_admin_idempotency(operator_id, action, target_id, idempotency_key);
+CREATE INDEX IF NOT EXISTS idx_admin_idem_updated_at ON alphafrog_admin_idempotency(updated_at DESC);
 
 COMMIT;

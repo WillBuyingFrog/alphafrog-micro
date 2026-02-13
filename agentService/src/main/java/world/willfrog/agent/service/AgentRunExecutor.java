@@ -135,6 +135,7 @@ public class AgentRunExecutor {
                         "totalCreditsConsumed", totalCreditsConsumed,
                         "total_credits_consumed", totalCreditsConsumed
                 ));
+                creditService.recordRunConsumeLedger(runId, userId, totalCreditsConsumed);
                 stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
                 return;
             }

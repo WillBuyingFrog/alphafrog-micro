@@ -73,6 +73,10 @@ public class AgentController {
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
+        User user = authService.getUserByUsername(authentication.getName());
+        if (!authService.isUserActive(user)) {
+            return ResponseWrapper.error(ResponseCode.FORBIDDEN, "账号已被禁用，无法创建新任务");
+        }
         if (request == null || request.message() == null || request.message().isBlank()) {
             return ResponseWrapper.paramError("message 不能为空");
         }

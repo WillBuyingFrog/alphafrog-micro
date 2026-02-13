@@ -9,8 +9,10 @@ import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditApplicationDao;
+import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditLedgerDao;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditApplication;
+import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditLedger;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
@@ -28,6 +30,7 @@ public class AgentCreditService {
 
     private final UserDao userDao;
     private final AgentCreditApplicationDao creditApplicationDao;
+    private final AgentCreditLedgerDao creditLedgerDao;
     private final AgentRunMapper runMapper;
     private final AgentRunEventMapper eventMapper;
     private final AgentModelCatalogService modelCatalogService;
@@ -72,6 +75,9 @@ public class AgentCreditService {
         application.setReason(nvl(reason));
         application.setContact(nvl(contact));
         application.setStatus("PENDING");
+        application.setProcessedBy("");
+        application.setProcessReason("");
+        application.setVersion(0);
         application.setExt("{}");
         application.setProcessedAt(null); // 待审批
         creditApplicationDao.insert(application);
@@ -142,6 +148,35 @@ public class AgentCreditService {
         }
         double safeRate = baseRate <= 0D ? 1.0D : baseRate;
         return (int) Math.ceil((totalTokens / 1000D) * safeRate);
+    }
+
+    public void recordRunConsumeLedger(String runId, String userId, int totalCreditsConsumed) {
+        if (runId == null || runId.isBlank() || userId == null || userId.isBlank() || totalCreditsConsumed <= 0) {
+            return;
+        }
+        Long userIdLong = parseUserId(userId);
+        User user = userDao.getUserById(userIdLong);
+        if (user == null) {
+            return;
+        }
+        int totalCredits = Math.max(0, user.getCredit() == null ? 0 : user.getCredit());
+        int usedCreditsAfter = Math.max(0, runMapper.sumCompletedCreditsByUser(userId));
+        int balanceAfter = Math.max(0, totalCredits - usedCreditsAfter);
+        int balanceBefore = Math.max(0, balanceAfter + totalCreditsConsumed);
+
+        AgentCreditLedger ledger = new AgentCreditLedger();
+        ledger.setLedgerId(UUID.randomUUID().toString().replace("-", ""));
+        ledger.setUserId(userId);
+        ledger.setBizType("RUN_CONSUME");
+        ledger.setDelta(-totalCreditsConsumed);
+        ledger.setBalanceBefore(balanceBefore);
+        ledger.setBalanceAfter(balanceAfter);
+        ledger.setSourceType("AGENT_RUN");
+        ledger.setSourceId(runId);
+        ledger.setOperatorId("");
+        ledger.setIdempotencyKey("");
+        ledger.setExt("{}");
+        creditLedgerDao.insertIgnoreDuplicate(ledger);
     }
 
     private boolean extractCacheHit(Map<String, Object> payload) {
@@ -305,7 +340,17 @@ public class AgentCreditService {
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        creditApplicationDao.updateStatus(applicationId, "APPROVED", now);
+        int changed = creditApplicationDao.updateStatusWithVersion(
+                applicationId,
+                "APPROVED",
+                now,
+                nvl(adminId),
+                "",
+                application.getVersion() == null ? 0 : application.getVersion()
+        );
+        if (changed <= 0) {
+            throw new IllegalStateException("failed to update application status");
+        }
 
         CreditSummary summary = getUserCredits(application.getUserId());
         return new ApplyCreditSummary(
@@ -331,7 +376,17 @@ public class AgentCreditService {
         }
 
         OffsetDateTime now = OffsetDateTime.now(ZoneOffset.UTC);
-        creditApplicationDao.updateStatus(applicationId, "REJECTED", now);
+        int changed = creditApplicationDao.updateStatusWithVersion(
+                applicationId,
+                "REJECTED",
+                now,
+                nvl(adminId),
+                "",
+                application.getVersion() == null ? 0 : application.getVersion()
+        );
+        if (changed <= 0) {
+            throw new IllegalStateException("failed to update application status");
+        }
 
         CreditSummary summary = getUserCredits(application.getUserId());
         return new ApplyCreditSummary(
