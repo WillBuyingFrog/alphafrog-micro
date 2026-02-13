@@ -9,6 +9,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
+// DEBUG VERSION 2 - FORCE REBUILD
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -52,11 +53,18 @@ public class JwtAuthFilter extends OncePerRequestFilter {
 
     private String resolveToken(HttpServletRequest request) {
         String bearerToken = request.getHeader(jwtConfig.getHeader());
-        if(StringUtils.hasText(bearerToken) && bearerToken.startsWith(jwtConfig.getTokenPrefix())) {
-            return bearerToken.substring(jwtConfig.getTokenPrefix().length()).trim();
-        } else {
-            return null;
+        log.info("resolveToken: headerValue={}", bearerToken);
+        if(StringUtils.hasText(bearerToken)) {
+            String prefix = jwtConfig.getTokenPrefix();
+            // 支持 "Bearer token" 和 "Bearertoken" 两种格式
+            if(bearerToken.startsWith(prefix + " ")) {
+                return bearerToken.substring(prefix.length() + 1).trim();
+            } else if(bearerToken.startsWith(prefix)) {
+                return bearerToken.substring(prefix.length()).trim();
+            }
         }
+        log.info("resolveToken: no valid token found");
+        return null;
     }
 
     private boolean validateToken(String token) {
