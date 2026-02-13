@@ -47,6 +47,7 @@ public class SecurityConfig{
                                 "/api/auth/verify-reset-token"
                         ).permitAll()
                         .requestMatchers("/admin/login", "/admin/create").permitAll()
+                        .requestMatchers("/admin/**").authenticated()
                         .requestMatchers("/auth/**").authenticated()
                         .requestMatchers("/api/auth/**").authenticated()
                         .requestMatchers("/tasks/**").authenticated()

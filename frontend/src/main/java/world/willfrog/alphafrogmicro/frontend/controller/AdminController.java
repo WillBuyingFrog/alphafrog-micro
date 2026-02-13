@@ -187,7 +187,11 @@ public class AdminController {
                                                     @RequestParam(required = false) String status,
                                                     @RequestParam(required = false, defaultValue = "1") Integer page,
                                                     @RequestParam(required = false, defaultValue = "20") Integer pageSize) {
+        log.info("listCreditApplications called: auth={}, isAuthenticated={}", 
+                authentication != null ? authentication.getName() : "null",
+                authentication != null ? authentication.isAuthenticated() : "N/A");
         if (!isAdmin(authentication)) {
+            log.warn("listCreditApplications: access denied, auth={}", authentication);
             return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
         }
 
