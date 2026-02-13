@@ -56,8 +56,11 @@ import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
+import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 @DubboService
 @RequiredArgsConstructor
@@ -162,6 +165,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         List<AgentRun> runs = runMapper.listByUser(userId, statusFilter, fromTime, limit, offset);
         int total = runMapper.countByUser(userId, statusFilter, fromTime);
         boolean hasMore = offset + runs.size() < total;
+        Set<String> runIdsWithArtifacts = resolveRunsWithArtifacts(runs);
 
         ListAgentRunsResponse.Builder builder = ListAgentRunsResponse.newBuilder();
         builder.setTotal(total);
@@ -169,7 +173,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         for (AgentRun run : runs) {
             run = markExpiredIfNeeded(run);
             String userGoal = eventService.extractUserGoal(run.getExt());
-            boolean hasArtifacts = hasVisibleArtifacts(run);
+            boolean hasArtifacts = hasVisibleArtifacts(run, runIdsWithArtifacts);
             AgentObservabilityService.ListMetrics metrics = observabilityService.extractListMetrics(run.getSnapshotJson());
             builder.addItems(AgentRunListItemMessage.newBuilder()
                     .setId(nvl(run.getId()))
@@ -184,6 +188,25 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                     .build());
         }
         return builder.build();
+    }
+
+    private Set<String> resolveRunsWithArtifacts(List<AgentRun> runs) {
+        if (runs == null || runs.isEmpty()) {
+            return Collections.emptySet();
+        }
+        List<String> runIds = runs.stream()
+                .map(AgentRun::getId)
+                .filter(id -> id != null && !id.isBlank())
+                .toList();
+        if (runIds.isEmpty()) {
+            return Collections.emptySet();
+        }
+        try {
+            return new HashSet<>(eventMapper.listRunIdsWithExecutePythonArtifacts(runIds));
+        } catch (Exception e) {
+            log.warn("Resolve run artifacts in batch failed, fallback empty set", e);
+            return Collections.emptySet();
+        }
     }
 
     /**
@@ -671,13 +694,20 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
     }
 
-    private boolean hasVisibleArtifacts(AgentRun run) {
-        try {
-            return !artifactService.listArtifacts(run, false).isEmpty();
-        } catch (Exception e) {
-            log.warn("Resolve hasArtifacts failed for runId={}", run.getId(), e);
+    private boolean hasVisibleArtifacts(AgentRun run, Set<String> runIdsWithArtifacts) {
+        if (run == null || run.getId() == null || run.getId().isBlank()) {
             return false;
         }
+        if (run.getStartedAt() == null) {
+            return false;
+        }
+        if (artifactRetentionNormalDays > 0) {
+            OffsetDateTime visibleSince = OffsetDateTime.now().minusDays(artifactRetentionNormalDays);
+            if (run.getStartedAt().isBefore(visibleSince)) {
+                return false;
+            }
+        }
+        return runIdsWithArtifacts.contains(run.getId());
     }
 
     private boolean isTerminal(AgentRunStatus status) {

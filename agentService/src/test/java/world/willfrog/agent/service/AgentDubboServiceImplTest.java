@@ -16,16 +16,19 @@ import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 
+import java.time.OffsetDateTime;
 import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -128,6 +131,35 @@ class AgentDubboServiceImplTest {
         var status = service.getStatus(GetAgentRunStatusRequest.newBuilder().setUserId("u1").setId("run-2").build());
         assertEquals("EXECUTING", status.getPhase());
         assertEquals(0, status.getTotalCreditsConsumed());
+    }
+
+    @Test
+    void listRuns_shouldUseBatchArtifactHintInsteadOfArtifactService() {
+        AgentRun run = new AgentRun();
+        run.setId("run-1");
+        run.setUserId("u1");
+        run.setStatus(AgentRunStatus.COMPLETED);
+        run.setExt("{\"user_goal\":\"hello\"}");
+        run.setSnapshotJson("{}");
+        run.setStartedAt(OffsetDateTime.now());
+
+        when(runMapper.listByUser("u1", null, null, 20, 0)).thenReturn(List.of(run));
+        when(runMapper.countByUser("u1", null, null)).thenReturn(1);
+        when(eventMapper.listRunIdsWithExecutePythonArtifacts(List.of("run-1"))).thenReturn(List.of("run-1"));
+        when(eventService.extractUserGoal(run.getExt())).thenReturn("hello");
+        when(observabilityService.extractListMetrics("{}")).thenReturn(new AgentObservabilityService.ListMetrics(10L, 20, 1));
+
+        var response = service.listRuns(ListAgentRunsRequest.newBuilder()
+                .setUserId("u1")
+                .setLimit(20)
+                .setOffset(0)
+                .setDays(0)
+                .build());
+
+        assertEquals(1, response.getItemsCount());
+        assertEquals(true, response.getItems(0).getHasArtifacts());
+        assertEquals("hello", response.getItems(0).getMessage());
+        verifyNoInteractions(artifactService);
     }
 
     @Test

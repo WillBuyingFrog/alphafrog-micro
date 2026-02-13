@@ -62,4 +62,19 @@
         ORDER BY seq ASC
     </select>
 
+    <select id="listRunIdsWithExecutePythonArtifacts" resultType="string">
+        SELECT DISTINCT run_id
+        FROM alphafrog_agent_run_event
+        WHERE run_id IN
+        <foreach collection="runIds" item="runId" open="(" separator="," close=")">
+            #{runId}
+        </foreach>
+          AND (
+            (event_type = 'TOOL_CALL_STARTED'
+                AND COALESCE(payload_json ->> 'tool_name', payload_json ->> 'toolName') = 'executePython')
+                OR
+            (event_type = 'PARALLEL_TASK_STARTED' AND payload_json ->> 'tool' = 'executePython')
+            )
+    </select>
+
 </mapper>

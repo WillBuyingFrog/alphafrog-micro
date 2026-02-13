@@ -146,8 +146,11 @@ public class AgentController {
 
     @GetMapping
     public ResponseWrapper<AgentRunListResponse> list(Authentication authentication,
-                                                      @RequestParam(value = "limit", required = false, defaultValue = "20") int limit,
-                                                      @RequestParam(value = "offset", required = false, defaultValue = "0") int offset,
+                                                      @RequestParam(value = "limit", required = false) Integer limit,
+                                                      @RequestParam(value = "offset", required = false) Integer offset,
+                                                      @RequestParam(value = "page", required = false) Integer page,
+                                                      @RequestParam(value = "size", required = false) Integer size,
+                                                      @RequestParam(value = "max", required = false) Integer max,
                                                       @RequestParam(value = "status", required = false, defaultValue = "") String status,
                                                       @RequestParam(value = "days", required = false, defaultValue = "0") int days) {
         String userId = resolveUserId(authentication);
@@ -155,11 +158,13 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
+            int resolvedLimit = resolveLimit(limit, size, max);
+            int resolvedOffset = resolveOffset(offset, page, resolvedLimit);
             ListAgentRunsResponse resp = agentDubboService.listRuns(
                     ListAgentRunsRequest.newBuilder()
                             .setUserId(userId)
-                            .setLimit(limit)
-                            .setOffset(offset)
+                            .setLimit(resolvedLimit)
+                            .setOffset(resolvedOffset)
                             .setStatus(nvl(status))
                             .setDays(days)
                             .build()
@@ -497,6 +502,30 @@ public class AgentController {
         }
         Integer userType = user.getUserType();
         return userType != null && userType == ADMIN_USER_TYPE;
+    }
+
+    private int resolveLimit(Integer limit, Integer size, Integer max) {
+        if (limit != null && limit > 0) {
+            return limit;
+        }
+        if (max != null && max > 0) {
+            return max;
+        }
+        if (size != null && size > 0) {
+            return size;
+        }
+        return 20;
+    }
+
+    private int resolveOffset(Integer offset, Integer page, int limit) {
+        if (offset != null && offset >= 0) {
+            return offset;
+        }
+        if (page != null && page > 0 && limit > 0) {
+            long candidate = (long) page * (long) limit;
+            return candidate > Integer.MAX_VALUE ? Integer.MAX_VALUE : (int) candidate;
+        }
+        return 0;
     }
 
     private AgentRunResponse toRunResponse(AgentRunMessage run) {
