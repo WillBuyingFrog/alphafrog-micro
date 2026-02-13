@@ -22,4 +22,9 @@ public class AgentRun {
     private OffsetDateTime updatedAt;
     private OffsetDateTime completedAt;
     private String ext; // JSON string
+
+    // List view metrics extracted from snapshot_json.observability.summary
+    private Long durationMs;
+    private Integer totalTokens;
+    private Integer toolCalls;
 }

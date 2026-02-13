@@ -459,6 +459,7 @@ CREATE INDEX IF NOT EXISTS idx_strategy_nav_run ON alphafrog_strategy_nav(run_id
 CREATE INDEX IF NOT EXISTS idx_strategy_nav_date ON alphafrog_strategy_nav(trade_date);
 
 CREATE INDEX IF NOT EXISTS idx_agent_run_user ON alphafrog_agent_run(user_id);
+CREATE INDEX IF NOT EXISTS idx_agent_run_user_started_desc ON alphafrog_agent_run(user_id, started_at DESC);
 CREATE INDEX IF NOT EXISTS idx_agent_run_status ON alphafrog_agent_run(status);
 CREATE INDEX IF NOT EXISTS idx_agent_run_updated ON alphafrog_agent_run(updated_at);
 CREATE INDEX IF NOT EXISTS idx_agent_run_event_run ON alphafrog_agent_run_event(run_id);

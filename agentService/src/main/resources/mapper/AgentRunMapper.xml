@@ -17,6 +17,9 @@
         <result property="updatedAt" column="updated_at"/>
         <result property="completedAt" column="completed_at"/>
         <result property="ext" column="ext"/>
+        <result property="durationMs" column="duration_ms"/>
+        <result property="totalTokens" column="total_tokens"/>
+        <result property="toolCalls" column="tool_calls"/>
     </resultMap>
 
     <insert id="insert" parameterType="world.willfrog.agent.entity.AgentRun">
@@ -70,16 +73,45 @@
         SELECT id,
                user_id,
                status,
-               current_step,
-               max_steps,
-               plan_json::text AS plan_json,
-               snapshot_json::text AS snapshot_json,
                last_error,
                ttl_expires_at,
                started_at,
                updated_at,
                completed_at,
-               ext::text AS ext
+               ext::text AS ext,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,totalDurationMs}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,totalDurationMs}')::bigint
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,total_duration_ms}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,total_duration_ms}')::bigint
+                           END,
+                       0
+               ) AS duration_ms,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,totalTokens}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,totalTokens}')::int
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,total_tokens}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,total_tokens}')::int
+                           END,
+                       0
+               ) AS total_tokens,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,toolCalls}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,toolCalls}')::int
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,tool_calls}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,tool_calls}')::int
+                           END,
+                       0
+               ) AS tool_calls
         FROM alphafrog_agent_run
         WHERE user_id = #{userId}
         <if test="status != null">

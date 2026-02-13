@@ -171,20 +171,19 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         builder.setTotal(total);
         builder.setHasMore(hasMore);
         for (AgentRun run : runs) {
-            run = markExpiredIfNeeded(run);
+            AgentRunStatus effectiveStatus = eventService.shouldMarkExpired(run) ? AgentRunStatus.EXPIRED : run.getStatus();
             String userGoal = eventService.extractUserGoal(run.getExt());
             boolean hasArtifacts = hasVisibleArtifacts(run, runIdsWithArtifacts);
-            AgentObservabilityService.ListMetrics metrics = observabilityService.extractListMetrics(run.getSnapshotJson());
             builder.addItems(AgentRunListItemMessage.newBuilder()
                     .setId(nvl(run.getId()))
                     .setMessage(nvl(userGoal))
-                    .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
+                    .setStatus(effectiveStatus == null ? "" : effectiveStatus.name())
                     .setCreatedAt(run.getStartedAt() == null ? "" : run.getStartedAt().toString())
                     .setCompletedAt(run.getCompletedAt() == null ? "" : run.getCompletedAt().toString())
                     .setHasArtifacts(hasArtifacts)
-                    .setDurationMs(Math.max(0L, metrics.durationMs()))
-                    .setTotalTokens(Math.max(0, metrics.totalTokens()))
-                    .setToolCalls(Math.max(0, metrics.toolCalls()))
+                    .setDurationMs(nonNegativeLong(run.getDurationMs()))
+                    .setTotalTokens(nonNegativeInt(run.getTotalTokens()))
+                    .setToolCalls(nonNegativeInt(run.getToolCalls()))
                     .build());
         }
         return builder.build();
@@ -853,6 +852,14 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
 
     private String nvl(String v) {
         return v == null ? "" : v;
+    }
+
+    private long nonNegativeLong(Long v) {
+        return v == null ? 0L : Math.max(0L, v);
+    }
+
+    private int nonNegativeInt(Integer v) {
+        return v == null ? 0 : Math.max(0, v);
     }
 
     private void ensureUserActive(String userId) {
