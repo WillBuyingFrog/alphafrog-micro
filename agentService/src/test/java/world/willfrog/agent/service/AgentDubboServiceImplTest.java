@@ -147,7 +147,6 @@ class AgentDubboServiceImplTest {
         when(runMapper.countByUser("u1", null, null)).thenReturn(1);
         when(eventMapper.listRunIdsWithExecutePythonArtifacts(List.of("run-1"))).thenReturn(List.of("run-1"));
         when(eventService.extractUserGoal(run.getExt())).thenReturn("hello");
-        when(observabilityService.extractListMetrics("{}")).thenReturn(new AgentObservabilityService.ListMetrics(10L, 20, 1));
 
         var response = service.listRuns(ListAgentRunsRequest.newBuilder()
                 .setUserId("u1")

@@ -87,10 +87,36 @@ public class AgentRunExecutor {
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
             String userGoal = eventService.extractUserGoal(run.getExt());
+            AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
+
+            eventService.append(runId, userId, "RUN_CONFIG_APPLIED", mapOf(
+                    "webSearchEnabled", runConfig.webSearchEnabled(),
+                    "codeInterpreterEnabled", runConfig.codeInterpreterEnabled(),
+                    "codeInterpreterMaxCredits", runConfig.codeInterpreterMaxCredits(),
+                    "smartRetrievalEnabled", runConfig.smartRetrievalEnabled()
+            ));
+            if (runConfig.webSearchEnabled()) {
+                eventService.append(runId, userId, "RUN_CAPABILITY_PLACEHOLDER", mapOf(
+                        "capability", "webSearch",
+                        "requested", true,
+                        "available", false,
+                        "reason", "backend_tool_not_implemented_yet"
+                ));
+            }
+            if (runConfig.smartRetrievalEnabled()) {
+                eventService.append(runId, userId, "RUN_CAPABILITY_PLACEHOLDER", mapOf(
+                        "capability", "smartRetrieval",
+                        "requested", true,
+                        "available", false,
+                        "reason", "backend_tool_not_implemented_yet"
+                ));
+            }
 
             List<ToolSpecification> toolSpecifications = new ArrayList<>();
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
-            toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
+            if (runConfig.codeInterpreterEnabled()) {
+                toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
+            }
 
             var todoPlan = todoPlanner.plan(TodoPlanner.PlanRequest.builder()
                     .run(run)

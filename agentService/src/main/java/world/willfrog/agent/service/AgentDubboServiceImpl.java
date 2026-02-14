@@ -20,8 +20,6 @@ import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
 import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsResponse;
-import world.willfrog.alphafrogmicro.agent.idl.ProcessCreditApplicationRequest;
-import world.willfrog.alphafrogmicro.agent.idl.ProcessCreditApplicationResponse;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
@@ -544,57 +542,6 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setStatus(nvl(summary.status()))
                 .setAppliedAt(nvl(summary.appliedAt()))
                 .build();
-    }
-
-    /**
-     * 处理额度申请（管理员审批）
-     */
-    @Override
-    public ProcessCreditApplicationResponse processCreditApplication(ProcessCreditApplicationRequest request) {
-        String action = request.getAction();
-        String applicationId = request.getApplicationId();
-        String adminId = request.getAdminId();
-        
-        try {
-            if ("APPROVE".equalsIgnoreCase(action)) {
-                AgentCreditService.ApplyCreditSummary summary = creditService.approveApplication(applicationId, adminId);
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(true)
-                        .setMessage("Application approved successfully")
-                        .setApplicationId(applicationId)
-                        .setStatus("APPROVED")
-                        .build();
-            } else if ("REJECT".equalsIgnoreCase(action)) {
-                AgentCreditService.ApplyCreditSummary summary = creditService.rejectApplication(applicationId, adminId);
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(true)
-                        .setMessage("Application rejected successfully")
-                        .setApplicationId(applicationId)
-                        .setStatus("REJECTED")
-                        .build();
-            } else {
-                return ProcessCreditApplicationResponse.newBuilder()
-                        .setSuccess(false)
-                        .setMessage("Invalid action: " + action + ". Expected APPROVE or REJECT")
-                        .build();
-            }
-        } catch (IllegalArgumentException e) {
-            return ProcessCreditApplicationResponse.newBuilder()
-                    .setSuccess(false)
-                    .setMessage(e.getMessage())
-                    .build();
-        } catch (IllegalStateException e) {
-            return ProcessCreditApplicationResponse.newBuilder()
-                    .setSuccess(false)
-                    .setMessage(e.getMessage())
-                    .build();
-        } catch (Exception e) {
-            log.error("Failed to process credit application: {}", applicationId, e);
-            return ProcessCreditApplicationResponse.newBuilder()
-                    .setSuccess(false)
-                    .setMessage("Internal error: " + e.getMessage())
-                    .build();
-        }
     }
 
     /**

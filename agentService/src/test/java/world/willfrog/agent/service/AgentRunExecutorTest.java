@@ -6,6 +6,7 @@ import dev.langchain4j.model.chat.ChatLanguageModel;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
@@ -29,6 +30,8 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 @ExtendWith(MockitoExtension.class)
 class AgentRunExecutorTest {
@@ -80,6 +83,7 @@ class AgentRunExecutorTest {
         when(eventService.extractDebugMode(anyString())).thenReturn(false);
         when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of());
         when(eventService.extractUserGoal(anyString())).thenReturn("goal");
+        when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", ""));
@@ -137,6 +141,66 @@ class AgentRunExecutorTest {
 
         verify(runMapper).updateSnapshot(eq("run-fail"), eq("u1"), eq(AgentRunStatus.FAILED), anyString(), eq(true), eq("boom"));
         verify(eventService).append(eq("run-fail"), eq("u1"), eq("WORKFLOW_FAILED"), anyMap());
+    }
+
+    @Test
+    void execute_shouldExcludeExecutePythonWhenCodeInterpreterDisabled() {
+        AgentRun run = run("run-no-code");
+        when(runMapper.findById("run-no-code")).thenReturn(run);
+        when(eventService.isRunnable("run-no-code", "u1")).thenReturn(true);
+        when(eventService.extractRunConfig(anyString()))
+                .thenReturn(new AgentEventService.RunConfig(false, false, 0, false));
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-no-code");
+
+        ArgumentCaptor<TodoPlanner.PlanRequest> captor = ArgumentCaptor.forClass(TodoPlanner.PlanRequest.class);
+        verify(todoPlanner).plan(captor.capture());
+        List<String> toolNames = captor.getValue().getToolSpecifications().stream()
+                .map(ToolSpecification::name)
+                .toList();
+        assertFalse(toolNames.contains("executePython"));
+    }
+
+    @Test
+    void execute_shouldKeepExecutePythonWhenRunConfigDefaultEnabled() {
+        AgentRun run = run("run-default");
+        when(runMapper.findById("run-default")).thenReturn(run);
+        when(eventService.isRunnable("run-default", "u1")).thenReturn(true);
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-default");
+
+        ArgumentCaptor<TodoPlanner.PlanRequest> captor = ArgumentCaptor.forClass(TodoPlanner.PlanRequest.class);
+        verify(todoPlanner).plan(captor.capture());
+        List<String> toolNames = captor.getValue().getToolSpecifications().stream()
+                .map(ToolSpecification::name)
+                .toList();
+        assertTrue(toolNames.contains("executePython"));
     }
 
     private AgentRun run(String id) {

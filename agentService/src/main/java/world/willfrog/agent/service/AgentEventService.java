@@ -281,6 +281,65 @@ public class AgentEventService {
         }
     }
 
+    /**
+     * 提取 run 级 config 配置。
+     * <p>
+     * 默认值：
+     * - webSearch.enabled = false
+     * - codeInterpreter.enabled = true（保持历史行为兼容）
+     * - codeInterpreter.maxCredits = 0
+     * - smartRetrieval.enabled = false
+     */
+    public RunConfig extractRunConfig(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return RunConfig.defaults();
+        }
+        try {
+            Map<?, ?> extMap = objectMapper.readValue(extJson, Map.class);
+            Map<?, ?> contextMap = mapFromObject(extMap.get("context_json"));
+            Map<?, ?> configMap = mapFromObject(contextMap.get("config"));
+            if (configMap.isEmpty()) {
+                configMap = mapFromObject(extMap.get("config"));
+            }
+            if (configMap.isEmpty()) {
+                return RunConfig.defaults();
+            }
+            Map<?, ?> webSearch = readSection(configMap, "webSearch", "web_search");
+            Map<?, ?> codeInterpreter = readSection(configMap, "codeInterpreter", "code_interpreter");
+            Map<?, ?> smartRetrieval = readSection(configMap, "smartRetrieval", "smart_retrieval");
+
+            boolean webSearchEnabled = readBoolean(webSearch, "enabled", "enabled", false);
+            boolean codeInterpreterEnabled = readBoolean(codeInterpreter, "enabled", "enabled", true);
+            int codeInterpreterMaxCredits = readInt(codeInterpreter, "maxCredits", "max_credits", 0);
+            boolean smartRetrievalEnabled = readBoolean(smartRetrieval, "enabled", "enabled", false);
+
+            return new RunConfig(
+                    webSearchEnabled,
+                    codeInterpreterEnabled,
+                    Math.max(0, codeInterpreterMaxCredits),
+                    smartRetrievalEnabled
+            );
+        } catch (Exception e) {
+            return RunConfig.defaults();
+        }
+    }
+
+    public boolean extractWebSearchEnabled(String extJson) {
+        return extractRunConfig(extJson).webSearchEnabled();
+    }
+
+    public boolean extractCodeInterpreterEnabled(String extJson) {
+        return extractRunConfig(extJson).codeInterpreterEnabled();
+    }
+
+    public int extractCodeInterpreterMaxCredits(String extJson) {
+        return extractRunConfig(extJson).codeInterpreterMaxCredits();
+    }
+
+    public boolean extractSmartRetrievalEnabled(String extJson) {
+        return extractRunConfig(extJson).smartRetrievalEnabled();
+    }
+
     private List<String> parseProviderOrderValue(Object raw) {
         if (raw == null) {
             return List.of();
@@ -324,6 +383,71 @@ public class AgentEventService {
             return Boolean.TRUE.equals(direct) || Boolean.TRUE.equals(toBoolean(contextMap.get(contextKeySnake)));
         } catch (Exception e) {
             return false;
+        }
+    }
+
+    private Map<?, ?> mapFromObject(Object raw) {
+        if (raw instanceof Map<?, ?> map) {
+            return map;
+        }
+        if (!(raw instanceof String text) || text.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object parsed = objectMapper.readValue(text, Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                return map;
+            }
+            return Map.of();
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private Map<?, ?> readSection(Map<?, ?> parent, String keyCamel, String keySnake) {
+        if (parent == null || parent.isEmpty()) {
+            return Map.of();
+        }
+        Object value = parent.get(keyCamel);
+        if (value == null) {
+            value = parent.get(keySnake);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map;
+        }
+        return Map.of();
+    }
+
+    private boolean readBoolean(Map<?, ?> map, String keyCamel, String keySnake, boolean defaultValue) {
+        if (map == null || map.isEmpty()) {
+            return defaultValue;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        Boolean boolValue = toBoolean(value);
+        return boolValue == null ? defaultValue : boolValue;
+    }
+
+    private int readInt(Map<?, ?> map, String keyCamel, String keySnake, int defaultValue) {
+        if (map == null || map.isEmpty()) {
+            return defaultValue;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (Exception e) {
+            return defaultValue;
         }
     }
 
@@ -511,6 +635,17 @@ public class AgentEventService {
             return "v1";
         }
         return version;
+    }
+
+    public record RunConfig(
+            boolean webSearchEnabled,
+            boolean codeInterpreterEnabled,
+            int codeInterpreterMaxCredits,
+            boolean smartRetrievalEnabled
+    ) {
+        public static RunConfig defaults() {
+            return new RunConfig(false, true, 0, false);
+        }
     }
 
 }

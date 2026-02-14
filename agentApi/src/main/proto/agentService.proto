@@ -279,20 +279,6 @@ message ExportAgentRunResponse {
   string message = 4;
 }
 
-// 额度申请处理（管理员审批）
-message ProcessCreditApplicationRequest {
-  string application_id = 1;
-  string action = 2;  // APPROVE or REJECT
-  string admin_id = 3;
-}
-
-message ProcessCreditApplicationResponse {
-  bool success = 1;
-  string message = 2;
-  string application_id = 3;
-  string status = 4;  // APPROVED or REJECTED
-}
-
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
@@ -311,7 +297,6 @@ service AgentDubboService {
   rpc ListModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
   rpc GetCredits(GetAgentCreditsRequest) returns (GetAgentCreditsResponse);
   rpc ApplyCredits(ApplyAgentCreditsRequest) returns (ApplyAgentCreditsResponse);
-  rpc ProcessCreditApplication(ProcessCreditApplicationRequest) returns (ProcessCreditApplicationResponse);
   rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
 }
