@@ -486,9 +486,11 @@ public class AgentLlmProperties {
         private String subAgentPlannerSystemPromptTemplate;
         private String subAgentSummarySystemPrompt;
         private String pythonRefineSystemPrompt;
+        private String pythonRefineRequirementsFile;
         private List<String> pythonRefineRequirements = new ArrayList<>();
         private String pythonRefineOutputInstruction;
         private List<DatasetFieldSpec> datasetFieldSpecs = new ArrayList<>();
+        private String datasetFieldSpecsFile;
         private String orchestratorPlanningSystemPrompt;
         private String orchestratorSummarySystemPrompt;
 
@@ -580,6 +582,14 @@ public class AgentLlmProperties {
             this.pythonRefineSystemPrompt = pythonRefineSystemPrompt;
         }
 
+        public String getPythonRefineRequirementsFile() {
+            return pythonRefineRequirementsFile;
+        }
+
+        public void setPythonRefineRequirementsFile(String pythonRefineRequirementsFile) {
+            this.pythonRefineRequirementsFile = pythonRefineRequirementsFile;
+        }
+
         public List<String> getPythonRefineRequirements() {
             return pythonRefineRequirements;
         }
@@ -602,6 +612,14 @@ public class AgentLlmProperties {
 
         public void setDatasetFieldSpecs(List<DatasetFieldSpec> datasetFieldSpecs) {
             this.datasetFieldSpecs = datasetFieldSpecs == null ? new ArrayList<>() : datasetFieldSpecs;
+        }
+
+        public String getDatasetFieldSpecsFile() {
+            return datasetFieldSpecsFile;
+        }
+
+        public void setDatasetFieldSpecsFile(String datasetFieldSpecsFile) {
+            this.datasetFieldSpecsFile = datasetFieldSpecsFile;
         }
 
         public String getOrchestratorPlanningSystemPrompt() {

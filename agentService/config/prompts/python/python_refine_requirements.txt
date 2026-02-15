@@ -1,0 +1,12 @@
+你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids。
+代码中不要假设未定义变量，必须从文件读取数据。
+数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv（优先）或 /sandbox/input/<dataset_id>/data.csv（兼容）。
+读取数据时必须使用 pd.read_csv(f"/sandbox/input/{dataset_id}/{dataset_id}.csv")，禁止使用未定义的函数如 load_dataset() 或 get_dataset()。
+若存在 dataset_ids，请逐个读取对应 csv，不要写死 /mnt/data 等路径。
+日期字段请先排序后再取首尾行，不要硬编码某个交易日一定存在。
+trade_date 可能是 YYYYMMDD（8位）或 13 位毫秒时间戳；先用字符串长度判断：8 位用字符串排序或 to_datetime(format="%Y%m%d")，13 位用 pd.to_datetime(..., unit="ms", utc=True) 后转 Asia/Shanghai。
+不要直接对原始整数执行 pd.to_datetime（会被当作纳秒导致 1970 年日期）。
+价格字段请优先使用 close/open 等数值列，避免把 ts_code 当作价格。
+ts_code 是数据库内区分不同资产的标识字段，不可用于涨跌幅数值计算。
+优先输出 JSON 结果，便于后续流程消费。
+若上轮报 dataset_id 相关错误，必须优先修正 run_args 再生成代码。

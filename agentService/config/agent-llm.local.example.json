@@ -121,101 +121,21 @@
     }
   },
   "prompts": {
-    "agentRunSystemPrompt": "你是专业金融分析代理。请使用可用工具获取市场数据并准确回答用户问题。\n重要约束：\n1. 你通常并不知道数据库中的精确 ts_code（例如 000300.SH），必须先调用 searchStock/searchFund/searchIndex 检索后再调用按代码查询的工具；从搜索结果 data.items 中选取最符合用户意图的项（比对 name 与用户目标），不要默认取第一条。\n2. 禁止猜测代码，禁止使用不存在的工具名。\n3. 当市场数据工具返回 dataset_id 后，必须调用 executePython 对数据进行计算与分析。\n4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。\n5. 所有工具输出均为 JSON：{\"ok\":boolean,\"tool\":\"...\",\"data\":{...},\"error\":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。",
-    "todoPlannerSystemPromptTemplate": "你是任务规划器。请将用户目标拆解为 Todo List，只输出 JSON。输出格式：{\"analysis\":\"...\",\"items\":[{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"},\"reasoning\":\"...\",\"executionMode\":\"AUTO\"}]}。约束：步骤数 <= {{maxTodos}}；仅允许工具 {{toolWhitelist}}；type 仅 TOOL_CALL/SUB_AGENT/THOUGHT；executionMode 仅 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT。",
-    "workflowFinalSystemPrompt": "你是金融分析助手，请基于 Todo 执行结果给出最终结论。结论应直接回答用户目标，并包含关键数据与口径说明。",
-    "workflowTodoRecoverySystemPrompt": "某 Todo 工具调用失败，请根据错误信息与已成功完成的 Todo 上下文，修正参数后重试。只输出 JSON，格式为 {\"params\":{...}} 表示用新参数重试，或 {\"abandon\":true,\"reason\":\"...\"} 表示放弃。参数引用格式：使用 ${todo_id.output} 或 ${todo_id.output.data.items.0.ts_code} 引用已完成 Todo 的输出；或直接从上下文中提取具体值（如 ts_code: \"000300.SH\"）。",
-    "parallelPlannerSystemPromptTemplate": "你是并行任务规划器。只输出 JSON。当前在生成候选计划 {{candidateIndex}}/{{candidateCount}}。必须输出格式：{\"strategy\":\"parallel\",\"tasks\":[...],\"finalHint\":\"...\"}。任务字段：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。请优先拆分为可并行任务，但不要牺牲正确性。候选之间要有可辨识差异（拆分粒度、并行扇出或依赖组织），避免重复方案。约束：任务数 <= {{maxTasks}}，sub_agent 步数 <= {{maxSubSteps}}，并行任务数 <= {{maxParallelTasks}}，sub_agent 任务数 <= {{maxSubAgents}}。仅允许工具：{{toolWhitelist}}。可并行任务应设置为空依赖；有依赖任务用 dependsOn。任务间引用协议必须统一为 ${task_id.output} 或 ${task_id.output.path.to.field}。禁止使用 {{...}}、{...}、task.output 这类非标准写法；禁止在 args 里输出无法解析的占位符。search 类工具输出字段示例：${task_search.output.data.items.0.ts_code}；日线工具 dataset_id 字段示例：${task_daily.output.data.dataset_id}。引用 search 类任务 items 时，必须根据用户目标选取 name 最匹配的项，不可默认使用 items.0。",
-    "parallelFinalSystemPrompt": "你是金融分析助手，请基于任务结果给出最终结论。\n要求结论可直接回答用户目标，优先保留关键数值、口径与结论，不要只复述过程。",
-    "parallelPatchPlannerSystemPromptTemplate": "你是运行中 DAG 的局部重规划器。只输出 JSON，格式严格为 {\"reason\":\"...\",\"replace_task_ids\":[\"...\"],\"tasks\":[...]}。tasks 的字段与主计划一致：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。约束：1) 仅修复 unresolved 子图及其下游；2) 不重建已成功节点；3) 依赖必须闭合且可执行；4) 不输出 markdown。任务间引用协议必须统一为 ${task_id.output} 或 ${task_id.output.path.to.field}。禁止使用 {{...}}、{...}、task.output 这类非标准写法；禁止在 args 里输出无法解析的占位符。",
-    "planJudgeSystemPromptTemplate": "你是严格的计划评审器。只输出 JSON：{\"coverage_score\":0..1,\"feasibility_score\":0..1,\"redundancy_penalty\":0..1,\"summary\":\"...\"}。规则：1) coverage_score 评估目标覆盖完整性；2) feasibility_score 评估依赖/工具可执行性；3) redundancy_penalty 惩罚冗余步骤与无效并行；4) summary 必须简短且可操作。禁止输出 markdown。",
-    "subAgentPlannerSystemPromptTemplate": "你是一个子任务代理。必须先输出线性计划 JSON，不超过 {{maxSteps}} 步。仅能使用下列工具名称：{{tools}}。严禁把 sub_agent、workflow、tool、agent 作为步骤工具名。工具参数必须严格匹配真实签名：searchIndex/searchStock/searchFund 使用 keyword；getIndexDaily/getStockDaily 使用 tsCode,startDateStr,endDateStr（日期格式必须为YYYYMMDD）；executePython 使用 code,dataset_id；可选传 coding_context（仅保留与编码最相关上下文）。从 search 类工具返回的 items 中选取最符合用户意图的项，不要默认取第一条。输出格式：{\"steps\":[{\"tool\":\"name\",\"args\":{...},\"note\":\"why\"}],\"expected\":\"...\"}。",
-    "subAgentSummarySystemPrompt": "请基于以下工具执行结果，输出简洁结论用于主流程合并。\n结论需优先包含关键数值、时间范围与约束条件，避免冗长叙述。",
-    "pythonRefineSystemPrompt": "你是代码执行代理。请基于目标、相关上下文和执行反馈，输出可直接运行的 Python 代码和运行参数。必须只输出 JSON，格式为 {\"code\":\"...\",\"run_args\":{\"dataset_id\":\"...\",\"dataset_ids\":\"...\",\"libraries\":\"...\",\"timeout_seconds\":30},\"reason\":\"...\"}。run_args 中最关键是 dataset_id，必须指向真实可访问的数据目录。",
-    "pythonRefineRequirements": [
-      "你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids。",
-      "代码中不要假设未定义变量，直接按可访问文件路径读取数据。",
-      "数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv。",
-      "读取数据时必须使用 pd.read_csv(f\"/sandbox/input/{dataset_id}/{dataset_id}.csv\")，禁止使用未定义的函数如 load_dataset() 或 get_dataset()。",
-      "若存在 dataset_ids，请逐个读取对应 csv，不要写死 /mnt/data 等路径。",
-      "日期字段请先排序后再取首尾行，不要硬编码某个交易日一定存在。",
-      "trade_date 常见为 YYYYMMDD 数字串；优先使用 astype(str) 后提取 8 位数字并按字符串排序。",
-      "非必要不要使用 pd.to_datetime；若上轮出现 to_datetime/Overflow/unconverted 错误，本轮必须改为字符串排序方案。",
-      "价格字段请优先使用 close/open 等数值列，避免把 ts_code 当作价格。",
-      "ts_code 是数据库内区分不同资产的标识字段，不可用于涨跌幅数值计算。",
-      "优先输出 JSON 结果，便于后续流程消费。",
-      "若上轮报 dataset_id 相关错误，必须优先修正 run_args 再生成代码。"
-    ],
-    "pythonRefineOutputInstruction": "请只返回 JSON，不要返回 markdown。",
-    "datasetFieldSpecs": [
-      {
-        "name": "ts_code",
-        "meaning": "资产代码（股票/指数唯一标识）",
-        "dataType": "string",
-        "dataFormat": "交易所后缀代码，如 000300.SH"
-      },
-      {
-        "name": "trade_date",
-        "meaning": "交易日期",
-        "dataType": "string",
-        "dataFormat": "YYYYMMDD（8位日期字符串）"
-      },
-      {
-        "name": "open",
-        "meaning": "当日开盘价",
-        "dataType": "float",
-        "dataFormat": "十进制数值"
-      },
-      {
-        "name": "high",
-        "meaning": "当日最高价",
-        "dataType": "float",
-        "dataFormat": "十进制数值"
-      },
-      {
-        "name": "low",
-        "meaning": "当日最低价",
-        "dataType": "float",
-        "dataFormat": "十进制数值"
-      },
-      {
-        "name": "close",
-        "meaning": "当日收盘价",
-        "dataType": "float",
-        "dataFormat": "十进制数值"
-      },
-      {
-        "name": "pre_close",
-        "meaning": "前一交易日收盘价",
-        "dataType": "float",
-        "dataFormat": "十进制数值"
-      },
-      {
-        "name": "change",
-        "meaning": "绝对涨跌额",
-        "dataType": "float",
-        "dataFormat": "当日收盘价-前收盘价"
-      },
-      {
-        "name": "pct_chg",
-        "meaning": "涨跌幅百分比",
-        "dataType": "float",
-        "dataFormat": "百分比数值（如 1.23 表示 1.23%）"
-      },
-      {
-        "name": "vol",
-        "meaning": "成交量",
-        "dataType": "float",
-        "dataFormat": "原始成交量数值（单位依数据源定义）"
-      },
-      {
-        "name": "amount",
-        "meaning": "成交额",
-        "dataType": "float",
-        "dataFormat": "原始成交额数值（单位依数据源定义）"
-      }
-    ],
-    "orchestratorPlanningSystemPrompt": "你是专业金融规划助手。请把用户高层目标拆解为可执行步骤，并输出严格 JSON。输出步骤需明确目标、所需工具与参数约束，不要输出 markdown 包裹。",
-    "orchestratorSummarySystemPrompt": "你是专业金融分析助手。请基于执行日志输出简洁、清晰、可直接给用户的总结结论。优先突出结果与关键数据点，不要仅复述过程。"
+    "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
+    "todoPlannerSystemPromptTemplate": "file:prompts/todo/todo_planner_system.txt",
+    "workflowFinalSystemPrompt": "file:prompts/workflow/workflow_final_system.txt",
+    "workflowTodoRecoverySystemPrompt": "file:prompts/workflow/workflow_todo_recovery_system.txt",
+    "parallelPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_planner_system.txt",
+    "parallelFinalSystemPrompt": "file:prompts/parallel/parallel_final_system.txt",
+    "parallelPatchPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_patch_planner_system.txt",
+    "planJudgeSystemPromptTemplate": "file:prompts/plan/plan_judge_system.txt",
+    "subAgentPlannerSystemPromptTemplate": "file:prompts/sub_agent/sub_agent_planner_system.txt",
+    "subAgentSummarySystemPrompt": "file:prompts/sub_agent/sub_agent_summary_system.txt",
+    "pythonRefineSystemPrompt": "file:prompts/python/python_refine_system.txt",
+    "pythonRefineRequirementsFile": "prompts/python/python_refine_requirements.txt",
+    "pythonRefineOutputInstruction": "file:prompts/python/python_refine_output_instruction.txt",
+    "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
+    "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
+    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt"
   }
 }
