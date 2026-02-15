@@ -71,10 +71,21 @@ public class AgentLlmLocalConfigLoader {
                     this.localConfig = sanitized;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
-                    log.info("Loaded local llm config from {} (endpoints={}, models={})",
+                    // 计算从 endpoints 中收集的模型数量
+                    int endpointModels = 0;
+                    if (sanitized.getEndpoints() != null) {
+                        for (AgentLlmProperties.Endpoint endpoint : sanitized.getEndpoints().values()) {
+                            if (endpoint != null && endpoint.getModels() != null) {
+                                endpointModels += endpoint.getModels().size();
+                            }
+                        }
+                    }
+                    log.info("Loaded local llm config from {} (endpoints={}, topLevelModels={}, endpointModels={}, modelMetadata={})",
                             path,
                             sanitized.getEndpoints().size(),
-                            sanitized.getModels().size());
+                            sanitized.getModels().size(),
+                            endpointModels,
+                            sanitized.getModelMetadata().size());
                 }
             } catch (Exception e) {
                 log.error("Failed to load local llm config from {}", path, e);
