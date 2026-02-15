@@ -183,18 +183,22 @@ public class AgentModelCatalogService {
     private List<String> chooseModels(AgentLlmProperties base,
                                       AgentLlmProperties local,
                                       Map<String, AgentLlmProperties.Endpoint> endpoints) {
-        List<String> source = local != null && local.getModels() != null && !local.getModels().isEmpty()
-                ? local.getModels()
-                : (base == null ? List.of() : base.getModels());
-        LinkedHashSet<String> deduplicated = new LinkedHashSet<>();
-        for (String model : source == null ? List.<String>of() : source) {
-            String normalized = normalize(model);
-            if (normalized != null) {
-                deduplicated.add(normalized);
+        // 1. 优先使用 local.models 列表（如果存在且非空）
+        if (local != null && local.getModels() != null && !local.getModels().isEmpty()) {
+            LinkedHashSet<String> deduplicated = new LinkedHashSet<>();
+            for (String model : local.getModels()) {
+                String normalized = normalize(model);
+                if (normalized != null) {
+                    deduplicated.add(normalized);
+                }
             }
+            return new ArrayList<>(deduplicated);
         }
-        if (deduplicated.isEmpty() && endpoints != null && !endpoints.isEmpty()) {
-            for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
+        
+        // 2. 从 local.endpoints 收集模型（优先）
+        LinkedHashSet<String> deduplicated = new LinkedHashSet<>();
+        if (local != null && local.getEndpoints() != null) {
+            for (AgentLlmProperties.Endpoint endpoint : local.getEndpoints().values()) {
                 if (endpoint == null || endpoint.getModels() == null) {
                     continue;
                 }
@@ -206,6 +210,32 @@ public class AgentModelCatalogService {
                 }
             }
         }
+        
+        // 3. 如果 local 没有，从 base.endpoints 收集
+        if (deduplicated.isEmpty() && base != null && base.getEndpoints() != null) {
+            for (AgentLlmProperties.Endpoint endpoint : base.getEndpoints().values()) {
+                if (endpoint == null || endpoint.getModels() == null) {
+                    continue;
+                }
+                for (String modelId : endpoint.getModels().keySet()) {
+                    String normalized = normalize(modelId);
+                    if (normalized != null) {
+                        deduplicated.add(normalized);
+                    }
+                }
+            }
+        }
+        
+        // 4. 最后尝试 base.models
+        if (deduplicated.isEmpty() && base != null && base.getModels() != null) {
+            for (String model : base.getModels()) {
+                String normalized = normalize(model);
+                if (normalized != null) {
+                    deduplicated.add(normalized);
+                }
+            }
+        }
+        
         return new ArrayList<>(deduplicated);
     }
 
