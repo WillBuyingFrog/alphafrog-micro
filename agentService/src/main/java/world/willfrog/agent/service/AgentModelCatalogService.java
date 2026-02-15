@@ -1,6 +1,7 @@
 package world.willfrog.agent.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.config.AgentLlmProperties;
 
@@ -12,6 +13,7 @@ import java.util.Map;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class AgentModelCatalogService {
 
     private static final double DEFAULT_BASE_RATE = 1.0D;
@@ -192,13 +194,14 @@ public class AgentModelCatalogService {
                     deduplicated.add(normalized);
                 }
             }
+            log.debug("Using local.models list: {}", deduplicated);
             return new ArrayList<>(deduplicated);
         }
         
-        // 2. 从 local.endpoints 收集模型（优先）
+        // 2. 从 merged endpoints 收集模型（已包含 local + base）
         LinkedHashSet<String> deduplicated = new LinkedHashSet<>();
-        if (local != null && local.getEndpoints() != null) {
-            for (AgentLlmProperties.Endpoint endpoint : local.getEndpoints().values()) {
+        if (endpoints != null) {
+            for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
                 if (endpoint == null || endpoint.getModels() == null) {
                     continue;
                 }
@@ -211,29 +214,20 @@ public class AgentModelCatalogService {
             }
         }
         
-        // 3. 如果 local 没有，从 base.endpoints 收集
-        if (deduplicated.isEmpty() && base != null && base.getEndpoints() != null) {
-            for (AgentLlmProperties.Endpoint endpoint : base.getEndpoints().values()) {
-                if (endpoint == null || endpoint.getModels() == null) {
-                    continue;
-                }
-                for (String modelId : endpoint.getModels().keySet()) {
-                    String normalized = normalize(modelId);
-                    if (normalized != null) {
-                        deduplicated.add(normalized);
-                    }
-                }
-            }
+        if (!deduplicated.isEmpty()) {
+            log.debug("Collected models from endpoints: {}", deduplicated);
+            return new ArrayList<>(deduplicated);
         }
         
-        // 4. 最后尝试 base.models
-        if (deduplicated.isEmpty() && base != null && base.getModels() != null) {
+        // 3. 最后尝试 base.models
+        if (base != null && base.getModels() != null) {
             for (String model : base.getModels()) {
                 String normalized = normalize(model);
                 if (normalized != null) {
                     deduplicated.add(normalized);
                 }
             }
+            log.debug("Using base.models list: {}", deduplicated);
         }
         
         return new ArrayList<>(deduplicated);
