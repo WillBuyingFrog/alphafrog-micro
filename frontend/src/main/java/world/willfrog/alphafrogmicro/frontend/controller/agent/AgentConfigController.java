@@ -49,7 +49,8 @@ public class AgentConfigController {
                         model.getEndpoint(),
                         model.getCompositeId(),
                         model.getBaseRate(),
-                        model.getFeaturesList()
+                        model.getFeaturesList(),
+                        model.getValidProvidersList()
                 ));
             }
             return ResponseWrapper.success(new AgentModelListResponse(models));

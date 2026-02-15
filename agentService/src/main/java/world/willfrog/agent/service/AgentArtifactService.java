@@ -64,6 +64,7 @@ public class AgentArtifactService {
 
     public List<AgentArtifactMessage> listArtifacts(AgentRun run, boolean isAdmin) {
         List<ResolvedArtifact> artifacts = resolveArtifacts(run, isAdmin);
+        String runId = run == null || run.getId() == null ? "" : run.getId();
         List<AgentArtifactMessage> result = new ArrayList<>();
         for (ResolvedArtifact artifact : artifacts) {
             result.add(AgentArtifactMessage.newBuilder()
@@ -71,7 +72,7 @@ public class AgentArtifactService {
                     .setType(artifact.getType())
                     .setName(artifact.getName())
                     .setContentType(artifact.getContentType())
-                    .setUrl("/api/agent/artifacts/" + artifact.getArtifactId() + "/download")
+                    .setUrl("/api/agent/runs/" + runId + "/artifacts/" + artifact.getArtifactId() + "/download")
                     .setMetaJson(artifact.getMetaJson())
                     .setCreatedAt(formatTime(artifact.getCreatedAt()))
                     .setExpiresAtMillis(artifact.getExpiresAtMillis())

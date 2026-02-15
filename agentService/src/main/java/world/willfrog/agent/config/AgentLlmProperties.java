@@ -77,6 +77,11 @@ public class AgentLlmProperties {
     public static class Endpoint {
         private String baseUrl;
         private String apiKey;
+        /**
+         * 新配置支持在 endpoint 下声明模型元信息：
+         * endpoint -> models -> modelId -> metadata。
+         */
+        private Map<String, ModelMetadata> models = new HashMap<>();
 
         public String getBaseUrl() {
             return baseUrl;
@@ -93,12 +98,21 @@ public class AgentLlmProperties {
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey;
         }
+
+        public Map<String, ModelMetadata> getModels() {
+            return models;
+        }
+
+        public void setModels(Map<String, ModelMetadata> models) {
+            this.models = models == null ? new HashMap<>() : models;
+        }
     }
 
     public static class ModelMetadata {
         private String displayName;
         private Double baseRate;
         private List<String> features = new ArrayList<>();
+        private List<String> validProviders = new ArrayList<>();
 
         public String getDisplayName() {
             return displayName;
@@ -122,6 +136,14 @@ public class AgentLlmProperties {
 
         public void setFeatures(List<String> features) {
             this.features = features == null ? new ArrayList<>() : features;
+        }
+
+        public List<String> getValidProviders() {
+            return validProviders;
+        }
+
+        public void setValidProviders(List<String> validProviders) {
+            this.validProviders = validProviders == null ? new ArrayList<>() : validProviders;
         }
     }
 

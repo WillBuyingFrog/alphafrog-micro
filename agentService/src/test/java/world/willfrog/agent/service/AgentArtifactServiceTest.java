@@ -79,5 +79,6 @@ class AgentArtifactServiceTest {
         var artifacts = service.listArtifacts(run, false);
 
         assertTrue(artifacts.stream().anyMatch(a -> "python_script".equals(a.getType())));
+        assertTrue(artifacts.stream().allMatch(a -> a.getUrl().startsWith("/api/agent/runs/run-1/artifacts/")));
     }
 }

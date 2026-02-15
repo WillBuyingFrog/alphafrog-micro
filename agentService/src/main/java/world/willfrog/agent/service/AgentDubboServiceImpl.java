@@ -48,6 +48,7 @@ import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
+import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
@@ -55,6 +56,7 @@ import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
@@ -142,6 +144,31 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return toRunMessage(run);
     }
 
+    @Override
+    public AgentRunMessage updateRun(UpdateAgentRunRequest request) {
+        String userId = request.getUserId();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        String runId = request.getId();
+        if (runId == null || runId.isBlank()) {
+            throw new IllegalArgumentException("id is required");
+        }
+        String title = normalizeTitle(request.getTitle());
+        if (title == null) {
+            throw new IllegalArgumentException("title is required");
+        }
+        AgentRun run = requireRun(runId, userId);
+        Map<String, Object> extMap = readExtMap(run.getExt());
+        extMap.put("title", title);
+        String updatedExt = writeJson(extMap);
+        int updated = runMapper.updateExt(runId, userId, updatedExt);
+        if (updated <= 0) {
+            throw new IllegalStateException("run not found");
+        }
+        return toRunMessage(requireRun(runId, userId));
+    }
+
     /**
      * 按用户分页查询历史 run 列表。
      *
@@ -170,11 +197,11 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         builder.setHasMore(hasMore);
         for (AgentRun run : runs) {
             AgentRunStatus effectiveStatus = eventService.shouldMarkExpired(run) ? AgentRunStatus.EXPIRED : run.getStatus();
-            String userGoal = eventService.extractUserGoal(run.getExt());
+            String displayTitle = eventService.extractRunDisplayTitle(run.getExt());
             boolean hasArtifacts = hasVisibleArtifacts(run, runIdsWithArtifacts);
             builder.addItems(AgentRunListItemMessage.newBuilder()
                     .setId(nvl(run.getId()))
-                    .setMessage(nvl(userGoal))
+                    .setMessage(nvl(displayTitle))
                     .setStatus(effectiveStatus == null ? "" : effectiveStatus.name())
                     .setCreatedAt(run.getStartedAt() == null ? "" : run.getStartedAt().toString())
                     .setCompletedAt(run.getCompletedAt() == null ? "" : run.getCompletedAt().toString())
@@ -509,6 +536,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                     .setCompositeId(nvl(item.compositeId()))
                     .setBaseRate(item.baseRate())
                     .addAllFeatures(item.features() == null ? List.of() : item.features())
+                    .addAllValidProviders(item.validProviders() == null ? List.of() : item.validProviders())
                     .build());
         }
         return builder.build();
@@ -625,6 +653,44 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         String payload = "reason=SNAPSHOT_VERSION_INCOMPATIBLE; suggested_action=CREATE_NEW_RUN_WITH_ORIGINAL_MESSAGE; original_message="
                 + nvl(originalMessage);
         throw new IllegalStateException(payload);
+    }
+
+    private Map<String, Object> readExtMap(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return new HashMap<>();
+        }
+        try {
+            Map<?, ?> ext = objectMapper.readValue(extJson, Map.class);
+            Map<String, Object> result = new HashMap<>();
+            for (Map.Entry<?, ?> entry : ext.entrySet()) {
+                result.put(String.valueOf(entry.getKey()), entry.getValue());
+            }
+            return result;
+        } catch (Exception e) {
+            return new HashMap<>();
+        }
+    }
+
+    private String writeJson(Map<String, Object> value) {
+        try {
+            return objectMapper.writeValueAsString(value == null ? Map.of() : value);
+        } catch (Exception e) {
+            return "{}";
+        }
+    }
+
+    private String normalizeTitle(String title) {
+        if (title == null) {
+            return null;
+        }
+        String normalized = title.trim();
+        if (normalized.isBlank()) {
+            return null;
+        }
+        if (normalized.length() > 120) {
+            throw new IllegalArgumentException("title too long");
+        }
+        return normalized;
     }
 
     private String readExtField(String extJson, String field) {

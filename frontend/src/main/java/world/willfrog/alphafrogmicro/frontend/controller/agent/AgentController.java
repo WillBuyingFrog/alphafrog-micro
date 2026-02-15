@@ -5,6 +5,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
@@ -14,6 +16,8 @@ import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
+import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
@@ -29,6 +33,7 @@ import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
+import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 import world.willfrog.alphafrogmicro.common.dto.ResponseCode;
 import world.willfrog.alphafrogmicro.common.dto.ResponseWrapper;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
@@ -45,6 +50,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListItemResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunUpdateRequest;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import java.util.ArrayList;
@@ -205,6 +211,37 @@ public class AgentController {
             return handleRpcError(e, "查询 agent run");
         } catch (Exception e) {
             return handleError(e, "查询 agent run");
+        }
+    }
+
+    @PutMapping("/{runId}")
+    public ResponseWrapper<AgentRunResponse> update(Authentication authentication,
+                                                    @PathVariable("runId") String runId,
+                                                    @RequestBody(required = false) AgentRunUpdateRequest request) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        if (request == null || request.title() == null || request.title().isBlank()) {
+            return ResponseWrapper.paramError("title 不能为空");
+        }
+        String title = request.title().trim();
+        if (title.length() > 120) {
+            return ResponseWrapper.paramError("title 长度不能超过 120");
+        }
+        try {
+            AgentRunMessage run = agentDubboService.updateRun(
+                    UpdateAgentRunRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setTitle(title)
+                            .build()
+            );
+            return ResponseWrapper.success(toRunResponse(run));
+        } catch (RpcException e) {
+            return handleRpcError(e, "更新 agent run");
+        } catch (Exception e) {
+            return handleError(e, "更新 agent run");
         }
     }
 
@@ -420,6 +457,62 @@ public class AgentController {
             return handleRpcError(e, "查询 artifacts");
         } catch (Exception e) {
             return handleError(e, "查询 artifacts");
+        }
+    }
+
+    @GetMapping("/{runId}/artifacts/{artifactId}/download")
+    public ResponseEntity<byte[]> downloadArtifact(Authentication authentication,
+                                                   @PathVariable("runId") String runId,
+                                                   @PathVariable("artifactId") String artifactId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (runId == null || runId.isBlank()) {
+            return ResponseEntity.badRequest().build();
+        }
+        try {
+            DownloadAgentArtifactResponse resp = agentDubboService.downloadArtifact(
+                    DownloadAgentArtifactRequest.newBuilder()
+                            .setUserId(userId)
+                            .setArtifactId(artifactId)
+                            .setIsAdmin(isAdmin(authentication))
+                            .build()
+            );
+            HttpHeaders headers = new HttpHeaders();
+            MediaType mediaType = MediaType.APPLICATION_OCTET_STREAM;
+            try {
+                if (resp.getContentType() != null && !resp.getContentType().isBlank()) {
+                    mediaType = MediaType.parseMediaType(resp.getContentType());
+                }
+            } catch (Exception ignore) {
+                mediaType = MediaType.APPLICATION_OCTET_STREAM;
+            }
+            headers.setContentType(mediaType);
+            headers.setContentLength(resp.getContent().size());
+            String filename = resp.getFilename() == null || resp.getFilename().isBlank() ? "artifact.bin" : resp.getFilename();
+            headers.set(HttpHeaders.CONTENT_DISPOSITION, "attachment; filename=\"" + filename + "\"");
+            return ResponseEntity.ok().headers(headers).body(resp.getContent().toByteArray());
+        } catch (RpcException e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+            if (msg.contains("artifact not found") || msg.contains("run not found")) {
+                return ResponseEntity.status(404).build();
+            }
+            if (msg.contains("artifact too large")) {
+                return ResponseEntity.status(422).build();
+            }
+            log.error("下载 artifact 失败: runId={}, artifactId={}, err={}", runId, artifactId, e.getMessage());
+            return ResponseEntity.status(502).build();
+        } catch (Exception e) {
+            String msg = e.getMessage() == null ? "" : e.getMessage().toLowerCase();
+            if (msg.contains("artifact not found") || msg.contains("run not found")) {
+                return ResponseEntity.status(404).build();
+            }
+            if (msg.contains("artifact too large")) {
+                return ResponseEntity.status(422).build();
+            }
+            log.error("下载 artifact 失败: runId={}, artifactId={}", runId, artifactId, e);
+            return ResponseEntity.status(500).build();
         }
     }
 

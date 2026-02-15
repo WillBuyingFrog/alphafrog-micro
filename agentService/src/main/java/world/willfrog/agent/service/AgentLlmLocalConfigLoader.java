@@ -101,6 +101,27 @@ public class AgentLlmLocalConfigLoader {
         AgentLlmProperties cfg = input == null ? new AgentLlmProperties() : input;
         if (cfg.getEndpoints() == null) {
             cfg.setEndpoints(null);
+        } else {
+            for (AgentLlmProperties.Endpoint endpoint : cfg.getEndpoints().values()) {
+                if (endpoint == null) {
+                    continue;
+                }
+                if (endpoint.getModels() == null) {
+                    endpoint.setModels(null);
+                    continue;
+                }
+                for (AgentLlmProperties.ModelMetadata metadata : endpoint.getModels().values()) {
+                    if (metadata == null) {
+                        continue;
+                    }
+                    if (metadata.getFeatures() == null) {
+                        metadata.setFeatures(null);
+                    }
+                    if (metadata.getValidProviders() == null) {
+                        metadata.setValidProviders(null);
+                    }
+                }
+            }
         }
         if (cfg.getModels() == null) {
             cfg.setModels(null);
@@ -111,6 +132,9 @@ public class AgentLlmLocalConfigLoader {
             for (AgentLlmProperties.ModelMetadata metadata : cfg.getModelMetadata().values()) {
                 if (metadata != null && metadata.getFeatures() == null) {
                     metadata.setFeatures(null);
+                }
+                if (metadata != null && metadata.getValidProviders() == null) {
+                    metadata.setValidProviders(null);
                 }
             }
         }

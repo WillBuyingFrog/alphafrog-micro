@@ -201,6 +201,28 @@ public class AgentEventService {
     }
 
     /**
+     * 会话标题优先级：
+     * 1) ext.title（重命名后显示名）
+     * 2) ext.user_goal（历史默认标题）
+     */
+    public String extractRunDisplayTitle(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return "";
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object title = map.get("title");
+            if (title != null && !String.valueOf(title).isBlank()) {
+                return String.valueOf(title).trim();
+            }
+            Object userGoal = map.get("user_goal");
+            return userGoal == null ? "" : String.valueOf(userGoal);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
      * 从 ext JSON 中提取模型名。
      *
      * @param extJson ext 字段 JSON

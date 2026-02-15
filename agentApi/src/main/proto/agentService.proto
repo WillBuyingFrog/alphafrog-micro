@@ -42,6 +42,12 @@ message GetAgentRunRequest {
   string id = 2;
 }
 
+message UpdateAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+  string title = 3;
+}
+
 message ListAgentRunsRequest {
   string user_id = 1;
   int32 limit = 2;
@@ -203,6 +209,7 @@ message AgentModelMessage {
   string composite_id = 4;
   double base_rate = 5;
   repeated string features = 6;
+  repeated string valid_providers = 7;
 }
 
 message ListAgentModelsRequest {
@@ -282,6 +289,7 @@ message ExportAgentRunResponse {
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
+  rpc UpdateRun(UpdateAgentRunRequest) returns (AgentRunMessage);
   rpc ListRuns(ListAgentRunsRequest) returns (ListAgentRunsResponse);
   rpc ListEvents(ListAgentRunEventsRequest) returns (ListAgentRunEventsResponse);
   rpc DeleteRun(DeleteAgentRunRequest) returns (AgentEmpty);

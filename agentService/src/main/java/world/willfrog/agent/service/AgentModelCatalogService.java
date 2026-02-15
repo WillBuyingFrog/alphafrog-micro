@@ -22,8 +22,9 @@ public class AgentModelCatalogService {
     public List<ModelCatalogItem> listModels() {
         AgentLlmProperties local = localConfigLoader.current().orElse(null);
         Map<String, AgentLlmProperties.Endpoint> endpoints = mergeEndpoints(properties, local);
-        List<String> allowedModels = chooseModels(properties, local);
-        Map<String, AgentLlmProperties.ModelMetadata> metadataMap = mergeModelMetadata(properties, local);
+        List<String> allowedModels = chooseModels(properties, local, endpoints);
+        Map<String, AgentLlmProperties.ModelMetadata> metadataMap = mergeModelMetadata(properties, local, endpoints);
+        Map<String, List<String>> endpointModels = listEndpointModels(endpoints);
         List<AgentLlmProperties.JudgeRoute> routes = chooseRoutes(properties, local);
 
         LinkedHashMap<String, ModelCatalogItem> items = new LinkedHashMap<>();
@@ -44,15 +45,33 @@ public class AgentModelCatalogService {
                     if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
                         continue;
                     }
-                    addItem(items, metadataMap, modelId, endpoint);
+                    addItem(items, metadataMap, endpoints, modelId, endpoint);
                 }
             }
         }
 
         if (items.isEmpty()) {
-            for (String endpoint : endpoints.keySet()) {
-                for (String modelId : allowedModels) {
-                    addItem(items, metadataMap, modelId, endpoint);
+            if (!endpointModels.isEmpty()) {
+                for (String endpoint : endpoints.keySet()) {
+                    List<String> modelsOnEndpoint = endpointModels.getOrDefault(endpoint, List.of());
+                    if (modelsOnEndpoint.isEmpty()) {
+                        for (String modelId : allowedModels) {
+                            addItem(items, metadataMap, endpoints, modelId, endpoint);
+                        }
+                        continue;
+                    }
+                    for (String modelId : modelsOnEndpoint) {
+                        if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
+                            continue;
+                        }
+                        addItem(items, metadataMap, endpoints, modelId, endpoint);
+                    }
+                }
+            } else {
+                for (String endpoint : endpoints.keySet()) {
+                    for (String modelId : allowedModels) {
+                        addItem(items, metadataMap, endpoints, modelId, endpoint);
+                    }
                 }
             }
         }
@@ -66,7 +85,8 @@ public class AgentModelCatalogService {
             return DEFAULT_BASE_RATE;
         }
         AgentLlmProperties local = localConfigLoader.current().orElse(null);
-        Map<String, AgentLlmProperties.ModelMetadata> metadata = mergeModelMetadata(properties, local);
+        Map<String, AgentLlmProperties.Endpoint> endpoints = mergeEndpoints(properties, local);
+        Map<String, AgentLlmProperties.ModelMetadata> metadata = mergeModelMetadata(properties, local, endpoints);
         AgentLlmProperties.ModelMetadata meta = metadata.get(normalized);
         if (meta == null || meta.getBaseRate() == null || meta.getBaseRate() <= 0D) {
             return DEFAULT_BASE_RATE;
@@ -76,10 +96,11 @@ public class AgentModelCatalogService {
 
     private void addItem(Map<String, ModelCatalogItem> items,
                          Map<String, AgentLlmProperties.ModelMetadata> metadataMap,
+                         Map<String, AgentLlmProperties.Endpoint> endpoints,
                          String modelId,
                          String endpoint) {
         String compositeId = modelId + "@" + endpoint;
-        AgentLlmProperties.ModelMetadata metadata = metadataMap.get(modelId);
+        AgentLlmProperties.ModelMetadata metadata = resolveMetadata(metadataMap, endpoints, endpoint, modelId);
         String displayName = metadata == null || isBlank(metadata.getDisplayName())
                 ? modelId
                 : metadata.getDisplayName().trim();
@@ -89,14 +110,32 @@ public class AgentModelCatalogService {
         List<String> features = metadata == null || metadata.getFeatures() == null
                 ? List.of()
                 : metadata.getFeatures().stream().map(this::normalize).filter(v -> v != null).toList();
+        List<String> validProviders = metadata == null || metadata.getValidProviders() == null
+                ? List.of()
+                : metadata.getValidProviders().stream().map(this::normalize).filter(v -> v != null).toList();
         items.put(compositeId, new ModelCatalogItem(
                 modelId,
                 displayName,
                 endpoint,
                 compositeId,
                 baseRate,
-                features
+                features,
+                validProviders
         ));
+    }
+
+    private AgentLlmProperties.ModelMetadata resolveMetadata(Map<String, AgentLlmProperties.ModelMetadata> metadataMap,
+                                                             Map<String, AgentLlmProperties.Endpoint> endpoints,
+                                                             String endpoint,
+                                                             String modelId) {
+        AgentLlmProperties.Endpoint endpointConfig = endpoints.get(endpoint);
+        if (endpointConfig != null && endpointConfig.getModels() != null) {
+            AgentLlmProperties.ModelMetadata endpointMeta = endpointConfig.getModels().get(modelId);
+            if (endpointMeta != null) {
+                return endpointMeta;
+            }
+        }
+        return metadataMap.get(modelId);
     }
 
     private Map<String, AgentLlmProperties.Endpoint> mergeEndpoints(AgentLlmProperties base, AgentLlmProperties local) {
@@ -124,13 +163,26 @@ public class AgentModelCatalogService {
                 if (source != null && !isBlank(source.getApiKey())) {
                     target.setApiKey(source.getApiKey().trim());
                 }
+                if (source != null && source.getModels() != null && !source.getModels().isEmpty()) {
+                    for (Map.Entry<String, AgentLlmProperties.ModelMetadata> modelEntry : source.getModels().entrySet()) {
+                        String modelKey = normalize(modelEntry.getKey());
+                        if (modelKey == null) {
+                            continue;
+                        }
+                        AgentLlmProperties.ModelMetadata mergedModel = target.getModels()
+                                .computeIfAbsent(modelKey, ignored -> new AgentLlmProperties.ModelMetadata());
+                        mergeModelMetadataInto(mergedModel, modelEntry.getValue());
+                    }
+                }
             }
         }
         merged.entrySet().removeIf(entry -> entry.getValue() == null || isBlank(entry.getValue().getBaseUrl()));
         return merged;
     }
 
-    private List<String> chooseModels(AgentLlmProperties base, AgentLlmProperties local) {
+    private List<String> chooseModels(AgentLlmProperties base,
+                                      AgentLlmProperties local,
+                                      Map<String, AgentLlmProperties.Endpoint> endpoints) {
         List<String> source = local != null && local.getModels() != null && !local.getModels().isEmpty()
                 ? local.getModels()
                 : (base == null ? List.of() : base.getModels());
@@ -139,6 +191,19 @@ public class AgentModelCatalogService {
             String normalized = normalize(model);
             if (normalized != null) {
                 deduplicated.add(normalized);
+            }
+        }
+        if (deduplicated.isEmpty() && endpoints != null && !endpoints.isEmpty()) {
+            for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
+                if (endpoint == null || endpoint.getModels() == null) {
+                    continue;
+                }
+                for (String modelId : endpoint.getModels().keySet()) {
+                    String normalized = normalize(modelId);
+                    if (normalized != null) {
+                        deduplicated.add(normalized);
+                    }
+                }
             }
         }
         return new ArrayList<>(deduplicated);
@@ -159,7 +224,9 @@ public class AgentModelCatalogService {
         return baseRoutes == null ? List.of() : baseRoutes;
     }
 
-    private Map<String, AgentLlmProperties.ModelMetadata> mergeModelMetadata(AgentLlmProperties base, AgentLlmProperties local) {
+    private Map<String, AgentLlmProperties.ModelMetadata> mergeModelMetadata(AgentLlmProperties base,
+                                                                              AgentLlmProperties local,
+                                                                              Map<String, AgentLlmProperties.Endpoint> endpoints) {
         Map<String, AgentLlmProperties.ModelMetadata> merged = new LinkedHashMap<>();
         if (base != null && base.getModelMetadata() != null) {
             for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : base.getModelMetadata().entrySet()) {
@@ -178,14 +245,21 @@ public class AgentModelCatalogService {
                 }
                 AgentLlmProperties.ModelMetadata source = entry.getValue();
                 AgentLlmProperties.ModelMetadata target = merged.computeIfAbsent(key, ignored -> new AgentLlmProperties.ModelMetadata());
-                if (source != null && !isBlank(source.getDisplayName())) {
-                    target.setDisplayName(source.getDisplayName().trim());
+                mergeModelMetadataInto(target, source);
+            }
+        }
+        if (endpoints != null && !endpoints.isEmpty()) {
+            for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
+                if (endpoint == null || endpoint.getModels() == null) {
+                    continue;
                 }
-                if (source != null && source.getBaseRate() != null && source.getBaseRate() > 0D) {
-                    target.setBaseRate(source.getBaseRate());
-                }
-                if (source != null && source.getFeatures() != null && !source.getFeatures().isEmpty()) {
-                    target.setFeatures(source.getFeatures());
+                for (Map.Entry<String, AgentLlmProperties.ModelMetadata> modelEntry : endpoint.getModels().entrySet()) {
+                    String modelId = normalize(modelEntry.getKey());
+                    if (modelId == null) {
+                        continue;
+                    }
+                    AgentLlmProperties.ModelMetadata target = merged.computeIfAbsent(modelId, ignored -> new AgentLlmProperties.ModelMetadata());
+                    mergeModelMetadataInto(target, modelEntry.getValue());
                 }
             }
         }
@@ -197,6 +271,17 @@ public class AgentModelCatalogService {
         if (source != null) {
             target.setBaseUrl(source.getBaseUrl());
             target.setApiKey(source.getApiKey());
+            if (source.getModels() != null && !source.getModels().isEmpty()) {
+                Map<String, AgentLlmProperties.ModelMetadata> copiedModels = new LinkedHashMap<>();
+                for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : source.getModels().entrySet()) {
+                    String modelId = normalize(entry.getKey());
+                    if (modelId == null) {
+                        continue;
+                    }
+                    copiedModels.put(modelId, copyModelMetadata(entry.getValue()));
+                }
+                target.setModels(copiedModels);
+            }
         }
         return target;
     }
@@ -207,8 +292,56 @@ public class AgentModelCatalogService {
             target.setDisplayName(source.getDisplayName());
             target.setBaseRate(source.getBaseRate());
             target.setFeatures(source.getFeatures());
+            target.setValidProviders(source.getValidProviders());
         }
         return target;
+    }
+
+    private void mergeModelMetadataInto(AgentLlmProperties.ModelMetadata target,
+                                        AgentLlmProperties.ModelMetadata source) {
+        if (target == null || source == null) {
+            return;
+        }
+        if (!isBlank(source.getDisplayName())) {
+            target.setDisplayName(source.getDisplayName().trim());
+        }
+        if (source.getBaseRate() != null && source.getBaseRate() > 0D) {
+            target.setBaseRate(source.getBaseRate());
+        }
+        if (source.getFeatures() != null && !source.getFeatures().isEmpty()) {
+            target.setFeatures(source.getFeatures());
+        }
+        if (source.getValidProviders() != null && !source.getValidProviders().isEmpty()) {
+            target.setValidProviders(source.getValidProviders());
+        }
+    }
+
+    private Map<String, List<String>> listEndpointModels(Map<String, AgentLlmProperties.Endpoint> endpoints) {
+        Map<String, List<String>> result = new LinkedHashMap<>();
+        if (endpoints == null || endpoints.isEmpty()) {
+            return result;
+        }
+        for (Map.Entry<String, AgentLlmProperties.Endpoint> entry : endpoints.entrySet()) {
+            String endpoint = normalize(entry.getKey());
+            if (endpoint == null) {
+                continue;
+            }
+            AgentLlmProperties.Endpoint config = entry.getValue();
+            if (config == null || config.getModels() == null || config.getModels().isEmpty()) {
+                continue;
+            }
+            LinkedHashSet<String> modelIds = new LinkedHashSet<>();
+            for (String modelId : config.getModels().keySet()) {
+                String normalized = normalize(modelId);
+                if (normalized != null) {
+                    modelIds.add(normalized);
+                }
+            }
+            if (!modelIds.isEmpty()) {
+                result.put(endpoint, new ArrayList<>(modelIds));
+            }
+        }
+        return result;
     }
 
     private String normalize(String value) {
@@ -229,7 +362,8 @@ public class AgentModelCatalogService {
             String endpoint,
             String compositeId,
             double baseRate,
-            List<String> features
+            List<String> features,
+            List<String> validProviders
     ) {
     }
 }

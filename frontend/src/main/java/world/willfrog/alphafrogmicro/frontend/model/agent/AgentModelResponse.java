@@ -8,6 +8,7 @@ public record AgentModelResponse(
         String endpoint,
         String compositeId,
         Double baseRate,
-        List<String> features
+        List<String> features,
+        List<String> validProviders
 ) {
 }

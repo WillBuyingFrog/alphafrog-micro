@@ -5,6 +5,7 @@ import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -26,7 +27,7 @@ public class AgentLlmResolver {
     public ResolvedLlm resolve(String endpointName, String modelName) {
         AgentLlmProperties local = localConfigLoader.current().orElse(null);
         Map<String, AgentLlmProperties.Endpoint> endpoints = mergeEndpoints(properties, local);
-        List<String> models = chooseModels(properties, local);
+        List<String> models = chooseModels(properties, local, endpoints);
 
         String endpointKey = normalize(endpointName);
         if (endpointKey == null) {
@@ -85,6 +86,17 @@ public class AgentLlmResolver {
                 if (localEp != null && !isBlank(localEp.getApiKey())) {
                     target.setApiKey(localEp.getApiKey());
                 }
+                if (localEp != null && localEp.getModels() != null && !localEp.getModels().isEmpty()) {
+                    Map<String, AgentLlmProperties.ModelMetadata> mergedModels = target.getModels();
+                    for (Map.Entry<String, AgentLlmProperties.ModelMetadata> modelEntry : localEp.getModels().entrySet()) {
+                        String modelId = normalize(modelEntry.getKey());
+                        if (modelId == null) {
+                            continue;
+                        }
+                        mergedModels.put(modelId, copyMetadata(modelEntry.getValue()));
+                    }
+                    target.setModels(mergedModels);
+                }
             }
         }
         return merged;
@@ -95,18 +107,48 @@ public class AgentLlmResolver {
         if (source != null) {
             target.setBaseUrl(source.getBaseUrl());
             target.setApiKey(source.getApiKey());
+            if (source.getModels() != null && !source.getModels().isEmpty()) {
+                Map<String, AgentLlmProperties.ModelMetadata> copied = new LinkedHashMap<>();
+                for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : source.getModels().entrySet()) {
+                    String modelId = normalize(entry.getKey());
+                    if (modelId == null) {
+                        continue;
+                    }
+                    copied.put(modelId, copyMetadata(entry.getValue()));
+                }
+                target.setModels(copied);
+            }
         }
         return target;
     }
 
-    private List<String> chooseModels(AgentLlmProperties base, AgentLlmProperties local) {
-        if (local != null && local.getModels() != null && !local.getModels().isEmpty()) {
-            return local.getModels();
+    private List<String> chooseModels(AgentLlmProperties base,
+                                      AgentLlmProperties local,
+                                      Map<String, AgentLlmProperties.Endpoint> endpoints) {
+        List<String> source = local != null && local.getModels() != null && !local.getModels().isEmpty()
+                ? local.getModels()
+                : (base == null ? List.of() : base.getModels());
+        LinkedHashSet<String> models = new LinkedHashSet<>();
+        for (String model : source == null ? List.<String>of() : source) {
+            String normalized = normalize(model);
+            if (normalized != null) {
+                models.add(normalized);
+            }
         }
-        if (base != null && base.getModels() != null) {
-            return base.getModels();
+        if (models.isEmpty() && endpoints != null && !endpoints.isEmpty()) {
+            for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
+                if (endpoint == null || endpoint.getModels() == null) {
+                    continue;
+                }
+                for (String modelId : endpoint.getModels().keySet()) {
+                    String normalized = normalize(modelId);
+                    if (normalized != null) {
+                        models.add(normalized);
+                    }
+                }
+            }
         }
-        return new ArrayList<>();
+        return new ArrayList<>(models);
     }
 
     private String firstNonBlank(String first, String second) {
@@ -127,6 +169,17 @@ public class AgentLlmResolver {
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
+    }
+
+    private AgentLlmProperties.ModelMetadata copyMetadata(AgentLlmProperties.ModelMetadata source) {
+        AgentLlmProperties.ModelMetadata target = new AgentLlmProperties.ModelMetadata();
+        if (source != null) {
+            target.setDisplayName(source.getDisplayName());
+            target.setBaseRate(source.getBaseRate());
+            target.setFeatures(source.getFeatures());
+            target.setValidProviders(source.getValidProviders());
+        }
+        return target;
     }
 
     public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey) {
