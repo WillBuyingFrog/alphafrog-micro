@@ -53,24 +53,31 @@ public class AgentModelCatalogService {
             }
         }
 
+        log.info("listModels debug: items.size before building={}, routes.isEmpty={}, endpointModels.isEmpty={}", 
+                items.size(), routes.isEmpty(), endpointModels.isEmpty());
+        
         if (items.isEmpty()) {
             if (!endpointModels.isEmpty()) {
+                log.info("listModels debug: Building from endpointModels, keys={}", endpointModels.keySet());
                 for (String endpoint : endpoints.keySet()) {
                     List<String> modelsOnEndpoint = endpointModels.getOrDefault(endpoint, List.of());
+                    log.info("listModels debug: Processing endpoint={}, modelsOnEndpoint={}", endpoint, modelsOnEndpoint);
                     if (modelsOnEndpoint.isEmpty()) {
-                        for (String modelId : allowedModels) {
-                            addItem(items, metadataMap, endpoints, modelId, endpoint);
-                        }
+                        log.info("listModels debug: Skipping endpoint {} (no models defined)", endpoint);
                         continue;
                     }
                     for (String modelId : modelsOnEndpoint) {
                         if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
+                            log.info("listModels debug: Skipping model {} (not in allowedModels)", modelId);
                             continue;
                         }
+                        String compositeId = modelId + "@" + endpoint;
+                        log.info("listModels debug: Adding model={}, endpoint={}, compositeId={}", modelId, endpoint, compositeId);
                         addItem(items, metadataMap, endpoints, modelId, endpoint);
                     }
                 }
             } else {
+                log.info("listModels debug: Building from allowedModels for all endpoints");
                 for (String endpoint : endpoints.keySet()) {
                     for (String modelId : allowedModels) {
                         addItem(items, metadataMap, endpoints, modelId, endpoint);
@@ -79,6 +86,7 @@ public class AgentModelCatalogService {
             }
         }
 
+        log.info("listModels debug: Returning {} items, keys={}", items.size(), items.keySet());
         return new ArrayList<>(items.values());
     }
 
