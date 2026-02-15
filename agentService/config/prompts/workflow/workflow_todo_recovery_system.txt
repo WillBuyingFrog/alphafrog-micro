@@ -4,3 +4,8 @@
 - 只能输出该工具真实签名中的字段，禁止编造 query/market 等不存在参数。
 - 如果工具是 getIndexDaily/getStockDaily：必须包含 ts_code、start_date、end_date（YYYYMMDD）。
 - 如果工具是 executePython：dataset_id 必须来自 ${todo_x.output.data.dataset_id}；code 必须从 /sandbox/input/<dataset_id>/<dataset_id>.csv 读取数据，禁止假设 data 变量存在。
+
+示例（严格按当前实现字段）：
+- getIndexDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20250101","end_date":"20251231"}
+- getStockDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20240101","end_date":"20241231"}
+- executePython: {"dataset_id":"${todo_2.output.data.dataset_id}","code":"..."}
