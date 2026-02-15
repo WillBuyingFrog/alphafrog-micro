@@ -64,6 +64,7 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     }
 
     private String resolveToken(HttpServletRequest request) {
+        // 1. 优先从 Header 解析
         String bearerToken = request.getHeader(jwtConfig.getHeader());
         log.info("resolveToken: headerValue={}", bearerToken);
         if(StringUtils.hasText(bearerToken)) {
@@ -75,6 +76,14 @@ public class JwtAuthFilter extends OncePerRequestFilter {
                 return bearerToken.substring(prefix.length()).trim();
             }
         }
+        
+        // 2. 从 URL 参数解析（用于 artifact 下载等场景）
+        String tokenParam = request.getParameter("token");
+        if(StringUtils.hasText(tokenParam)) {
+            log.info("resolveToken: resolved from URL parameter");
+            return tokenParam.trim();
+        }
+        
         log.info("resolveToken: no valid token found");
         return null;
     }
