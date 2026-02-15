@@ -1,5 +1,6 @@
 package world.willfrog.agent.graph;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.SystemMessage;
@@ -20,7 +21,6 @@ import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -179,14 +179,31 @@ public class PythonCodeRefinementNode {
         }
 
         if (!traces.isEmpty()) {
-            AttemptTrace last = traces.get(traces.size() - 1);
-            userPrompt.append("上一轮运行参数:\n").append(writeJson(last.getRunArgs())).append("\n");
-            userPrompt.append("上一轮失败代码:\n```python\n")
-                    .append(safe(last.getCode()))
-                    .append("\n```\n");
-            userPrompt.append("上一轮执行反馈:\n")
-                    .append(safe(last.getOutput()))
-                    .append("\n");
+            userPrompt.append("失败历史（按倒序，最近一次在前，包含全部失败尝试）:\n");
+            for (int i = traces.size() - 1; i >= 0; i--) {
+                AttemptTrace trace = traces.get(i);
+                if (trace == null) {
+                    continue;
+                }
+                userPrompt.append("第").append(trace.getAttempt()).append("次:\n");
+                userPrompt.append("运行参数:\n").append(writeJson(trace.getRunArgs())).append("\n");
+                String code = safe(trace.getCode());
+                if (code.isBlank()) {
+                    userPrompt.append("失败代码: <empty>\n");
+                } else {
+                    userPrompt.append("失败代码:\n```python\n")
+                            .append(code)
+                            .append("\n```\n");
+                }
+                String output = safe(trace.getOutput());
+                if (output.isBlank()) {
+                    userPrompt.append("执行反馈: <empty>\n");
+                } else {
+                    userPrompt.append("执行反馈:\n")
+                            .append(preview(output, 5000))
+                            .append("\n");
+                }
+            }
         }
 
         userPrompt.append(promptService.pythonRefineOutputInstruction());
@@ -281,7 +298,7 @@ public class PythonCodeRefinementNode {
             JsonNode node = objectMapper.readTree(json);
             JsonNode runArgsNode = node.path("run_args");
             if (runArgsNode.isObject()) {
-                Map<String, Object> parsed = objectMapper.convertValue(runArgsNode, Map.class);
+                Map<String, Object> parsed = objectMapper.convertValue(runArgsNode, new TypeReference<Map<String, Object>>() {});
                 return sanitizeRunArgs(parsed);
             }
             return Map.of();

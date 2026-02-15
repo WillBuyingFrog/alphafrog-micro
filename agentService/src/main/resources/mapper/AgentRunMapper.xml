@@ -212,6 +212,18 @@
           AND user_id = #{userId}
     </update>
 
+    <!--
+        根据 run ID 和用户 ID 删除 Agent Run 记录。
+        
+        说明：
+        - 物理删除，不可恢复
+        - 必须同时匹配 id 和 user_id，确保用户只能删除自己的 run
+        - 返回值为实际删除的记录数（成功为1，未找到为0）
+        
+        使用场景：
+        - 用户主动删除已完成的 run
+        - 不允许删除运行中的 run（业务层校验）
+    -->
     <delete id="deleteByIdAndUser">
         DELETE FROM alphafrog_agent_run
         WHERE id = #{id}

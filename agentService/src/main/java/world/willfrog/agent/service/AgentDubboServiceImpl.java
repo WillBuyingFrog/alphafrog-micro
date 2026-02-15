@@ -263,10 +263,25 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     }
 
     /**
-     * 删除指定 run（运行中任务禁止删除）。
+     * 删除指定的 Agent Run。
+     * <p>
+     * 业务规则：
+     * <ul>
+     *   <li>运行中的任务禁止删除（状态为 RECEIVED/PLANNING/EXECUTING/SUMMARIZING），
+     *       需先调用 {@link #cancelRun} 或 {@link #pauseRun}</li>
+     *   <li>删除成功后，会同步清理 Redis 中的 run 状态缓存（{@link AgentRunStateStore#clear}）</li>
+     * </ul>
+     * <p>
+     * 异常场景：
+     * <ul>
+     *   <li>run 不存在或不属于该用户：抛出 IllegalArgumentException("run not found")</li>
+     *   <li>run 正在运行中：抛出 IllegalStateException("run is running, cancel/pause first")</li>
+     * </ul>
      *
-     * @param request 删除请求
-     * @return 空响应
+     * @param request 删除请求，包含 user_id（用户 ID）和 id（run ID）
+     * @return 空响应（AgentEmpty）
+     * @throws IllegalArgumentException 当 run 不存在或 user_id/id 为空时
+     * @throws IllegalStateException    当 run 正在运行中时
      */
     @Override
     public AgentEmpty deleteRun(DeleteAgentRunRequest request) {

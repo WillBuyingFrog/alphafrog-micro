@@ -245,6 +245,27 @@ public class AgentController {
         }
     }
 
+    /**
+     * 删除指定的 Agent Run（运行中的任务禁止删除）。
+     * <p>
+     * 删除行为说明：
+     * <ul>
+     *   <li>只能删除属于自己的 run（通过当前登录用户鉴权）</li>
+     *   <li>运行中的 run（状态为 RECEIVED/PLANNING/EXECUTING/SUMMARIZING）禁止删除，需先取消或暂停</li>
+     *   <li>删除后会同步清理 Redis 中的状态缓存</li>
+     * </ul>
+     * <p>
+     * 异常响应：
+     * <ul>
+     *   <li>401：用户未登录</li>
+     *   <li>404：run 不存在</li>
+     *   <li>409：run 正在运行中，需先取消/暂停</li>
+     * </ul>
+     *
+     * @param authentication 当前用户认证信息
+     * @param runId          要删除的 run ID（路径参数）
+     * @return 删除成功返回 "ok"，失败返回对应错误码
+     */
     @DeleteMapping("/{runId}")
     public ResponseWrapper<String> delete(Authentication authentication,
                                           @PathVariable("runId") String runId) {
