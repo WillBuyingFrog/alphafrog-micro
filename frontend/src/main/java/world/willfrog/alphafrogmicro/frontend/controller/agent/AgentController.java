@@ -34,6 +34,10 @@ import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentArtifactsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageRequest;
+import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesResponse;
 import world.willfrog.alphafrogmicro.common.dto.ResponseCode;
 import world.willfrog.alphafrogmicro.common.dto.ResponseWrapper;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
@@ -51,6 +55,10 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListItemRespon
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunUpdateRequest;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendRequest;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageItemResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageListResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import java.util.ArrayList;
@@ -590,6 +598,118 @@ public class AgentController {
             return handleRpcError(e, "导出 agent run");
         } catch (Exception e) {
             return handleError(e, "导出 agent run");
+        }
+    }
+
+    /**
+     * 发送追问消息。
+     * <p>
+     * 仅支持 COMPLETED 状态的 Run 进行追问。
+     *
+     * @param authentication 当前用户认证信息
+     * @param runId          Run ID
+     * @param request        发送消息请求
+     * @return 发送结果
+     */
+    @PostMapping("/{runId}/messages")
+    public ResponseWrapper<AgentMessageSendResponse> sendMessage(Authentication authentication,
+                                                                 @PathVariable("runId") String runId,
+                                                                 @RequestBody AgentMessageSendRequest request) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        if (request == null || request.content() == null || request.content().isBlank()) {
+            return ResponseWrapper.paramError("content 不能为空");
+        }
+
+        // 处理 contextOverride：仅 admin + debugMode 可用
+        String contextOverride = null;
+        if (request.contextOverride() != null && !request.contextOverride().isBlank()) {
+            boolean admin = isAdmin(authentication);
+            boolean debugMode = Boolean.TRUE.equals(request.stream()); // 或其他 debug 标识
+            if (admin && debugMode) {
+                contextOverride = request.contextOverride();
+            } else {
+                log.warn("Non-admin or non-debug user attempted to use contextOverride, userId={}", userId);
+            }
+        }
+
+        try {
+            SendAgentMessageResponse resp = agentDubboService.sendMessage(
+                    SendAgentMessageRequest.newBuilder()
+                            .setUserId(userId)
+                            .setRunId(runId)
+                            .setContent(request.content())
+                            .setContextOverride(nvl(contextOverride))
+                            .setStream(Boolean.TRUE.equals(request.stream()))
+                            .build()
+            );
+            return ResponseWrapper.success(new AgentMessageSendResponse(
+                    resp.getMessageId(),
+                    resp.getSeq(),
+                    resp.getStatus(),
+                    emptyToNull(resp.getRunStatus()),
+                    emptyToNull(resp.getRejectReason())
+            ));
+        } catch (RpcException e) {
+            return handleRpcError(e, "发送消息");
+        } catch (Exception e) {
+            return handleError(e, "发送消息");
+        }
+    }
+
+    /**
+     * 获取 Run 的消息历史。
+     *
+     * @param authentication   当前用户认证信息
+     * @param runId            Run ID
+     * @param limit            每页数量（默认 50，最大 200）
+     * @param offset           分页偏移
+     * @param includeInitial   是否包含初始问题（默认 true）
+     * @return 消息历史列表
+     */
+    @GetMapping("/{runId}/messages")
+    public ResponseWrapper<AgentMessageListResponse> listMessages(Authentication authentication,
+                                                                  @PathVariable("runId") String runId,
+                                                                  @RequestParam(value = "limit", required = false, defaultValue = "50") int limit,
+                                                                  @RequestParam(value = "offset", required = false, defaultValue = "0") int offset,
+                                                                  @RequestParam(value = "include_initial", required = false, defaultValue = "true") boolean includeInitial) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            ListAgentMessagesResponse resp = agentDubboService.listMessages(
+                    ListAgentMessagesRequest.newBuilder()
+                            .setUserId(userId)
+                            .setRunId(runId)
+                            .setLimit(Math.min(Math.max(1, limit), 200))
+                            .setOffset(Math.max(0, offset))
+                            .setIncludeInitial(includeInitial)
+                            .build()
+            );
+            List<AgentMessageItemResponse> items = new ArrayList<>();
+            for (var item : resp.getItemsList()) {
+                items.add(new AgentMessageItemResponse(
+                        item.getId(),
+                        item.getSeq(),
+                        item.getRole(),
+                        item.getContent(),
+                        item.getMsgType(),
+                        emptyToNull(item.getMetaJson()),
+                        emptyToNull(item.getCreatedAt())
+                ));
+            }
+            return ResponseWrapper.success(new AgentMessageListResponse(
+                    items,
+                    resp.getTotal(),
+                    resp.getHasMore()
+            ));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询消息历史");
+        } catch (Exception e) {
+            return handleError(e, "查询消息历史");
         }
     }
 

@@ -25,6 +25,9 @@ import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.service.AgentMessageService;
+import world.willfrog.agent.service.AgentContextCompressor;
+import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
@@ -54,6 +57,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final AgentCreditService creditService;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
+    private final AgentMessageService messageService;
+    private final AgentContextCompressor contextCompressor;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.flow.workflow.max-tool-calls:20}")
@@ -536,9 +541,25 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             summary.add(row);
         }
 
+        // 加载消息历史（多轮对话支持）
+        String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+
+        String userMessageContent;
+        if (dialogueContext.isBlank()) {
+            userMessageContent = "当前轮次用户需求: " + nvl(request.getUserGoal())
+                    + "\n执行摘要: " + safeWrite(summary)
+                    + "\n执行上下文: " + safeWrite(context);
+        } else {
+            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+                    + "\n\n当前轮次用户需求: " + nvl(request.getUserGoal())
+                    + "\n执行摘要: " + safeWrite(summary)
+                    + "\n执行上下文: " + safeWrite(context)
+                    + "\n\n请参考历史对话，以当前轮次用户需求为重点回答。";
+        }
+
         List<ChatMessage> messages = List.of(
                 new SystemMessage(promptService.workflowFinalSystemPrompt()),
-                new UserMessage("用户目标: " + nvl(request.getUserGoal()) + "\n执行摘要: " + safeWrite(summary) + "\n执行上下文: " + safeWrite(context))
+                new UserMessage(userMessageContent)
         );
 
         long llmStartedAt = System.currentTimeMillis();
@@ -568,7 +589,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         eventService.append(runId, userId, "FINAL_ANSWER_COMPLETED", Map.of(
                 "answer_preview", preview(answer),
-                "answerPreview", preview(answer)
+                "answerPreview", preview(answer),
+                "endpoint", nvl(request.getEndpointName()),
+                "model", nvl(request.getModelName())
         ));
         return answer;
     }
@@ -645,6 +668,43 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return text.substring(0, 500);
         }
         return text;
+    }
+
+    /**
+     * 构建对话上下文（用于多轮对话）。
+     * <p>
+     * 1. 加载消息历史
+     * 2. 应用上下文压缩
+     * 3. 格式化为对话文本
+     *
+     * @param runId Run ID
+     * @return 对话上下文文本（空字符串表示没有历史消息）
+     */
+    private String buildDialogueContext(String runId, String currentUserGoal) {
+        try {
+            List<AgentRunMessage> messages = messageService.listMessages(runId);
+            if (messages == null || messages.isEmpty()) {
+                return "";
+            }
+
+            AgentContextCompressor.ContextBuildResult result = contextCompressor.buildCompressedContext(messages, currentUserGoal);
+
+            // 记录上下文压缩事件（如果发生了压缩）
+            AgentContextCompressor.CompressionResult compression = result.compression();
+            if (compression != null && compression.compressedMessages() < compression.originalMessages()) {
+                eventService.append(runId, null, "CONTEXT_COMPRESSED", Map.of(
+                        "strategy", nvl(compression.strategy()),
+                        "original_count", compression.originalMessages(),
+                        "compressed_count", compression.compressedMessages(),
+                        "dropped_sequences", compression.droppedSequences()
+                ));
+            }
+
+            return result.text();
+        } catch (Exception e) {
+            log.warn("Failed to build dialogue context for runId={}, ignoring: {}", runId, e.getMessage());
+            return "";
+        }
     }
 
     private String toolDisplayName(String toolName) {

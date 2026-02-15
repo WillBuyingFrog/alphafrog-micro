@@ -43,6 +43,10 @@ public interface AgentRunMapper {
                    @Param("status") AgentRunStatus status,
                    @Param("planJson") String planJson);
 
+    int updatePlanJson(@Param("id") String id,
+                       @Param("userId") String userId,
+                       @Param("planJson") String planJson);
+
     int updateExt(@Param("id") String id,
                   @Param("userId") String userId,
                   @Param("ext") String ext);

@@ -286,6 +286,51 @@ message ExportAgentRunResponse {
   string message = 4;
 }
 
+// 消息内容
+message AgentRunMessageItem {
+  int64 id = 1;
+  int32 seq = 2;
+  string role = 3;        // "user" | "assistant" | "system"
+  string content = 4;
+  string msg_type = 5;    // "initial" | "follow_up" | "summary"
+  string meta_json = 6;   // 元数据 JSON
+  string created_at = 7;
+}
+
+// 发送消息请求
+message SendAgentMessageRequest {
+  string user_id = 1;
+  string run_id = 2;
+  string content = 3;           // 用户消息内容
+  string context_override = 4;  // 可选：上下文覆盖（仅 admin + debugMode 可用）
+  bool stream = 5;              // 是否流式响应（预留）
+}
+
+// 发送消息响应
+message SendAgentMessageResponse {
+  int64 message_id = 1;         // 消息 ID
+  int32 seq = 2;                // 分配的序号
+  string status = 3;            // "accepted" | "rejected"
+  string run_status = 4;        // 处理后的 run 状态
+  string reject_reason = 5;     // 拒绝原因（如被拒绝）
+}
+
+// 获取消息历史请求
+message ListAgentMessagesRequest {
+  string user_id = 1;
+  string run_id = 2;
+  int32 limit = 3;              // 默认 50，最大 200
+  int32 offset = 4;             // 分页偏移
+  bool include_initial = 5;     // 是否包含初始问题（默认 true）
+}
+
+// 获取消息历史响应
+message ListAgentMessagesResponse {
+  repeated AgentRunMessageItem items = 1;
+  int32 total = 2;
+  bool has_more = 3;
+}
+
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
@@ -307,4 +352,6 @@ service AgentDubboService {
   rpc ApplyCredits(ApplyAgentCreditsRequest) returns (ApplyAgentCreditsResponse);
   rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
+  rpc SendMessage(SendAgentMessageRequest) returns (SendAgentMessageResponse);
+  rpc ListMessages(ListAgentMessagesRequest) returns (ListAgentMessagesResponse);
 }

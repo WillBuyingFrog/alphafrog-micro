@@ -334,6 +334,14 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getRuntime() == null) {
             cfg.setRuntime(null);
         }
+        if (cfg.getRuntime().getMultiTurn() == null) {
+            cfg.getRuntime().setMultiTurn(null);
+        }
+        if (cfg.getRuntime().getMultiTurn().getCompression() == null) {
+            cfg.getRuntime().getMultiTurn().setCompression(null);
+        } else if (cfg.getRuntime().getMultiTurn().getCompression().getSummaryProviderOrder() == null) {
+            cfg.getRuntime().getMultiTurn().getCompression().setSummaryProviderOrder(null);
+        }
         if (cfg.getRuntime().getResume() == null) {
             cfg.getRuntime().setResume(null);
         }

@@ -7,12 +7,13 @@ import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Value;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
+import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunListItemMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunEventMessage;
-import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
+
 import world.willfrog.alphafrogmicro.agent.idl.AgentModelMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
@@ -49,6 +50,11 @@ import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageRequest;
+import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesResponse;
+import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessageItem;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
@@ -79,6 +85,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentCreditService creditService;
     private final UserDao userDao;
     private final ObjectMapper objectMapper;
+    private final AgentMessageService messageService;
 
     @Value("${agent.run.list.default-days:30}")
     private int listDefaultDays;
@@ -105,7 +112,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      * @return run 信息
      */
     @Override
-    public AgentRunMessage createRun(CreateAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage createRun(CreateAgentRunRequest request) {
         String userId = request.getUserId();
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("user_id is required");
@@ -139,13 +146,13 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      * @return run 信息
      */
     @Override
-    public AgentRunMessage getRun(GetAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage getRun(GetAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         return toRunMessage(run);
     }
 
     @Override
-    public AgentRunMessage updateRun(UpdateAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage updateRun(UpdateAgentRunRequest request) {
         String userId = request.getUserId();
         if (userId == null || userId.isBlank()) {
             throw new IllegalArgumentException("user_id is required");
@@ -304,7 +311,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      * @return 取消后的 run 信息
      */
     @Override
-    public AgentRunMessage cancelRun(CancelAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage cancelRun(CancelAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
@@ -322,7 +329,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      * @return 暂停后的 run 信息
      */
     @Override
-    public AgentRunMessage pauseRun(PauseAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage pauseRun(PauseAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
@@ -340,7 +347,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
      * @return 续做后的 run 信息
      */
     @Override
-    public AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
+    public world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
         AgentRun run = requireRun(request.getId(), request.getUserId());
         if (run.getStatus() == AgentRunStatus.EXPIRED) {
             throw new IllegalStateException("run expired");
@@ -627,6 +634,158 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .build();
     }
 
+    /**
+     * 发送追问消息。
+     * <p>
+     * 业务规则（MVP）：
+     * <ul>
+     *   <li>仅支持 Run 完整跑完并产出最终结果后才允许继续追问</li>
+     *   <li>准入状态：仅允许 COMPLETED（如有需要可再放开 FAILED/CANCELED）</li>
+     *   <li>其余状态（RECEIVED/PLANNING/EXECUTING/SUMMARIZING/WAITING）拒绝并提示用户等待/新建 run</li>
+     *   <li>context_override 仅对 admin + debugMode 开放（在 frontend 层校验）</li>
+     * </ul>
+     * <p>
+     * 执行流程：
+     * 1. 校验权限和 Run 状态
+     * 2. 保存用户消息（msg_type=follow_up）
+     * 3. 记录 FOLLOW_UP_RECEIVED 事件
+     * 4. 重置 Run 状态并触发异步执行
+     *
+     * @param request 发送消息请求
+     * @return 发送结果
+     */
+    @Override
+    public SendAgentMessageResponse sendMessage(SendAgentMessageRequest request) {
+        String userId = request.getUserId();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        String runId = request.getRunId();
+        if (runId == null || runId.isBlank()) {
+            throw new IllegalArgumentException("run_id is required");
+        }
+        String content = request.getContent();
+        if (content == null || content.isBlank()) {
+            throw new IllegalArgumentException("content is required");
+        }
+
+        AgentRun run = requireRun(runId, userId);
+
+        // MVP：仅允许 COMPLETED 状态的 Run 进行追问
+        // 注：如需支持 FAILED/CANCELED，可扩展为：
+        // if (run.getStatus() != AgentRunStatus.COMPLETED && run.getStatus() != AgentRunStatus.FAILED && run.getStatus() != AgentRunStatus.CANCELED)
+        if (run.getStatus() != AgentRunStatus.COMPLETED) {
+            return SendAgentMessageResponse.newBuilder()
+                    .setStatus("rejected")
+                    .setRejectReason("run not completed, current status: " + run.getStatus().name() + ", please wait or create a new run")
+                    .setRunStatus(run.getStatus().name())
+                    .build();
+        }
+
+        // 检查 Run 是否已过期
+        if (eventService.shouldMarkExpired(run)) {
+            runMapper.updateStatus(runId, userId, AgentRunStatus.EXPIRED);
+            eventService.append(runId, userId, "RUN_EXPIRED", Map.of(
+                    "run_id", runId,
+                    "expired_at", OffsetDateTime.now().toString()
+            ));
+            return SendAgentMessageResponse.newBuilder()
+                    .setStatus("rejected")
+                    .setRejectReason("run expired")
+                    .setRunStatus(AgentRunStatus.EXPIRED.name())
+                    .build();
+        }
+
+        // 保存用户追问消息
+        String metaJson = messageService.buildMetaJson(null, null, null, null);
+        AgentRunMessage userMessage = messageService.createUserMessage(runId, content, metaJson);
+
+        // 记录 FOLLOW_UP_RECEIVED 事件
+        eventService.append(runId, userId, "FOLLOW_UP_RECEIVED", Map.of(
+                "seq", userMessage.getSeq(),
+                "content_preview", preview(content, 200),
+                "message_id", userMessage.getId()
+        ));
+
+        // 清理旧计划缓存，确保追问重新规划
+        runMapper.updatePlanJson(runId, userId, "{}");
+        stateStore.clearPlanCache(runId);
+        stateStore.clearTasks(runId);
+
+        // 重置 Run 状态为 RECEIVED，准备重新执行
+        runMapper.resetForResume(runId, userId, eventService.nextTtlExpiresAt());
+        eventService.append(runId, userId, "WORKFLOW_RESUMED", Map.of(
+                "run_id", runId,
+                "reason", "follow_up",
+                "message_seq", userMessage.getSeq()
+        ));
+
+        // 触发异步执行
+        executor.executeAsync(runId);
+
+        return SendAgentMessageResponse.newBuilder()
+                .setMessageId(userMessage.getId())
+                .setSeq(userMessage.getSeq())
+                .setStatus("accepted")
+                .setRunStatus(AgentRunStatus.RECEIVED.name())
+                .build();
+    }
+
+    /**
+     * 获取 Run 的消息历史。
+     * <p>
+     * 权限校验：只能查询属于自己的 run 的消息
+     *
+     * @param request 查询请求
+     * @return 消息历史列表
+     */
+    @Override
+    public ListAgentMessagesResponse listMessages(ListAgentMessagesRequest request) {
+        String userId = request.getUserId();
+        if (userId == null || userId.isBlank()) {
+            throw new IllegalArgumentException("user_id is required");
+        }
+        String runId = request.getRunId();
+        if (runId == null || runId.isBlank()) {
+            throw new IllegalArgumentException("run_id is required");
+        }
+
+        // 校验权限
+        requireRun(runId, userId);
+
+        int limit = request.getLimit() <= 0 ? 50 : Math.min(request.getLimit(), 200);
+        int offset = Math.max(0, request.getOffset());
+        boolean includeInitial = request.getIncludeInitial();
+
+        int total;
+        java.util.List<AgentRunMessage> messages;
+        if (includeInitial) {
+            total = messageService.countMessages(runId);
+            messages = messageService.listMessagesWithPagination(runId, limit, offset);
+        } else {
+            total = messageService.countMessagesExcludingInitial(runId);
+            messages = messageService.listMessagesWithPaginationExcludingInitial(runId, limit, offset);
+        }
+
+        ListAgentMessagesResponse.Builder builder = ListAgentMessagesResponse.newBuilder();
+        builder.setTotal(total);
+        builder.setHasMore(offset + messages.size() < total);
+
+        for (AgentRunMessage msg : messages) {
+            builder.addItems(AgentRunMessageItem.newBuilder()
+                    .setId(msg.getId() != null ? msg.getId() : 0L)
+                    .setSeq(msg.getSeq() != null ? msg.getSeq() : 0)
+                    .setRole(nvl(msg.getRole()))
+                    .setContent(nvl(msg.getContent()))
+                    .setMsgType(nvl(msg.getMsgType()))
+                    .setMetaJson(nvl(msg.getMetaJson()))
+                    .setCreatedAt(msg.getCreatedAt() != null ? msg.getCreatedAt().toString() : "")
+                    .build());
+        }
+
+        return builder.build();
+    }
+
     private AgentRun requireRun(String id, String userId) {
         if (id == null || id.isBlank()) {
             throw new IllegalArgumentException("id is required");
@@ -762,8 +921,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
     }
 
-    private AgentRunMessage toRunMessage(AgentRun run) {
-        return AgentRunMessage.newBuilder()
+    private world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage toRunMessage(AgentRun run) {
+        return world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage.newBuilder()
                 .setId(nvl(run.getId()))
                 .setUserId(nvl(run.getUserId()))
                 .setStatus(run.getStatus() == null ? "" : run.getStatus().name())
@@ -908,5 +1067,22 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (!"ACTIVE".equalsIgnoreCase(status.trim())) {
             throw new IllegalStateException("user disabled");
         }
+    }
+
+    /**
+     * 生成内容预览（截断并添加省略号）。
+     *
+     * @param content 原始内容
+     * @param maxLen  最大长度
+     * @return 预览内容
+     */
+    private String preview(String content, int maxLen) {
+        if (content == null) {
+            return "";
+        }
+        if (content.length() <= maxLen) {
+            return content;
+        }
+        return content.substring(0, maxLen) + "...";
     }
 }

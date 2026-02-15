@@ -46,6 +46,7 @@ public class AgentEventService {
     private final StringRedisTemplate redisTemplate;
     /** 本地 llm/runtim 配置加载器。 */
     private final AgentLlmLocalConfigLoader llmLocalConfigLoader;
+    private final AgentMessageService messageService;
 
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
@@ -114,6 +115,15 @@ public class AgentEventService {
 
         runMapper.insert(run);
         append(runId, userId, "RUN_RECEIVED", ext);
+
+        // 写入首条用户消息（initial）
+        try {
+            messageService.createInitialMessage(runId, message);
+        } catch (Exception e) {
+            // 消息写入失败不影响主流程，仅记录日志
+            log.warn("Failed to create initial message for runId={}, but continuing: {}", runId, e.getMessage());
+        }
+
         return runMapper.findByIdAndUser(runId, userId);
     }
 

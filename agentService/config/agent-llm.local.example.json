@@ -118,6 +118,21 @@
           ]
         }
       ]
+    },
+    "multiTurn": {
+      "compression": {
+        "enabled": true,
+        "strategy": "LLM_SUMMARY",
+        "summaryEndpoint": "openrouter",
+        "summaryModel": "qwen/qwen3-max-thinking",
+        "summaryProviderOrder": [
+          "fireworks"
+        ],
+        "summaryMaxChars": 1200,
+        "summaryTemperature": 0.2,
+        "minMessagesForSummary": 6,
+        "summaryMaxMessages": 20
+      }
     }
   },
   "prompts": {

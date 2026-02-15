@@ -70,6 +70,31 @@ public class AgentAiServiceFactory {
         return builder.build();
     }
 
+    public ChatLanguageModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
+                                                                           List<String> providerOrder,
+                                                                           Double temperatureOverride) {
+        List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
+        if (isOpenRouterEndpoint(resolved) && !normalizedProviderOrder.isEmpty()) {
+            String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
+            if (isBlank(apiKey)) {
+                throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
+            }
+            double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
+            Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
+            return new OpenRouterProviderRoutedChatModel(
+                    objectMapper,
+                    resolved.baseUrl(),
+                    apiKey,
+                    headers,
+                    resolved.modelName(),
+                    finalTemperature,
+                    maxTokens,
+                    normalizedProviderOrder
+            );
+        }
+        return buildChatModelWithTemperature(resolved, temperatureOverride);
+    }
+
     public ChatLanguageModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();

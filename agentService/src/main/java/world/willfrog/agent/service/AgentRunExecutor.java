@@ -10,6 +10,7 @@ import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
@@ -38,6 +39,7 @@ public class AgentRunExecutor {
     private final AgentCreditService creditService;
     private final TodoPlanner todoPlanner;
     private final LinearWorkflowExecutor workflowExecutor;
+    private final AgentMessageService messageService;
     private final ObjectMapper objectMapper;
 
     @Async
@@ -86,7 +88,7 @@ public class AgentRunExecutor {
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatLanguageModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
-            String userGoal = eventService.extractUserGoal(run.getExt());
+            String userGoal = resolveUserGoal(run);
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
 
             eventService.append(runId, userId, "RUN_CONFIG_APPLIED", mapOf(
@@ -161,6 +163,28 @@ public class AgentRunExecutor {
                         "totalCreditsConsumed", totalCreditsConsumed,
                         "total_credits_consumed", totalCreditsConsumed
                 ));
+
+                // 写入助手回复消息
+                try {
+                    String assistantMetaJson = messageService.buildMetaJson(
+                            modelName,
+                            endpointName,
+                            null,
+                            null
+                    );
+                    messageService.createAssistantMessage(runId, result.getFinalAnswer(), assistantMetaJson);
+
+                    // 记录 MESSAGE_COMPLETED 事件
+                    eventService.append(runId, userId, "MESSAGE_COMPLETED", mapOf(
+                            "role", "assistant",
+                            "content_preview", preview(result.getFinalAnswer(), 200),
+                            "model", nvl(modelName),
+                            "endpoint", nvl(endpointName)
+                    ));
+                } catch (Exception e) {
+                    log.warn("Failed to create assistant message for runId={}, but continuing: {}", runId, e.getMessage());
+                }
+
                 creditService.recordRunConsumeLedger(runId, userId, totalCreditsConsumed);
                 stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
                 return;
@@ -220,5 +244,30 @@ public class AgentRunExecutor {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private String resolveUserGoal(AgentRun run) {
+        if (run == null || run.getId() == null) {
+            return "";
+        }
+        try {
+            AgentRunMessage latestUser = messageService.findLatestUserMessage(run.getId());
+            if (latestUser != null && latestUser.getContent() != null && !latestUser.getContent().isBlank()) {
+                return latestUser.getContent();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to resolve latest user message, fallback to ext: runId={}, err={}", run.getId(), e.getMessage());
+        }
+        return eventService.extractUserGoal(run.getExt());
+    }
+
+    private String preview(String content, int maxLen) {
+        if (content == null) {
+            return "";
+        }
+        if (content.length() <= maxLen) {
+            return content;
+        }
+        return content.substring(0, maxLen) + "...";
     }
 }

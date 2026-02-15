@@ -214,7 +214,9 @@ public class SubAgentRunner {
             emitEvent(request, "SUB_AGENT_PLAN_CREATED", Map.of(
                     "task_id", nvl(request.getTaskId()),
                     "steps_count", stepsNode.size(),
-                    "steps", buildStepSummary(stepsNode)
+                    "steps", buildStepSummary(stepsNode),
+                    "endpoint", nvl(request.getEndpointName()),
+                    "model", nvl(request.getModelName())
             ));
             observabilityService.addNodeCount(request.getRunId(), stepsNode.size());
 
@@ -338,7 +340,9 @@ public class SubAgentRunner {
 
             emitEvent(request, "SUB_AGENT_COMPLETED", Map.of(
                     "task_id", nvl(request.getTaskId()),
-                    "steps", executedSteps.size()
+                    "steps", executedSteps.size(),
+                    "endpoint", nvl(request.getEndpointName()),
+                    "model", nvl(request.getModelName())
             ));
 
             return SubAgentResult.builder()

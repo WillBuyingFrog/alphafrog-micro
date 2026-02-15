@@ -13,7 +13,6 @@ import world.willfrog.agent.workflow.WorkflowState;
 import java.time.Duration;
 import java.util.HashMap;
 import java.util.LinkedHashMap;
-import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -74,6 +73,15 @@ public class AgentRunStateStore {
         if (blank(runId)) {
             return;
         }
+        redisTemplate.delete(planOverrideKey(runId));
+    }
+
+    public void clearPlanCache(String runId) {
+        if (blank(runId)) {
+            return;
+        }
+        redisTemplate.delete(planKey(runId));
+        redisTemplate.delete(planValidKey(runId));
         redisTemplate.delete(planOverrideKey(runId));
     }
 

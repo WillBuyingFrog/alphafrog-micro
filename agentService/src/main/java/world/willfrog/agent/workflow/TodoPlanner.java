@@ -1,5 +1,6 @@
 package world.willfrog.agent.workflow;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
@@ -24,11 +25,13 @@ import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentMessageService;
+import world.willfrog.agent.service.AgentContextCompressor;
+import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.time.Instant;
 import java.util.ArrayList;
-import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
@@ -49,6 +52,8 @@ public class TodoPlanner {
     private final AgentObservabilityService observabilityService;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
+    private final AgentMessageService messageService;
+    private final AgentContextCompressor contextCompressor;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.flow.workflow.max-todos:10}")
@@ -97,7 +102,9 @@ public class TodoPlanner {
             ));
             eventService.append(runId, userId, "PLANNING_COMPLETED", Map.of(
                     "items_count", todoPlan.getItems().size(),
-                    "itemsCount", todoPlan.getItems().size()
+                    "itemsCount", todoPlan.getItems().size(),
+                    "endpoint", nvl(request.getEndpointName()),
+                    "model", nvl(request.getModelName())
             ));
             return todoPlan;
         } catch (Exception e) {
@@ -108,11 +115,24 @@ public class TodoPlanner {
     }
 
     private TodoPlan generatePlan(PlanRequest request, Set<String> toolWhitelist) {
+        String runId = request.getRun().getId();
         String toolList = toolWhitelist.stream().sorted().collect(Collectors.joining(", "));
         String prompt = promptService.todoPlannerSystemPrompt(toolList, resolveMaxTodos());
+
+        // 加载消息历史（多轮对话支持）
+        String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+        String userMessageContent;
+        if (dialogueContext.isBlank()) {
+            userMessageContent = request.getUserGoal();
+        } else {
+            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+                    + "\n\n当前轮次用户需求：" + request.getUserGoal()
+                    + "\n\n请参考历史对话，以当前轮次用户需求为重点规划。";
+        }
+
         List<ChatMessage> messages = List.of(
                 new SystemMessage(prompt),
-                new UserMessage(request.getUserGoal())
+                new UserMessage(userMessageContent)
         );
 
         long llmStartedAt = System.currentTimeMillis();
@@ -241,7 +261,7 @@ public class TodoPlanner {
         if (!node.isObject()) {
             return Map.of();
         }
-        return objectMapper.convertValue(node, Map.class);
+        return objectMapper.convertValue(node, new TypeReference<Map<String, Object>>() {});
     }
 
     private TodoType parseType(String text) {
@@ -305,6 +325,31 @@ public class TodoPlanner {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    /**
+     * 构建对话上下文（用于多轮对话）。
+     * <p>
+     * 1. 加载消息历史
+     * 2. 应用上下文压缩
+     * 3. 格式化为对话文本
+     *
+     * @param runId Run ID
+     * @return 对话上下文文本（空字符串表示没有历史消息）
+     */
+    private String buildDialogueContext(String runId, String currentUserGoal) {
+        try {
+            List<AgentRunMessage> messages = messageService.listMessages(runId);
+            if (messages == null || messages.isEmpty()) {
+                return "";
+            }
+
+            AgentContextCompressor.ContextBuildResult result = contextCompressor.buildCompressedContext(messages, currentUserGoal);
+            return result.text();
+        } catch (Exception e) {
+            log.warn("Failed to build dialogue context for runId={}, ignoring: {}", runId, e.getMessage());
+            return "";
+        }
     }
 
     @Data

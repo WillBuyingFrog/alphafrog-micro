@@ -155,6 +155,7 @@ public class AgentLlmProperties {
         private Parallel parallel = new Parallel();
         private SubAgent subAgent = new SubAgent();
         private Judge judge = new Judge();
+        private MultiTurn multiTurn = new MultiTurn();
 
         public Resume getResume() {
             return resume;
@@ -210,6 +211,14 @@ public class AgentLlmProperties {
 
         public void setJudge(Judge judge) {
             this.judge = judge == null ? new Judge() : judge;
+        }
+
+        public MultiTurn getMultiTurn() {
+            return multiTurn;
+        }
+
+        public void setMultiTurn(MultiTurn multiTurn) {
+            this.multiTurn = multiTurn == null ? new MultiTurn() : multiTurn;
         }
     }
 
@@ -471,6 +480,102 @@ public class AgentLlmProperties {
 
         public void setModels(List<String> models) {
             this.models = models == null ? new ArrayList<>() : models;
+        }
+    }
+
+    public static class MultiTurn {
+        private Compression compression = new Compression();
+
+        public Compression getCompression() {
+            return compression;
+        }
+
+        public void setCompression(Compression compression) {
+            this.compression = compression == null ? new Compression() : compression;
+        }
+    }
+
+    public static class Compression {
+        private Boolean enabled;
+        private String strategy;
+        private String summaryEndpoint;
+        private String summaryModel;
+        private List<String> summaryProviderOrder = new ArrayList<>();
+        private Integer summaryMaxChars;
+        private Double summaryTemperature;
+        private Integer minMessagesForSummary;
+        private Integer summaryMaxMessages;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getStrategy() {
+            return strategy;
+        }
+
+        public void setStrategy(String strategy) {
+            this.strategy = strategy;
+        }
+
+        public String getSummaryEndpoint() {
+            return summaryEndpoint;
+        }
+
+        public void setSummaryEndpoint(String summaryEndpoint) {
+            this.summaryEndpoint = summaryEndpoint;
+        }
+
+        public String getSummaryModel() {
+            return summaryModel;
+        }
+
+        public void setSummaryModel(String summaryModel) {
+            this.summaryModel = summaryModel;
+        }
+
+        public List<String> getSummaryProviderOrder() {
+            return summaryProviderOrder;
+        }
+
+        public void setSummaryProviderOrder(List<String> summaryProviderOrder) {
+            this.summaryProviderOrder = summaryProviderOrder == null ? new ArrayList<>() : summaryProviderOrder;
+        }
+
+        public Integer getSummaryMaxChars() {
+            return summaryMaxChars;
+        }
+
+        public void setSummaryMaxChars(Integer summaryMaxChars) {
+            this.summaryMaxChars = summaryMaxChars;
+        }
+
+        public Double getSummaryTemperature() {
+            return summaryTemperature;
+        }
+
+        public void setSummaryTemperature(Double summaryTemperature) {
+            this.summaryTemperature = summaryTemperature;
+        }
+
+        public Integer getMinMessagesForSummary() {
+            return minMessagesForSummary;
+        }
+
+        public void setMinMessagesForSummary(Integer minMessagesForSummary) {
+            this.minMessagesForSummary = minMessagesForSummary;
+        }
+
+        public Integer getSummaryMaxMessages() {
+            return summaryMaxMessages;
+        }
+
+        public void setSummaryMaxMessages(Integer summaryMaxMessages) {
+            this.summaryMaxMessages = summaryMaxMessages;
         }
     }
 
