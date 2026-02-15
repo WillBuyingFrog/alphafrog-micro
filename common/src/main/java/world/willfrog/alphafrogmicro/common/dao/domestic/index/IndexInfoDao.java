@@ -25,6 +25,25 @@ public interface IndexInfoDao {
     @Select("SELECT * FROM alphafrog_index_info WHERE name like CONCAT('%', #{name}, '%') LIMIT #{limit} OFFSET #{offset}")
     List<IndexInfo> getIndexInfoByName(@Param("name") String name, @Param("limit") int limit, @Param("offset") int offset);
 
+    @Select("SELECT * FROM alphafrog_index_info " +
+            "WHERE ts_code like CONCAT('%', #{query}, '%') " +
+            "   OR fullname like CONCAT('%', #{query}, '%') " +
+            "   OR name like CONCAT('%', #{query}, '%') " +
+            "ORDER BY " +
+            "   CASE " +
+            "     WHEN ts_code = #{query} THEN 0 " +
+            "     WHEN name = #{query} THEN 1 " +
+            "     WHEN fullname = #{query} THEN 2 " +
+            "     WHEN ts_code like CONCAT(#{query}, '%') THEN 3 " +
+            "     WHEN name like CONCAT(#{query}, '%') THEN 4 " +
+            "     WHEN fullname like CONCAT(#{query}, '%') THEN 5 " +
+            "     ELSE 10 " +
+            "   END, " +
+            "   length(name) ASC, " +
+            "   ts_code ASC " +
+            "LIMIT #{limit} OFFSET #{offset}")
+    List<IndexInfo> searchIndexInfo(@Param("query") String query, @Param("limit") int limit, @Param("offset") int offset);
+
     @Select("SELECT count(*) FROM alphafrog_index_info")
     int getIndexInfoCount();
 

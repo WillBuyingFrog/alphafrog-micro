@@ -1,5 +1,6 @@
 package world.willfrog.agent.tool;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
@@ -279,11 +280,14 @@ public class MarketDataTools {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("ts_code", item.getTsCode());
                 row.put("name", item.getName());
+                row.put("full_name", item.getFullname());
+                row.put("market", item.getMarket());
                 items.add(row);
             });
             return ok("searchIndex", Map.of(
                     "query", nvl(keyword),
                     "count", response.getItemsCount(),
+                    "returned", items.size(),
                     "items", items
             ));
         } catch (Exception e) {
@@ -452,7 +456,7 @@ public class MarketDataTools {
             return Map.of();
         }
         try {
-            return objectMapper.readValue(json, Map.class);
+            return objectMapper.readValue(json, new TypeReference<Map<String, Object>>() {});
         } catch (Exception e) {
             return Map.of();
         }
