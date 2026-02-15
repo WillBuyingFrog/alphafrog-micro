@@ -25,6 +25,7 @@ public class AgentModelCatalogService {
         AgentLlmProperties local = localConfigLoader.current().orElse(null);
         Map<String, AgentLlmProperties.Endpoint> endpoints = mergeEndpoints(properties, local);
         List<String> allowedModels = chooseModels(properties, local, endpoints);
+        log.info("listModels: endpoints={}, allowedModels={}", endpoints.keySet(), allowedModels);
         Map<String, AgentLlmProperties.ModelMetadata> metadataMap = mergeModelMetadata(properties, local, endpoints);
         Map<String, List<String>> endpointModels = listEndpointModels(endpoints);
         List<AgentLlmProperties.JudgeRoute> routes = chooseRoutes(properties, local);
@@ -178,7 +179,23 @@ public class AgentModelCatalogService {
                 }
             }
         }
-        merged.entrySet().removeIf(entry -> entry.getValue() == null || isBlank(entry.getValue().getBaseUrl()));
+        // 记录被过滤的 endpoint
+        List<String> removedEndpoints = new ArrayList<>();
+        merged.entrySet().removeIf(entry -> {
+            boolean shouldRemove = entry.getValue() == null || isBlank(entry.getValue().getBaseUrl());
+            if (shouldRemove) {
+                removedEndpoints.add(entry.getKey());
+            }
+            return shouldRemove;
+        });
+        if (!removedEndpoints.isEmpty()) {
+            log.warn("Removed endpoints without baseUrl: {}", removedEndpoints);
+        }
+        log.info("mergeEndpoints result: endpoints={}, modelCounts={}", 
+                merged.keySet(),
+                merged.entrySet().stream().collect(java.util.stream.Collectors.toMap(
+                    Map.Entry::getKey, 
+                    e -> e.getValue() != null && e.getValue().getModels() != null ? e.getValue().getModels().size() : 0)));
         return merged;
     }
 
@@ -215,7 +232,7 @@ public class AgentModelCatalogService {
         }
         
         if (!deduplicated.isEmpty()) {
-            log.debug("Collected models from endpoints: {}", deduplicated);
+            log.info("Collected {} models from endpoints: {}", deduplicated.size(), deduplicated);
             return new ArrayList<>(deduplicated);
         }
         
