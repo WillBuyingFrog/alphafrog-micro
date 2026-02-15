@@ -28,65 +28,35 @@ public class AgentModelCatalogService {
         log.info("listModels: endpoints={}, allowedModels={}", endpoints.keySet(), allowedModels);
         Map<String, AgentLlmProperties.ModelMetadata> metadataMap = mergeModelMetadata(properties, local, endpoints);
         Map<String, List<String>> endpointModels = listEndpointModels(endpoints);
-        List<AgentLlmProperties.JudgeRoute> routes = chooseRoutes(properties, local);
 
         LinkedHashMap<String, ModelCatalogItem> items = new LinkedHashMap<>();
-        if (!routes.isEmpty()) {
-            for (AgentLlmProperties.JudgeRoute route : routes) {
-                if (route == null) {
-                    continue;
-                }
-                String endpoint = normalize(route.getEndpointName());
-                if (endpoint == null || !endpoints.containsKey(endpoint)) {
-                    continue;
-                }
-                for (String model : route.getModels() == null ? List.<String>of() : route.getModels()) {
-                    String modelId = normalize(model);
-                    if (modelId == null) {
-                        continue;
-                    }
-                    if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
-                        continue;
-                    }
-                    addItem(items, metadataMap, endpoints, modelId, endpoint);
-                }
-            }
-        }
-
-        log.info("listModels debug: items.size before building={}, routes.isEmpty={}, endpointModels.isEmpty={}", 
-                items.size(), routes.isEmpty(), endpointModels.isEmpty());
         
-        if (items.isEmpty()) {
-            if (!endpointModels.isEmpty()) {
-                log.info("listModels debug: Building from endpointModels, keys={}", endpointModels.keySet());
-                for (String endpoint : endpoints.keySet()) {
-                    List<String> modelsOnEndpoint = endpointModels.getOrDefault(endpoint, List.of());
-                    log.info("listModels debug: Processing endpoint={}, modelsOnEndpoint={}", endpoint, modelsOnEndpoint);
-                    if (modelsOnEndpoint.isEmpty()) {
-                        log.info("listModels debug: Skipping endpoint {} (no models defined)", endpoint);
-                        continue;
-                    }
-                    for (String modelId : modelsOnEndpoint) {
-                        if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
-                            log.info("listModels debug: Skipping model {} (not in allowedModels)", modelId);
-                            continue;
-                        }
-                        String compositeId = modelId + "@" + endpoint;
-                        log.info("listModels debug: Adding model={}, endpoint={}, compositeId={}", modelId, endpoint, compositeId);
-                        addItem(items, metadataMap, endpoints, modelId, endpoint);
-                    }
+        // 构建模型 -> endpoint 的映射
+        // 优先根据模型在哪个 endpoint 的 models 中定义来确定
+        Map<String, String> modelEndpointMap = new LinkedHashMap<>();
+        for (Map.Entry<String, List<String>> entry : endpointModels.entrySet()) {
+            String endpoint = entry.getKey();
+            for (String modelId : entry.getValue()) {
+                if (!allowedModels.isEmpty() && !allowedModels.contains(modelId)) {
+                    continue;
                 }
-            } else {
-                log.info("listModels debug: Building from allowedModels for all endpoints");
-                for (String endpoint : endpoints.keySet()) {
-                    for (String modelId : allowedModels) {
-                        addItem(items, metadataMap, endpoints, modelId, endpoint);
-                    }
-                }
+                // 优先保留第一个遇到的 endpoint（或按配置顺序）
+                modelEndpointMap.putIfAbsent(modelId, endpoint);
             }
         }
+        
+        // 对于未在 endpointModels 中找到的 allowedModels，使用 defaultEndpoint
+        String defaultEndpoint = local != null && !isBlank(local.getDefaultEndpoint()) 
+                ? normalize(local.getDefaultEndpoint()) 
+                : endpoints.keySet().iterator().next();
+        
+        // 添加所有允许使用的模型
+        for (String modelId : allowedModels) {
+            String endpoint = modelEndpointMap.getOrDefault(modelId, defaultEndpoint);
+            addItem(items, metadataMap, endpoints, modelId, endpoint);
+        }
 
-        log.info("listModels debug: Returning {} items, keys={}", items.size(), items.keySet());
+        log.info("listModels: Returning {} items, keys={}", items.size(), items.keySet());
         return new ArrayList<>(items.values());
     }
 
