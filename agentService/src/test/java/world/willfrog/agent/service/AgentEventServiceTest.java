@@ -27,6 +27,8 @@ class AgentEventServiceTest {
     private StringRedisTemplate redisTemplate;
     @Mock
     private AgentLlmLocalConfigLoader llmLocalConfigLoader;
+    @Mock
+    private AgentMessageService messageService;
 
     private AgentEventService service;
     private ObjectMapper objectMapper;
@@ -39,7 +41,8 @@ class AgentEventServiceTest {
                 eventMapper,
                 objectMapper,
                 redisTemplate,
-                llmLocalConfigLoader
+                llmLocalConfigLoader,
+                messageService
         );
     }
 

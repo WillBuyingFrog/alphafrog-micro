@@ -60,6 +60,8 @@ class AgentDubboServiceImplTest {
     private AgentCreditService creditService;
     @Mock
     private UserDao userDao;
+    @Mock
+    private AgentMessageService messageService;
 
     private AgentDubboServiceImpl service;
 
@@ -77,7 +79,8 @@ class AgentDubboServiceImplTest {
                 modelCatalogService,
                 creditService,
                 userDao,
-                new ObjectMapper()
+                new ObjectMapper(),
+                messageService
         );
         ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
         ReflectionTestUtils.setField(service, "artifactRetentionNormalDays", 7);

@@ -22,6 +22,8 @@ import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.service.AgentMessageService;
+import world.willfrog.agent.service.AgentContextCompressor;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.List;
@@ -64,6 +66,10 @@ class LinearWorkflowExecutorTest {
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
     private ChatLanguageModel model;
+    @Mock
+    private AgentMessageService messageService;
+    @Mock
+    private AgentContextCompressor contextCompressor;
 
     private LinearWorkflowExecutor executor;
 
@@ -84,6 +90,8 @@ class LinearWorkflowExecutorTest {
                 creditService,
                 localConfigLoader,
                 new AgentLlmProperties(),
+                messageService,
+                contextCompressor,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);

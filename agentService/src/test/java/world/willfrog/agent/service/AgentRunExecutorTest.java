@@ -58,6 +58,8 @@ class AgentRunExecutorTest {
     private LinearWorkflowExecutor workflowExecutor;
     @Mock
     private ChatLanguageModel chatLanguageModel;
+    @Mock
+    private AgentMessageService messageService;
 
     private AgentRunExecutor executor;
 
@@ -74,6 +76,7 @@ class AgentRunExecutorTest {
                 creditService,
                 todoPlanner,
                 workflowExecutor,
+                messageService,
                 new ObjectMapper()
         );
 

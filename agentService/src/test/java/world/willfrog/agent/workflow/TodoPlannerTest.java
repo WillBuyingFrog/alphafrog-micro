@@ -21,6 +21,8 @@ import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.service.AgentMessageService;
+import world.willfrog.agent.service.AgentContextCompressor;
 
 import java.util.List;
 import java.util.Map;
@@ -56,6 +58,10 @@ class TodoPlannerTest {
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
     private ChatLanguageModel model;
+    @Mock
+    private AgentMessageService messageService;
+    @Mock
+    private AgentContextCompressor contextCompressor;
 
     private TodoPlanner planner;
 
@@ -70,6 +76,8 @@ class TodoPlannerTest {
                 observabilityService,
                 localConfigLoader,
                 new AgentLlmProperties(),
+                messageService,
+                contextCompressor,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(planner, "defaultMaxTodos", 2);
