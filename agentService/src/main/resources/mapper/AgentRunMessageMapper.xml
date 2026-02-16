@@ -30,7 +30,7 @@
             #{seq},
             #{role},
             #{content},
-            COALESCE(#{metaJson}, '{}'),
+            COALESCE(#{metaJson}::jsonb, '{}'),
             COALESCE(#{msgType}, 'follow_up'),
             COALESCE(#{createdAt}, NOW())
         )

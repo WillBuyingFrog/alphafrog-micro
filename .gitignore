@@ -87,3 +87,5 @@ agentService/config/agent-llm.local.json
 
 # container runtime data
 /data
+
+.token.local
