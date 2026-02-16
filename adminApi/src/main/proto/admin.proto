@@ -226,6 +226,126 @@ message UpdateUserStatusResponse {
   UserStatusEffectiveActions effective_actions = 8;
 }
 
+// ========== Agent 运行监控 ==========
+message AdminAgentRun {
+  string run_id = 1;
+  string user_id = 2;
+  string username = 3;
+  string status = 4;
+  string message = 5;
+  int32 current_step = 6;
+  int32 max_steps = 7;
+  string started_at = 8;
+  string updated_at = 9;
+  string completed_at = 10;
+  int64 duration_ms = 11;
+  int32 total_tokens = 12;
+  int32 tool_calls = 13;
+  bool has_artifacts = 14;
+  string ext = 15;
+}
+
+message ListAdminAgentRunsRequest {
+  string status = 1;
+  string user_id = 2;
+  int32 page = 3;
+  int32 page_size = 4;
+  int32 days = 5;
+}
+
+message ListAdminAgentRunsResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  repeated AdminAgentRun runs = 4;
+  int32 total = 5;
+  int32 page = 6;
+  int32 page_size = 7;
+}
+
+message GetAdminAgentRunRequest {
+  string run_id = 1;
+}
+
+message GetAdminAgentRunResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  AdminAgentRun run = 4;
+  string plan_json = 5;
+  string snapshot_json = 6;
+  string last_error = 7;
+}
+
+message StopAdminAgentRunRequest {
+  string run_id = 1;
+  string operator_id = 2;
+  string reason = 3;
+}
+
+message StopAdminAgentRunResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  string run_id = 4;
+  string new_status = 5;
+}
+
+// ========== 系统配置管理 ==========
+message SystemConfigItem {
+  string key = 1;
+  string value = 2;
+  string description = 3;
+  string category = 4;
+  bool editable = 5;
+}
+
+message GetSystemConfigRequest {}
+
+message GetSystemConfigResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  repeated SystemConfigItem configs = 4;
+  string config_json = 5;
+}
+
+message UpdateSystemConfigRequest {
+  string key = 1;
+  string value = 2;
+  string operator_id = 3;
+  string reason = 4;
+}
+
+message UpdateSystemConfigResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  SystemConfigItem config = 4;
+}
+
+// ========== 用户额度直接调整 ==========
+message AdjustUserCreditRequest {
+  string user_id = 1;
+  int32 delta = 2;
+  string reason = 3;
+  string operator_id = 4;
+  string idempotency_key = 5;
+}
+
+message AdjustUserCreditResponse {
+  bool success = 1;
+  string message = 2;
+  string error_code = 3;
+  string user_id = 4;
+  int32 credit_before = 5;
+  int32 credit_after = 6;
+  int32 delta = 7;
+  string ledger_id = 8;
+  string audit_id = 9;
+  bool idempotent_replay = 10;
+}
+
 service AdminService {
   rpc validateAdminLogin(AdminLoginRequest) returns (AdminLoginResponse);
   rpc createAdmin(AdminCreateRequest) returns (AdminActionResponse);
@@ -239,4 +359,16 @@ service AdminService {
   rpc listCreditLedger(ListCreditLedgerRequest) returns (ListCreditLedgerResponse);
   rpc listUsers(ListUsersRequest) returns (ListUsersResponse);
   rpc updateUserStatus(UpdateUserStatusRequest) returns (UpdateUserStatusResponse);
+
+  // Agent 运行监控
+  rpc listAgentRuns(ListAdminAgentRunsRequest) returns (ListAdminAgentRunsResponse);
+  rpc getAgentRun(GetAdminAgentRunRequest) returns (GetAdminAgentRunResponse);
+  rpc stopAgentRun(StopAdminAgentRunRequest) returns (StopAdminAgentRunResponse);
+
+  // 系统配置管理
+  rpc getSystemConfig(GetSystemConfigRequest) returns (GetSystemConfigResponse);
+  rpc updateSystemConfig(UpdateSystemConfigRequest) returns (UpdateSystemConfigResponse);
+
+  // 用户额度直接调整
+  rpc adjustUserCredit(AdjustUserCreditRequest) returns (AdjustUserCreditResponse);
 }

@@ -551,6 +551,222 @@ public class AdminController {
         return map;
     }
 
+    // ========== Agent 运行监控 ==========
+
+    @GetMapping("/agent-runs")
+    public ResponseEntity<?> listAgentRuns(Authentication authentication,
+                                           @RequestParam(required = false) String status,
+                                           @RequestParam(required = false) String userId,
+                                           @RequestParam(required = false, defaultValue = "1") Integer page,
+                                           @RequestParam(required = false, defaultValue = "20") Integer pageSize,
+                                           @RequestParam(required = false, defaultValue = "30") Integer days) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        ListAdminAgentRunsResponse response = adminService.listAgentRuns(
+                ListAdminAgentRunsRequest.newBuilder()
+                        .setStatus(nvl(status))
+                        .setUserId(nvl(userId))
+                        .setPage(page == null ? 1 : page)
+                        .setPageSize(pageSize == null ? 20 : Math.min(pageSize, 100))
+                        .setDays(days == null ? 30 : days)
+                        .build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        List<Map<String, Object>> runs = response.getRunsList().stream()
+                .map(this::convertAdminAgentRunToMap)
+                .collect(Collectors.toList());
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("runs", runs);
+        payload.put("total", response.getTotal());
+        payload.put("page", response.getPage());
+        payload.put("pageSize", response.getPageSize());
+        return ResponseEntity.ok(payload);
+    }
+
+    @GetMapping("/agent-runs/{runId}")
+    public ResponseEntity<?> getAgentRun(Authentication authentication,
+                                         @PathVariable String runId) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        GetAdminAgentRunResponse response = adminService.getAgentRun(
+                GetAdminAgentRunRequest.newBuilder()
+                        .setRunId(runId)
+                        .build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("run", convertAdminAgentRunToMap(response.getRun()));
+        payload.put("planJson", response.getPlanJson());
+        payload.put("snapshotJson", response.getSnapshotJson());
+        payload.put("lastError", response.getLastError());
+        return ResponseEntity.ok(payload);
+    }
+
+    @PostMapping("/agent-runs/{runId}/stop")
+    public ResponseEntity<?> stopAgentRun(Authentication authentication,
+                                          @PathVariable String runId,
+                                          @RequestBody(required = false) Map<String, Object> requestBody) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        String operatorId = adminUser == null || adminUser.getUserId() == null ? "" : String.valueOf(adminUser.getUserId());
+        String reason = requestBody == null ? "" : nvl(requestBody.get("reason"));
+
+        StopAdminAgentRunResponse response = adminService.stopAgentRun(
+                StopAdminAgentRunRequest.newBuilder()
+                        .setRunId(runId)
+                        .setOperatorId(operatorId)
+                        .setReason(reason)
+                        .build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("runId", response.getRunId());
+        payload.put("newStatus", response.getNewStatus());
+        payload.put("message", response.getMessage());
+        return ResponseEntity.ok(payload);
+    }
+
+    // ========== 系统配置管理 ==========
+
+    @GetMapping("/system-config")
+    public ResponseEntity<?> getSystemConfig(Authentication authentication) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        GetSystemConfigResponse response = adminService.getSystemConfig(
+                GetSystemConfigRequest.newBuilder().build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        List<Map<String, Object>> configs = response.getConfigsList().stream()
+                .map(this::convertSystemConfigItemToMap)
+                .collect(Collectors.toList());
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("configs", configs);
+        payload.put("configJson", response.getConfigJson());
+        return ResponseEntity.ok(payload);
+    }
+
+    @PutMapping("/system-config")
+    public ResponseEntity<?> updateSystemConfig(Authentication authentication,
+                                                @RequestBody Map<String, Object> requestBody) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        String key = requestBody == null ? "" : nvl(requestBody.get("key"));
+        String value = requestBody == null ? "" : nvl(requestBody.get("value"));
+        String reason = requestBody == null ? "" : nvl(requestBody.get("reason"));
+
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        String operatorId = adminUser == null || adminUser.getUserId() == null ? "" : String.valueOf(adminUser.getUserId());
+
+        UpdateSystemConfigResponse response = adminService.updateSystemConfig(
+                UpdateSystemConfigRequest.newBuilder()
+                        .setKey(key)
+                        .setValue(value)
+                        .setOperatorId(operatorId)
+                        .setReason(reason)
+                        .build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("config", convertSystemConfigItemToMap(response.getConfig()));
+        payload.put("message", response.getMessage());
+        return ResponseEntity.ok(payload);
+    }
+
+    // ========== 用户额度直接调整 ==========
+
+    @PostMapping("/users/{userId}/credit-adjust")
+    public ResponseEntity<?> adjustUserCredit(Authentication authentication,
+                                              @PathVariable String userId,
+                                              @RequestHeader("Idempotency-Key") String idempotencyKey,
+                                              @RequestBody Map<String, Object> requestBody) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (idempotencyKey == null || idempotencyKey.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "Idempotency-Key is required"));
+        }
+        Integer delta = readInt(requestBody == null ? null : requestBody.get("delta"));
+        String reason = requestBody == null ? "" : nvl(requestBody.get("reason"));
+
+        if (delta == null) {
+            return ResponseEntity.badRequest().body(Map.of("error", "delta is required"));
+        }
+        if (reason.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "reason is required"));
+        }
+
+        User adminUser = authService.getUserByUsername(authentication.getName());
+        String operatorId = adminUser == null || adminUser.getUserId() == null ? "" : String.valueOf(adminUser.getUserId());
+
+        AdjustUserCreditResponse response = adminService.adjustUserCredit(
+                AdjustUserCreditRequest.newBuilder()
+                        .setUserId(userId)
+                        .setDelta(delta)
+                        .setReason(reason)
+                        .setOperatorId(operatorId)
+                        .setIdempotencyKey(idempotencyKey)
+                        .build()
+        );
+        if (!response.getSuccess()) {
+            return buildError(response.getErrorCode(), response.getMessage());
+        }
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("userId", response.getUserId());
+        payload.put("creditBefore", response.getCreditBefore());
+        payload.put("creditAfter", response.getCreditAfter());
+        payload.put("delta", response.getDelta());
+        payload.put("ledgerId", response.getLedgerId());
+        payload.put("auditId", response.getAuditId());
+        payload.put("idempotentReplay", response.getIdempotentReplay());
+        payload.put("message", response.getMessage());
+        return ResponseEntity.ok(payload);
+    }
+
+    private Map<String, Object> convertAdminAgentRunToMap(AdminAgentRun run) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("runId", run.getRunId());
+        map.put("userId", run.getUserId());
+        map.put("username", run.getUsername());
+        map.put("status", run.getStatus());
+        map.put("message", run.getMessage());
+        map.put("currentStep", run.getCurrentStep());
+        map.put("maxSteps", run.getMaxSteps());
+        map.put("startedAt", run.getStartedAt());
+        map.put("updatedAt", run.getUpdatedAt());
+        map.put("completedAt", run.getCompletedAt());
+        map.put("durationMs", run.getDurationMs());
+        map.put("totalTokens", run.getTotalTokens());
+        map.put("toolCalls", run.getToolCalls());
+        map.put("hasArtifacts", run.getHasArtifacts());
+        return map;
+    }
+
+    private Map<String, Object> convertSystemConfigItemToMap(SystemConfigItem config) {
+        Map<String, Object> map = new HashMap<>();
+        map.put("key", config.getKey());
+        map.put("value", config.getValue());
+        map.put("description", config.getDescription());
+        map.put("category", config.getCategory());
+        map.put("editable", config.getEditable());
+        return map;
+    }
+
     private boolean isAdmin(Authentication authentication) {
         if (authentication == null || !authentication.isAuthenticated()) {
             return false;

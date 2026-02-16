@@ -54,6 +54,11 @@ public interface UserDao {
     int increaseCreditByUserId(@Param("userId") Long userId, @Param("delta") int delta);
 
     @Update("UPDATE alphafrog_user " +
+            "SET credit = GREATEST(0, COALESCE(credit, 0) - #{delta}) " +
+            "WHERE user_id = #{userId}")
+    int decreaseCreditByUserId(@Param("userId") Long userId, @Param("delta") int delta);
+
+    @Update("UPDATE alphafrog_user " +
             "SET password = #{encodedPassword} " +
             "WHERE user_id = #{userId}")
     int updatePasswordByUserId(@Param("userId") Long userId, @Param("encodedPassword") String encodedPassword);
