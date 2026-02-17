@@ -6,6 +6,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
@@ -14,7 +15,9 @@ import world.willfrog.agent.model.AgentRunStatus;
 
 import java.time.OffsetDateTime;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @Service
@@ -41,9 +44,24 @@ public class AgentEventService {
     private final ObjectMapper objectMapper;
     /** Redis 客户端：用于事件序号原子递增。 */
     private final StringRedisTemplate redisTemplate;
+    /** 本地 llm/runtim 配置加载器。 */
+    private final AgentLlmLocalConfigLoader llmLocalConfigLoader;
+    private final AgentMessageService messageService;
 
     @Value("${agent.run.ttl-minutes:60}")
     private int ttlMinutes;
+
+    @Value("${agent.run.interrupted-ttl-days:7}")
+    private int interruptedTtlDays;
+
+    @Value("${agent.run.checkpoint-version:v2}")
+    private String checkpointVersion;
+
+    @Value("${agent.event.payload.max-chars:10000}")
+    private int payloadMaxChars;
+
+    @Value("${agent.event.payload.preview-chars:4096}")
+    private int payloadPreviewChars;
 
     /**
      * 创建新的 run 记录并写入初始事件。
@@ -54,6 +72,7 @@ public class AgentEventService {
      * @param idempotencyKey 幂等键
      * @param modelName      模型名（可为空，后续会用默认）
      * @param endpointName   端点名（可为空，后续会用默认）
+     * @param debugMode      run 级调试模式开关
      * @return 创建后的 run
      */
     public AgentRun createRun(String userId,
@@ -61,7 +80,11 @@ public class AgentEventService {
                               String contextJson,
                               String idempotencyKey,
                               String modelName,
-                              String endpointName) {
+                              String endpointName,
+                              boolean captureLlmRequests,
+                              String provider,
+                              int plannerCandidateCount,
+                              boolean debugMode) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -70,6 +93,13 @@ public class AgentEventService {
         ext.put("idempotency_key", idempotencyKey == null ? "" : idempotencyKey);
         ext.put("model_name", modelName == null ? "" : modelName);
         ext.put("endpoint_name", endpointName == null ? "" : endpointName);
+        ext.put("capture_llm_requests", captureLlmRequests);
+        ext.put("debug_mode", debugMode);
+        ext.put("provider", provider == null ? "" : provider.trim());
+        if (plannerCandidateCount > 0) {
+            ext.put("planner_candidate_count", plannerCandidateCount);
+        }
+        ext.put("checkpoint_version", resolveCheckpointVersion());
 
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -85,6 +115,15 @@ public class AgentEventService {
 
         runMapper.insert(run);
         append(runId, userId, "RUN_RECEIVED", ext);
+
+        // 写入首条用户消息（initial）
+        try {
+            messageService.createInitialMessage(runId, message);
+        } catch (Exception e) {
+            // 消息写入失败不影响主流程，仅记录日志
+            log.warn("Failed to create initial message for runId={}, but continuing: {}", runId, e.getMessage());
+        }
+
         return runMapper.findByIdAndUser(runId, userId);
     }
 
@@ -102,6 +141,10 @@ public class AgentEventService {
         }
         if (run.getStatus() == AgentRunStatus.CANCELED) {
             log.info("Run canceled, stop: {}", runId);
+            return false;
+        }
+        if (run.getStatus() == AgentRunStatus.EXPIRED) {
+            log.info("Run expired, stop: {}", runId);
             return false;
         }
         if (run.getStatus() == AgentRunStatus.WAITING) {
@@ -134,7 +177,8 @@ public class AgentEventService {
         event.setRunId(runId);
         event.setSeq(nextSeq);
         event.setEventType(eventType);
-        event.setPayloadJson(payload instanceof String ? (String) payload : writeJson(payload));
+        String payloadJson = payload instanceof String ? (String) payload : writeJson(payload);
+        event.setPayloadJson(normalizePayloadJson(eventType, payloadJson));
         try {
             eventMapper.insert(event);
         } catch (Exception e) {
@@ -167,6 +211,28 @@ public class AgentEventService {
     }
 
     /**
+     * 会话标题优先级：
+     * 1) ext.title（重命名后显示名）
+     * 2) ext.user_goal（历史默认标题）
+     */
+    public String extractRunDisplayTitle(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return "";
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object title = map.get("title");
+            if (title != null && !String.valueOf(title).isBlank()) {
+                return String.valueOf(title).trim();
+            }
+            Object userGoal = map.get("user_goal");
+            return userGoal == null ? "" : String.valueOf(userGoal);
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    /**
      * 从 ext JSON 中提取模型名。
      *
      * @param extJson ext 字段 JSON
@@ -187,12 +253,273 @@ public class AgentEventService {
     }
 
     /**
+     * run 级开关：是否抓取 LLM 原始请求。
+     * 支持 ext 明文字段与 context_json 回退读取。
+     */
+    public boolean extractCaptureLlmRequests(String extJson) {
+        return extractBooleanFromExt(extJson, "capture_llm_requests", "captureLlmRequests", "capture_llm_requests");
+    }
+
+    /**
+     * run 级调试模式：
+     * 开启后会把关键中间态写入微服务日志，便于线上问题复盘。
+     */
+    public boolean extractDebugMode(String extJson) {
+        return extractBooleanFromExt(extJson, "debug_mode", "debugMode", "debug_mode");
+    }
+
+    public List<String> extractOpenRouterProviderOrder(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return List.of();
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object raw = map.get("provider");
+            List<String> providers = parseProviderOrderValue(raw);
+            if (!providers.isEmpty()) {
+                return providers;
+            }
+            Object contextRaw = map.get("context_json");
+            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
+                return List.of();
+            }
+            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
+            return parseProviderOrderValue(contextMap.get("provider"));
+        } catch (Exception e) {
+            return List.of();
+        }
+    }
+
+    public int extractPlannerCandidateCount(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return 0;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Object raw = map.get("planner_candidate_count");
+            if (raw == null) {
+                return 0;
+            }
+            if (raw instanceof Number number) {
+                return Math.max(0, number.intValue());
+            }
+            String text = String.valueOf(raw).trim();
+            if (text.isBlank()) {
+                return 0;
+            }
+            return Math.max(0, Integer.parseInt(text));
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    /**
+     * 提取 run 级 config 配置。
+     * <p>
+     * 默认值：
+     * - webSearch.enabled = false
+     * - codeInterpreter.enabled = true（保持历史行为兼容）
+     * - codeInterpreter.maxCredits = 0
+     * - smartRetrieval.enabled = false
+     */
+    public RunConfig extractRunConfig(String extJson) {
+        if (extJson == null || extJson.isBlank()) {
+            return RunConfig.defaults();
+        }
+        try {
+            Map<?, ?> extMap = objectMapper.readValue(extJson, Map.class);
+            Map<?, ?> contextMap = mapFromObject(extMap.get("context_json"));
+            Map<?, ?> configMap = mapFromObject(contextMap.get("config"));
+            if (configMap.isEmpty()) {
+                configMap = mapFromObject(extMap.get("config"));
+            }
+            if (configMap.isEmpty()) {
+                return RunConfig.defaults();
+            }
+            Map<?, ?> webSearch = readSection(configMap, "webSearch", "web_search");
+            Map<?, ?> codeInterpreter = readSection(configMap, "codeInterpreter", "code_interpreter");
+            Map<?, ?> smartRetrieval = readSection(configMap, "smartRetrieval", "smart_retrieval");
+
+            boolean webSearchEnabled = readBoolean(webSearch, "enabled", "enabled", false);
+            boolean codeInterpreterEnabled = readBoolean(codeInterpreter, "enabled", "enabled", true);
+            int codeInterpreterMaxCredits = readInt(codeInterpreter, "maxCredits", "max_credits", 0);
+            boolean smartRetrievalEnabled = readBoolean(smartRetrieval, "enabled", "enabled", false);
+
+            return new RunConfig(
+                    webSearchEnabled,
+                    codeInterpreterEnabled,
+                    Math.max(0, codeInterpreterMaxCredits),
+                    smartRetrievalEnabled
+            );
+        } catch (Exception e) {
+            return RunConfig.defaults();
+        }
+    }
+
+    public boolean extractWebSearchEnabled(String extJson) {
+        return extractRunConfig(extJson).webSearchEnabled();
+    }
+
+    public boolean extractCodeInterpreterEnabled(String extJson) {
+        return extractRunConfig(extJson).codeInterpreterEnabled();
+    }
+
+    public int extractCodeInterpreterMaxCredits(String extJson) {
+        return extractRunConfig(extJson).codeInterpreterMaxCredits();
+    }
+
+    public boolean extractSmartRetrievalEnabled(String extJson) {
+        return extractRunConfig(extJson).smartRetrievalEnabled();
+    }
+
+    private List<String> parseProviderOrderValue(Object raw) {
+        if (raw == null) {
+            return List.of();
+        }
+        String text = String.valueOf(raw).trim();
+        if (text.isBlank()) {
+            return List.of();
+        }
+        List<String> providers = new ArrayList<>();
+        for (String token : text.split(",")) {
+            String provider = token == null ? "" : token.trim();
+            if (!provider.isBlank()) {
+                providers.add(provider);
+            }
+        }
+        return providers;
+    }
+
+    private boolean extractBooleanFromExt(String extJson,
+                                          String extKey,
+                                          String contextKeyCamel,
+                                          String contextKeySnake) {
+        if (extJson == null || extJson.isBlank()) {
+            return false;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(extJson, Map.class);
+            Boolean direct = toBoolean(map.get(extKey));
+            if (Boolean.TRUE.equals(direct)) {
+                return true;
+            }
+            Object contextRaw = map.get("context_json");
+            if (!(contextRaw instanceof String contextJson) || contextJson.isBlank()) {
+                return Boolean.TRUE.equals(direct);
+            }
+            Map<?, ?> contextMap = objectMapper.readValue(contextJson, Map.class);
+            Boolean contextValue = toBoolean(contextMap.get(contextKeyCamel));
+            if (contextValue != null) {
+                return contextValue || Boolean.TRUE.equals(direct);
+            }
+            return Boolean.TRUE.equals(direct) || Boolean.TRUE.equals(toBoolean(contextMap.get(contextKeySnake)));
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    private Map<?, ?> mapFromObject(Object raw) {
+        if (raw instanceof Map<?, ?> map) {
+            return map;
+        }
+        if (!(raw instanceof String text) || text.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object parsed = objectMapper.readValue(text, Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                return map;
+            }
+            return Map.of();
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private Map<?, ?> readSection(Map<?, ?> parent, String keyCamel, String keySnake) {
+        if (parent == null || parent.isEmpty()) {
+            return Map.of();
+        }
+        Object value = parent.get(keyCamel);
+        if (value == null) {
+            value = parent.get(keySnake);
+        }
+        if (value instanceof Map<?, ?> map) {
+            return map;
+        }
+        return Map.of();
+    }
+
+    private boolean readBoolean(Map<?, ?> map, String keyCamel, String keySnake, boolean defaultValue) {
+        if (map == null || map.isEmpty()) {
+            return defaultValue;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        Boolean boolValue = toBoolean(value);
+        return boolValue == null ? defaultValue : boolValue;
+    }
+
+    private int readInt(Map<?, ?> map, String keyCamel, String keySnake, int defaultValue) {
+        if (map == null || map.isEmpty()) {
+            return defaultValue;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        if (value == null) {
+            return defaultValue;
+        }
+        if (value instanceof Number number) {
+            return number.intValue();
+        }
+        try {
+            return Integer.parseInt(String.valueOf(value).trim());
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
+
+    private Boolean toBoolean(Object value) {
+        if (value == null) {
+            return null;
+        }
+        if (value instanceof Boolean boolValue) {
+            return boolValue;
+        }
+        return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    /**
      * 计算下一次 TTL 过期时间。
      *
      * @return OffsetDateTime
      */
     public OffsetDateTime nextTtlExpiresAt() {
         return OffsetDateTime.now().plusMinutes(ttlMinutes);
+    }
+
+    public OffsetDateTime nextInterruptedExpiresAt() {
+        return OffsetDateTime.now().plusDays(resolveInterruptedTtlDays());
+    }
+
+    public boolean shouldMarkExpired(AgentRun run) {
+        if (run == null) {
+            return false;
+        }
+        AgentRunStatus status = run.getStatus();
+        if (status != AgentRunStatus.WAITING
+                && status != AgentRunStatus.FAILED
+                && status != AgentRunStatus.CANCELED) {
+            return false;
+        }
+        if (run.getTtlExpiresAt() == null) {
+            return false;
+        }
+        return OffsetDateTime.now().isAfter(run.getTtlExpiresAt());
     }
 
     /**
@@ -252,6 +579,57 @@ public class AgentEventService {
     }
 
     /**
+     * 规范化事件 payload。
+     * <p>
+     * 策略：
+     * 1. 默认允许原样写入；
+     * 2. 当 payload 长度超过上限时，写入“截断摘要对象”，避免事件体无限增长；
+     * 3. 摘要对象保留 event_type、原始长度和预览内容，便于排查。
+     *
+     * @param eventType   事件类型
+     * @param payloadJson 原始 payload JSON
+     * @return 可落库的 payload JSON
+     */
+    private String normalizePayloadJson(String eventType, String payloadJson) {
+        String normalized = payloadJson == null || payloadJson.isBlank() ? "{}" : payloadJson;
+        if (payloadMaxChars <= 0 || normalized.length() <= payloadMaxChars) {
+            return normalized;
+        }
+
+        int previewChars = payloadPreviewChars <= 0 ? 1024 : payloadPreviewChars;
+        previewChars = Math.min(previewChars, payloadMaxChars);
+        previewChars = Math.max(previewChars, 128);
+        String preview = normalized.substring(0, Math.min(previewChars, normalized.length()));
+
+        Map<String, Object> compact = new HashMap<>();
+        compact.put("truncated", true);
+        compact.put("event_type", eventType == null ? "" : eventType);
+        compact.put("original_size", normalized.length());
+        compact.put("max_size", payloadMaxChars);
+        compact.put("payload_preview", preview);
+        String compactJson = writeJson(compact);
+        if (compactJson.length() <= payloadMaxChars) {
+            log.warn("Event payload truncated: eventType={}, originalSize={}, maxSize={}",
+                    eventType, normalized.length(), payloadMaxChars);
+            return compactJson;
+        }
+
+        // 极端情况下继续缩减，确保落库字符串可控。
+        int adjustedPreview = Math.max(64, payloadMaxChars / 4);
+        compact.put("payload_preview", normalized.substring(0, Math.min(adjustedPreview, normalized.length())));
+        compactJson = writeJson(compact);
+        if (compactJson.length() <= payloadMaxChars) {
+            log.warn("Event payload truncated with compact preview: eventType={}, originalSize={}, maxSize={}",
+                    eventType, normalized.length(), payloadMaxChars);
+            return compactJson;
+        }
+
+        log.warn("Event payload replaced by minimal marker: eventType={}, originalSize={}, maxSize={}",
+                eventType, normalized.length(), payloadMaxChars);
+        return "{\"truncated\":true}";
+    }
+
+    /**
      * 从 ext JSON 里读取指定字段，缺失或异常时返回空字符串。
      *
      * @param extJson ext 字段 JSON
@@ -268,6 +646,37 @@ public class AgentEventService {
             return v == null ? "" : String.valueOf(v);
         } catch (Exception e) {
             return "";
+        }
+    }
+
+    private int resolveInterruptedTtlDays() {
+        int local = llmLocalConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getResume)
+                .map(AgentLlmProperties.Resume::getInterruptedTtlDays)
+                .orElse(0);
+        if (local > 0) {
+            return local;
+        }
+        return interruptedTtlDays > 0 ? interruptedTtlDays : 7;
+    }
+
+    private String resolveCheckpointVersion() {
+        String version = checkpointVersion == null ? "" : checkpointVersion.trim();
+        if (version.isBlank()) {
+            return "v1";
+        }
+        return version;
+    }
+
+    public record RunConfig(
+            boolean webSearchEnabled,
+            boolean codeInterpreterEnabled,
+            int codeInterpreterMaxCredits,
+            boolean smartRetrievalEnabled
+    ) {
+        public static RunConfig defaults() {
+            return new RunConfig(false, true, 0, false);
         }
     }
 

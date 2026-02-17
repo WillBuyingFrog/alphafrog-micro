@@ -7,7 +7,7 @@ public record AgentArtifactResponse(
         String contentType,
         String url,
         String metaJson,
-        String createdAt
+        String createdAt,
+        Long expiresAtMillis
 ) {
 }
-

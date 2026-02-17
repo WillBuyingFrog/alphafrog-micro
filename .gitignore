@@ -58,6 +58,9 @@ test-secrets.yml
 # Coding Agent configs
 
 /.qwen
+/.qoder
+/.kimi
+.mcp.json
 /.cursor
 /.codex
 /.kilocode
@@ -84,3 +87,5 @@ agentService/config/agent-llm.local.json
 
 # container runtime data
 /data
+
+.token.local

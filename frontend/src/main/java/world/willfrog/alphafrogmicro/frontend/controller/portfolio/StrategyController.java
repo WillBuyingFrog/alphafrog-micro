@@ -35,8 +35,6 @@ import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyCreateRequest;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyNavResponse;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyResponse;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyTargetResponse;
-import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyTargetUpsertItem;
-import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyTargetUpsertRequest;
 import world.willfrog.alphafrogmicro.portfolioservice.dto.StrategyUpdateRequest;
 
 import java.math.BigDecimal;
@@ -197,7 +195,7 @@ public class StrategyController {
     @PostMapping("/{id}/targets:bulk-upsert")
     public ResponseWrapper<List<StrategyTargetResponse>> upsertTargets(Authentication authentication,
                                                                        @PathVariable("id") Long strategyId,
-                                                                       @RequestBody StrategyTargetUpsertRequest request) {
+                                                                       @RequestBody TargetBulkUpsertRequest request) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -211,7 +209,7 @@ public class StrategyController {
                     .setUserId(userId)
                     .setStrategyId(strategyId);
             if (request.getItems() != null) {
-                for (StrategyTargetUpsertItem item : request.getItems()) {
+                for (TargetBulkUpsertItem item : request.getItems()) {
                     builder.addItems(StrategyTargetMessage.newBuilder()
                             .setSymbol(nvl(item.getSymbol()))
                             .setSymbolType(nvl(item.getSymbolType()))
@@ -509,5 +507,56 @@ public class StrategyController {
             return null;
         }
         return OffsetDateTime.parse(value);
+    }
+
+    public static class TargetBulkUpsertRequest {
+        private List<TargetBulkUpsertItem> items;
+
+        public List<TargetBulkUpsertItem> getItems() {
+            return items;
+        }
+
+        public void setItems(List<TargetBulkUpsertItem> items) {
+            this.items = items;
+        }
+    }
+
+    public static class TargetBulkUpsertItem {
+        private String symbol;
+        private String symbolType;
+        private BigDecimal targetWeight;
+        private LocalDate effectiveDate;
+
+        public String getSymbol() {
+            return symbol;
+        }
+
+        public void setSymbol(String symbol) {
+            this.symbol = symbol;
+        }
+
+        public String getSymbolType() {
+            return symbolType;
+        }
+
+        public void setSymbolType(String symbolType) {
+            this.symbolType = symbolType;
+        }
+
+        public BigDecimal getTargetWeight() {
+            return targetWeight;
+        }
+
+        public void setTargetWeight(BigDecimal targetWeight) {
+            this.targetWeight = targetWeight;
+        }
+
+        public LocalDate getEffectiveDate() {
+            return effectiveDate;
+        }
+
+        public void setEffectiveDate(LocalDate effectiveDate) {
+            this.effectiveDate = effectiveDate;
+        }
     }
 }

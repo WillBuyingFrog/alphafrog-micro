@@ -5,6 +5,8 @@ import lombok.Getter;
 import lombok.NoArgsConstructor;
 import lombok.Setter;
 
+import java.time.OffsetDateTime;
+
 @Entity
 @NoArgsConstructor
 @Getter
@@ -36,4 +38,12 @@ public class User {
     private Integer userLevel;
 
     private Integer credit;
+
+    private String status;
+
+    private OffsetDateTime disabledAt;
+
+    private String disabledReason;
+
+    private OffsetDateTime statusUpdatedAt;
 }

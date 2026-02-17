@@ -1,5 +1,6 @@
 package world.willfrog.agent.graph;
 
+import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.SystemMessage;
@@ -11,13 +12,15 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.config.CodeRefineProperties;
+import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.ArrayList;
-import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -41,6 +44,8 @@ public class PythonCodeRefinementNode {
     private final CodeRefineProperties codeRefineProperties;
     private final CodeRefineLocalConfigLoader localConfigLoader;
     private final AgentPromptService promptService;
+    private final AgentObservabilityService observabilityService;
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
 
     @Data
     @Builder
@@ -54,6 +59,9 @@ public class PythonCodeRefinementNode {
         private String datasetIds;
         private String libraries;
         private Integer timeoutSeconds;
+        private String endpointName;
+        private String endpointBaseUrl;
+        private String modelName;
     }
 
     @Data
@@ -171,24 +179,67 @@ public class PythonCodeRefinementNode {
         }
 
         if (!traces.isEmpty()) {
-            AttemptTrace last = traces.get(traces.size() - 1);
-            userPrompt.append("上一轮运行参数:\n").append(writeJson(last.getRunArgs())).append("\n");
-            userPrompt.append("上一轮失败代码:\n```python\n")
-                    .append(safe(last.getCode()))
-                    .append("\n```\n");
-            userPrompt.append("上一轮执行反馈:\n")
-                    .append(safe(last.getOutput()))
-                    .append("\n");
+            userPrompt.append("失败历史（按倒序，最近一次在前，包含全部失败尝试）:\n");
+            for (int i = traces.size() - 1; i >= 0; i--) {
+                AttemptTrace trace = traces.get(i);
+                if (trace == null) {
+                    continue;
+                }
+                userPrompt.append("第").append(trace.getAttempt()).append("次:\n");
+                userPrompt.append("运行参数:\n").append(writeJson(trace.getRunArgs())).append("\n");
+                String code = safe(trace.getCode());
+                if (code.isBlank()) {
+                    userPrompt.append("失败代码: <empty>\n");
+                } else {
+                    userPrompt.append("失败代码:\n```python\n")
+                            .append(code)
+                            .append("\n```\n");
+                }
+                String output = safe(trace.getOutput());
+                if (output.isBlank()) {
+                    userPrompt.append("执行反馈: <empty>\n");
+                } else {
+                    userPrompt.append("执行反馈:\n")
+                            .append(preview(output, 5000))
+                            .append("\n");
+                }
+            }
         }
 
         userPrompt.append(promptService.pythonRefineOutputInstruction());
 
         try {
-            Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(List.of(
+            List<dev.langchain4j.data.message.ChatMessage> llmMessages = List.of(
                     new SystemMessage(systemPrompt),
                     new UserMessage(userPrompt.toString())
-            ));
-            return extractPlan(resp.content().text(), currentRunArgs, systemPrompt, userPrompt.toString(), null);
+            );
+            long llmStartedAt = System.currentTimeMillis();
+            Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(llmMessages);
+            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            String runId = AgentContext.getRunId();
+            String llmText = resp.content().text();
+            if (runId != null && !runId.isBlank()) {
+                Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        llmMessages,
+                        null,
+                        Map.of("stage", "python_refine_plan")
+                );
+                observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_SUB_AGENT,
+                        resp.tokenUsage(),
+                        llmDurationMs,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        llmRequestSnapshot,
+                        llmText
+                );
+            }
+            return extractPlan(llmText, currentRunArgs, systemPrompt, userPrompt.toString(), null);
         } catch (Exception e) {
             log.warn("Generate python code failed", e);
             return GeneratedPlan.builder()
@@ -247,7 +298,7 @@ public class PythonCodeRefinementNode {
             JsonNode node = objectMapper.readTree(json);
             JsonNode runArgsNode = node.path("run_args");
             if (runArgsNode.isObject()) {
-                Map<String, Object> parsed = objectMapper.convertValue(runArgsNode, Map.class);
+                Map<String, Object> parsed = objectMapper.convertValue(runArgsNode, new TypeReference<Map<String, Object>>() {});
                 return sanitizeRunArgs(parsed);
             }
             return Map.of();
@@ -390,28 +441,12 @@ public class PythonCodeRefinementNode {
         if (output == null || output.isBlank()) {
             return false;
         }
-        if (output.startsWith("Tool invocation error")) {
+        try {
+            JsonNode root = objectMapper.readTree(output);
+            return root.path("ok").asBoolean(false);
+        } catch (Exception e) {
             return false;
         }
-        if (output.startsWith("Tool Execution Error")) {
-            return false;
-        }
-        if (output.startsWith("Failed to create task")) {
-            return false;
-        }
-        if (output.startsWith("Task FAILED")) {
-            return false;
-        }
-        if (output.startsWith("Task CANCELED")) {
-            return false;
-        }
-        if (output.startsWith("Task PENDING (Timeout)")) {
-            return false;
-        }
-        if (output.startsWith("Exit Code:")) {
-            return false;
-        }
-        return !output.contains("STDERR:");
     }
 
     private int resolveMaxAttempts() {

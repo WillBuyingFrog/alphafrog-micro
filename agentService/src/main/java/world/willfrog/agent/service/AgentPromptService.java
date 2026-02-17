@@ -4,6 +4,8 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -12,11 +14,48 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AgentPromptService {
 
+    private static final DateTimeFormatter CN_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy年MM月dd日");
     private final AgentLlmProperties properties;
     private final AgentLlmLocalConfigLoader localConfigLoader;
 
     public String agentRunSystemPrompt() {
-        return firstNonBlank(currentPrompts().getAgentRunSystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), ""));
+    }
+
+    public String todoPlannerSystemPrompt(String toolWhitelist, int maxTodos) {
+        String template = firstNonBlank(
+                currentPrompts().getTodoPlannerSystemPromptTemplate(),
+                """
+                你是任务规划专家。请把用户目标拆解为 Todo List，只输出 JSON。
+                输出格式:
+                {"analysis":"...","items":[{"id":"todo_1","sequence":1,"type":"TOOL_CALL","toolName":"searchIndex","params":{"keyword":"沪深300"},"reasoning":"...","executionMode":"AUTO"}]}
+                规则:
+                1) 只能使用工具: {{toolWhitelist}}
+                2) 总步骤数不超过 {{maxTodos}}
+                3) type 仅允许 TOOL_CALL/SUB_AGENT/THOUGHT
+                4) executionMode 仅允许 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT
+                """
+        );
+        String specific = render(template, Map.of(
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos)
+        ));
+        return composeSystemPrompt(specific);
+    }
+
+    public String workflowFinalSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(
+                currentPrompts().getWorkflowFinalSystemPrompt(),
+                currentPrompts().getParallelFinalSystemPrompt(),
+                ""
+        ));
+    }
+
+    public String workflowTodoRecoverySystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(
+                currentPrompts().getWorkflowTodoRecoverySystemPrompt(),
+                ""
+        ));
     }
 
     public String parallelPlannerSystemPrompt(String toolWhitelist,
@@ -24,36 +63,58 @@ public class AgentPromptService {
                                               int maxSubSteps,
                                               int maxParallelTasks,
                                               int maxSubAgents) {
+        return parallelPlannerSystemPrompt(toolWhitelist, maxTasks, maxSubSteps, maxParallelTasks, maxSubAgents, 1, 1);
+    }
+
+    public String parallelPlannerSystemPrompt(String toolWhitelist,
+                                              int maxTasks,
+                                              int maxSubSteps,
+                                              int maxParallelTasks,
+                                              int maxSubAgents,
+                                              int candidateIndex,
+                                              int candidateCount) {
         String template = firstNonBlank(currentPrompts().getParallelPlannerSystemPromptTemplate(),
                 "");
-        return render(template, Map.of(
+        String specific = render(template, Map.of(
                 "toolWhitelist", safe(toolWhitelist),
                 "maxTasks", String.valueOf(maxTasks),
                 "maxSubSteps", String.valueOf(maxSubSteps),
                 "maxParallelTasks", String.valueOf(maxParallelTasks),
-                "maxSubAgents", String.valueOf(maxSubAgents)
+                "maxSubAgents", String.valueOf(maxSubAgents),
+                "candidateIndex", String.valueOf(Math.max(candidateIndex, 1)),
+                "candidateCount", String.valueOf(Math.max(candidateCount, 1))
         ));
+        return composeSystemPrompt(specific);
     }
 
     public String parallelFinalSystemPrompt() {
-        return firstNonBlank(currentPrompts().getParallelFinalSystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getParallelFinalSystemPrompt(), ""));
+    }
+
+    public String parallelPatchPlannerSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getParallelPatchPlannerSystemPromptTemplate(), ""));
+    }
+
+    public String planJudgeSystemPrompt() {
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getPlanJudgeSystemPromptTemplate(), ""));
     }
 
     public String subAgentPlannerSystemPrompt(String tools, int maxSteps) {
         String template = firstNonBlank(currentPrompts().getSubAgentPlannerSystemPromptTemplate(),
                 "");
-        return render(template, Map.of(
+        String specific = render(template, Map.of(
                 "tools", safe(tools),
                 "maxSteps", String.valueOf(maxSteps)
         ));
+        return composeSystemPrompt(specific);
     }
 
     public String subAgentSummarySystemPrompt() {
-        return firstNonBlank(currentPrompts().getSubAgentSummarySystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getSubAgentSummarySystemPrompt(), ""));
     }
 
     public String pythonRefineSystemPrompt() {
-        return firstNonBlank(currentPrompts().getPythonRefineSystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getPythonRefineSystemPrompt(), ""));
     }
 
     public List<String> pythonRefineRequirements() {
@@ -98,11 +159,27 @@ public class AgentPromptService {
     }
 
     public String orchestratorPlanningSystemPrompt() {
-        return firstNonBlank(currentPrompts().getOrchestratorPlanningSystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorPlanningSystemPrompt(), ""));
     }
 
     public String orchestratorSummarySystemPrompt() {
-        return firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt());
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt(), ""));
+    }
+
+    private String composeSystemPrompt(String specificPrompt) {
+        String global = firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), "");
+        String specific = firstNonBlank(specificPrompt, "");
+        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
+
+        List<String> parts = new ArrayList<>();
+        parts.add(todayLine);
+        if (!global.isBlank()) {
+            parts.add(global);
+        }
+        if (!specific.isBlank() && !specific.equals(global)) {
+            parts.add(specific);
+        }
+        return String.join("\n", parts).trim();
     }
 
     private AgentLlmProperties.Prompts currentPrompts() {
@@ -117,8 +194,13 @@ public class AgentPromptService {
         }
         AgentLlmProperties.Prompts merged = new AgentLlmProperties.Prompts();
         merged.setAgentRunSystemPrompt(firstNonBlank(local.getAgentRunSystemPrompt(), base.getAgentRunSystemPrompt()));
+        merged.setTodoPlannerSystemPromptTemplate(firstNonBlank(local.getTodoPlannerSystemPromptTemplate(), base.getTodoPlannerSystemPromptTemplate()));
+        merged.setWorkflowFinalSystemPrompt(firstNonBlank(local.getWorkflowFinalSystemPrompt(), base.getWorkflowFinalSystemPrompt()));
+        merged.setWorkflowTodoRecoverySystemPrompt(firstNonBlank(local.getWorkflowTodoRecoverySystemPrompt(), base.getWorkflowTodoRecoverySystemPrompt()));
         merged.setParallelPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPlannerSystemPromptTemplate(), base.getParallelPlannerSystemPromptTemplate()));
         merged.setParallelFinalSystemPrompt(firstNonBlank(local.getParallelFinalSystemPrompt(), base.getParallelFinalSystemPrompt()));
+        merged.setParallelPatchPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPatchPlannerSystemPromptTemplate(), base.getParallelPatchPlannerSystemPromptTemplate()));
+        merged.setPlanJudgeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeSystemPromptTemplate(), base.getPlanJudgeSystemPromptTemplate()));
         merged.setSubAgentPlannerSystemPromptTemplate(firstNonBlank(local.getSubAgentPlannerSystemPromptTemplate(), base.getSubAgentPlannerSystemPromptTemplate()));
         merged.setSubAgentSummarySystemPrompt(firstNonBlank(local.getSubAgentSummarySystemPrompt(), base.getSubAgentSummarySystemPrompt()));
         merged.setPythonRefineSystemPrompt(firstNonBlank(local.getPythonRefineSystemPrompt(), base.getPythonRefineSystemPrompt()));

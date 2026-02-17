@@ -33,7 +33,33 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ---
 
-## v0.3-phase2 版本功能（当前版本）
+## v0.4 版本功能（当前版本）
+
+### Agent 能力增强
+- **多轮对话支持**: 基于消息历史的追问能力，支持上下文压缩（滑动窗口策略，默认保留最近5轮）
+- **会话重命名**: 支持修改 Run 会话标题 (`PUT /api/agent/runs/{runId}`)
+- **模型配置重构**: 支持 endpoint 级模型配置，返回 validProviders 列表
+- **Run Config 执行层生效**: `webSearch`/`codeInterpreter`/`smartRetrieval` 配置真正影响执行行为
+- **Prompt 外置与热加载**: Prompts 拆分到独立文件，支持运行时热更新
+- **事件模型信息**: 关键事件记录 endpoint 和 model，支持前端展示"由 XXX 模型生成"
+
+### 管理后台 (Admin)
+- **Agent 运行监控**: 查询/详情/强制停止运行中的 Agent Run
+- **系统配置管理**: 动态调整全局配置参数
+- **用户额度调整**: 管理员手动调整用户信用额度，带审计日志
+- **Magic Password 外部化**: 安全配置移至 `.env` 文件
+
+### 工具与搜索优化
+- **指数搜索相关性排序**: 按精确/前缀匹配排序，避免基础指数被截断
+- **Python 精修增强**: 展示完整失败历史，倒序排列，提升调试效率
+- **Artifacts 下载路径**: 改为 run 维度 (`/runs/{runId}/artifacts/{id}`)，兼容旧路由
+
+### 额度与审批系统
+- **完整额度链路**: 申请 → 审批 → 消耗 → 台账
+- **审计日志**: 审批操作全量记录，支持追溯
+- **乐观锁与幂等**: 审批并发控制与幂等机制
+
+## v0.3-phase2 版本功能
 
 ### Agent 能力
 - **Agent Run**: 创建/查询/取消/续做/状态/事件流/结果
@@ -75,13 +101,158 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ---
 
-## v0.4 TODO（规划）
+## 便捷部署
 
-- 断点恢复能力完善
-- 中间结果缓存策略完善
-- 工具搜索能力完善
-- 上下文压缩策略
-- 指标库与预定义分析能力
+### 从 v0.3 迁移
+
+若您已部署 v0.3 版本，按以下步骤升级至 v0.4：
+
+#### 1. 备份数据
+```bash
+# 备份 PostgreSQL 数据库
+pg_dump -h your_host -U your_user -d alphafrog > alphafrog_v0.3_backup_$(date +%Y%m%d).sql
+
+# 备份现有配置
+cp agentService/config/agent-llm.local.json agentService/config/agent-llm.local.json.v0.3.backup
+```
+
+#### 2. 更新代码
+```bash
+git fetch origin
+git checkout v0.4
+# 或 git checkout tags/v0.4.0
+```
+
+#### 3. 执行数据库迁移（按时间顺序）
+```bash
+# 连接 PostgreSQL 后依次执行以下迁移脚本
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260122_agent.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260210_agent_expired.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260212_auth_invite_reset.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_agent_credit.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_admin_credit_governance.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_agent_runs_perf.sql
+psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260216_multi_turn_message.sql
+```
+
+#### 4. 更新配置文件
+
+**agent-llm.local.json** - 配置结构升级：
+```json
+{
+  "defaultEndpoint": "openrouter",
+  "defaultModel": "moonshotai/kimi-k2.5",
+  "endpoints": {
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "your-api-key",
+      "models": {
+        "moonshotai/kimi-k2.5": {
+          "displayName": "Kimi K2.5",
+          "baseRate": 0.3,
+          "validProviders": ["moonshotai/int4", "fireworks"]
+        }
+      }
+    }
+  }
+}
+```
+
+**环境变量** - 新增 Magic Password：
+```bash
+# 在 .env 文件中添加
+ADMIN_MAGIC_PASSWORD=your_secure_password_here
+```
+
+#### 5. 部署 Prompt 文件
+```bash
+# 将 prompts 目录部署到配置目录
+rsync -av agentService/config/prompts/ /path/to/config/prompts/
+```
+
+#### 6. 构建并重启服务
+```bash
+# 构建镜像
+bash build_all_images.sh
+
+# 滚动重启服务（推荐顺序）
+docker-compose up -d --no-deps --build agent-service
+docker-compose up -d --no-deps --build admin-service
+docker-compose up -d --no-deps --build frontend
+```
+
+---
+
+### 全新部署
+
+若您是首次部署 AlphaFrog，请按以下步骤进行：
+
+#### 1. 环境准备
+```bash
+# 克隆代码
+git clone <repository-url>
+cd alphafrog-micro
+
+# 创建环境文件
+cp .env.example .env
+# 编辑 .env，填写必要配置（数据库、Redis、API Keys 等）
+```
+
+#### 2. 数据库初始化
+```bash
+# 创建数据库（若不存在）
+createdb -h your_host -U your_user alphafrog
+
+# 执行完整 Schema（v0.4 已包含所有历史变更）
+psql -h your_host -U your_user -d alphafrog -f alphafrog_schema_full.sql
+# 或按顺序执行 portfolio_schema.sql + 各 migration 文件
+```
+
+#### 3. 配置 LLM
+```bash
+# 复制示例配置
+cp agentService/config/agent-llm.local.example.json agentService/config/agent-llm.local.json
+
+# 编辑配置，填入您的 API Keys
+vim agentService/config/agent-llm.local.json
+```
+
+#### 4. 构建并启动
+```bash
+# 一键构建所有镜像
+bash build_all_images.sh
+
+# 启动全部服务
+docker-compose up -d
+
+# 查看服务状态
+docker-compose ps
+```
+
+#### 5. 验证部署
+```bash
+# 检查健康状态
+curl http://localhost:8090/actuator/health
+
+# 测试 Agent 创建
+curl -X POST http://localhost:8090/api/agent/runs \
+  -H "Content-Type: application/json" \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -d '{"userGoal": "查询沪深300最新净值"}'
+```
+
+#### 6. 创建首个管理员（可选）
+```bash
+# 在数据库中设置管理员标志
+psql -h your_host -U your_user -d alphafrog -c \
+  "UPDATE alphafrog_user SET is_admin = true, status = 'ACTIVE' WHERE email = 'your@email.com';"
+```
+
+---
+
+### 版本规划
+
+- **v0.5 规划**: 可观测性增强、金融特色压测、性能优化
 
 
 ---

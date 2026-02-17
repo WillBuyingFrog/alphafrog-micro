@@ -2,8 +2,10 @@ package world.willfrog.agent.tool;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
+import lombok.NoArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.Cursor;
@@ -181,7 +183,13 @@ public class DatasetRegistry {
                 if (json == null || json.isEmpty()) {
                     continue;
                 }
-                DatasetMeta meta = objectMapper.readValue(json, DatasetMeta.class);
+                DatasetMeta meta;
+                try {
+                    meta = objectMapper.readValue(json, DatasetMeta.class);
+                } catch (JsonProcessingException e) {
+                    log.warn("Skip invalid dataset meta, key={}", key, e);
+                    continue;
+                }
                 if (now >= meta.getExpireAt()) {
                     deleteDatasetFiles(meta);
                     redisTemplate.delete(key);
@@ -324,6 +332,8 @@ public class DatasetRegistry {
 
     @Data
     @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class DatasetMeta {
         private String datasetId;
         private String queryKey;

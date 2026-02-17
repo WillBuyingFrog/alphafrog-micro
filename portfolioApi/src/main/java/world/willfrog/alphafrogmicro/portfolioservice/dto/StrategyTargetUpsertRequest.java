@@ -2,13 +2,19 @@ package world.willfrog.alphafrogmicro.portfolioservice.dto;
 
 import jakarta.validation.Valid;
 import jakarta.validation.constraints.NotEmpty;
-import lombok.Data;
 
 import java.util.List;
 
-@Data
 public class StrategyTargetUpsertRequest {
     @Valid
     @NotEmpty
     private List<StrategyTargetUpsertItem> items;
+
+    public List<StrategyTargetUpsertItem> getItems() {
+        return items;
+    }
+
+    public void setItems(List<StrategyTargetUpsertItem> items) {
+        this.items = items;
+    }
 }

@@ -102,19 +102,17 @@ public class DomesticIndexServiceImpl extends DomesticIndexServiceImplBase {
     public DomesticIndexSearchResponse searchDomesticIndex(DomesticIndexSearchRequest request) {
 
         String query = request.getQuery();
+        if (query == null || query.trim().isEmpty()) {
+            return DomesticIndexSearchResponse.newBuilder().build();
+        }
+        String normalizedQuery = query.trim();
         List<IndexInfo> indexInfoList;
 
         try {
-            // 使用合理的分页参数，避免返回过多数据
-            indexInfoList = indexInfoDao.getIndexInfoByTsCode(query, 50, 0);
-            indexInfoList.addAll(indexInfoDao.getIndexInfoByFullName(query, 50, 0));
-            indexInfoList.addAll(indexInfoDao.getIndexInfoByName(query, 50, 0));
-
-            indexInfoList = indexInfoList.stream()
-                    .distinct()
-                    .toList();
+            // 单条 SQL + 相关性排序，避免高热度关键词下“随机截断”导致基础指数缺失
+            indexInfoList = indexInfoDao.searchIndexInfo(normalizedQuery, 200, 0);
         } catch (Exception e) {
-            log.error("Error occurred while searching index info with query: {}", query, e);
+            log.error("Error occurred while searching index info with query: {}", normalizedQuery, e);
             // 搜索异常时返回空响应
             return DomesticIndexSearchResponse.newBuilder().build();
         }

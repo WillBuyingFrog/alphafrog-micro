@@ -2,6 +2,7 @@ package world.willfrog.agent.graph;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatLanguageModel;
@@ -11,7 +12,10 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
@@ -23,8 +27,6 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 
 @Component
 @RequiredArgsConstructor
@@ -40,14 +42,6 @@ import java.util.regex.Pattern;
 public class SubAgentRunner {
     /** 子代理规划最大重试次数（用于修正无效工具/格式问题）。 */
     private static final int MAX_PLAN_ATTEMPTS = 3;
-    /** 从工具输出中提取 dataset_id。 */
-    private static final Pattern DATASET_ID_PATTERN = Pattern.compile("DATASET_(?:CREATED|REUSED):\\s*([^\\s\\n]+)");
-    /** 从工具输出中提取数据集行数提示。 */
-    private static final Pattern ROWS_PATTERN = Pattern.compile("Rows:\\s*([^\\n]+)");
-    /** 从工具输出中提取数据时间范围提示。 */
-    private static final Pattern RANGE_PATTERN = Pattern.compile("Range:\\s*([^\\n]+)");
-    /** 从工具输出中提取字段提示。 */
-    private static final Pattern FIELDS_PATTERN = Pattern.compile("Fields:\\s*([^\\n]+)");
 
     /** 工具路由器。 */
     private final ToolRouter toolRouter;
@@ -57,6 +51,10 @@ public class SubAgentRunner {
     private final ObjectMapper objectMapper;
     /** 事件服务（记录子代理过程）。 */
     private final AgentEventService eventService;
+    /** 可观测指标聚合服务。 */
+    private final AgentObservabilityService observabilityService;
+    /** LLM 原始请求快照构建器。 */
+    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
 
@@ -76,10 +74,20 @@ public class SubAgentRunner {
         private String goal;
         /** 上下文补充。 */
         private String context;
+        /** 上游透传的初始参数（已完成占位符解析）。 */
+        private Map<String, Object> seedArgs;
         /** 可用工具白名单。 */
         private Set<String> toolWhitelist;
+        /** 工具规格列表（用于 LLM 请求记录）。 */
+        private List<ToolSpecification> toolSpecifications;
         /** 允许的最大步骤数。 */
         private int maxSteps;
+        /** 端点名。 */
+        private String endpointName;
+        /** 端点 baseUrl。 */
+        private String endpointBaseUrl;
+        /** 模型名。 */
+        private String modelName;
     }
 
     /**
@@ -109,6 +117,8 @@ public class SubAgentRunner {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
+        String previousPhase = AgentContext.getPhase();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
         Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
         String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
@@ -120,13 +130,38 @@ public class SubAgentRunner {
             String lastPlanError = "sub_agent plan generation failed";
             String retryHint = "";
             for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
-                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(List.of(
+                List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
                         new UserMessage("目标: " + request.getGoal()
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
-                ));
+                );
+                long llmStartedAt = System.currentTimeMillis();
+                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
+                long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
                 String planText = planResp.content().text();
+                Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        planMessages,
+                        request.getToolSpecifications(),
+                        Map.of(
+                                "stage", "sub_agent_plan",
+                                "attempt", attempt
+                        )
+                );
+                observabilityService.recordLlmCall(
+                        request.getRunId(),
+                        AgentObservabilityService.PHASE_SUB_AGENT,
+                        planResp.tokenUsage(),
+                        llmDurationMs,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        planRequestSnapshot,
+                        planText
+                );
                 String json = extractJson(planText);
                 JsonNode root = objectMapper.readTree(json);
                 JsonNode candidate = root.path("steps");
@@ -179,8 +214,11 @@ public class SubAgentRunner {
             emitEvent(request, "SUB_AGENT_PLAN_CREATED", Map.of(
                     "task_id", nvl(request.getTaskId()),
                     "steps_count", stepsNode.size(),
-                    "steps", buildStepSummary(stepsNode)
+                    "steps", buildStepSummary(stepsNode),
+                    "endpoint", nvl(request.getEndpointName()),
+                    "model", nvl(request.getModelName())
             ));
+            observabilityService.addNodeCount(request.getRunId(), stepsNode.size());
 
             // 第二步：按计划逐步执行工具。
             for (JsonNode stepNode : stepsNode) {
@@ -194,7 +232,7 @@ public class SubAgentRunner {
                 }
                 JsonNode argsNode = stepNode.path("args");
                 Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
-                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps);
+                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps, request.getSeedArgs());
 
                 int stepIndex = executedSteps.size();
                 emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
@@ -205,6 +243,7 @@ public class SubAgentRunner {
                 ));
                 String output;
                 boolean stepSuccess;
+                Map<String, Object> cachePayload = toolRouter.toEventCachePayload(null);
                 if ("executePython".equals(tool)) {
                     PythonCodeRefinementNode.Result refineResult = pythonCodeRefinementNode.execute(
                             PythonCodeRefinementNode.Request.builder()
@@ -217,6 +256,9 @@ public class SubAgentRunner {
                                     .datasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2")))
                                     .libraries(firstNonBlank(args.get("libraries"), args.get("arg3")))
                                     .timeoutSeconds(toNullableInt(args.get("timeout_seconds"), args.get("timeoutSeconds"), args.get("arg4")))
+                                    .endpointName(request.getEndpointName())
+                                    .endpointBaseUrl(request.getEndpointBaseUrl())
+                                    .modelName(request.getModelName())
                                     .build(),
                             model
                     );
@@ -230,8 +272,10 @@ public class SubAgentRunner {
                             "traces", summarizePythonTraces(refineResult.getTraces(), !stepSuccess)
                     ));
                 } else {
-                    output = toolRouter.invoke(tool, args);
-                    stepSuccess = isStepSuccessful(tool, output);
+                    ToolRouter.ToolInvocationResult invokeResult = toolRouter.invokeWithMeta(tool, args);
+                    output = invokeResult.getOutput();
+                    stepSuccess = invokeResult.isSuccess() && isStepSuccessful(tool, output);
+                    cachePayload = toolRouter.toEventCachePayload(invokeResult);
                 }
 
                 Map<String, Object> stepResult = new HashMap<>();
@@ -246,7 +290,8 @@ public class SubAgentRunner {
                         "step_index", stepIndex,
                         "tool", tool,
                         "success", stepSuccess,
-                        "output_preview", preview(output)
+                        "output_preview", preview(output),
+                        "cache", cachePayload
                 ));
                 if (!stepSuccess) {
                     String err = "sub_agent step failed: tool=" + tool + ", reason=" + preview(output);
@@ -264,19 +309,45 @@ public class SubAgentRunner {
 
             // 第三步：把步骤执行结果再总结成可供主流程合并的结论文本。
             String summaryPrompt = promptService.subAgentSummarySystemPrompt();
-            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(List.of(
+            String executedStepsJson = objectMapper.writeValueAsString(executedSteps);
+            List<dev.langchain4j.data.message.ChatMessage> summaryMessages = List.of(
                     new SystemMessage(summaryPrompt),
-                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + objectMapper.writeValueAsString(executedSteps))
-            ));
+                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
+            );
+            long llmStartedAt = System.currentTimeMillis();
+            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
+            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            String finalText = finalResp.content().text();
+            Map<String, Object> summaryRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                    request.getEndpointName(),
+                    request.getEndpointBaseUrl(),
+                    request.getModelName(),
+                    summaryMessages,
+                    request.getToolSpecifications(),
+                    Map.of("stage", "sub_agent_summary")
+            );
+            observabilityService.recordLlmCall(
+                    request.getRunId(),
+                    AgentObservabilityService.PHASE_SUB_AGENT,
+                    finalResp.tokenUsage(),
+                    llmDurationMs,
+                    request.getEndpointName(),
+                    request.getModelName(),
+                    null,
+                    summaryRequestSnapshot,
+                    finalText
+            );
 
             emitEvent(request, "SUB_AGENT_COMPLETED", Map.of(
                     "task_id", nvl(request.getTaskId()),
-                    "steps", executedSteps.size()
+                    "steps", executedSteps.size(),
+                    "endpoint", nvl(request.getEndpointName()),
+                    "model", nvl(request.getModelName())
             ));
 
             return SubAgentResult.builder()
                     .success(true)
-                    .answer(finalResp.content().text())
+                    .answer(finalText)
                     .steps(executedSteps)
                     .build();
         } catch (Exception e) {
@@ -286,6 +357,12 @@ public class SubAgentRunner {
                     "error", nvl(e.getMessage())
             ));
             return SubAgentResult.builder().success(false).error(nvl(e.getMessage())).steps(executedSteps).build();
+        } finally {
+            if (previousPhase == null || previousPhase.isBlank()) {
+                AgentContext.clearPhase();
+            } else {
+                AgentContext.setPhase(previousPhase);
+            }
         }
     }
 
@@ -328,7 +405,8 @@ public class SubAgentRunner {
      */
     private Map<String, Object> normalizeStepArgs(String tool,
                                                   Map<String, Object> rawArgs,
-                                                  List<Map<String, Object>> executedSteps) {
+                                                  List<Map<String, Object>> executedSteps,
+                                                  Map<String, Object> seedArgs) {
         Map<String, Object> args = new HashMap<>();
         if (rawArgs != null) {
             args.putAll(rawArgs);
@@ -374,21 +452,49 @@ public class SubAgentRunner {
         }
 
         if ("executePython".equals(tool)) {
-            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            Map<String, Object> effectiveSeedArgs = seedArgs == null ? Map.of() : seedArgs;
+            String seedDatasetId = firstNonBlank(
+                    effectiveSeedArgs.get("dataset_id"),
+                    effectiveSeedArgs.get("datasetId"),
+                    effectiveSeedArgs.get("arg1")
+            );
+            List<String> seedDatasetIds = parseDatasetIds(firstNonBlank(
+                    effectiveSeedArgs.get("dataset_ids"),
+                    effectiveSeedArgs.get("datasetIds"),
+                    effectiveSeedArgs.get("arg2")
+            ));
             List<String> discoveredDatasetIds = extractDatasetIds(executedSteps);
+
+            LinkedHashSet<String> availableDatasetIds = new LinkedHashSet<>();
+            if (!seedDatasetId.isBlank()) {
+                availableDatasetIds.add(seedDatasetId);
+            }
+            availableDatasetIds.addAll(seedDatasetIds);
+            availableDatasetIds.addAll(discoveredDatasetIds);
+
+            String datasetId = firstNonBlank(args.get("dataset_id"), args.get("datasetId"), args.get("arg1"));
+            if (!datasetId.isBlank() && !availableDatasetIds.isEmpty() && !availableDatasetIds.contains(datasetId)) {
+                datasetId = availableDatasetIds.iterator().next();
+            }
             if (datasetId.isBlank()) {
-                datasetId = discoveredDatasetIds.isEmpty() ? "" : discoveredDatasetIds.get(0);
+                datasetId = availableDatasetIds.isEmpty() ? "" : availableDatasetIds.iterator().next();
             }
             if (!datasetId.isBlank()) {
                 args.put("dataset_id", datasetId);
             }
-            if (args.get("dataset_ids") == null && !discoveredDatasetIds.isEmpty()) {
-                String all = discoveredDatasetIds.stream().collect(Collectors.joining(","));
-                if (!all.isBlank()) {
-                    args.put("dataset_ids", all);
-                }
+
+            LinkedHashSet<String> mergedDatasetIds = new LinkedHashSet<>();
+            mergedDatasetIds.addAll(parseDatasetIds(firstNonBlank(args.get("dataset_ids"), args.get("datasetIds"), args.get("arg2"))));
+            mergedDatasetIds.addAll(availableDatasetIds);
+            mergedDatasetIds.remove(datasetId);
+            if (!mergedDatasetIds.isEmpty()) {
+                args.put("dataset_ids", String.join(",", mergedDatasetIds));
             }
+
             String code = firstNonBlank(args.get("code"), args.get("arg0"));
+            if (code.isBlank()) {
+                code = firstNonBlank(effectiveSeedArgs.get("code"), effectiveSeedArgs.get("arg0"));
+            }
             if (!code.isBlank()) {
                 args.put("code", code);
             }
@@ -404,31 +510,14 @@ public class SubAgentRunner {
      * @return true 表示成功
      */
     private boolean isStepSuccessful(String tool, String output) {
-        if (output == null) {
+        if (output == null || output.isBlank()) {
             return false;
         }
-        if (output.startsWith("Tool invocation error")) {
+        JsonNode root = parseJson(output);
+        if (root == null || !root.isObject()) {
             return false;
         }
-        if (output.startsWith("Unsupported tool")) {
-            return false;
-        }
-        if (output.contains("Invalid date range")) {
-            return false;
-        }
-        if (output.contains("No daily index data found")) {
-            return false;
-        }
-        if (output.contains("No daily data found")) {
-            return false;
-        }
-        if (output.startsWith("Task PENDING (Timeout)")) {
-            return false;
-        }
-        if ("executePython".equals(tool) && (output.startsWith("Exit Code:") || output.contains("STDERR:"))) {
-            return false;
-        }
-        return true;
+        return root.path("ok").asBoolean(false);
     }
 
     /**
@@ -441,9 +530,26 @@ public class SubAgentRunner {
         LinkedHashSet<String> ids = new LinkedHashSet<>();
         for (Map<String, Object> step : executedSteps) {
             String output = firstNonBlank(step.get("output"));
-            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-            while (matcher.find()) {
-                ids.add(matcher.group(1));
+            JsonNode root = parseJson(output);
+            if (root == null || !root.path("ok").asBoolean(false)) {
+                continue;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isObject()) {
+                continue;
+            }
+            String datasetId = firstNonBlank(data.path("dataset_id").asText(""));
+            if (!datasetId.isBlank()) {
+                ids.add(datasetId);
+            }
+            JsonNode datasetIds = data.path("dataset_ids");
+            if (datasetIds.isArray()) {
+                for (JsonNode item : datasetIds) {
+                    String id = firstNonBlank(item.asText(""));
+                    if (!id.isBlank()) {
+                        ids.add(id);
+                    }
+                }
             }
         }
         return new ArrayList<>(ids);
@@ -465,7 +571,9 @@ public class SubAgentRunner {
             Map<String, Object> item = new HashMap<>();
             item.put("attempt", trace.getAttempt());
             item.put("success", trace.isSuccess());
+            item.put("code", trace.getCode());
             item.put("code_preview", preview(trace.getCode()));
+            item.put("run_args", trace.getRunArgs());
             item.put("run_args_preview", trace.getRunArgs());
             item.put("output_preview", preview(trace.getOutput()));
             if (includeLlmSnapshot && trace.getLlmSnapshot() != null && !trace.getLlmSnapshot().isEmpty()) {
@@ -544,20 +652,53 @@ public class SubAgentRunner {
             if (output.isBlank()) {
                 continue;
             }
-            Matcher matcher = DATASET_ID_PATTERN.matcher(output);
-            while (matcher.find()) {
-                String id = matcher.group(1);
-                String tool = firstNonBlank(step.get("tool"));
-                Map<String, Object> stepArgs = toMap(step.get("args"));
-                String tsCode = firstNonBlank(stepArgs.get("tsCode"), stepArgs.get("ts_code"), stepArgs.get("code"));
-                String rows = extractFirstGroup(ROWS_PATTERN, output);
-                String range = extractFirstGroup(RANGE_PATTERN, output);
-                String fields = extractFirstGroup(FIELDS_PATTERN, output);
+            JsonNode root = parseJson(output);
+            if (root == null || !root.path("ok").asBoolean(false)) {
+                continue;
+            }
+            JsonNode data = root.path("data");
+            if (!data.isObject()) {
+                continue;
+            }
+
+            List<String> datasetIds = new ArrayList<>();
+            String datasetId = firstNonBlank(data.path("dataset_id").asText(""));
+            if (!datasetId.isBlank()) {
+                datasetIds.add(datasetId);
+            }
+            JsonNode idsNode = data.path("dataset_ids");
+            if (idsNode.isArray()) {
+                for (JsonNode item : idsNode) {
+                    String id = firstNonBlank(item.asText(""));
+                    if (!id.isBlank() && !datasetIds.contains(id)) {
+                        datasetIds.add(id);
+                    }
+                }
+            }
+
+            if (datasetIds.isEmpty()) {
+                continue;
+            }
+
+            String tool = firstNonBlank(step.get("tool"));
+            Map<String, Object> stepArgs = toMap(step.get("args"));
+            String tsCode = firstNonBlank(
+                    data.path("ts_code").asText(""),
+                    stepArgs.get("tsCode"),
+                    stepArgs.get("ts_code"),
+                    stepArgs.get("code")
+            );
+            String rows = data.path("rows").asText("");
+            String startDate = data.path("start_date").asText("");
+            String endDate = data.path("end_date").asText("");
+            String fields = data.path("fields").isArray() ? data.path("fields").toString() : "";
+
+            for (String id : datasetIds) {
                 String line = "- dataset_id=" + id
                         + (tool.isBlank() ? "" : " (tool=" + tool + ")")
                         + (tsCode.isBlank() ? "" : " (tsCode=" + tsCode + ")")
                         + (rows.isBlank() ? "" : " (rows=" + rows + ")")
-                        + (range.isBlank() ? "" : " (range=" + range + ")")
+                        + ((startDate.isBlank() || endDate.isBlank()) ? "" : " (range=" + startDate + "~" + endDate + ")")
                         + (fields.isBlank() ? "" : " (fields=" + fields + ")");
                 if (!hints.contains(line)) {
                     hints.add(line);
@@ -567,15 +708,15 @@ public class SubAgentRunner {
         return String.join("\n", hints);
     }
 
-    private String extractFirstGroup(Pattern pattern, String text) {
-        if (pattern == null || text == null || text.isBlank()) {
-            return "";
+    private JsonNode parseJson(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
         }
-        Matcher matcher = pattern.matcher(text);
-        if (!matcher.find()) {
-            return "";
+        try {
+            return objectMapper.readTree(text);
+        } catch (Exception e) {
+            return null;
         }
-        return firstNonBlank(matcher.group(1));
     }
 
     @SuppressWarnings("unchecked")
@@ -596,6 +737,27 @@ public class SubAgentRunner {
         } catch (NumberFormatException e) {
             return null;
         }
+    }
+
+    private List<String> parseDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return List.of();
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String value = nvl(part).trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1).trim();
+            }
+            if (!value.isBlank()) {
+                ids.add(value);
+            }
+        }
+        return new ArrayList<>(ids);
     }
 
     private String compactDate(String raw) {

@@ -31,6 +31,10 @@ message CreateAgentRunRequest {
   string idempotency_key = 4;
   string model_name = 5;
   string endpoint_name = 6;
+  bool capture_llm_requests = 7;
+  string provider = 8;
+  int32 planner_candidate_count = 9;
+  bool debug_mode = 10;
 }
 
 message GetAgentRunRequest {
@@ -38,7 +42,44 @@ message GetAgentRunRequest {
   string id = 2;
 }
 
+message UpdateAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+  string title = 3;
+}
+
+message ListAgentRunsRequest {
+  string user_id = 1;
+  int32 limit = 2;
+  int32 offset = 3;
+  string status = 4;
+  int32 days = 5;
+}
+
+message AgentRunListItemMessage {
+  string id = 1;
+  string message = 2;
+  string status = 3;
+  string created_at = 4;
+  string completed_at = 5;
+  bool has_artifacts = 6;
+  int64 duration_ms = 7;
+  int32 total_tokens = 8;
+  int32 tool_calls = 9;
+}
+
+message ListAgentRunsResponse {
+  repeated AgentRunListItemMessage items = 1;
+  int32 total = 2;
+  bool has_more = 3;
+}
+
 message CancelAgentRunRequest {
+  string user_id = 1;
+  string id = 2;
+}
+
+message DeleteAgentRunRequest {
   string user_id = 1;
   string id = 2;
 }
@@ -91,6 +132,8 @@ message AgentRunResultMessage {
   string status = 2;
   string answer = 3;
   string payload_json = 4;
+  string observability_json = 5;
+  int32 total_credits_consumed = 6;
 }
 
 message AgentRunStatusMessage {
@@ -103,6 +146,8 @@ message AgentRunStatusMessage {
   string last_event_payload_json = 7;
   string plan_json = 8;
   string progress_json = 9;
+  string observability_json = 10;
+  int32 total_credits_consumed = 11;
 }
 
 message AgentToolMessage {
@@ -127,15 +172,96 @@ message AgentArtifactMessage {
   string url = 5;
   string meta_json = 6;
   string created_at = 7;
+  int64 expires_at_millis = 8;
 }
 
 message ListAgentArtifactsRequest {
   string user_id = 1;
   string id = 2;
+  bool is_admin = 3;
 }
 
 message ListAgentArtifactsResponse {
   repeated AgentArtifactMessage items = 1;
+}
+
+message DownloadAgentArtifactRequest {
+  string user_id = 1;
+  string artifact_id = 2;
+  bool is_admin = 3;
+}
+
+message DownloadAgentArtifactResponse {
+  string artifact_id = 1;
+  string filename = 2;
+  string content_type = 3;
+  bytes content = 4;
+}
+
+message GetAgentConfigRequest {
+  string user_id = 1;
+}
+
+message AgentModelMessage {
+  string id = 1;
+  string display_name = 2;
+  string endpoint = 3;
+  string composite_id = 4;
+  double base_rate = 5;
+  repeated string features = 6;
+  repeated string valid_providers = 7;
+}
+
+message ListAgentModelsRequest {
+  string user_id = 1;
+}
+
+message ListAgentModelsResponse {
+  repeated AgentModelMessage models = 1;
+}
+
+message GetAgentCreditsRequest {
+  string user_id = 1;
+}
+
+message GetAgentCreditsResponse {
+  int32 total_credits = 1;
+  int32 remaining_credits = 2;
+  int32 used_credits = 3;
+  string reset_cycle = 4;
+  string next_reset_at = 5;
+}
+
+message ApplyAgentCreditsRequest {
+  string user_id = 1;
+  int32 amount = 2;
+  string reason = 3;
+  string contact = 4;
+}
+
+message ApplyAgentCreditsResponse {
+  string application_id = 1;
+  int32 total_credits = 2;
+  int32 remaining_credits = 3;
+  int32 used_credits = 4;
+  string status = 5;
+  string applied_at = 6;
+}
+
+message AgentRetentionConfigMessage {
+  int32 normal_days = 1;
+  int32 admin_days = 2;
+}
+
+message AgentFeatureConfigMessage {
+  bool parallel_execution = 1;
+  bool pause_resume = 2;
+}
+
+message GetAgentConfigResponse {
+  AgentRetentionConfigMessage retention_days = 1;
+  int32 max_polling_interval = 2;
+  AgentFeatureConfigMessage features = 3;
 }
 
 message SubmitAgentFeedbackRequest {
@@ -160,10 +286,58 @@ message ExportAgentRunResponse {
   string message = 4;
 }
 
+// 消息内容
+message AgentRunMessageItem {
+  int64 id = 1;
+  int32 seq = 2;
+  string role = 3;        // "user" | "assistant" | "system"
+  string content = 4;
+  string msg_type = 5;    // "initial" | "follow_up" | "summary"
+  string meta_json = 6;   // 元数据 JSON
+  string created_at = 7;
+}
+
+// 发送消息请求
+message SendAgentMessageRequest {
+  string user_id = 1;
+  string run_id = 2;
+  string content = 3;           // 用户消息内容
+  string context_override = 4;  // 可选：上下文覆盖（仅 admin + debugMode 可用）
+  bool stream = 5;              // 是否流式响应（预留）
+}
+
+// 发送消息响应
+message SendAgentMessageResponse {
+  int64 message_id = 1;         // 消息 ID
+  int32 seq = 2;                // 分配的序号
+  string status = 3;            // "accepted" | "rejected"
+  string run_status = 4;        // 处理后的 run 状态
+  string reject_reason = 5;     // 拒绝原因（如被拒绝）
+}
+
+// 获取消息历史请求
+message ListAgentMessagesRequest {
+  string user_id = 1;
+  string run_id = 2;
+  int32 limit = 3;              // 默认 50，最大 200
+  int32 offset = 4;             // 分页偏移
+  bool include_initial = 5;     // 是否包含初始问题（默认 true）
+}
+
+// 获取消息历史响应
+message ListAgentMessagesResponse {
+  repeated AgentRunMessageItem items = 1;
+  int32 total = 2;
+  bool has_more = 3;
+}
+
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
+  rpc UpdateRun(UpdateAgentRunRequest) returns (AgentRunMessage);
+  rpc ListRuns(ListAgentRunsRequest) returns (ListAgentRunsResponse);
   rpc ListEvents(ListAgentRunEventsRequest) returns (ListAgentRunEventsResponse);
+  rpc DeleteRun(DeleteAgentRunRequest) returns (AgentEmpty);
   rpc CancelRun(CancelAgentRunRequest) returns (AgentRunMessage);
   rpc PauseRun(PauseAgentRunRequest) returns (AgentRunMessage);
   rpc ResumeRun(ResumeAgentRunRequest) returns (AgentRunMessage);
@@ -171,6 +345,13 @@ service AgentDubboService {
   rpc GetStatus(GetAgentRunStatusRequest) returns (AgentRunStatusMessage);
   rpc ListTools(ListAgentToolsRequest) returns (ListAgentToolsResponse);
   rpc ListArtifacts(ListAgentArtifactsRequest) returns (ListAgentArtifactsResponse);
+  rpc DownloadArtifact(DownloadAgentArtifactRequest) returns (DownloadAgentArtifactResponse);
+  rpc GetConfig(GetAgentConfigRequest) returns (GetAgentConfigResponse);
+  rpc ListModels(ListAgentModelsRequest) returns (ListAgentModelsResponse);
+  rpc GetCredits(GetAgentCreditsRequest) returns (GetAgentCreditsResponse);
+  rpc ApplyCredits(ApplyAgentCreditsRequest) returns (ApplyAgentCreditsResponse);
   rpc SubmitFeedback(SubmitAgentFeedbackRequest) returns (AgentEmpty);
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
+  rpc SendMessage(SendAgentMessageRequest) returns (SendAgentMessageResponse);
+  rpc ListMessages(ListAgentMessagesRequest) returns (ListAgentMessagesResponse);
 }

@@ -1,0 +1,11 @@
+某 Todo 工具调用失败，请根据错误信息与已成功完成的 Todo 上下文，修正参数后重试。只输出 JSON，格式为 {"params":{...}} 表示用新参数重试，或 {"abandon":true,"reason":"..."} 表示放弃。
+参数引用格式：使用 ${todo_id.output} 或 ${todo_id.output.data.items.0.ts_code} 引用已完成 Todo 的输出；索引必须用 items.0，禁止 {todo_1...} / task.output / items[0]。
+补充约束：
+- 只能输出该工具真实签名中的字段，禁止编造 query/market 等不存在参数。
+- 如果工具是 getIndexDaily/getStockDaily：必须包含 ts_code、start_date、end_date（YYYYMMDD）。
+- 如果工具是 executePython：dataset_id 必须来自 ${todo_x.output.data.dataset_id}；code 必须从 /sandbox/input/<dataset_id>/<dataset_id>.csv 读取数据，禁止假设 data 变量存在。
+
+示例（严格按当前实现字段）：
+- getIndexDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20250101","end_date":"20251231"}
+- getStockDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20240101","end_date":"20241231"}
+- executePython: {"dataset_id":"${todo_2.output.data.dataset_id}","code":"..."}

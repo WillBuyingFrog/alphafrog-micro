@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE mapper PUBLIC "-//mybatis.org//DTD Mapper 3.0//EN" "http://mybatis.org/dtd/mybatis-3-mapper.dtd">
+
+<mapper namespace="world.willfrog.agent.mapper.AgentRunMessageMapper">
+
+    <!-- 结果映射 -->
+    <resultMap id="AgentRunMessageResultMap" type="world.willfrog.agent.entity.AgentRunMessage">
+        <id column="id" property="id"/>
+        <result column="run_id" property="runId"/>
+        <result column="seq" property="seq"/>
+        <result column="role" property="role"/>
+        <result column="content" property="content"/>
+        <result column="meta_json" property="metaJson"/>
+        <result column="msg_type" property="msgType"/>
+        <result column="created_at" property="createdAt"/>
+    </resultMap>
+
+    <!-- 插入单条消息 -->
+    <insert id="insert" useGeneratedKeys="true" keyProperty="id" keyColumn="id">
+        INSERT INTO alphafrog_agent_run_message (
+            run_id,
+            seq,
+            role,
+            content,
+            meta_json,
+            msg_type,
+            created_at
+        ) VALUES (
+            #{runId},
+            #{seq},
+            #{role},
+            #{content},
+            COALESCE(#{metaJson}::jsonb, '{}'),
+            COALESCE(#{msgType}, 'follow_up'),
+            COALESCE(#{createdAt}, NOW())
+        )
+    </insert>
+
+    <!-- 根据 ID 查询消息 -->
+    <select id="findById" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE id = #{id}
+    </select>
+
+    <!-- 根据 run_id 和 seq 查询消息 -->
+    <select id="findByRunIdAndSeq" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId} AND seq = #{seq}
+    </select>
+
+    <!-- 查询指定 run 的所有消息（按 seq 升序） -->
+    <select id="listByRunId" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+        ORDER BY seq ASC
+    </select>
+
+    <!-- 分页查询指定 run 的消息（按 seq 升序） -->
+    <select id="listByRunIdWithPagination" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+        ORDER BY seq ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 查询指定 run 的消息总数 -->
+    <select id="countByRunId" resultType="java.lang.Integer">
+        SELECT COUNT(*) FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+    </select>
+
+    <!-- 获取指定 run 的下一个消息序号 -->
+    <select id="getNextSeq" resultType="java.lang.Integer">
+        SELECT COALESCE(MAX(seq), 0) + 1 FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+    </select>
+
+    <!-- 查询指定 run 的最新消息 -->
+    <select id="findLatestByRunId" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+        ORDER BY seq DESC
+        LIMIT 1
+    </select>
+
+    <!-- 查询指定 run 的最新用户消息 -->
+    <select id="findLatestUserByRunId" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+          AND role = 'user'
+        ORDER BY seq DESC
+        LIMIT 1
+    </select>
+
+    <!-- 删除指定 run 的所有消息 -->
+    <delete id="deleteByRunId">
+        DELETE FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+    </delete>
+
+    <!-- 分页查询指定 run 的消息（排除 initial） -->
+    <select id="listByRunIdWithPaginationExcludeInitial" resultMap="AgentRunMessageResultMap">
+        SELECT * FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+          AND msg_type != 'initial'
+        ORDER BY seq ASC
+        LIMIT #{limit} OFFSET #{offset}
+    </select>
+
+    <!-- 查询指定 run 的消息总数（排除 initial） -->
+    <select id="countByRunIdExcludeInitial" resultType="java.lang.Integer">
+        SELECT COUNT(*) FROM alphafrog_agent_run_message
+        WHERE run_id = #{runId}
+          AND msg_type != 'initial'
+    </select>
+
+</mapper>

@@ -17,6 +17,9 @@
         <result property="updatedAt" column="updated_at"/>
         <result property="completedAt" column="completed_at"/>
         <result property="ext" column="ext"/>
+        <result property="durationMs" column="duration_ms"/>
+        <result property="totalTokens" column="total_tokens"/>
+        <result property="toolCalls" column="tool_calls"/>
     </resultMap>
 
     <insert id="insert" parameterType="world.willfrog.agent.entity.AgentRun">
@@ -66,9 +69,102 @@
         LIMIT 1
     </select>
 
+    <select id="listByUser" resultMap="AgentRunResultMap">
+        SELECT id,
+               user_id,
+               status,
+               last_error,
+               ttl_expires_at,
+               started_at,
+               updated_at,
+               completed_at,
+               ext::text AS ext,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,totalDurationMs}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,totalDurationMs}')::bigint
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,total_duration_ms}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,total_duration_ms}')::bigint
+                           END,
+                       0
+               ) AS duration_ms,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,totalTokens}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,totalTokens}')::int
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,total_tokens}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,total_tokens}')::int
+                           END,
+                       0
+               ) AS total_tokens,
+               COALESCE(
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,toolCalls}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,toolCalls}')::int
+                           END,
+                       CASE
+                           WHEN (snapshot_json #>> '{observability,summary,tool_calls}') ~ '^[0-9]+$'
+                               THEN (snapshot_json #>> '{observability,summary,tool_calls}')::int
+                           END,
+                       0
+               ) AS tool_calls
+        FROM alphafrog_agent_run
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="fromTime != null">
+            AND started_at &gt;= #{fromTime}
+        </if>
+        ORDER BY started_at DESC
+        LIMIT #{limit}
+        OFFSET #{offset}
+    </select>
+
+    <select id="countByUser" resultType="int">
+        SELECT COUNT(1)
+        FROM alphafrog_agent_run
+        WHERE user_id = #{userId}
+        <if test="status != null">
+            AND status = #{status}
+        </if>
+        <if test="fromTime != null">
+            AND started_at &gt;= #{fromTime}
+        </if>
+    </select>
+
+    <select id="sumCompletedCreditsByUser" resultType="int">
+        SELECT COALESCE(SUM(
+                   CASE
+                       WHEN (e.payload_json -&gt;&gt; 'totalCreditsConsumed') ~ '^[0-9]+$'
+                           THEN (e.payload_json -&gt;&gt; 'totalCreditsConsumed')::int
+                       WHEN (e.payload_json -&gt;&gt; 'total_credits_consumed') ~ '^[0-9]+$'
+                           THEN (e.payload_json -&gt;&gt; 'total_credits_consumed')::int
+                       ELSE 0
+                       END
+               ), 0)
+        FROM alphafrog_agent_run_event e
+                 JOIN alphafrog_agent_run r ON r.id = e.run_id
+        WHERE r.user_id = #{userId}
+          AND e.event_type = 'WORKFLOW_COMPLETED'
+    </select>
+
     <update id="updateStatus">
         UPDATE alphafrog_agent_run
         SET status = #{status},
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updateStatusWithTtl">
+        UPDATE alphafrog_agent_run
+        SET status = #{status},
+            ttl_expires_at = #{ttlExpiresAt},
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND user_id = #{userId}
@@ -78,6 +174,22 @@
         UPDATE alphafrog_agent_run
         SET status = #{status},
             plan_json = CAST(#{planJson} AS jsonb),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updatePlanJson">
+        UPDATE alphafrog_agent_run
+        SET plan_json = CAST(#{planJson} AS jsonb),
+            updated_at = CURRENT_TIMESTAMP
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </update>
+
+    <update id="updateExt">
+        UPDATE alphafrog_agent_run
+        SET ext = CAST(#{ext} AS jsonb),
             updated_at = CURRENT_TIMESTAMP
         WHERE id = #{id}
           AND user_id = #{userId}
@@ -107,5 +219,23 @@
         WHERE id = #{id}
           AND user_id = #{userId}
     </update>
+
+    <!--
+        根据 run ID 和用户 ID 删除 Agent Run 记录。
+        
+        说明：
+        - 物理删除，不可恢复
+        - 必须同时匹配 id 和 user_id，确保用户只能删除自己的 run
+        - 返回值为实际删除的记录数（成功为1，未找到为0）
+        
+        使用场景：
+        - 用户主动删除已完成的 run
+        - 不允许删除运行中的 run（业务层校验）
+    -->
+    <delete id="deleteByIdAndUser">
+        DELETE FROM alphafrog_agent_run
+        WHERE id = #{id}
+          AND user_id = #{userId}
+    </delete>
 
 </mapper>

@@ -259,6 +259,7 @@ services:
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       NACOS_ADDRESS: nacos
+      ADMIN_MAGIC_PASSWORD: ${ADMIN_MAGIC_PASSWORD:-frog20191127StartFromBelieving}
       # Memory Optimization (Light)
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx256m"
     deploy:
