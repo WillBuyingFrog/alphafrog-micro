@@ -50,6 +50,13 @@ agent:
       enabled: ${AF_AGENT_OBS_LLM_TRACE_ENABLED:false}
       max-calls: ${AF_AGENT_OBS_LLM_TRACE_MAX_CALLS:100}
       max-text-chars: ${AF_AGENT_OBS_LLM_TRACE_MAX_TEXT_CHARS:20000}
+    raw-http:
+      enabled: ${AF_AGENT_OBS_RAW_HTTP_ENABLED:true}
+      capture-body-max-chars: ${AF_AGENT_OBS_RAW_HTTP_MAX_CHARS:100000}
+      capture-headers: ${AF_AGENT_OBS_RAW_HTTP_HEADERS:true}
+      generate-curl: ${AF_AGENT_OBS_RAW_HTTP_CURL:true}
+      capture-endpoints: ${AF_AGENT_OBS_CAPTURE_ENDPOINTS:}
+      exclude-endpoints: ${AF_AGENT_OBS_EXCLUDE_ENDPOINTS:}
   artifact:
     retention-days:
       normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}

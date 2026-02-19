@@ -19,6 +19,8 @@ public class AgentAiServiceFactory {
 
     private final AgentLlmResolver llmResolver;
     private final ObjectMapper objectMapper;
+    private final RawHttpLogger httpLogger;
+    private final AgentObservabilityService observabilityService;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -89,7 +91,10 @@ public class AgentAiServiceFactory {
                     resolved.modelName(),
                     finalTemperature,
                     maxTokens,
-                    normalizedProviderOrder
+                    normalizedProviderOrder,
+                    httpLogger,
+                    observabilityService,
+                    resolved.endpointName()
             );
         }
         return buildChatModelWithTemperature(resolved, temperatureOverride);
@@ -112,7 +117,10 @@ public class AgentAiServiceFactory {
                     resolved.modelName(),
                     temperature,
                     maxTokens,
-                    normalizedProviderOrder
+                    normalizedProviderOrder,
+                    httpLogger,
+                    observabilityService,
+                    resolved.endpointName()
             );
         }
 

@@ -176,6 +176,117 @@ public class AgentObservabilityService {
         });
     }
 
+    /**
+     * 记录带有原始 HTTP 信息的 LLM 调用（ALP-25 核心方法）。
+     * 
+     * <p>本方法是 ALP-25 可观测性增强的核心入口，支持记录完整的 HTTP 请求/响应信息，
+     * 用于后续的问题诊断、curl 复现、Provider 差异分析等。</p>
+     * 
+     * <p><b>上报内容：</b></p>
+     * <ul>
+     *   <li>Run 维度统计：LLM 调用次数、Token 消耗、耗时</li>
+     *   <li>Phase 维度统计：各阶段的调用次数和错误数</li>
+     *   <li>原始 HTTP 信息：完整请求/响应（URL、headers、body、statusCode）</li>
+     *   <li>Curl 命令：可直接执行的复现命令</li>
+     * </ul>
+     * 
+     * <p><b>使用场景：</b></p>
+     * <ul>
+     *   <li>OpenRouterProviderRoutedChatModel 在完成 HTTP 调用后上报</li>
+     *   <li>后续其他自定义 ChatModel 实现可复用此方法</li>
+     * </ul>
+     * 
+     * @param runId Run ID，用于关联到具体的 AgentRun
+     * @param phase 阶段标识，如 "planning"、"execution"、"summarizing"
+     * @param tokenUsage Token 使用情况（从 LLM 响应中解析）
+     * @param durationMs 请求耗时（毫秒）
+     * @param endpointName Endpoint 名称，如 "fireworks"、"openrouter"
+     * @param modelName 模型名称，如 "accounts/fireworks/models/kimi-k2p5"
+     * @param errorMessage 错误信息，null 表示成功，非 null 表示失败原因
+     * @param httpRequest 原始 HTTP 请求记录（由 RawHttpLogger 生成）
+     * @param httpResponse 原始 HTTP 响应记录（由 RawHttpLogger 生成）
+     * @param curlCommand 可直接执行的 curl 命令（用于快速复现）
+     * 
+     * @see RawHttpLogger
+     * @see OpenRouterProviderRoutedChatModel
+     * @since ALP-25
+     */
+    public void recordLlmCallWithRawHttp(
+            String runId,
+            String phase,
+            TokenUsage tokenUsage,
+            long durationMs,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
+        
+        // 写入 debug 文件
+        if (log.isDebugEnabled()) {
+            Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("runId", runId);
+            payload.put("phase", normalizePhase(phase));
+            payload.put("durationMs", clampDuration(durationMs));
+            payload.put("endpoint", nvl(endpointName));
+            payload.put("model", nvl(modelName));
+            payload.put("hasError", errorMessage != null && !errorMessage.isBlank());
+            payload.put("error", trim(errorMessage, 500));
+            payload.put("tokenUsage", tokenUsage == null ? null : Map.of(
+                    "input", tokenUsage.inputTokenCount(),
+                    "output", tokenUsage.outputTokenCount(),
+                    "total", tokenUsage.totalTokenCount()
+            ));
+            payload.put("httpRequest", httpRequest != null ? Map.of(
+                    "url", nvl(httpRequest.getUrl()),
+                    "method", nvl(httpRequest.getMethod()),
+                    "bodyPreview", preview(httpRequest.getBody(), 500)
+            ) : null);
+            payload.put("httpResponse", httpResponse != null ? Map.of(
+                    "statusCode", httpResponse.getStatusCode(),
+                    "bodyPreview", preview(httpResponse.getBody(), 500)
+            ) : null);
+            debugFileWriter.write("OBS_LLM_RAW_HTTP", payload);
+        }
+        
+        // 更新观测状态
+        mutate(runId, state -> {
+            state.getSummary().setLlmCalls(state.getSummary().getLlmCalls() + 1);
+            PhaseMetrics phaseMetrics = phaseMetrics(state, phase);
+            phaseMetrics.setCount(phaseMetrics.getCount() + 1);
+            phaseMetrics.setLlmCalls(phaseMetrics.getLlmCalls() + 1);
+            phaseMetrics.setDurationMs(phaseMetrics.getDurationMs() + clampDuration(durationMs));
+            applyTokens(state.getSummary(), phaseMetrics, tokenUsage);
+            
+            if (endpointName != null && !endpointName.isBlank()) {
+                state.getDiagnostics().setLastEndpoint(endpointName);
+            }
+            if (modelName != null && !modelName.isBlank()) {
+                state.getDiagnostics().setLastModel(modelName);
+            }
+            if (errorMessage != null && !errorMessage.isBlank()) {
+                phaseMetrics.setErrorCount(phaseMetrics.getErrorCount() + 1);
+                state.getDiagnostics().setLastErrorType("LLM_ERROR");
+                state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
+            }
+            
+            // 添加增强的 LLM Trace（包含原始 HTTP）
+            appendLlmTraceWithRawHttp(
+                    state.getDiagnostics(), 
+                    runId, 
+                    phase, 
+                    durationMs, 
+                    endpointName, 
+                    modelName, 
+                    errorMessage,
+                    httpRequest,
+                    httpResponse,
+                    curlCommand
+            );
+        });
+    }
+
     public void recordToolCall(String runId,
                                String phase,
                                String toolName,
@@ -511,6 +622,113 @@ public class AgentObservabilityService {
             traces.remove(0);
         }
     }
+    
+    /**
+     * 添加带有原始 HTTP 信息的 LLM Trace（ALP-25 内部方法）。
+     * 
+     * <p>将完整的 HTTP 观测数据添加到 Diagnostics.llmTraces 列表中。</p>
+     * 
+     * <p><b>数据结构说明：</b></p>
+     * <ul>
+     *   <li>httpRequest: 包含 URL、method、headers、body、timestamp</li>
+     *   <li>httpResponse: 包含 statusCode、headers、body、durationMs、timestamp</li>
+     *   <li>curlCommand: 可直接执行的 curl 命令字符串</li>
+     *   <li>request/responsePreview: 向后兼容的字段（@Deprecated）</li>
+     * </ul>
+     * 
+     * <p><b>存储限制：</b></p>
+     * <p>llmTraces 列表受 {@link #llmTraceCallLimit()} 限制，
+     * 超出限制时会移除最旧的记录。</p>
+     * 
+     * @param diagnostics 观测状态对象（会被修改）
+     * @param runId Run ID
+     * @param phase 阶段标识
+     * @param durationMs 耗时
+     * @param endpointName Endpoint 名称
+     * @param modelName 模型名称
+     * @param errorMessage 错误信息
+     * @param httpRequest 原始 HTTP 请求记录
+     * @param httpResponse 原始 HTTP 响应记录
+     * @param curlCommand curl 命令
+     */
+    private void appendLlmTraceWithRawHttp(
+            Diagnostics diagnostics,
+            String runId,
+            String phase,
+            long durationMs,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
+        
+        if (!shouldCaptureLlmTrace(diagnostics)) {
+            return;
+        }
+        
+        if (diagnostics.getLlmTraces() == null) {
+            diagnostics.setLlmTraces(new ArrayList<>());
+        }
+        
+        List<LlmTrace> traces = diagnostics.getLlmTraces();
+        LlmTrace trace = new LlmTrace();
+        trace.setTime(OffsetDateTime.now().toString());
+        trace.setRunId(nvl(runId));
+        trace.setPhase(normalizePhase(phase));
+        trace.setDurationMs(clampDuration(durationMs));
+        trace.setEndpoint(nvl(endpointName));
+        trace.setModel(nvl(modelName));
+        trace.setHasError(errorMessage != null && !errorMessage.isBlank());
+        trace.setError(trim(errorMessage, 1000));
+        
+        // 设置原始 HTTP 请求信息
+        if (httpRequest != null) {
+            RawHttpTrace reqTrace = new RawHttpTrace();
+            reqTrace.setUrl(httpRequest.getUrl());
+            reqTrace.setMethod(httpRequest.getMethod());
+            reqTrace.setStatusCode(0); // 请求没有状态码
+            reqTrace.setHeaders(httpRequest.getHeaders());
+            reqTrace.setBody(httpRequest.getBody());
+            reqTrace.setDurationMs(0);
+            reqTrace.setTimestamp(httpRequest.getTimestamp());
+            trace.setHttpRequest(reqTrace);
+        }
+        
+        // 设置原始 HTTP 响应信息
+        if (httpResponse != null) {
+            RawHttpTrace respTrace = new RawHttpTrace();
+            respTrace.setUrl(null); // 响应没有 URL
+            respTrace.setMethod(null); // 响应没有方法
+            respTrace.setStatusCode(httpResponse.getStatusCode());
+            respTrace.setHeaders(httpResponse.getHeaders());
+            respTrace.setBody(httpResponse.getBody());
+            respTrace.setDurationMs(httpResponse.getDurationMs());
+            respTrace.setTimestamp(httpResponse.getTimestamp());
+            trace.setHttpResponse(respTrace);
+        }
+        
+        // 设置 curl 命令
+        trace.setCurlCommand(curlCommand);
+        
+        // 保留向后兼容的字段
+        trace.setRequest(null);
+        trace.setResponsePreview(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
+        
+        traces.add(trace);
+        
+        int limit = llmTraceCallLimit();
+        while (traces.size() > limit) {
+            traces.remove(0);
+        }
+    }
+    
+    private String preview(String text, int maxChars) {
+        if (text == null || text.length() <= maxChars) {
+            return text;
+        }
+        return text.substring(0, maxChars) + "...[truncated]";
+    }
 
     private boolean shouldCaptureLlmTrace(Diagnostics diagnostics) {
         if (diagnostics == null) {
@@ -654,8 +872,81 @@ public class AgentObservabilityService {
         private String model;
         private boolean hasError;
         private String error;
+        
+        // ========== ALP-25 新增：原始 HTTP 信息 ==========
+        
+        /**
+         * 原始 HTTP 请求信息（包含完整 URL、headers、body）
+         * 可直接用于 curl 复现
+         */
+        private RawHttpTrace httpRequest;
+        
+        /**
+         * 原始 HTTP 响应信息（包含 statusCode、headers、body）
+         */
+        private RawHttpTrace httpResponse;
+        
+        /**
+         * 可直接执行的 curl 命令（Authorization 已脱敏）
+         */
+        private String curlCommand;
+        
+        // ========== 向后兼容的字段 ==========
+        
+        /**
+         * @deprecated 使用 {@link #httpRequest} 替代
+         * 保留用于向后兼容，内容为 LangChain4j 转换后的请求快照
+         */
+        @Deprecated
         private Map<String, Object> request;
+        
+        /**
+         * @deprecated 使用 {@link #httpResponse} 替代
+         * 保留用于向后兼容，仅包含响应文本预览
+         */
+        @Deprecated
         private String responsePreview;
+    }
+    
+    /**
+     * 原始 HTTP 追踪记录
+     */
+    @Data
+    public static class RawHttpTrace {
+        /**
+         * 请求 URL（如 https://api.fireworks.ai/inference/v1/chat/completions）
+         */
+        private String url;
+        
+        /**
+         * HTTP 方法（如 POST）
+         */
+        private String method;
+        
+        /**
+         * HTTP 状态码（仅响应有，请求为 0）
+         */
+        private int statusCode;
+        
+        /**
+         * HTTP headers（敏感信息已脱敏）
+         */
+        private Map<String, String> headers;
+        
+        /**
+         * HTTP body（JSON 字符串，已截断）
+         */
+        private String body;
+        
+        /**
+         * 耗时（毫秒，仅响应有）
+         */
+        private long durationMs;
+        
+        /**
+         * 时间戳
+         */
+        private long timestamp;
     }
 
     public record ListMetrics(long durationMs, int totalTokens, int toolCalls) {
