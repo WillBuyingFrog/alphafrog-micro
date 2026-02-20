@@ -22,7 +22,7 @@ public class ResponseWrapper<T> implements Serializable {
     /**
      * 响应状态码
      */
-    private String code;
+    private Integer code;
     
     /**
      * 响应消息
