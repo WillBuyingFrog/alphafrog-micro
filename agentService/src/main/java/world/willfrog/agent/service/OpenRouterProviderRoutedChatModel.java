@@ -40,15 +40,18 @@ import java.util.Map;
  * <p>当用户配置中指定了 providerOrder（如优先使用 Fireworks 提供的 Kimi K2.5）时，
  * AgentAiServiceFactory 会创建此类的实例，而非标准的 OpenAiChatModel。</p>
  * 
- * <p><b>HTTP 捕获流程：</b></p>
+ * <p><b>HTTP 捕获流程（ALP-25）：</b></p>
  * <pre>
- * 1. 检查 httpLogger.shouldCapture(endpointName) —— 是否记录此 endpoint
- * 2. 记录请求：httpLogger.recordRequest(url, method, headers, body)
- * 3. 发送 HTTP 请求
- * 4. 记录响应：httpLogger.recordResponse(statusCode, headers, body, durationMs)
- * 5. 生成 curl 命令：httpLogger.toCurlCommand(requestRecord)
- * 6. 上报观测：observabilityService.recordLlmCallWithRawHttp(...)
+ * 1. 检查客户端是否要求捕获（captureLlmRequests=true）
+ * 2. 检查 endpoint 是否在服务端白名单内（httpLogger.shouldCapture）
+ * 3. 只有两者都满足时才记录 HTTP：
+ *    - 记录请求：httpLogger.recordRequest(url, method, headers, body)
+ *    - 发送 HTTP 请求
+ *    - 记录响应：httpLogger.recordResponse(statusCode, headers, body, durationMs)
+ *    - 生成 curl 命令：httpLogger.toCurlCommand(requestRecord)
+ *    - 上报观测：observabilityService.recordLlmCallWithRawHttp(...)
  * </pre>
+ * <p><b>注意：</b>压测时请确保 captureLlmRequests=false，避免存储爆炸。</p>
  * 
  * <p><b>与标准 OpenAiChatModel 的区别：</b></p>
  * <ul>
@@ -108,9 +111,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
      *   <li>解析响应，上报观测数据</li>
      * </ol>
      * 
-     * <p><b>HTTP 捕获决策：</b></p>
-     * <p>只在 httpLogger.shouldCapture(endpointName) 返回 true 时记录 HTTP，
-     * 这允许通过配置控制只捕获特定 endpoint（如只捕获 fireworks，不捕获 openrouter）。</p>
+     * <p><b>HTTP 捕获决策（双重检查，ALP-25）：</b></p>
+     * <ol>
+     *   <li><b>客户端参数：</b>请求中 captureLlmRequests=true 时启用</li>
+     *   <li><b>服务端白名单：</b>endpoint 在 httpLogger.shouldCapture 白名单内</li>
+     * </ol>
+     * <p>只有两个条件同时满足时才记录 HTTP。压测时请设置 captureLlmRequests=false。</p>
      * 
      * @param messages 对话消息列表
      * @param toolSpecifications 可用工具定义
@@ -122,8 +128,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
         String requestJson = null;
         long requestStartedAt = System.currentTimeMillis();
         
-        // ALP-25：判断是否记录 HTTP（根据 endpoint 白名单配置）
-        boolean shouldCapture = httpLogger != null && httpLogger.shouldCapture(endpointName);
+        // ALP-25：判断是否记录 HTTP（客户端参数 + 服务端白名单）
+        // 只有当客户端显式要求 captureLlmRequests=true 且 endpoint 在白名单内时才捕获
+        boolean clientWantsCapture = observabilityService != null 
+                && observabilityService.isCaptureLlmRequestsEnabled(AgentContext.getRunId());
+        boolean endpointAllowed = httpLogger != null && httpLogger.shouldCapture(endpointName);
+        boolean shouldCapture = clientWantsCapture && endpointAllowed;
         RawHttpLogger.HttpRequestRecord requestRecord = null;
         RawHttpLogger.HttpResponseRecord responseRecord = null;
         String curlCommand = null;

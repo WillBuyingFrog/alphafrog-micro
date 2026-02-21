@@ -66,6 +66,34 @@ public class AgentObservabilityService {
             }
         });
     }
+    
+    /**
+     * 检查指定 Run 是否启用了 LLM 请求捕获（ALP-25）
+     * 
+     * <p>用于 OpenRouterProviderRoutedChatModel 判断是否记录原始 HTTP。</p>
+     * 
+     * @param runId Run ID
+     * @return true 表示该 Run 启用了捕获
+     */
+    public boolean isCaptureLlmRequestsEnabled(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return false;
+        }
+        try {
+            ObservabilityState state = loadState(runId);
+            if (state == null || state.getDiagnostics() == null) {
+                return false;
+            }
+            // 全局开关优先
+            if (llmTraceEnabled) {
+                return true;
+            }
+            return Boolean.TRUE.equals(state.getDiagnostics().getCaptureLlmRequests());
+        } catch (Exception e) {
+            log.warn("检查 captureLlmRequests 失败: runId={}", runId, e);
+            return false;
+        }
+    }
 
     public void addNodeCount(String runId, int delta) {
         if (delta == 0) {

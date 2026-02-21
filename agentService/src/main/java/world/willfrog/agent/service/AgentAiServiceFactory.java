@@ -76,7 +76,8 @@ public class AgentAiServiceFactory {
                                                                            List<String> providerOrder,
                                                                            Double temperatureOverride) {
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
-        if (isOpenRouterEndpoint(resolved) && !normalizedProviderOrder.isEmpty()) {
+        // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
+        if (shouldUseProviderRoutedModel(resolved)) {
             String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
             if (isBlank(apiKey)) {
                 throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
@@ -107,7 +108,8 @@ public class AgentAiServiceFactory {
             throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
         }
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
-        if (isOpenRouterEndpoint(resolved) && !normalizedProviderOrder.isEmpty()) {
+        // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
+        if (shouldUseProviderRoutedModel(resolved)) {
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
             return new OpenRouterProviderRoutedChatModel(
                     objectMapper,
@@ -158,14 +160,28 @@ public class AgentAiServiceFactory {
         return value == null || value.trim().isEmpty();
     }
 
-    private boolean isOpenRouterEndpoint(AgentLlmResolver.ResolvedLlm resolved) {
-        if (resolved == null) {
+    /**
+     * 判断是否使用 OpenRouterProviderRoutedChatModel（支持 HTTP 捕获）
+     * ALP-25: 对所有 OpenAI 兼容端点启用 HTTP 捕获
+     */
+    private boolean shouldUseProviderRoutedModel(AgentLlmResolver.ResolvedLlm resolved) {
+        if (resolved == null || isBlank(resolved.baseUrl())) {
             return false;
         }
-        if (!isBlank(resolved.endpointName()) && "openrouter".equalsIgnoreCase(resolved.endpointName().trim())) {
-            return true;
-        }
-        return resolved.baseUrl() != null && resolved.baseUrl().contains("openrouter.ai");
+        // 支持所有 OpenAI 兼容 API：OpenRouter、Fireworks、OpenAI 等
+        String baseUrl = resolved.baseUrl().toLowerCase();
+        return baseUrl.contains("openrouter.ai") 
+            || baseUrl.contains("fireworks.ai")
+            || baseUrl.contains("openai.com")
+            || baseUrl.contains("api/v1");  // OpenAI 兼容 API 通用路径
+    }
+    
+    /**
+     * @deprecated 使用 {@link #shouldUseProviderRoutedModel} 替代
+     */
+    @Deprecated
+    private boolean isOpenRouterEndpoint(AgentLlmResolver.ResolvedLlm resolved) {
+        return shouldUseProviderRoutedModel(resolved);
     }
 
     private List<String> sanitizeProviderOrder(List<String> providerOrder) {
