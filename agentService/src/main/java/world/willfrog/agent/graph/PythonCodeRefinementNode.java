@@ -62,6 +62,9 @@ public class PythonCodeRefinementNode {
         private String endpointName;
         private String endpointBaseUrl;
         private String modelName;
+        private String decisionLlmTraceId;
+        private String decisionStage;
+        private String decisionExcerpt;
     }
 
     @Data
@@ -90,6 +93,9 @@ public class PythonCodeRefinementNode {
         private String code;
         private Map<String, Object> runArgs;
         private Map<String, Object> llmSnapshot;
+        private String decisionLlmTraceId;
+        private String decisionStage;
+        private String decisionExcerpt;
     }
 
     public Result execute(Request request, ChatLanguageModel model) {
@@ -97,56 +103,89 @@ public class PythonCodeRefinementNode {
         List<AttemptTrace> traces = new ArrayList<>();
         String currentCode = safe(request.getInitialCode());
         Map<String, Object> currentRunArgs = buildInitialRunArgs(request);
+        String currentDecisionTraceId = safe(request.getDecisionLlmTraceId());
+        String currentDecisionStage = safe(request.getDecisionStage());
+        String currentDecisionExcerpt = safe(request.getDecisionExcerpt());
+        String previousStage = AgentContext.getStage();
+        Integer previousAttempt = AgentContext.getPythonRefineAttempt();
+        String previousDecisionTraceId = AgentContext.getDecisionTraceId();
+        String previousDecisionStage = AgentContext.getDecisionStage();
+        String previousDecisionExcerpt = AgentContext.getDecisionExcerpt();
 
-        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
-            Map<String, Object> llmSnapshot = null;
-            if (currentCode.isBlank()) {
-                GeneratedPlan generated = generatePythonPlan(request, traces, currentRunArgs, model);
-                currentCode = safe(generated.getCode());
-                currentRunArgs = mergeRunArgs(currentRunArgs, generated.getRunArgs());
-                llmSnapshot = copySnapshot(generated.getLlmSnapshot());
+        try {
+            for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+                Map<String, Object> llmSnapshot = null;
                 if (currentCode.isBlank()) {
-                    String output = "Python code generation failed: empty code";
-                    traces.add(AttemptTrace.builder()
-                            .attempt(attempt)
-                            .code("")
-                            .runArgs(copyForTrace(currentRunArgs))
-                            .llmSnapshot(copySnapshot(llmSnapshot))
-                            .output(output)
-                            .success(false)
-                            .build());
-                    continue;
+                    GeneratedPlan generated = generatePythonPlan(request, traces, currentRunArgs, model);
+                    currentCode = safe(generated.getCode());
+                    currentRunArgs = mergeRunArgs(currentRunArgs, generated.getRunArgs());
+                    llmSnapshot = copySnapshot(generated.getLlmSnapshot());
+                    currentDecisionTraceId = safe(generated.getDecisionLlmTraceId());
+                    currentDecisionStage = safe(generated.getDecisionStage());
+                    currentDecisionExcerpt = safe(generated.getDecisionExcerpt());
+                    if (currentCode.isBlank()) {
+                        String output = "Python code generation failed: empty code";
+                        traces.add(AttemptTrace.builder()
+                                .attempt(attempt)
+                                .code("")
+                                .runArgs(copyForTrace(currentRunArgs))
+                                .llmSnapshot(copySnapshot(llmSnapshot))
+                                .output(output)
+                                .success(false)
+                                .build());
+                        continue;
+                    }
                 }
-            }
 
-            String output = toolRouter.invoke("executePython", buildExecuteArgs(currentRunArgs, currentCode));
-            boolean success = isExecutionSuccess(output);
-            traces.add(AttemptTrace.builder()
-                    .attempt(attempt)
-                    .code(currentCode)
-                    .runArgs(copyForTrace(currentRunArgs))
-                    .llmSnapshot(copySnapshot(llmSnapshot))
-                    .output(output)
-                    .success(success)
-                    .build());
-            if (success) {
-                return Result.builder()
-                        .success(true)
-                        .attemptsUsed(attempt)
+                AgentContext.setStage("python_refine_execute");
+                AgentContext.setPythonRefineAttempt(attempt);
+                AgentContext.setDecisionContext(currentDecisionTraceId, currentDecisionStage, currentDecisionExcerpt);
+                String output;
+                try {
+                    output = toolRouter.invoke("executePython", buildExecuteArgs(currentRunArgs, currentCode));
+                } finally {
+                    AgentContext.clearPythonRefineAttempt();
+                }
+                boolean success = isExecutionSuccess(output);
+                traces.add(AttemptTrace.builder()
+                        .attempt(attempt)
+                        .code(currentCode)
+                        .runArgs(copyForTrace(currentRunArgs))
+                        .llmSnapshot(copySnapshot(llmSnapshot))
                         .output(output)
-                        .traces(traces)
-                        .build();
+                        .success(success)
+                        .build());
+                if (success) {
+                    return Result.builder()
+                            .success(true)
+                            .attemptsUsed(attempt)
+                            .output(output)
+                            .traces(traces)
+                            .build();
+                }
+                currentCode = "";
             }
-            currentCode = "";
-        }
 
-        String lastError = traces.isEmpty() ? "" : preview(traces.get(traces.size() - 1).getOutput(), 500);
-        return Result.builder()
-                .success(false)
-                .attemptsUsed(traces.size())
-                .output("Python execution failed after " + maxAttempts + " attempts. last_error=" + lastError)
-                .traces(traces)
-                .build();
+            String lastError = traces.isEmpty() ? "" : preview(traces.get(traces.size() - 1).getOutput(), 500);
+            return Result.builder()
+                    .success(false)
+                    .attemptsUsed(traces.size())
+                    .output("Python execution failed after " + maxAttempts + " attempts. last_error=" + lastError)
+                    .traces(traces)
+                    .build();
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+            AgentContext.setPythonRefineAttempt(previousAttempt);
+            if (previousDecisionTraceId == null || previousDecisionTraceId.isBlank()) {
+                AgentContext.clearDecisionContext();
+            } else {
+                AgentContext.setDecisionContext(previousDecisionTraceId, previousDecisionStage, previousDecisionExcerpt);
+            }
+        }
     }
 
     private Map<String, Object> buildExecuteArgs(Map<String, Object> runArgs, String code) {
@@ -215,12 +254,14 @@ public class PythonCodeRefinementNode {
             );
             // 设置当前 phase 并记录开始时间
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
+            AgentContext.setStage("python_refine_plan");
             long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(llmMessages);
             long llmCompletedAt = System.currentTimeMillis();
             long llmDurationMs = llmCompletedAt - llmStartedAt;
             String runId = AgentContext.getRunId();
             String llmText = resp.content().text();
+            String traceId = "";
             if (runId != null && !runId.isBlank()) {
                 Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                         request.getEndpointName(),
@@ -230,7 +271,7 @@ public class PythonCodeRefinementNode {
                         null,
                         Map.of("stage", "python_refine_plan")
                 );
-                observabilityService.recordLlmCall(
+                traceId = observabilityService.recordLlmCall(
                         runId,
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         resp.tokenUsage(),
@@ -244,13 +285,17 @@ public class PythonCodeRefinementNode {
                         llmText
                 );
             }
-            return extractPlan(llmText, currentRunArgs, systemPrompt, userPrompt.toString(), null);
+            return extractPlan(llmText, currentRunArgs, systemPrompt, userPrompt.toString(), null,
+                    traceId, "python_refine_plan", preview(userPrompt.toString(), 800));
         } catch (Exception e) {
             log.warn("Generate python code failed", e);
             return GeneratedPlan.builder()
                     .code("")
                     .runArgs(currentRunArgs)
                     .llmSnapshot(buildLlmSnapshot(systemPrompt, userPrompt.toString(), currentRunArgs, "", e.getMessage()))
+                    .decisionLlmTraceId(safe(request.getDecisionLlmTraceId()))
+                    .decisionStage(safe(request.getDecisionStage()))
+                    .decisionExcerpt(safe(request.getDecisionExcerpt()))
                     .build();
         }
     }
@@ -259,7 +304,10 @@ public class PythonCodeRefinementNode {
                                       Map<String, Object> fallbackRunArgs,
                                       String systemPrompt,
                                       String userPrompt,
-                                      String error) {
+                                      String error,
+                                      String traceId,
+                                      String stage,
+                                      String excerpt) {
         String code = extractCode(text);
         Map<String, Object> runArgs = extractRunArgs(text);
         if (runArgs.isEmpty()) {
@@ -269,6 +317,9 @@ public class PythonCodeRefinementNode {
                 .code(code)
                 .runArgs(mergeRunArgs(fallbackRunArgs, runArgs))
                 .llmSnapshot(buildLlmSnapshot(systemPrompt, userPrompt, fallbackRunArgs, text, error))
+                .decisionLlmTraceId(safe(traceId))
+                .decisionStage(safe(stage))
+                .decisionExcerpt(safe(excerpt))
                 .build();
     }
 

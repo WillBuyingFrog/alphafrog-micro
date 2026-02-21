@@ -118,6 +118,7 @@ public class SubAgentRunner {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
         String previousPhase = AgentContext.getPhase();
+        String previousStage = AgentContext.getStage();
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
         Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
@@ -129,6 +130,7 @@ public class SubAgentRunner {
             JsonNode stepsNode = null;
             String lastPlanError = "sub_agent plan generation failed";
             String retryHint = "";
+            String planTraceId = "";
             for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
                 List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
@@ -136,6 +138,7 @@ public class SubAgentRunner {
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
                 );
+                AgentContext.setStage("sub_agent_plan");
                 long llmStartedAt = System.currentTimeMillis();
                 Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
                 long llmCompletedAt = System.currentTimeMillis();
@@ -152,7 +155,7 @@ public class SubAgentRunner {
                                 "attempt", attempt
                         )
                 );
-                observabilityService.recordLlmCall(
+                planTraceId = observabilityService.recordLlmCall(
                         request.getRunId(),
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         planResp.tokenUsage(),
@@ -247,6 +250,9 @@ public class SubAgentRunner {
                 String output;
                 boolean stepSuccess;
                 Map<String, Object> cachePayload = toolRouter.toEventCachePayload(null);
+                AgentContext.setStage("sub_agent_step_execution");
+                AgentContext.setSubAgentStepIndex(stepIndex);
+                AgentContext.setDecisionContext(planTraceId, "sub_agent_plan", preview(systemPrompt));
                 if ("executePython".equals(tool)) {
                     PythonCodeRefinementNode.Result refineResult = pythonCodeRefinementNode.execute(
                             PythonCodeRefinementNode.Request.builder()
@@ -262,6 +268,9 @@ public class SubAgentRunner {
                                     .endpointName(request.getEndpointName())
                                     .endpointBaseUrl(request.getEndpointBaseUrl())
                                     .modelName(request.getModelName())
+                                    .decisionLlmTraceId(planTraceId)
+                                    .decisionStage("sub_agent_plan")
+                                    .decisionExcerpt(preview(systemPrompt))
                                     .build(),
                             model
                     );
@@ -280,6 +289,7 @@ public class SubAgentRunner {
                     stepSuccess = invokeResult.isSuccess() && isStepSuccessful(tool, output);
                     cachePayload = toolRouter.toEventCachePayload(invokeResult);
                 }
+                AgentContext.clearSubAgentStepIndex();
 
                 Map<String, Object> stepResult = new HashMap<>();
                 stepResult.put("tool", tool);
@@ -317,6 +327,7 @@ public class SubAgentRunner {
                     new SystemMessage(summaryPrompt),
                     new UserMessage("目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
             );
+            AgentContext.setStage("sub_agent_summary");
             long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
             long llmCompletedAt = System.currentTimeMillis();
@@ -369,6 +380,13 @@ public class SubAgentRunner {
             } else {
                 AgentContext.setPhase(previousPhase);
             }
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+            AgentContext.clearSubAgentStepIndex();
+            AgentContext.clearDecisionContext();
         }
     }
 

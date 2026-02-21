@@ -9,6 +9,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.model.AgentRunStatus;
 
 import java.util.ArrayList;
@@ -19,6 +20,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
@@ -46,6 +48,9 @@ public class AgentObservabilityService {
 
     @Value("${agent.observability.llm-trace.max-text-chars:20000}")
     private int llmTraceMaxTextChars;
+
+    @Value("${agent.observability.llm-trace.reasoning-max-chars:20000}")
+    private int llmTraceReasoningMaxChars;
 
     public void initializeRun(String runId, String endpointName, String modelName) {
         initializeRun(runId, endpointName, modelName, false);
@@ -105,14 +110,14 @@ public class AgentObservabilityService {
         });
     }
 
-    public void recordLlmCall(String runId,
-                              String phase,
-                              TokenUsage tokenUsage,
-                              long durationMs,
-                              String endpointName,
-                              String modelName,
-                              String errorMessage) {
-        recordLlmCall(
+    public String recordLlmCall(String runId,
+                                String phase,
+                                TokenUsage tokenUsage,
+                                long durationMs,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage) {
+        return recordLlmCall(
                 runId,
                 phase,
                 tokenUsage,
@@ -126,18 +131,18 @@ public class AgentObservabilityService {
         );
     }
 
-    public void recordLlmCall(String runId,
-                              String phase,
-                              TokenUsage tokenUsage,
-                              long durationMs,
-                              String endpointName,
-                              String modelName,
-                              String errorMessage,
-                              List<ChatMessage> requestMessages,
-                              Map<String, Object> requestMeta,
-                              String responseText) {
+    public String recordLlmCall(String runId,
+                                String phase,
+                                TokenUsage tokenUsage,
+                                long durationMs,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage,
+                                List<ChatMessage> requestMessages,
+                                Map<String, Object> requestMeta,
+                                String responseText) {
         Map<String, Object> requestSnapshot = buildLlmRequestSnapshot(requestMessages, requestMeta);
-        recordLlmCall(
+        return recordLlmCall(
                 runId,
                 phase,
                 tokenUsage,
@@ -150,39 +155,44 @@ public class AgentObservabilityService {
         );
     }
 
-    public void recordLlmCall(String runId,
-                              String phase,
-                              TokenUsage tokenUsage,
-                              long durationMs,
-                              String endpointName,
-                              String modelName,
-                              String errorMessage,
-                              Map<String, Object> requestSnapshot,
-                              String responseText) {
-        recordLlmCall(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName, 
-                     errorMessage, requestSnapshot, responseText);
+    public String recordLlmCall(String runId,
+                                String phase,
+                                TokenUsage tokenUsage,
+                                long durationMs,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage,
+                                Map<String, Object> requestSnapshot,
+                                String responseText) {
+        return recordLlmCall(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName,
+                errorMessage, requestSnapshot, responseText);
     }
 
-    public void recordLlmCall(String runId,
-                              String phase,
-                              TokenUsage tokenUsage,
-                              long durationMs,
-                              long startedAtMillis,
-                              long completedAtMillis,
-                              String endpointName,
-                              String modelName,
-                              String errorMessage,
-                              Map<String, Object> requestSnapshot,
-                              String responseText) {
+    public String recordLlmCall(String runId,
+                                String phase,
+                                TokenUsage tokenUsage,
+                                long durationMs,
+                                long startedAtMillis,
+                                long completedAtMillis,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage,
+                                Map<String, Object> requestSnapshot,
+                                String responseText) {
         Map<String, Object> sanitizedRequestSnapshot = sanitizeRequestSnapshot(requestSnapshot);
         String responsePreview = trim(responseText, llmTraceTextLimit());
+        String traceId = newTraceId();
+        String stage = resolveStage(sanitizedRequestSnapshot);
+        ReasoningExtraction reasoning = extractReasoning(responseText);
         if (log.isDebugEnabled()) {
             log.debug("OBS_LLM runId={} phase={} durationMs={} endpoint={} model={} hasError={}",
                     runId, normalizePhase(phase), clampDuration(durationMs), nvl(endpointName), nvl(modelName),
                     errorMessage != null && !errorMessage.isBlank());
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("traceId", traceId);
             payload.put("runId", runId);
             payload.put("phase", normalizePhase(phase));
+            payload.put("stage", stage);
             payload.put("durationMs", clampDuration(durationMs));
             payload.put("startedAtMillis", startedAtMillis);
             payload.put("completedAtMillis", completedAtMillis);
@@ -195,6 +205,8 @@ public class AgentObservabilityService {
                     "output", tokenUsage.outputTokenCount(),
                     "total", tokenUsage.totalTokenCount()
             ));
+            payload.put("reasoningText", trim(reasoning.text(), 500));
+            payload.put("reasoningTruncated", reasoning.truncated());
             payload.put("request", sanitizedRequestSnapshot);
             payload.put("responsePreview", responsePreview);
             debugFileWriter.write("OBS_LLM", payload);
@@ -217,9 +229,10 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, startedAtMillis, completedAtMillis,
-                    endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview);
+            appendLlmTrace(state.getDiagnostics(), traceId, runId, phase, stage, durationMs, startedAtMillis, completedAtMillis,
+                    endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview, reasoning);
         });
+        return traceId;
     }
 
     /**
@@ -257,7 +270,7 @@ public class AgentObservabilityService {
      * @see OpenRouterProviderRoutedChatModel
      * @since ALP-25
      */
-    public void recordLlmCallWithRawHttp(
+    public String recordLlmCallWithRawHttp(
             String runId,
             String phase,
             TokenUsage tokenUsage,
@@ -268,11 +281,11 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
-        recordLlmCallWithRawHttp(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName,
+        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName,
                 errorMessage, httpRequest, httpResponse, curlCommand);
     }
 
-    public void recordLlmCallWithRawHttp(
+    public String recordLlmCallWithRawHttp(
             String runId,
             String phase,
             TokenUsage tokenUsage,
@@ -285,12 +298,18 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
+        String traceId = newTraceId();
+        String stage = resolveStage(null);
+        String rawResponseBody = httpResponse == null ? null : httpResponse.getBody();
+        ReasoningExtraction reasoning = extractReasoning(rawResponseBody);
         
         // 写入 debug 文件
         if (log.isDebugEnabled()) {
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("traceId", traceId);
             payload.put("runId", runId);
             payload.put("phase", normalizePhase(phase));
+            payload.put("stage", stage);
             payload.put("durationMs", clampDuration(durationMs));
             payload.put("startedAtMillis", startedAtMillis);
             payload.put("completedAtMillis", completedAtMillis);
@@ -312,6 +331,8 @@ public class AgentObservabilityService {
                     "statusCode", httpResponse.getStatusCode(),
                     "bodyPreview", preview(httpResponse.getBody(), 500)
             ) : null);
+            payload.put("reasoningText", trim(reasoning.text(), 500));
+            payload.put("reasoningTruncated", reasoning.truncated());
             debugFileWriter.write("OBS_LLM_RAW_HTTP", payload);
         }
         
@@ -339,8 +360,10 @@ public class AgentObservabilityService {
             // 添加增强的 LLM Trace（包含原始 HTTP）
             appendLlmTraceWithRawHttp(
                     state.getDiagnostics(), 
+                    traceId,
                     runId, 
                     phase, 
+                    stage,
                     durationMs, 
                     startedAtMillis,
                     completedAtMillis,
@@ -349,14 +372,18 @@ public class AgentObservabilityService {
                     errorMessage,
                     httpRequest,
                     httpResponse,
-                    curlCommand
+                    curlCommand,
+                    reasoning
             );
         });
+        return traceId;
     }
 
     public void recordToolCall(String runId,
                                String phase,
                                String toolName,
+                               Map<String, Object> params,
+                               String output,
                                long durationMs,
                                boolean success,
                                boolean cacheEligible,
@@ -371,11 +398,22 @@ public class AgentObservabilityService {
                     runId, normalizePhase(phase), nvl(toolName), clampDuration(durationMs), success,
                     cacheEligible, cacheHit, nvl(cacheSource));
             Map<String, Object> payload = new LinkedHashMap<>();
+            payload.put("traceId", newTraceId());
             payload.put("runId", runId);
             payload.put("phase", normalizePhase(phase));
+            payload.put("stage", nvl(AgentContext.getStage()));
             payload.put("tool", nvl(toolName));
             payload.put("durationMs", clampDuration(durationMs));
             payload.put("success", success);
+            payload.put("params", sanitizeRequestSnapshot(params));
+            payload.put("outputPreview", preview(output, llmTraceTextLimit()));
+            payload.put("todoId", nvl(AgentContext.getTodoId()));
+            payload.put("todoSequence", AgentContext.getTodoSequence());
+            payload.put("subAgentStepIndex", AgentContext.getSubAgentStepIndex());
+            payload.put("pythonRefineAttempt", AgentContext.getPythonRefineAttempt());
+            payload.put("decisionLlmTraceId", nvl(AgentContext.getDecisionTraceId()));
+            payload.put("decisionStage", nvl(AgentContext.getDecisionStage()));
+            payload.put("decisionExcerpt", trim(AgentContext.getDecisionExcerpt(), 500));
             payload.put("cache", Map.of(
                     "eligible", cacheEligible,
                     "hit", cacheHit,
@@ -402,6 +440,23 @@ public class AgentObservabilityService {
                     state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
                 }
             }
+            appendToolTrace(
+                    state.getDiagnostics(),
+                    runId,
+                    phase,
+                    toolName,
+                    params,
+                    output,
+                    durationMs,
+                    success,
+                    cacheEligible,
+                    cacheHit,
+                    cacheKey,
+                    cacheSource,
+                    cacheTtlRemainingMs,
+                    estimatedSavedDurationMs,
+                    errorMessage
+            );
         });
     }
 
@@ -498,6 +553,12 @@ public class AgentObservabilityService {
             if (parsed.getDiagnostics() == null) {
                 parsed.setDiagnostics(new Diagnostics());
             }
+            if (parsed.getDiagnostics().getLlmTraces() == null) {
+                parsed.getDiagnostics().setLlmTraces(new ArrayList<>());
+            }
+            if (parsed.getDiagnostics().getToolTraces() == null) {
+                parsed.getDiagnostics().setToolTraces(new ArrayList<>());
+            }
             ensurePhaseKeys(parsed);
             return parsed;
         } catch (Exception e) {
@@ -575,7 +636,10 @@ public class AgentObservabilityService {
     private ObservabilityState newState() {
         ObservabilityState state = new ObservabilityState();
         state.setSummary(new Summary());
-        state.setDiagnostics(new Diagnostics());
+        Diagnostics diagnostics = new Diagnostics();
+        diagnostics.setLlmTraces(new ArrayList<>());
+        diagnostics.setToolTraces(new ArrayList<>());
+        state.setDiagnostics(diagnostics);
         state.setPhases(defaultPhases());
         return state;
     }
@@ -652,26 +716,23 @@ public class AgentObservabilityService {
         return llmTraceMaxTextChars <= 0 ? 20000 : llmTraceMaxTextChars;
     }
 
+    private int llmTraceReasoningLimit() {
+        return llmTraceReasoningMaxChars <= 0 ? 20000 : llmTraceReasoningMaxChars;
+    }
+
     private int llmTraceCallLimit() {
         return llmTraceMaxCalls <= 0 ? 100 : llmTraceMaxCalls;
     }
 
-    private void appendLlmTrace(Diagnostics diagnostics,
-                                String runId,
-                                String phase,
-                                long durationMs,
-                                String endpointName,
-                                String modelName,
-                                String errorMessage,
-                                Map<String, Object> requestSnapshot,
-                                String responsePreview) {
-        appendLlmTrace(diagnostics, runId, phase, durationMs, 0, 0, endpointName, modelName, 
-                      errorMessage, requestSnapshot, responsePreview);
+    private String newTraceId() {
+        return UUID.randomUUID().toString().replace("-", "");
     }
 
     private void appendLlmTrace(Diagnostics diagnostics,
+                                String traceId,
                                 String runId,
                                 String phase,
+                                String stage,
                                 long durationMs,
                                 long startedAtMillis,
                                 long completedAtMillis,
@@ -679,7 +740,8 @@ public class AgentObservabilityService {
                                 String modelName,
                                 String errorMessage,
                                 Map<String, Object> requestSnapshot,
-                                String responsePreview) {
+                                String responsePreview,
+                                ReasoningExtraction reasoning) {
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
         }
@@ -688,9 +750,11 @@ public class AgentObservabilityService {
         }
         List<LlmTrace> traces = diagnostics.getLlmTraces();
         LlmTrace trace = new LlmTrace();
+        trace.setTraceId(nvl(traceId));
         trace.setTime(OffsetDateTime.now().toString());
         trace.setRunId(nvl(runId));
         trace.setPhase(normalizePhase(phase));
+        trace.setStage(nvl(stage));
         trace.setDurationMs(clampDuration(durationMs));
         trace.setStartedAtMillis(startedAtMillis > 0 ? startedAtMillis : 0);
         trace.setCompletedAtMillis(completedAtMillis > 0 ? completedAtMillis : 0);
@@ -700,6 +764,9 @@ public class AgentObservabilityService {
         trace.setError(trim(errorMessage, 1000));
         trace.setRequest(requestSnapshot);
         trace.setResponsePreview(responsePreview);
+        trace.setReasoningText(reasoning == null ? "" : reasoning.text());
+        trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
+        trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
         traces.add(trace);
         int limit = llmTraceCallLimit();
         while (traces.size() > limit) {
@@ -737,23 +804,10 @@ public class AgentObservabilityService {
      */
     private void appendLlmTraceWithRawHttp(
             Diagnostics diagnostics,
+            String traceId,
             String runId,
             String phase,
-            long durationMs,
-            String endpointName,
-            String modelName,
-            String errorMessage,
-            RawHttpLogger.HttpRequestRecord httpRequest,
-            RawHttpLogger.HttpResponseRecord httpResponse,
-            String curlCommand) {
-        appendLlmTraceWithRawHttp(diagnostics, runId, phase, durationMs, 0, 0, endpointName, modelName,
-                errorMessage, httpRequest, httpResponse, curlCommand);
-    }
-
-    private void appendLlmTraceWithRawHttp(
-            Diagnostics diagnostics,
-            String runId,
-            String phase,
+            String stage,
             long durationMs,
             long startedAtMillis,
             long completedAtMillis,
@@ -762,7 +816,8 @@ public class AgentObservabilityService {
             String errorMessage,
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
-            String curlCommand) {
+            String curlCommand,
+            ReasoningExtraction reasoning) {
         
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
@@ -774,9 +829,11 @@ public class AgentObservabilityService {
         
         List<LlmTrace> traces = diagnostics.getLlmTraces();
         LlmTrace trace = new LlmTrace();
+        trace.setTraceId(nvl(traceId));
         trace.setTime(OffsetDateTime.now().toString());
         trace.setRunId(nvl(runId));
         trace.setPhase(normalizePhase(phase));
+        trace.setStage(nvl(stage));
         trace.setDurationMs(clampDuration(durationMs));
         trace.setStartedAtMillis(startedAtMillis > 0 ? startedAtMillis : 0);
         trace.setCompletedAtMillis(completedAtMillis > 0 ? completedAtMillis : 0);
@@ -784,6 +841,9 @@ public class AgentObservabilityService {
         trace.setModel(nvl(modelName));
         trace.setHasError(errorMessage != null && !errorMessage.isBlank());
         trace.setError(trim(errorMessage, 1000));
+        trace.setReasoningText(reasoning == null ? "" : reasoning.text());
+        trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
+        trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
         
         // 设置原始 HTTP 请求信息
         if (httpRequest != null) {
@@ -825,12 +885,168 @@ public class AgentObservabilityService {
             traces.remove(0);
         }
     }
+
+    private void appendToolTrace(Diagnostics diagnostics,
+                                 String runId,
+                                 String phase,
+                                 String toolName,
+                                 Map<String, Object> params,
+                                 String output,
+                                 long durationMs,
+                                 boolean success,
+                                 boolean cacheEligible,
+                                 boolean cacheHit,
+                                 String cacheKey,
+                                 String cacheSource,
+                                 long cacheTtlRemainingMs,
+                                 long estimatedSavedDurationMs,
+                                 String errorMessage) {
+        if (diagnostics == null) {
+            return;
+        }
+        if (diagnostics.getToolTraces() == null) {
+            diagnostics.setToolTraces(new ArrayList<>());
+        }
+        ToolTrace trace = new ToolTrace();
+        trace.setTraceId(newTraceId());
+        trace.setTime(OffsetDateTime.now().toString());
+        trace.setRunId(nvl(runId));
+        trace.setPhase(normalizePhase(phase));
+        trace.setStage(nvl(AgentContext.getStage()));
+        trace.setTodoId(nvl(AgentContext.getTodoId()));
+        trace.setTodoSequence(AgentContext.getTodoSequence());
+        trace.setSubAgentStepIndex(AgentContext.getSubAgentStepIndex());
+        trace.setPythonRefineAttempt(AgentContext.getPythonRefineAttempt());
+        trace.setToolName(nvl(toolName));
+        trace.setParams(sanitizeRequestSnapshot(params));
+        trace.setSuccess(success);
+        trace.setDurationMs(clampDuration(durationMs));
+        trace.setCacheEligible(cacheEligible);
+        trace.setCacheHit(cacheHit);
+        trace.setCacheKey(nvl(cacheKey));
+        trace.setCacheSource(nvl(cacheSource));
+        trace.setCacheTtlRemainingMs(cacheTtlRemainingMs);
+        trace.setEstimatedSavedDurationMs(Math.max(0L, estimatedSavedDurationMs));
+        trace.setOutputPreview(preview(output, llmTraceTextLimit()));
+        trace.setError(trim(errorMessage, 1000));
+        trace.setDecisionLlmTraceId(nvl(AgentContext.getDecisionTraceId()));
+        trace.setDecisionStage(nvl(AgentContext.getDecisionStage()));
+        trace.setDecisionExcerpt(trim(AgentContext.getDecisionExcerpt(), 1000));
+        diagnostics.getToolTraces().add(trace);
+    }
     
     private String preview(String text, int maxChars) {
         if (text == null || text.length() <= maxChars) {
             return text;
         }
         return text.substring(0, maxChars) + "...[truncated]";
+    }
+
+    private String resolveStage(Map<String, Object> requestSnapshot) {
+        String current = nvl(AgentContext.getStage()).trim();
+        if (!current.isBlank()) {
+            return current;
+        }
+        if (requestSnapshot == null || requestSnapshot.isEmpty()) {
+            return "";
+        }
+        Object meta = requestSnapshot.get("meta");
+        if (meta instanceof Map<?, ?> metaMap) {
+            Object stage = metaMap.get("stage");
+            if (stage != null) {
+                return String.valueOf(stage);
+            }
+        }
+        Object stage = requestSnapshot.get("stage");
+        return stage == null ? "" : String.valueOf(stage);
+    }
+
+    private ReasoningExtraction extractReasoning(String payload) {
+        if (payload == null || payload.isBlank()) {
+            return ReasoningExtraction.empty();
+        }
+        Object parsed = payload;
+        try {
+            parsed = objectMapper.readValue(payload, Object.class);
+        } catch (Exception ignored) {
+            return ReasoningExtraction.empty();
+        }
+        return extractReasoningFromValue(parsed, 0);
+    }
+
+    private ReasoningExtraction extractReasoningFromValue(Object value, int depth) {
+        if (value == null || depth > 8) {
+            return ReasoningExtraction.empty();
+        }
+        if (value instanceof Map<?, ?> map) {
+            ReasoningExtraction direct = readDirectReasoning(map);
+            if (direct.hasText()) {
+                return direct;
+            }
+            for (Object child : map.values()) {
+                ReasoningExtraction nested = extractReasoningFromValue(child, depth + 1);
+                if (nested.hasText()) {
+                    return nested;
+                }
+            }
+            return ReasoningExtraction.empty();
+        }
+        if (value instanceof Collection<?> collection) {
+            for (Object item : collection) {
+                ReasoningExtraction nested = extractReasoningFromValue(item, depth + 1);
+                if (nested.hasText()) {
+                    return nested;
+                }
+            }
+            return ReasoningExtraction.empty();
+        }
+        return ReasoningExtraction.empty();
+    }
+
+    private ReasoningExtraction readDirectReasoning(Map<?, ?> map) {
+        Object details = map.get("reasoning_details");
+        if (details == null) {
+            details = map.get("reasoningDetails");
+        }
+        for (String key : List.of(
+                "reasoning",
+                "reasoning_content",
+                "reasoningContent",
+                "reasoning_text",
+                "reasoningText",
+                "thinking",
+                "thought",
+                "content"
+        )) {
+            Object value = map.get(key);
+            if (value == null) {
+                continue;
+            }
+            ReasoningExtraction extracted = reasoningFromObject(value, details);
+            if (extracted.hasText()) {
+                return extracted;
+            }
+        }
+        return ReasoningExtraction.empty();
+    }
+
+    private ReasoningExtraction reasoningFromObject(Object value, Object detailsCandidate) {
+        Object details = detailsCandidate == null ? value : detailsCandidate;
+        String text;
+        if (value instanceof String str) {
+            text = str;
+        } else {
+            text = safeWrite(sanitizeForTrace(value, 0));
+        }
+        text = nvl(text).trim();
+        if (text.isBlank()) {
+            return ReasoningExtraction.empty();
+        }
+        int limit = llmTraceReasoningLimit();
+        boolean truncated = text.length() > limit;
+        String normalized = truncated ? text.substring(0, limit) : text;
+        Object detailsPayload = sanitizeForTrace(details, 0);
+        return new ReasoningExtraction(normalized, detailsPayload, truncated);
     }
 
     private boolean shouldCaptureLlmTrace(Diagnostics diagnostics) {
@@ -963,13 +1179,16 @@ public class AgentObservabilityService {
         private String updatedAt;
         private Boolean captureLlmRequests;
         private List<LlmTrace> llmTraces;
+        private List<ToolTrace> toolTraces;
     }
 
     @Data
     public static class LlmTrace {
+        private String traceId;
         private String time;
         private String runId;
         private String phase;
+        private String stage;
         private long durationMs;
         private long startedAtMillis;      // 调用开始时间
         private long completedAtMillis;    // 调用结束时间
@@ -977,6 +1196,9 @@ public class AgentObservabilityService {
         private String model;
         private boolean hasError;
         private String error;
+        private String reasoningText;
+        private Object reasoningDetails;
+        private boolean reasoningTruncated;
         
         // ========== ALP-25 新增：原始 HTTP 信息 ==========
         
@@ -1011,6 +1233,34 @@ public class AgentObservabilityService {
          */
         @Deprecated
         private String responsePreview;
+    }
+
+    @Data
+    public static class ToolTrace {
+        private String traceId;
+        private String time;
+        private String runId;
+        private String phase;
+        private String stage;
+        private String todoId;
+        private Integer todoSequence;
+        private Integer subAgentStepIndex;
+        private Integer pythonRefineAttempt;
+        private String toolName;
+        private Map<String, Object> params;
+        private boolean success;
+        private long durationMs;
+        private boolean cacheEligible;
+        private boolean cacheHit;
+        private String cacheKey;
+        private String cacheSource;
+        private long cacheTtlRemainingMs;
+        private long estimatedSavedDurationMs;
+        private String outputPreview;
+        private String error;
+        private String decisionLlmTraceId;
+        private String decisionStage;
+        private String decisionExcerpt;
     }
     
     /**
@@ -1052,6 +1302,16 @@ public class AgentObservabilityService {
          * 时间戳
          */
         private long timestamp;
+    }
+
+    private record ReasoningExtraction(String text, Object details, boolean truncated) {
+        private static ReasoningExtraction empty() {
+            return new ReasoningExtraction("", null, false);
+        }
+
+        private boolean hasText() {
+            return text != null && !text.isBlank();
+        }
     }
 
     public record ListMetrics(long durationMs, int totalTokens, int toolCalls) {

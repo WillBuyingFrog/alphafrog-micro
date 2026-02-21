@@ -42,7 +42,7 @@ public class ToolRouter {
         boolean success = cached.isSuccess();
         long durationMs = Math.max(0L, cached.getDurationMs());
         ToolResultCacheService.CacheMeta cacheMeta = cached.getCacheMeta();
-        recordObservability(toolName, result, durationMs, success, cacheMeta);
+        recordObservability(toolName, params, result, durationMs, success, cacheMeta);
         debugLog("tool invoke response: runId={}, tool={}, success={}, durationMs={}, cache={}, resultPreview={}",
                 AgentContext.getRunId(),
                 nvl(toolName),
@@ -172,6 +172,7 @@ public class ToolRouter {
     }
 
     private void recordObservability(String toolName,
+                                     Map<String, Object> params,
                                      String result,
                                      long durationMs,
                                      boolean success,
@@ -185,6 +186,8 @@ public class ToolRouter {
                 runId,
                 phase,
                 toolName,
+                params,
+                result,
                 durationMs,
                 success,
                 cacheMeta != null && cacheMeta.isEligible(),

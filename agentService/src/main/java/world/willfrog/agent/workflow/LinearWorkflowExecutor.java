@@ -308,9 +308,20 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         );
 
         // 设置当前 phase 并记录开始时间
+        String previousStage = AgentContext.getStage();
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        AgentContext.setStage("workflow_todo_recovery");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response = request.getModel().generate(messages);
+        Response<AiMessage> response;
+        try {
+            response = request.getModel().generate(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
         String text = response.content() == null ? "" : nvl(response.content().text());
@@ -323,7 +334,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 request.getToolSpecifications(),
                 Map.of("stage", "workflow_todo_recovery")
         );
-        observabilityService.recordLlmCall(
+        String recoveryTraceId = observabilityService.recordLlmCall(
                 runId,
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
@@ -351,6 +362,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             if (Boolean.TRUE.equals(parsed.get("abandon"))) {
                 return null;
             }
+            item.setDecisionLlmTraceId(recoveryTraceId);
+            item.setDecisionStage("workflow_todo_recovery");
+            item.setDecisionExcerpt(preview(text));
             return parsed;
         } catch (Exception e) {
             log.warn("Failed to parse recovery response: {}", e.getMessage());
@@ -411,7 +425,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
 
             SubAgentRunner.SubAgentResult subResult;
+            AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
+            AgentContext.setStage("workflow_sub_agent");
+            AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
+            AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
             try {
                 subResult = subAgentRunner.run(
                         SubAgentRunner.SubAgentRequest.builder()
@@ -431,7 +449,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         request.getModel()
                 );
             } finally {
-                AgentContext.clearPhase();
+                restoreAgentContext(snapshot);
             }
 
             int usedCalls = subResult.getSteps() == null ? 1 : Math.max(1, subResult.getSteps().size());
@@ -487,11 +505,15 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         ));
 
         ToolRouter.ToolInvocationResult invokeResult;
+        AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
         AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
+        AgentContext.setStage("workflow_tool_execution");
+        AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
+        AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
         try {
             invokeResult = toolRouter.invokeWithMeta(toolName, resolvedParams);
         } finally {
-            AgentContext.clearPhase();
+            restoreAgentContext(snapshot);
         }
 
         toolCallCounter.increment(runId, 1);
@@ -570,9 +592,20 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         );
 
         // 设置当前 phase 并记录开始时间
+        String previousStage = AgentContext.getStage();
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        AgentContext.setStage("workflow_final_answer");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response = request.getModel().generate(messages);
+        Response<AiMessage> response;
+        try {
+            response = request.getModel().generate(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
         String answer = response.content() == null ? "" : nvl(response.content().text());
@@ -747,6 +780,54 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         return text == null ? "" : text;
     }
 
+    private AgentExecutionContextSnapshot snapshotAgentContext() {
+        return new AgentExecutionContextSnapshot(
+                AgentContext.getPhase(),
+                AgentContext.getStage(),
+                AgentContext.getTodoId(),
+                AgentContext.getTodoSequence(),
+                AgentContext.getSubAgentStepIndex(),
+                AgentContext.getPythonRefineAttempt(),
+                AgentContext.getDecisionTraceId(),
+                AgentContext.getDecisionStage(),
+                AgentContext.getDecisionExcerpt()
+        );
+    }
+
+    private void restoreAgentContext(AgentExecutionContextSnapshot snapshot) {
+        if (snapshot == null) {
+            AgentContext.clearPhase();
+            AgentContext.clearStage();
+            AgentContext.clearTodoContext();
+            AgentContext.clearSubAgentStepIndex();
+            AgentContext.clearPythonRefineAttempt();
+            AgentContext.clearDecisionContext();
+            return;
+        }
+        if (snapshot.phase() == null || snapshot.phase().isBlank()) {
+            AgentContext.clearPhase();
+        } else {
+            AgentContext.setPhase(snapshot.phase());
+        }
+        if (snapshot.stage() == null || snapshot.stage().isBlank()) {
+            AgentContext.clearStage();
+        } else {
+            AgentContext.setStage(snapshot.stage());
+        }
+        if (snapshot.todoId() == null || snapshot.todoId().isBlank()) {
+            AgentContext.clearTodoContext();
+        } else {
+            AgentContext.setTodoContext(snapshot.todoId(), snapshot.todoSequence());
+        }
+        AgentContext.setSubAgentStepIndex(snapshot.subAgentStepIndex());
+        AgentContext.setPythonRefineAttempt(snapshot.pythonRefineAttempt());
+        if (snapshot.decisionTraceId() == null || snapshot.decisionTraceId().isBlank()) {
+            AgentContext.clearDecisionContext();
+        } else {
+            AgentContext.setDecisionContext(snapshot.decisionTraceId(), snapshot.decisionStage(), snapshot.decisionExcerpt());
+        }
+    }
+
     private String safeWrite(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
@@ -762,6 +843,17 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                   ExecutionMode defaultExecutionMode,
                                   boolean subAgentEnabled,
                                   int subAgentMaxSteps) {
+    }
+
+    private record AgentExecutionContextSnapshot(String phase,
+                                                 String stage,
+                                                 String todoId,
+                                                 Integer todoSequence,
+                                                 Integer subAgentStepIndex,
+                                                 Integer pythonRefineAttempt,
+                                                 String decisionTraceId,
+                                                 String decisionStage,
+                                                 String decisionExcerpt) {
     }
 
     @Data

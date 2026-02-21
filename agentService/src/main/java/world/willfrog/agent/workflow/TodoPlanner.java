@@ -136,10 +136,21 @@ public class TodoPlanner {
                 new UserMessage(userMessageContent)
         );
 
-        // 设置当前 phase 并记录开始时间
+        // 设置当前 phase/stage 并记录开始时间
+        String previousStage = AgentContext.getStage();
         AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
+        AgentContext.setStage("todo_planning");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response = request.getModel().generate(messages);
+        Response<AiMessage> response;
+        try {
+            response = request.getModel().generate(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
         String raw = response.content() == null ? "" : nvl(response.content().text());
@@ -152,7 +163,7 @@ public class TodoPlanner {
                 request.getToolSpecifications(),
                 Map.of("stage", "todo_planning")
         );
-        observabilityService.recordLlmCall(
+        String planningTraceId = observabilityService.recordLlmCall(
                 request.getRun().getId(),
                 AgentObservabilityService.PHASE_PLANNING,
                 response.tokenUsage(),
@@ -166,7 +177,14 @@ public class TodoPlanner {
                 raw
         );
 
-        return parsePlan(extractJson(raw));
+        TodoPlan todoPlan = parsePlan(extractJson(raw));
+        String excerpt = raw.length() > 1000 ? raw.substring(0, 1000) : raw;
+        for (TodoItem item : todoPlan.getItems() == null ? List.<TodoItem>of() : todoPlan.getItems()) {
+            item.setDecisionLlmTraceId(planningTraceId);
+            item.setDecisionStage("todo_planning");
+            item.setDecisionExcerpt(excerpt);
+        }
+        return todoPlan;
     }
 
     private TodoPlan normalize(TodoPlan source, int maxTodos, Set<String> toolWhitelist) {
@@ -200,6 +218,9 @@ public class TodoPlanner {
                     .reasoning(nvl(raw.getReasoning()))
                     .executionMode(raw.getExecutionMode() == null ? ExecutionMode.AUTO : raw.getExecutionMode())
                     .status(TodoStatus.PENDING)
+                    .decisionLlmTraceId(nvl(raw.getDecisionLlmTraceId()))
+                    .decisionStage(nvl(raw.getDecisionStage()))
+                    .decisionExcerpt(nvl(raw.getDecisionExcerpt()))
                     .createdAt(Instant.now())
                     .build();
             normalized.add(item);
@@ -216,6 +237,9 @@ public class TodoPlanner {
                     .reasoning("请按用户目标完成任务")
                     .executionMode(ExecutionMode.FORCE_SUB_AGENT)
                     .status(TodoStatus.PENDING)
+                    .decisionLlmTraceId("")
+                    .decisionStage("")
+                    .decisionExcerpt("")
                     .createdAt(Instant.now())
                     .build());
         }
@@ -247,6 +271,9 @@ public class TodoPlanner {
                             .params(toMap(node.path("params")))
                             .reasoning(nvl(node.path("reasoning").asText("")))
                             .executionMode(parseExecutionMode(node.path("executionMode").asText("AUTO")))
+                            .decisionLlmTraceId(nvl(node.path("decisionLlmTraceId").asText("")))
+                            .decisionStage(nvl(node.path("decisionStage").asText("")))
+                            .decisionExcerpt(nvl(node.path("decisionExcerpt").asText("")))
                             .status(TodoStatus.PENDING)
                             .build();
                     items.add(item);

@@ -25,6 +25,9 @@ public class TodoItem {
     private TodoStatus status;
     private String resultSummary;
     private String output;
+    private String decisionLlmTraceId;
+    private String decisionStage;
+    private String decisionExcerpt;
     private Instant createdAt;
     private Instant completedAt;
 }
