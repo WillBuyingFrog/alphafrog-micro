@@ -29,6 +29,7 @@ import world.willfrog.agent.service.AgentMessageService;
 import world.willfrog.agent.service.AgentContextCompressor;
 import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.context.AgentContext;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -135,9 +136,12 @@ public class TodoPlanner {
                 new UserMessage(userMessageContent)
         );
 
+        // 设置当前 phase 并记录开始时间
+        AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
         long llmStartedAt = System.currentTimeMillis();
         Response<AiMessage> response = request.getModel().generate(messages);
-        long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        long llmCompletedAt = System.currentTimeMillis();
+        long llmDurationMs = llmCompletedAt - llmStartedAt;
         String raw = response.content() == null ? "" : nvl(response.content().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
@@ -153,6 +157,8 @@ public class TodoPlanner {
                 AgentObservabilityService.PHASE_PLANNING,
                 response.tokenUsage(),
                 llmDurationMs,
+                llmStartedAt,
+                llmCompletedAt,
                 request.getEndpointName(),
                 request.getModelName(),
                 null,

@@ -213,9 +213,12 @@ public class PythonCodeRefinementNode {
                     new SystemMessage(systemPrompt),
                     new UserMessage(userPrompt.toString())
             );
+            // 设置当前 phase 并记录开始时间
+            AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
             long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(llmMessages);
-            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            long llmCompletedAt = System.currentTimeMillis();
+            long llmDurationMs = llmCompletedAt - llmStartedAt;
             String runId = AgentContext.getRunId();
             String llmText = resp.content().text();
             if (runId != null && !runId.isBlank()) {
@@ -232,6 +235,8 @@ public class PythonCodeRefinementNode {
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         resp.tokenUsage(),
                         llmDurationMs,
+                        llmStartedAt,
+                        llmCompletedAt,
                         request.getEndpointName(),
                         request.getModelName(),
                         null,

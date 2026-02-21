@@ -214,7 +214,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             if (statusCode < 200 || statusCode >= 300) {
                 // ALP-25：上报错误观测
                 if (shouldCapture && observabilityService != null) {
-                    reportLlmCall(requestRecord, responseRecord, curlCommand, durationMs, 
+                    reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
                                  "HTTP_ERROR_" + statusCode);
                 }
                 
@@ -246,7 +246,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
-                reportLlmCall(requestRecord, responseRecord, curlCommand, durationMs, null);
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
             }
             
             return Response.from(aiMessage, tokenUsage, finishReason, metadata);
@@ -257,7 +257,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             // ALP-25：上报中断错误
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
-                reportLlmCall(requestRecord, responseRecord, curlCommand, durationMs, "INTERRUPTED");
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED");
             }
             
             String detail = "OpenRouter provider routed chat completion interrupted"
@@ -270,7 +270,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
                 String errorType = e.getClass().getSimpleName();
-                reportLlmCall(requestRecord, responseRecord, curlCommand, durationMs, 
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
                             errorType + ": " + e.getMessage());
             }
             
@@ -306,6 +306,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             RawHttpLogger.HttpRequestRecord request,
             RawHttpLogger.HttpResponseRecord response,
             String curlCommand,
+            long startedAtMillis,
             long durationMs,
             String errorMessage) {
         
@@ -324,12 +325,15 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
         
         // 从响应中提取 token usage
         TokenUsage tokenUsage = extractTokenUsageFromResponse(response);
+        long completedAtMillis = startedAtMillis + durationMs;
         
         observabilityService.recordLlmCallWithRawHttp(
                 runId,
                 phase != null ? phase : "unknown",
                 tokenUsage,
                 durationMs,
+                startedAtMillis,
+                completedAtMillis,
                 endpointName,
                 modelName,
                 errorMessage,

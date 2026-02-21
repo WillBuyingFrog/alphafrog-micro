@@ -307,7 +307,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 new UserMessage(safeWrite(userPayload))
         );
 
+        // 设置当前 phase 并记录开始时间
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        long llmStartedAt = System.currentTimeMillis();
         Response<AiMessage> response = request.getModel().generate(messages);
+        long llmCompletedAt = System.currentTimeMillis();
+        long llmDurationMs = llmCompletedAt - llmStartedAt;
         String text = response.content() == null ? "" : nvl(response.content().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
@@ -322,7 +327,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 runId,
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
-                0L,
+                llmDurationMs,
+                llmStartedAt,
+                llmCompletedAt,
                 request.getEndpointName(),
                 request.getModelName(),
                 null,
@@ -562,9 +569,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 new UserMessage(userMessageContent)
         );
 
+        // 设置当前 phase 并记录开始时间
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
         long llmStartedAt = System.currentTimeMillis();
         Response<AiMessage> response = request.getModel().generate(messages);
-        long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        long llmCompletedAt = System.currentTimeMillis();
+        long llmDurationMs = llmCompletedAt - llmStartedAt;
         String answer = response.content() == null ? "" : nvl(response.content().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
@@ -580,6 +590,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
                 llmDurationMs,
+                llmStartedAt,
+                llmCompletedAt,
                 request.getEndpointName(),
                 request.getModelName(),
                 null,

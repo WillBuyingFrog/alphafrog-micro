@@ -138,7 +138,8 @@ public class SubAgentRunner {
                 );
                 long llmStartedAt = System.currentTimeMillis();
                 Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
-                long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+                long llmCompletedAt = System.currentTimeMillis();
+                long llmDurationMs = llmCompletedAt - llmStartedAt;
                 String planText = planResp.content().text();
                 Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                         request.getEndpointName(),
@@ -156,6 +157,8 @@ public class SubAgentRunner {
                         AgentObservabilityService.PHASE_SUB_AGENT,
                         planResp.tokenUsage(),
                         llmDurationMs,
+                        llmStartedAt,
+                        llmCompletedAt,
                         request.getEndpointName(),
                         request.getModelName(),
                         null,
@@ -316,7 +319,8 @@ public class SubAgentRunner {
             );
             long llmStartedAt = System.currentTimeMillis();
             Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
-            long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+            long llmCompletedAt = System.currentTimeMillis();
+            long llmDurationMs = llmCompletedAt - llmStartedAt;
             String finalText = finalResp.content().text();
             Map<String, Object> summaryRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                     request.getEndpointName(),
@@ -331,6 +335,8 @@ public class SubAgentRunner {
                     AgentObservabilityService.PHASE_SUB_AGENT,
                     finalResp.tokenUsage(),
                     llmDurationMs,
+                    llmStartedAt,
+                    llmCompletedAt,
                     request.getEndpointName(),
                     request.getModelName(),
                     null,

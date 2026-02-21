@@ -159,6 +159,21 @@ public class AgentObservabilityService {
                               String errorMessage,
                               Map<String, Object> requestSnapshot,
                               String responseText) {
+        recordLlmCall(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName, 
+                     errorMessage, requestSnapshot, responseText);
+    }
+
+    public void recordLlmCall(String runId,
+                              String phase,
+                              TokenUsage tokenUsage,
+                              long durationMs,
+                              long startedAtMillis,
+                              long completedAtMillis,
+                              String endpointName,
+                              String modelName,
+                              String errorMessage,
+                              Map<String, Object> requestSnapshot,
+                              String responseText) {
         Map<String, Object> sanitizedRequestSnapshot = sanitizeRequestSnapshot(requestSnapshot);
         String responsePreview = trim(responseText, llmTraceTextLimit());
         if (log.isDebugEnabled()) {
@@ -169,6 +184,8 @@ public class AgentObservabilityService {
             payload.put("runId", runId);
             payload.put("phase", normalizePhase(phase));
             payload.put("durationMs", clampDuration(durationMs));
+            payload.put("startedAtMillis", startedAtMillis);
+            payload.put("completedAtMillis", completedAtMillis);
             payload.put("endpoint", nvl(endpointName));
             payload.put("model", nvl(modelName));
             payload.put("hasError", errorMessage != null && !errorMessage.isBlank());
@@ -200,7 +217,8 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview);
+            appendLlmTrace(state.getDiagnostics(), runId, phase, durationMs, startedAtMillis, completedAtMillis,
+                    endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview);
         });
     }
 
@@ -250,6 +268,23 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
+        recordLlmCallWithRawHttp(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName,
+                errorMessage, httpRequest, httpResponse, curlCommand);
+    }
+
+    public void recordLlmCallWithRawHttp(
+            String runId,
+            String phase,
+            TokenUsage tokenUsage,
+            long durationMs,
+            long startedAtMillis,
+            long completedAtMillis,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
         
         // 写入 debug 文件
         if (log.isDebugEnabled()) {
@@ -257,6 +292,8 @@ public class AgentObservabilityService {
             payload.put("runId", runId);
             payload.put("phase", normalizePhase(phase));
             payload.put("durationMs", clampDuration(durationMs));
+            payload.put("startedAtMillis", startedAtMillis);
+            payload.put("completedAtMillis", completedAtMillis);
             payload.put("endpoint", nvl(endpointName));
             payload.put("model", nvl(modelName));
             payload.put("hasError", errorMessage != null && !errorMessage.isBlank());
@@ -305,6 +342,8 @@ public class AgentObservabilityService {
                     runId, 
                     phase, 
                     durationMs, 
+                    startedAtMillis,
+                    completedAtMillis,
                     endpointName, 
                     modelName, 
                     errorMessage,
@@ -626,6 +665,21 @@ public class AgentObservabilityService {
                                 String errorMessage,
                                 Map<String, Object> requestSnapshot,
                                 String responsePreview) {
+        appendLlmTrace(diagnostics, runId, phase, durationMs, 0, 0, endpointName, modelName, 
+                      errorMessage, requestSnapshot, responsePreview);
+    }
+
+    private void appendLlmTrace(Diagnostics diagnostics,
+                                String runId,
+                                String phase,
+                                long durationMs,
+                                long startedAtMillis,
+                                long completedAtMillis,
+                                String endpointName,
+                                String modelName,
+                                String errorMessage,
+                                Map<String, Object> requestSnapshot,
+                                String responsePreview) {
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
         }
@@ -638,6 +692,8 @@ public class AgentObservabilityService {
         trace.setRunId(nvl(runId));
         trace.setPhase(normalizePhase(phase));
         trace.setDurationMs(clampDuration(durationMs));
+        trace.setStartedAtMillis(startedAtMillis > 0 ? startedAtMillis : 0);
+        trace.setCompletedAtMillis(completedAtMillis > 0 ? completedAtMillis : 0);
         trace.setEndpoint(nvl(endpointName));
         trace.setModel(nvl(modelName));
         trace.setHasError(errorMessage != null && !errorMessage.isBlank());
@@ -690,6 +746,23 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
+        appendLlmTraceWithRawHttp(diagnostics, runId, phase, durationMs, 0, 0, endpointName, modelName,
+                errorMessage, httpRequest, httpResponse, curlCommand);
+    }
+
+    private void appendLlmTraceWithRawHttp(
+            Diagnostics diagnostics,
+            String runId,
+            String phase,
+            long durationMs,
+            long startedAtMillis,
+            long completedAtMillis,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
         
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
@@ -705,6 +778,8 @@ public class AgentObservabilityService {
         trace.setRunId(nvl(runId));
         trace.setPhase(normalizePhase(phase));
         trace.setDurationMs(clampDuration(durationMs));
+        trace.setStartedAtMillis(startedAtMillis > 0 ? startedAtMillis : 0);
+        trace.setCompletedAtMillis(completedAtMillis > 0 ? completedAtMillis : 0);
         trace.setEndpoint(nvl(endpointName));
         trace.setModel(nvl(modelName));
         trace.setHasError(errorMessage != null && !errorMessage.isBlank());
@@ -896,6 +971,8 @@ public class AgentObservabilityService {
         private String runId;
         private String phase;
         private long durationMs;
+        private long startedAtMillis;      // 调用开始时间
+        private long completedAtMillis;    // 调用结束时间
         private String endpoint;
         private String model;
         private boolean hasError;
