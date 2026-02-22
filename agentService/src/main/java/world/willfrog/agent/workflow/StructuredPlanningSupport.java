@@ -95,7 +95,7 @@ public final class StructuredPlanningSupport {
             }
             index++;
         }
-        return ValidationResult.valid();
+        return ValidationResult.ok();
     }
 
     public static ValidationResult validateSubAgentPlan(JsonNode root, int maxSteps, Set<String> toolWhitelist) {
@@ -135,12 +135,12 @@ public final class StructuredPlanningSupport {
             }
             index++;
         }
-        return ValidationResult.valid();
+        return ValidationResult.ok();
     }
 
     public static ValidationResult validatePlaceholders(JsonNode node, boolean todoOnly) {
         if (node == null || node.isNull()) {
-            return ValidationResult.valid();
+            return ValidationResult.ok();
         }
         if (node.isObject()) {
             for (JsonNode child : node) {
@@ -149,7 +149,7 @@ public final class StructuredPlanningSupport {
                     return result;
                 }
             }
-            return ValidationResult.valid();
+            return ValidationResult.ok();
         }
         if (node.isArray()) {
             for (JsonNode child : node) {
@@ -158,14 +158,14 @@ public final class StructuredPlanningSupport {
                     return result;
                 }
             }
-            return ValidationResult.valid();
+            return ValidationResult.ok();
         }
         if (!node.isTextual()) {
-            return ValidationResult.valid();
+            return ValidationResult.ok();
         }
         String value = node.asText();
         if (!value.contains("${")) {
-            return ValidationResult.valid();
+            return ValidationResult.ok();
         }
 
         Matcher matcher = PLACEHOLDER.matcher(value);
@@ -184,7 +184,7 @@ public final class StructuredPlanningSupport {
                 return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "placeholder_must_use_step_or_todo_ref");
             }
         }
-        return ValidationResult.valid();
+        return ValidationResult.ok();
     }
 
     public static Map<String, Object> todoPlanningJsonSchema() {
@@ -274,7 +274,7 @@ public final class StructuredPlanningSupport {
     }
 
     public record ValidationResult(boolean valid, String category, String message) {
-        public static ValidationResult valid() {
+        public static ValidationResult ok() {
             return new ValidationResult(true, "", "");
         }
 
