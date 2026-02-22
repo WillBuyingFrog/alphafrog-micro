@@ -116,75 +116,132 @@ public class TodoPlanner {
     }
 
     private TodoPlan generatePlan(PlanRequest request, Set<String> toolWhitelist) {
+        return generatePlanWithRetries(request, toolWhitelist);
+    }
+
+    private TodoPlan generatePlanWithRetries(PlanRequest request, Set<String> toolWhitelist) {
         String runId = request.getRun().getId();
-        String toolList = toolWhitelist.stream().sorted().collect(Collectors.joining(", "));
-        String prompt = promptService.todoPlannerSystemPrompt(toolList, resolveMaxTodos());
+        boolean structuredEnabled = planningStructuredEnabled();
+        int maxAttempts = resolvePlanningMaxAttempts();
+        int maxTodos = resolveMaxTodos();
+        String lastCategory = "";
+        String lastError = "";
+        observabilityService.markPlanningStructured(runId, structuredEnabled);
+        observabilityService.setLastPlanningErrorCategory(runId, "");
 
-        // 加载消息历史（多轮对话支持）
-        String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
-        String userMessageContent;
-        if (dialogueContext.isBlank()) {
-            userMessageContent = request.getUserGoal();
-        } else {
-            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
-                    + "\n\n当前轮次用户需求：" + request.getUserGoal()
-                    + "\n\n请参考历史对话，以当前轮次用户需求为重点规划。";
-        }
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            observabilityService.incrementPlanningAttempts(runId, false);
+            String toolList = toolWhitelist.stream().sorted().collect(Collectors.joining(", "));
+            String prompt = promptService.todoPlannerSystemPrompt(toolList, maxTodos);
 
-        List<ChatMessage> messages = List.of(
-                new SystemMessage(prompt),
-                new UserMessage(userMessageContent)
-        );
-
-        // 设置当前 phase/stage 并记录开始时间
-        String previousStage = AgentContext.getStage();
-        AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
-        AgentContext.setStage("todo_planning");
-        long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response;
-        try {
-            response = request.getModel().generate(messages);
-        } finally {
-            if (previousStage == null || previousStage.isBlank()) {
-                AgentContext.clearStage();
+            String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+            String userMessageContent;
+            if (dialogueContext.isBlank()) {
+                userMessageContent = request.getUserGoal();
             } else {
-                AgentContext.setStage(previousStage);
+                userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+                        + "\n\n当前轮次用户需求：" + request.getUserGoal()
+                        + "\n\n请参考历史对话，以当前轮次用户需求为重点规划。";
+            }
+
+            List<ChatMessage> messages = List.of(
+                    new SystemMessage(prompt),
+                    new UserMessage(userMessageContent)
+            );
+            Response<AiMessage> response;
+            long llmStartedAt = System.currentTimeMillis();
+            long llmCompletedAt;
+            String raw;
+            String planningTraceId;
+            String previousStage = AgentContext.getStage();
+            AgentContext.StructuredOutputSpec previousStructuredOutputSpec = AgentContext.getStructuredOutputSpec();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
+            AgentContext.setStage("todo_planning");
+            if (structuredEnabled) {
+                AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                        "todo_plan",
+                        planningStructuredStrict(),
+                        StructuredPlanningSupport.todoPlanningJsonSchema(),
+                        planningRequireProviderParameters(),
+                        planningAllowProviderFallbacks()
+                ));
+            } else {
+                AgentContext.clearStructuredOutputSpec();
+            }
+            try {
+                response = request.getModel().generate(messages);
+                llmCompletedAt = System.currentTimeMillis();
+                raw = response.content() == null ? "" : nvl(response.content().text());
+                Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        messages,
+                        request.getToolSpecifications(),
+                        Map.of(
+                                "stage", "todo_planning",
+                                "attempt", attempt,
+                                "structured_output", structuredEnabled
+                        )
+                );
+                planningTraceId = observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_PLANNING,
+                        response.tokenUsage(),
+                        llmCompletedAt - llmStartedAt,
+                        llmStartedAt,
+                        llmCompletedAt,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        llmRequestSnapshot,
+                        raw
+                );
+            } finally {
+                if (previousStage == null || previousStage.isBlank()) {
+                    AgentContext.clearStage();
+                } else {
+                    AgentContext.setStage(previousStage);
+                }
+                if (previousStructuredOutputSpec == null) {
+                    AgentContext.clearStructuredOutputSpec();
+                } else {
+                    AgentContext.setStructuredOutputSpec(previousStructuredOutputSpec);
+                }
+            }
+
+            try {
+                JsonNode root = StructuredPlanningSupport.parseStructuredJson(objectMapper, raw);
+                StructuredPlanningSupport.ValidationResult validation = StructuredPlanningSupport.validateTodoPlan(root, maxTodos, toolWhitelist);
+                if (!validation.valid()) {
+                    throw new StructuredPlanningSupport.StructuredPlanningException(validation.category(), validation.message());
+                }
+                TodoPlan todoPlan = parsePlanNode(root);
+                String excerpt = raw.length() > 1000 ? raw.substring(0, 1000) : raw;
+                for (TodoItem item : todoPlan.getItems() == null ? List.<TodoItem>of() : todoPlan.getItems()) {
+                    item.setDecisionLlmTraceId(planningTraceId);
+                    item.setDecisionStage("todo_planning");
+                    item.setDecisionExcerpt(excerpt);
+                }
+                observabilityService.setLastPlanningErrorCategory(runId, "");
+                return todoPlan;
+            } catch (StructuredPlanningSupport.StructuredPlanningException e) {
+                lastCategory = nvl(e.category());
+                lastError = nvl(e.getMessage());
+                observabilityService.setLastPlanningErrorCategory(runId, lastCategory);
+                eventService.append(runId, request.getUserId(), "PLANNING_RETRY", Map.of(
+                        "attempt", attempt,
+                        "max_attempts", maxAttempts,
+                        "error_category", nvl(lastCategory),
+                        "error", nvl(lastError)
+                ));
             }
         }
-        long llmCompletedAt = System.currentTimeMillis();
-        long llmDurationMs = llmCompletedAt - llmStartedAt;
-        String raw = response.content() == null ? "" : nvl(response.content().text());
-
-        Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                request.getEndpointName(),
-                request.getEndpointBaseUrl(),
-                request.getModelName(),
-                messages,
-                request.getToolSpecifications(),
-                Map.of("stage", "todo_planning")
-        );
-        String planningTraceId = observabilityService.recordLlmCall(
-                request.getRun().getId(),
-                AgentObservabilityService.PHASE_PLANNING,
-                response.tokenUsage(),
-                llmDurationMs,
-                llmStartedAt,
-                llmCompletedAt,
-                request.getEndpointName(),
-                request.getModelName(),
-                null,
-                llmRequestSnapshot,
-                raw
-        );
-
-        TodoPlan todoPlan = parsePlan(extractJson(raw));
-        String excerpt = raw.length() > 1000 ? raw.substring(0, 1000) : raw;
-        for (TodoItem item : todoPlan.getItems() == null ? List.<TodoItem>of() : todoPlan.getItems()) {
-            item.setDecisionLlmTraceId(planningTraceId);
-            item.setDecisionStage("todo_planning");
-            item.setDecisionExcerpt(excerpt);
+        if (planningFailOnExhaustedRetries()) {
+            throw new IllegalStateException("planning_retry_exhausted:"
+                    + nvl(lastCategory) + ":" + nvl(lastError));
         }
-        return todoPlan;
+        return TodoPlan.builder().analysis("").items(List.of()).build();
     }
 
     private TodoPlan normalize(TodoPlan source, int maxTodos, Set<String> toolWhitelist) {
@@ -227,23 +284,6 @@ public class TodoPlanner {
             seq++;
         }
 
-        if (normalized.isEmpty()) {
-            normalized.add(TodoItem.builder()
-                    .id("todo_1")
-                    .sequence(1)
-                    .type(TodoType.SUB_AGENT)
-                    .toolName("executePython")
-                    .params(Map.of())
-                    .reasoning("请按用户目标完成任务")
-                    .executionMode(ExecutionMode.FORCE_SUB_AGENT)
-                    .status(TodoStatus.PENDING)
-                    .decisionLlmTraceId("")
-                    .decisionStage("")
-                    .decisionExcerpt("")
-                    .createdAt(Instant.now())
-                    .build());
-        }
-
         out.setItems(normalized);
         return out;
     }
@@ -254,40 +294,47 @@ public class TodoPlanner {
         }
         try {
             JsonNode root = objectMapper.readTree(planJson);
-            JsonNode itemsNode = root.path("items");
-            if (!itemsNode.isArray()) {
-                itemsNode = root.path("todos");
-            }
-
-            List<TodoItem> items = new ArrayList<>();
-            if (itemsNode.isArray()) {
-                int seq = 1;
-                for (JsonNode node : itemsNode) {
-                    TodoItem item = TodoItem.builder()
-                            .id(nvl(node.path("id").asText("")))
-                            .sequence(node.path("sequence").asInt(seq))
-                            .type(parseType(node.path("type").asText("TOOL_CALL")))
-                            .toolName(nvl(node.path("toolName").asText("")))
-                            .params(toMap(node.path("params")))
-                            .reasoning(nvl(node.path("reasoning").asText("")))
-                            .executionMode(parseExecutionMode(node.path("executionMode").asText("AUTO")))
-                            .decisionLlmTraceId(nvl(node.path("decisionLlmTraceId").asText("")))
-                            .decisionStage(nvl(node.path("decisionStage").asText("")))
-                            .decisionExcerpt(nvl(node.path("decisionExcerpt").asText("")))
-                            .status(TodoStatus.PENDING)
-                            .build();
-                    items.add(item);
-                    seq++;
-                }
-            }
-
-            return TodoPlan.builder()
-                    .analysis(nvl(root.path("analysis").asText("")))
-                    .items(items)
-                    .build();
+            return parsePlanNode(root);
         } catch (Exception e) {
             return TodoPlan.builder().analysis("").items(List.of()).build();
         }
+    }
+
+    private TodoPlan parsePlanNode(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            return TodoPlan.builder().analysis("").items(List.of()).build();
+        }
+        JsonNode itemsNode = root.path("items");
+        if (!itemsNode.isArray()) {
+            itemsNode = root.path("todos");
+        }
+
+        List<TodoItem> items = new ArrayList<>();
+        if (itemsNode.isArray()) {
+            int seq = 1;
+            for (JsonNode node : itemsNode) {
+                TodoItem item = TodoItem.builder()
+                        .id(nvl(node.path("id").asText("")))
+                        .sequence(node.path("sequence").asInt(seq))
+                        .type(parseType(node.path("type").asText("TOOL_CALL")))
+                        .toolName(nvl(node.path("toolName").asText("")))
+                        .params(toMap(node.path("params")))
+                        .reasoning(nvl(node.path("reasoning").asText("")))
+                        .executionMode(parseExecutionMode(node.path("executionMode").asText("AUTO")))
+                        .decisionLlmTraceId(nvl(node.path("decisionLlmTraceId").asText("")))
+                        .decisionStage(nvl(node.path("decisionStage").asText("")))
+                        .decisionExcerpt(nvl(node.path("decisionExcerpt").asText("")))
+                        .status(TodoStatus.PENDING)
+                        .build();
+                items.add(item);
+                seq++;
+            }
+        }
+
+        return TodoPlan.builder()
+                .analysis(nvl(root.path("analysis").asText("")))
+                .items(items)
+                .build();
     }
 
     private Map<String, Object> toMap(JsonNode node) {
@@ -332,20 +379,114 @@ public class TodoPlanner {
         return clamp(defaultMaxTodos, 1, 50);
     }
 
-    private int clamp(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
+    private boolean planningStructuredEnabled() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getEnabled);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getEnabled)
+                .orElse(null);
+        return base == null || base;
     }
 
-    private String extractJson(String text) {
-        if (text == null) {
-            return "{}";
+    private int resolvePlanningMaxAttempts() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getMaxAttempts)
+                .orElse(0);
+        if (local > 0) {
+            return clamp(local, 1, 10);
         }
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return text.substring(start, end + 1);
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getMaxAttempts)
+                .orElse(0);
+        if (base > 0) {
+            return clamp(base, 1, 10);
         }
-        return text.trim();
+        return 3;
+    }
+
+    private boolean planningStructuredStrict() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrict);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrict)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean planningFailOnExhaustedRetries() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getFailOnExhaustedRetries);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getFailOnExhaustedRetries)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean planningRequireProviderParameters() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getRequireProviderParameters);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getRequireProviderParameters)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean planningAllowProviderFallbacks() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getAllowProviderFallbacks);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getAllowProviderFallbacks)
+                .orElse(null);
+        return base != null && base;
+    }
+
+    private int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(max, value));
     }
 
     private String safeWrite(Object value) {

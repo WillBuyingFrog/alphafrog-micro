@@ -279,6 +279,7 @@ public class AgentLlmProperties {
         private Integer maxTodos;
         private Integer autoSplitThreshold;
         private Double complexityPenaltyLambda;
+        private StructuredOutput structuredOutput = new StructuredOutput();
 
         public Integer getCandidatePlanCount() {
             return candidatePlanCount;
@@ -318,6 +319,14 @@ public class AgentLlmProperties {
 
         public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
             this.complexityPenaltyLambda = complexityPenaltyLambda;
+        }
+
+        public StructuredOutput getStructuredOutput() {
+            return structuredOutput;
+        }
+
+        public void setStructuredOutput(StructuredOutput structuredOutput) {
+            this.structuredOutput = structuredOutput == null ? new StructuredOutput() : structuredOutput;
         }
     }
 
@@ -403,6 +412,8 @@ public class AgentLlmProperties {
         private Boolean enabled;
         private String complexityThreshold;
         private Integer maxSteps;
+        private StructuredOutput structuredOutput = new StructuredOutput();
+        private Placeholder placeholder = new Placeholder();
 
         public Boolean getEnabled() {
             return enabled;
@@ -426,6 +437,100 @@ public class AgentLlmProperties {
 
         public void setMaxSteps(Integer maxSteps) {
             this.maxSteps = maxSteps;
+        }
+
+        public StructuredOutput getStructuredOutput() {
+            return structuredOutput;
+        }
+
+        public void setStructuredOutput(StructuredOutput structuredOutput) {
+            this.structuredOutput = structuredOutput == null ? new StructuredOutput() : structuredOutput;
+        }
+
+        public Placeholder getPlaceholder() {
+            return placeholder;
+        }
+
+        public void setPlaceholder(Placeholder placeholder) {
+            this.placeholder = placeholder == null ? new Placeholder() : placeholder;
+        }
+    }
+
+    public static class StructuredOutput {
+        private Boolean enabled;
+        private Integer maxAttempts;
+        private Boolean strict;
+        private Boolean failOnExhaustedRetries;
+        private Boolean requireProviderParameters;
+        private Boolean allowProviderFallbacks;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Integer getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(Integer maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public Boolean getStrict() {
+            return strict;
+        }
+
+        public void setStrict(Boolean strict) {
+            this.strict = strict;
+        }
+
+        public Boolean getFailOnExhaustedRetries() {
+            return failOnExhaustedRetries;
+        }
+
+        public void setFailOnExhaustedRetries(Boolean failOnExhaustedRetries) {
+            this.failOnExhaustedRetries = failOnExhaustedRetries;
+        }
+
+        public Boolean getRequireProviderParameters() {
+            return requireProviderParameters;
+        }
+
+        public void setRequireProviderParameters(Boolean requireProviderParameters) {
+            this.requireProviderParameters = requireProviderParameters;
+        }
+
+        public Boolean getAllowProviderFallbacks() {
+            return allowProviderFallbacks;
+        }
+
+        public void setAllowProviderFallbacks(Boolean allowProviderFallbacks) {
+            this.allowProviderFallbacks = allowProviderFallbacks;
+        }
+    }
+
+    public static class Placeholder {
+        private Boolean resolveStepAlias;
+        private Boolean resolveTodoAlias;
+
+        public Boolean getResolveStepAlias() {
+            return resolveStepAlias;
+        }
+
+        public void setResolveStepAlias(Boolean resolveStepAlias) {
+            this.resolveStepAlias = resolveStepAlias;
+        }
+
+        public Boolean getResolveTodoAlias() {
+            return resolveTodoAlias;
+        }
+
+        public void setResolveTodoAlias(Boolean resolveTodoAlias) {
+            this.resolveTodoAlias = resolveTodoAlias;
         }
     }
 

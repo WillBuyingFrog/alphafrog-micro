@@ -38,12 +38,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class LinearWorkflowExecutor implements WorkflowExecutor {
+    private static final Pattern UNRESOLVED_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
 
     private final AgentEventService eventService;
     private final AgentPromptService promptService;
@@ -493,6 +496,26 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
         String toolName = nvl(item.getToolName());
+        List<Map<String, String>> unresolvedPlaceholders = collectUnresolvedPlaceholderRefs(resolvedParams);
+        if (!unresolvedPlaceholders.isEmpty()) {
+            Map<String, String> first = unresolvedPlaceholders.get(0);
+            String errorMessage = "PARAM_PLACEHOLDER_UNRESOLVED: tool=" + toolName
+                    + ", param=" + nvl(first.get("paramKey"))
+                    + ", placeholder=" + nvl(first.get("rawPlaceholder"));
+            eventService.append(runId, userId, "TOOL_CALL_PLACEHOLDER_UNRESOLVED", Map.of(
+                    "todo_id", nvl(item.getId()),
+                    "tool_name", toolName,
+                    "toolName", toolName,
+                    "error_category", "PARAM_PLACEHOLDER_UNRESOLVED",
+                    "unresolved_placeholders", unresolvedPlaceholders
+            ));
+            return TodoExecutionRecord.builder()
+                    .success(false)
+                    .output("")
+                    .summary(errorMessage)
+                    .toolCallsUsed(0)
+                    .build();
+        }
         String displayName = toolDisplayName(toolName);
         String description = toolDescription(toolName);
         eventService.append(runId, userId, "TOOL_CALL_STARTED", Map.of(
@@ -833,6 +856,54 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
             return "{}";
+        }
+    }
+
+    private List<Map<String, String>> collectUnresolvedPlaceholderRefs(Object value) {
+        List<Map<String, String>> refs = new ArrayList<>();
+        Set<String> dedup = new LinkedHashSet<>();
+        collectUnresolvedPlaceholderRefs(value, "", refs, dedup);
+        return refs;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void collectUnresolvedPlaceholderRefs(Object value,
+                                                  String path,
+                                                  List<Map<String, String>> refs,
+                                                  Set<String> dedup) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String nextPath = path.isBlank() ? key : path + "." + key;
+                collectUnresolvedPlaceholderRefs(entry.getValue(), nextPath, refs, dedup);
+            }
+            return;
+        }
+        if (value instanceof List<?> list) {
+            for (int idx = 0; idx < list.size(); idx++) {
+                String nextPath = path + "[" + idx + "]";
+                collectUnresolvedPlaceholderRefs(list.get(idx), nextPath, refs, dedup);
+            }
+            return;
+        }
+        if (!(value instanceof String text) || !text.contains("${")) {
+            return;
+        }
+        Matcher matcher = UNRESOLVED_PLACEHOLDER_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String raw = matcher.group();
+            String paramKey = path.isBlank() ? "<root>" : path;
+            String dedupKey = paramKey + "|" + raw;
+            if (!dedup.add(dedupKey)) {
+                continue;
+            }
+            refs.add(Map.of(
+                    "paramKey", paramKey,
+                    "rawPlaceholder", raw
+            ));
         }
     }
 

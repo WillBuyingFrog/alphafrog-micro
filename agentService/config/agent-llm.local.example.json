@@ -80,7 +80,15 @@
       "maxLocalReplans": 2,
       "maxTodos": 10,
       "autoSplitThreshold": 3,
-      "complexityPenaltyLambda": 0.25
+      "complexityPenaltyLambda": 0.25,
+      "structuredOutput": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "strict": true,
+        "failOnExhaustedRetries": true,
+        "requireProviderParameters": true,
+        "allowProviderFallbacks": false
+      }
     },
     "execution": {
       "mode": "LINEAR_WORKFLOW",
@@ -97,7 +105,18 @@
     "subAgent": {
       "enabled": true,
       "complexityThreshold": "MEDIUM",
-      "maxSteps": 6
+      "maxSteps": 6,
+      "structuredOutput": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "strict": true,
+        "requireProviderParameters": true,
+        "allowProviderFallbacks": false
+      },
+      "placeholder": {
+        "resolveStepAlias": true,
+        "resolveTodoAlias": true
+      }
     },
     "judge": {
       "enabled": false,

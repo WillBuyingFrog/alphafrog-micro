@@ -475,6 +475,27 @@ public class AgentObservabilityService {
         });
     }
 
+    public void markPlanningStructured(String runId, boolean enabled) {
+        mutate(runId, state -> state.getDiagnostics().setPlanningStructured(enabled));
+    }
+
+    public void incrementPlanningAttempts(String runId, boolean subAgentPlanning) {
+        mutate(runId, state -> {
+            Diagnostics diagnostics = state.getDiagnostics();
+            if (subAgentPlanning) {
+                long value = diagnostics.getSubAgentPlanningAttempts() == null ? 0L : diagnostics.getSubAgentPlanningAttempts();
+                diagnostics.setSubAgentPlanningAttempts(value + 1L);
+                return;
+            }
+            long value = diagnostics.getPlanningAttempts() == null ? 0L : diagnostics.getPlanningAttempts();
+            diagnostics.setPlanningAttempts(value + 1L);
+        });
+    }
+
+    public void setLastPlanningErrorCategory(String runId, String category) {
+        mutate(runId, state -> state.getDiagnostics().setLastPlanningErrorCategory(nvl(category)));
+    }
+
     public String loadObservabilityJson(String runId, String snapshotJson) {
         Optional<String> cached = stateStore.loadObservability(runId);
         if (cached.isPresent()) {
@@ -559,6 +580,18 @@ public class AgentObservabilityService {
             if (parsed.getDiagnostics().getToolTraces() == null) {
                 parsed.getDiagnostics().setToolTraces(new ArrayList<>());
             }
+            if (parsed.getDiagnostics().getPlanningStructured() == null) {
+                parsed.getDiagnostics().setPlanningStructured(false);
+            }
+            if (parsed.getDiagnostics().getPlanningAttempts() == null) {
+                parsed.getDiagnostics().setPlanningAttempts(0L);
+            }
+            if (parsed.getDiagnostics().getSubAgentPlanningAttempts() == null) {
+                parsed.getDiagnostics().setSubAgentPlanningAttempts(0L);
+            }
+            if (parsed.getDiagnostics().getLastPlanningErrorCategory() == null) {
+                parsed.getDiagnostics().setLastPlanningErrorCategory("");
+            }
             ensurePhaseKeys(parsed);
             return parsed;
         } catch (Exception e) {
@@ -639,6 +672,10 @@ public class AgentObservabilityService {
         Diagnostics diagnostics = new Diagnostics();
         diagnostics.setLlmTraces(new ArrayList<>());
         diagnostics.setToolTraces(new ArrayList<>());
+        diagnostics.setPlanningStructured(false);
+        diagnostics.setPlanningAttempts(0L);
+        diagnostics.setSubAgentPlanningAttempts(0L);
+        diagnostics.setLastPlanningErrorCategory("");
         state.setDiagnostics(diagnostics);
         state.setPhases(defaultPhases());
         return state;
@@ -1176,6 +1213,10 @@ public class AgentObservabilityService {
         private String lastTool;
         private String lastErrorType;
         private String lastErrorMessage;
+        private Boolean planningStructured;
+        private Long planningAttempts;
+        private Long subAgentPlanningAttempts;
+        private String lastPlanningErrorCategory;
         private String updatedAt;
         private Boolean captureLlmRequests;
         private List<LlmTrace> llmTraces;

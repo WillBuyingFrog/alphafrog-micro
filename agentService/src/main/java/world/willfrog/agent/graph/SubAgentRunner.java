@@ -12,20 +12,29 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.workflow.StructuredPlanningSupport;
+import world.willfrog.agent.workflow.TodoExecutionRecord;
+import world.willfrog.agent.workflow.TodoParamResolver;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
@@ -57,6 +66,14 @@ public class SubAgentRunner {
     private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     /** Prompt 配置服务。 */
     private final AgentPromptService promptService;
+    /** 占位符解析器（主流程与子流程共用）。 */
+    private final TodoParamResolver paramResolver;
+    /** 本地运行时配置。 */
+    private final AgentLlmLocalConfigLoader localConfigLoader;
+    /** 基础运行时配置。 */
+    private final AgentLlmProperties llmProperties;
+
+    private static final Pattern UNRESOLVED_PLACEHOLDER = Pattern.compile("\\$\\{[^}]+}");
 
     /**
      * 子代理请求参数。
@@ -119,6 +136,7 @@ public class SubAgentRunner {
         }
         String previousPhase = AgentContext.getPhase();
         String previousStage = AgentContext.getStage();
+        AgentContext.StructuredOutputSpec previousStructuredOutputSpec = AgentContext.getStructuredOutputSpec();
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
         Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
@@ -129,9 +147,15 @@ public class SubAgentRunner {
             // 第一步：生成“可执行的线性步骤 JSON”。若出现无效工具，自动要求模型重规划。
             JsonNode stepsNode = null;
             String lastPlanError = "sub_agent plan generation failed";
+            String lastPlanErrorCategory = StructuredPlanningSupport.CATEGORY_SCHEMA_VALIDATION_ERROR;
             String retryHint = "";
             String planTraceId = "";
-            for (int attempt = 1; attempt <= MAX_PLAN_ATTEMPTS; attempt++) {
+            int maxPlanAttempts = resolveSubAgentPlanningMaxAttempts();
+            boolean structuredEnabled = subAgentStructuredEnabled();
+            observabilityService.markPlanningStructured(request.getRunId(), structuredEnabled);
+            observabilityService.setLastPlanningErrorCategory(request.getRunId(), "");
+            for (int attempt = 1; attempt <= maxPlanAttempts; attempt++) {
+                observabilityService.incrementPlanningAttempts(request.getRunId(), true);
                 List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
                         new UserMessage("目标: " + request.getGoal()
@@ -139,80 +163,86 @@ public class SubAgentRunner {
                                 + "\n" + retryHint)
                 );
                 AgentContext.setStage("sub_agent_plan");
+                AgentContext.StructuredOutputSpec loopPreviousStructuredOutputSpec = AgentContext.getStructuredOutputSpec();
+                if (structuredEnabled) {
+                    AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                            "sub_agent_plan",
+                            subAgentStructuredStrict(),
+                            StructuredPlanningSupport.subAgentPlanningJsonSchema(),
+                            subAgentRequireProviderParameters(),
+                            subAgentAllowProviderFallbacks()
+                    ));
+                } else {
+                    AgentContext.clearStructuredOutputSpec();
+                }
                 long llmStartedAt = System.currentTimeMillis();
-                Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
-                long llmCompletedAt = System.currentTimeMillis();
-                long llmDurationMs = llmCompletedAt - llmStartedAt;
-                String planText = planResp.content().text();
-                Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                        request.getEndpointName(),
-                        request.getEndpointBaseUrl(),
-                        request.getModelName(),
-                        planMessages,
-                        request.getToolSpecifications(),
-                        Map.of(
-                                "stage", "sub_agent_plan",
-                                "attempt", attempt
-                        )
-                );
-                planTraceId = observabilityService.recordLlmCall(
-                        request.getRunId(),
-                        AgentObservabilityService.PHASE_SUB_AGENT,
-                        planResp.tokenUsage(),
-                        llmDurationMs,
-                        llmStartedAt,
-                        llmCompletedAt,
-                        request.getEndpointName(),
-                        request.getModelName(),
-                        null,
-                        planRequestSnapshot,
-                        planText
-                );
-                String json = extractJson(planText);
-                JsonNode root = objectMapper.readTree(json);
-                JsonNode candidate = root.path("steps");
-
-                if (!candidate.isArray()) {
-                    lastPlanError = "sub_agent plan missing steps";
-                    retryHint = "上一次输出缺少 steps 数组。请严格按 JSON 格式输出 steps。";
+                try {
+                    Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
+                    long llmCompletedAt = System.currentTimeMillis();
+                    long llmDurationMs = llmCompletedAt - llmStartedAt;
+                    String planText = planResp.content() == null ? "" : nvl(planResp.content().text());
+                    Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                            request.getEndpointName(),
+                            request.getEndpointBaseUrl(),
+                            request.getModelName(),
+                            planMessages,
+                            request.getToolSpecifications(),
+                            Map.of(
+                                    "stage", "sub_agent_plan",
+                                    "attempt", attempt,
+                                    "structured_output", structuredEnabled
+                            )
+                    );
+                    planTraceId = observabilityService.recordLlmCall(
+                            request.getRunId(),
+                            AgentObservabilityService.PHASE_SUB_AGENT,
+                            planResp.tokenUsage(),
+                            llmDurationMs,
+                            llmStartedAt,
+                            llmCompletedAt,
+                            request.getEndpointName(),
+                            request.getModelName(),
+                            null,
+                            planRequestSnapshot,
+                            planText
+                    );
+                    JsonNode root = StructuredPlanningSupport.parseStructuredJson(objectMapper, planText);
+                    StructuredPlanningSupport.ValidationResult validation =
+                            StructuredPlanningSupport.validateSubAgentPlan(root, request.getMaxSteps(), whitelist);
+                    if (!validation.valid()) {
+                        throw new StructuredPlanningSupport.StructuredPlanningException(validation.category(), validation.message());
+                    }
+                    stepsNode = root.path("steps");
+                    observabilityService.setLastPlanningErrorCategory(request.getRunId(), "");
+                    break;
+                } catch (StructuredPlanningSupport.StructuredPlanningException e) {
+                    lastPlanError = nvl(e.getMessage());
+                    lastPlanErrorCategory = nvl(e.category());
+                    observabilityService.setLastPlanningErrorCategory(request.getRunId(), lastPlanErrorCategory);
+                    retryHint = "上一次规划不符合 schema，错误类别=" + nvl(lastPlanErrorCategory)
+                            + "，错误=" + nvl(lastPlanError)
+                            + "。请严格输出符合 JSON Schema 的结构化结果。";
                     emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
                             "task_id", nvl(request.getTaskId()),
                             "attempt", attempt,
-                            "reason", lastPlanError
+                            "max_attempts", maxPlanAttempts,
+                            "error_category", nvl(lastPlanErrorCategory),
+                            "reason", nvl(lastPlanError)
                     ));
-                    continue;
+                } finally {
+                    if (loopPreviousStructuredOutputSpec == null) {
+                        AgentContext.clearStructuredOutputSpec();
+                    } else {
+                        AgentContext.setStructuredOutputSpec(loopPreviousStructuredOutputSpec);
+                    }
                 }
-                if (candidate.size() > request.getMaxSteps()) {
-                    lastPlanError = "sub_agent steps exceed max";
-                    retryHint = "上一次步骤数超过上限。请将 steps 控制在 " + request.getMaxSteps() + " 步以内。";
-                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
-                            "task_id", nvl(request.getTaskId()),
-                            "attempt", attempt,
-                            "reason", lastPlanError,
-                            "steps_count", candidate.size()
-                    ));
-                    continue;
-                }
-                List<String> invalidTools = collectInvalidTools(candidate, whitelist);
-                if (!invalidTools.isEmpty()) {
-                    lastPlanError = "sub_agent tool not allowed: " + invalidTools.get(0);
-                    retryHint = "上一次包含未允许的工具名: " + String.join(", ", invalidTools)
-                            + "。禁止使用 sub_agent/workflow/tool 等伪工具名，只能使用允许列表中的真实工具。";
-                    emitEvent(request, "SUB_AGENT_PLAN_RETRY", Map.of(
-                            "task_id", nvl(request.getTaskId()),
-                            "attempt", attempt,
-                            "reason", "invalid_tool",
-                            "invalid_tools", invalidTools
-                    ));
-                    continue;
-                }
-                stepsNode = candidate;
-                break;
             }
             if (stepsNode == null) {
+                observabilityService.setLastPlanningErrorCategory(request.getRunId(), nvl(lastPlanErrorCategory));
                 emitEvent(request, "SUB_AGENT_FAILED", Map.of(
                         "task_id", nvl(request.getTaskId()),
-                        "error", lastPlanError
+                        "error", lastPlanError,
+                        "error_category", nvl(lastPlanErrorCategory)
                 ));
                 return SubAgentResult.builder().success(false).error(lastPlanError).build();
             }
@@ -238,7 +268,24 @@ public class SubAgentRunner {
                 }
                 JsonNode argsNode = stepNode.path("args");
                 Map<String, Object> rawArgs = argsNode.isObject() ? objectMapper.convertValue(argsNode, Map.class) : Map.of();
-                Map<String, Object> args = normalizeStepArgs(tool, rawArgs, executedSteps, request.getSeedArgs());
+                Map<String, Object> resolvedRawArgs = resolveStepPlaceholders(rawArgs, executedSteps);
+                Map<String, Object> args = normalizeStepArgs(tool, resolvedRawArgs, executedSteps, request.getSeedArgs());
+                List<String> unresolved = collectUnresolvedPlaceholders(args);
+                if (!unresolved.isEmpty()) {
+                    String err = "PARAM_PLACEHOLDER_UNRESOLVED: tool=" + tool + ", placeholders=" + unresolved;
+                    emitEvent(request, "SUB_AGENT_FAILED", Map.of(
+                            "task_id", nvl(request.getTaskId()),
+                            "error", err,
+                            "error_category", "PARAM_PLACEHOLDER_UNRESOLVED",
+                            "tool", tool,
+                            "raw_placeholders", unresolved
+                    ));
+                    return SubAgentResult.builder()
+                            .success(false)
+                            .error(err)
+                            .steps(executedSteps)
+                            .build();
+                }
 
                 int stepIndex = executedSteps.size();
                 emitEvent(request, "SUB_AGENT_STEP_STARTED", Map.of(
@@ -387,6 +434,11 @@ public class SubAgentRunner {
             }
             AgentContext.clearSubAgentStepIndex();
             AgentContext.clearDecisionContext();
+            if (previousStructuredOutputSpec == null) {
+                AgentContext.clearStructuredOutputSpec();
+            } else {
+                AgentContext.setStructuredOutputSpec(previousStructuredOutputSpec);
+            }
         }
     }
 
@@ -417,6 +469,73 @@ public class SubAgentRunner {
             }
         }
         return invalid;
+    }
+
+    private Map<String, Object> resolveStepPlaceholders(Map<String, Object> rawArgs, List<Map<String, Object>> executedSteps) {
+        Map<String, Object> source = rawArgs == null ? Map.of() : rawArgs;
+        Map<String, TodoExecutionRecord> context = buildSubAgentAliasContext(executedSteps);
+        if (context.isEmpty()) {
+            return source;
+        }
+        return paramResolver.resolve(source, context);
+    }
+
+    private Map<String, TodoExecutionRecord> buildSubAgentAliasContext(List<Map<String, Object>> executedSteps) {
+        boolean resolveStepAlias = subAgentResolveStepAlias();
+        boolean resolveTodoAlias = subAgentResolveTodoAlias();
+        if ((!resolveStepAlias && !resolveTodoAlias) || executedSteps == null || executedSteps.isEmpty()) {
+            return Map.of();
+        }
+        Map<String, TodoExecutionRecord> context = new LinkedHashMap<>();
+        for (int i = 0; i < executedSteps.size(); i++) {
+            Map<String, Object> step = executedSteps.get(i);
+            String output = firstNonBlank(step == null ? null : step.get("output"));
+            TodoExecutionRecord record = TodoExecutionRecord.builder()
+                    .success(Boolean.TRUE.equals(step == null ? null : step.get("success")))
+                    .output(output)
+                    .summary(preview(output))
+                    .toolCallsUsed(1)
+                    .build();
+            if (resolveStepAlias) {
+                context.put("step_" + i, record);
+            }
+            if (resolveTodoAlias) {
+                context.put("todo_" + (i + 1), record);
+            }
+        }
+        return context;
+    }
+
+    private List<String> collectUnresolvedPlaceholders(Object value) {
+        LinkedHashSet<String> unresolved = new LinkedHashSet<>();
+        collectUnresolvedPlaceholders(value, unresolved);
+        return new ArrayList<>(unresolved);
+    }
+
+    @SuppressWarnings("unchecked")
+    private void collectUnresolvedPlaceholders(Object value, Set<String> unresolved) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                collectUnresolvedPlaceholders(entry.getValue(), unresolved);
+            }
+            return;
+        }
+        if (value instanceof List<?> list) {
+            for (Object item : list) {
+                collectUnresolvedPlaceholders(item, unresolved);
+            }
+            return;
+        }
+        if (!(value instanceof String text) || !text.contains("${")) {
+            return;
+        }
+        Matcher matcher = UNRESOLVED_PLACEHOLDER.matcher(text);
+        while (matcher.find()) {
+            unresolved.add(matcher.group());
+        }
     }
 
     /**
@@ -784,6 +903,129 @@ public class SubAgentRunner {
         return new ArrayList<>(ids);
     }
 
+    private int resolveSubAgentPlanningMaxAttempts() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getMaxAttempts)
+                .orElse(0);
+        if (local > 0) {
+            return Math.max(1, Math.min(local, 10));
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getMaxAttempts)
+                .orElse(0);
+        if (base > 0) {
+            return Math.max(1, Math.min(base, 10));
+        }
+        return MAX_PLAN_ATTEMPTS;
+    }
+
+    private boolean subAgentStructuredEnabled() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getEnabled);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getEnabled)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean subAgentStructuredStrict() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrict);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrict)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean subAgentRequireProviderParameters() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getRequireProviderParameters);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getRequireProviderParameters)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean subAgentAllowProviderFallbacks() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getAllowProviderFallbacks);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getAllowProviderFallbacks)
+                .orElse(null);
+        return base != null && base;
+    }
+
+    private boolean subAgentResolveStepAlias() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getPlaceholder)
+                .map(AgentLlmProperties.Placeholder::getResolveStepAlias);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getPlaceholder)
+                .map(AgentLlmProperties.Placeholder::getResolveStepAlias)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    private boolean subAgentResolveTodoAlias() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getPlaceholder)
+                .map(AgentLlmProperties.Placeholder::getResolveTodoAlias);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getPlaceholder)
+                .map(AgentLlmProperties.Placeholder::getResolveTodoAlias)
+                .orElse(null);
+        return base == null || base;
+    }
+
     private String compactDate(String raw) {
         if (raw == null) {
             return "";
@@ -806,24 +1048,6 @@ public class SubAgentRunner {
             }
         }
         return "";
-    }
-
-    /**
-     * 从文本中抽取最外层 JSON 片段。
-     *
-     * @param text 模型输出文本
-     * @return JSON 文本
-     */
-    private String extractJson(String text) {
-        if (text == null) {
-            return "{}";
-        }
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return text.substring(start, end + 1);
-        }
-        return text.trim();
     }
 
     /**

@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -55,8 +56,17 @@ public class AgentLlmRequestSnapshotBuilder {
             }
 
             ChatCompletionRequest request = builder.build();
-            snapshot.put("request", objectMapper.convertValue(request, new TypeReference<Map<String, Object>>() {
-            }));
+            Map<String, Object> requestMap = objectMapper.convertValue(request, new TypeReference<Map<String, Object>>() {
+            });
+            AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
+            if (structuredOutputSpec != null) {
+                requestMap.put("response_format", structuredOutputSpec.asResponseFormat());
+                Map<String, Object> providerMap = new LinkedHashMap<>();
+                providerMap.put("require_parameters", structuredOutputSpec.requireProviderParameters());
+                providerMap.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+                requestMap.put("provider", providerMap);
+            }
+            snapshot.put("request", requestMap);
         } catch (Exception e) {
             log.warn("Build chat completion request snapshot failed: endpoint={} model={}", endpointName, modelName, e);
             Map<String, Object> fallback = new LinkedHashMap<>();

@@ -157,12 +157,22 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
                     request,
                     new TypeReference<Map<String, Object>>() {}
             );
-            // OpenRouter 特有：添加 providerOrder
-            requestJsonMap.put("provider", Map.of("order", providerOrder));
+            // OpenRouter 特有：添加 providerOrder 与结构化输出参数。
+            AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
+            Map<String, Object> provider = new LinkedHashMap<>();
+            provider.put("order", providerOrder == null ? List.of() : providerOrder);
+            if (structuredOutputSpec != null) {
+                requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
+                provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
+                provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+            }
+            requestJsonMap.put("provider", provider);
 
             requestJson = objectMapper.writeValueAsString(requestJsonMap);
             if (log.isDebugEnabled()) {
-                log.debug("OpenRouter provider routing enabled: providers={}", providerOrder);
+                log.debug("OpenRouter provider routing enabled: providers={}, structuredSchema={}",
+                        providerOrder,
+                        structuredOutputSpec == null ? "" : structuredOutputSpec.schemaName());
             }
             
             // 构建 HTTP 请求信息
