@@ -9,21 +9,15 @@ spring:
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
-  kafka:
-    bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
-    admin:
-      auto-create: true
-    producer:
-      properties:
-        partitioner.class: org.apache.kafka.clients.producer.RoundRobinPartitioner
-    consumer:
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      enable-auto-commit: false
-      max-poll-records: 20
-      max-poll-interval-ms: 100000
-      session-timeout-ms: 300000
+  rabbitmq:
+    host: ${AF_RABBITMQ_HOST:localhost}
+    port: ${AF_RABBITMQ_PORT:5672}
+    username: ${AF_RABBITMQ_USER:guest}
+    password: ${AF_RABBITMQ_PASS:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
+        prefetch: 20
 
   data:
     redis:

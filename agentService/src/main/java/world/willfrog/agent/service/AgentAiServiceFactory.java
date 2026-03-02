@@ -21,6 +21,7 @@ public class AgentAiServiceFactory {
     private final ObjectMapper objectMapper;
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
+    private final OpenRouterCostService openRouterCostService;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -56,6 +57,9 @@ public class AgentAiServiceFactory {
             throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
         }
         double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
+        if (isDashScopeEndpoint(resolved)) {
+            return buildDashScopeChatModel(resolved, apiKey, finalTemperature);
+        }
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
                 .apiKey(apiKey)
                 .baseUrl(resolved.baseUrl())
@@ -77,6 +81,14 @@ public class AgentAiServiceFactory {
                                                                            Double temperatureOverride) {
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
         // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
+        if (isDashScopeEndpoint(resolved)) {
+            String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
+            if (isBlank(apiKey)) {
+                throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
+            }
+            double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
+            return buildDashScopeChatModel(resolved, apiKey, finalTemperature);
+        }
         if (shouldUseProviderRoutedModel(resolved)) {
             String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
             if (isBlank(apiKey)) {
@@ -95,6 +107,7 @@ public class AgentAiServiceFactory {
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
+                    openRouterCostService,
                     resolved.endpointName()
             );
         }
@@ -109,6 +122,9 @@ public class AgentAiServiceFactory {
         }
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
         // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
+        if (isDashScopeEndpoint(resolved)) {
+            return buildDashScopeChatModel(resolved, apiKey, temperature);
+        }
         if (shouldUseProviderRoutedModel(resolved)) {
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
             return new OpenRouterProviderRoutedChatModel(
@@ -122,6 +138,7 @@ public class AgentAiServiceFactory {
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
+                    openRouterCostService,
                     resolved.endpointName()
             );
         }
@@ -160,6 +177,22 @@ public class AgentAiServiceFactory {
         return value == null || value.trim().isEmpty();
     }
 
+    private ChatLanguageModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
+                                                      String apiKey,
+                                                      double finalTemperature) {
+        return new DashScopeChatModel(
+                objectMapper,
+                resolveDashScopeBaseUrl(resolved),
+                apiKey,
+                resolved.modelName(),
+                finalTemperature,
+                maxTokens,
+                httpLogger,
+                observabilityService,
+                resolved.endpointName()
+        );
+    }
+
     /**
      * 判断是否使用 OpenRouterProviderRoutedChatModel（支持 HTTP 捕获）
      * ALP-25: 对所有 OpenAI 兼容端点启用 HTTP 捕获
@@ -170,6 +203,9 @@ public class AgentAiServiceFactory {
         }
         // 支持所有 OpenAI 兼容 API：OpenRouter、Fireworks、OpenAI 等
         String baseUrl = resolved.baseUrl().toLowerCase();
+        if (baseUrl.contains("dashscope")) {
+            return false;
+        }
         return baseUrl.contains("openrouter.ai") 
             || baseUrl.contains("fireworks.ai")
             || baseUrl.contains("openai.com")
@@ -199,5 +235,31 @@ public class AgentAiServiceFactory {
             }
         }
         return providers;
+    }
+
+    private boolean isDashScopeEndpoint(AgentLlmResolver.ResolvedLlm resolved) {
+        if (resolved == null) {
+            return false;
+        }
+        String endpointName = resolved.endpointName();
+        if (endpointName != null && endpointName.trim().equalsIgnoreCase("dashscope")) {
+            return true;
+        }
+        String baseUrl = resolved.baseUrl();
+        return baseUrl != null && baseUrl.toLowerCase().contains("dashscope");
+    }
+
+    private String resolveDashScopeBaseUrl(AgentLlmResolver.ResolvedLlm resolved) {
+        if (resolved != null && !isBlank(resolved.baseUrl())) {
+            return resolved.baseUrl();
+        }
+        String region = resolved == null ? null : resolved.region();
+        String normalized = region == null ? "" : region.trim().toLowerCase();
+        return switch (normalized) {
+            case "us" -> "https://dashscope-us.aliyuncs.com/compatible-mode/v1";
+            case "cn" -> "https://dashscope.aliyuncs.com/compatible-mode/v1";
+            case "singapore" -> "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+            default -> "https://dashscope-intl.aliyuncs.com/compatible-mode/v1";
+        };
     }
 }

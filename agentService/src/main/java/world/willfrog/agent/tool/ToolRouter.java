@@ -2,17 +2,25 @@ package world.willfrog.agent.tool;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.config.StressTestProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.TimeUnit;
 
 @Component
 @RequiredArgsConstructor
@@ -24,6 +32,9 @@ public class ToolRouter {
     private final ToolResultCacheService toolResultCacheService;
     private final AgentObservabilityService observabilityService;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
+    private final StressTestProperties stressTestProperties;
+    private final ConcurrentHashMap<String, Timer> toolCallTimers = new ConcurrentHashMap<>();
 
     public String invoke(String toolName, Map<String, Object> params) {
         return invokeWithMeta(toolName, params).getOutput();
@@ -32,6 +43,29 @@ public class ToolRouter {
     public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
         debugLog("tool invoke request: runId={}, tool={}, params={}",
                 AgentContext.getRunId(), nvl(toolName), safeJson(params));
+
+        // Fault injection: simulated latency
+        if (stressTestProperties.isToolLatencyEnabled() && stressTestProperties.getToolLatencyMs() > 0) {
+            try {
+                Thread.sleep(stressTestProperties.getToolLatencyMs());
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+        }
+
+        // Fault injection: simulated failure
+        if (stressTestProperties.getToolFailureRate() > 0 && Math.random() < stressTestProperties.getToolFailureRate()) {
+            String errorResult = invocationError(toolName, "Simulated failure for stress test");
+            recordObservability(toolName, params, errorResult, 0, false, null);
+            getOrCreateToolCallTimer(nvl(toolName)).record(0, TimeUnit.MILLISECONDS);
+            return ToolInvocationResult.builder()
+                    .output(errorResult)
+                    .success(false)
+                    .durationMs(0)
+                    .cacheMeta(null)
+                    .build();
+        }
+
         ToolResultCacheService.CachedToolCallResult cached = toolResultCacheService.executeWithCache(
                 toolName,
                 params,
@@ -43,6 +77,9 @@ public class ToolRouter {
         long durationMs = Math.max(0L, cached.getDurationMs());
         ToolResultCacheService.CacheMeta cacheMeta = cached.getCacheMeta();
         recordObservability(toolName, params, result, durationMs, success, cacheMeta);
+
+        getOrCreateToolCallTimer(nvl(toolName)).record(durationMs, TimeUnit.MILLISECONDS);
+
         debugLog("tool invoke response: runId={}, tool={}, success={}, durationMs={}, cache={}, resultPreview={}",
                 AgentContext.getRunId(),
                 nvl(toolName),
@@ -73,6 +110,13 @@ public class ToolRouter {
                 "searchIndex",
                 "executePython"
         );
+    }
+
+    private Timer getOrCreateToolCallTimer(String toolName) {
+        return toolCallTimers.computeIfAbsent(toolName, name ->
+                Timer.builder("tool.call")
+                        .tag("toolName", name)
+                        .register(meterRegistry));
     }
 
     private ToolResultCacheService.ToolExecutionOutcome executeDirect(String toolName, Map<String, Object> params) {
@@ -108,15 +152,7 @@ public class ToolRouter {
                 );
                 case "executePython" -> pythonSandboxTools.executePython(
                         str(params.get("code"), params.get("arg0")),
-                        str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
-                        str(
-                                params.get("dataset_ids"),
-                                params.get("datasetIds"),
-                                params.get("datasets"),
-                                params.get("dataset_refs"),
-                                params.get("datasetRefs"),
-                                params.get("arg2")
-                        ),
+                        collectExecutePythonDatasetIds(params),
                         str(params.get("libraries"), params.get("arg3")),
                         toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
                 );
@@ -145,6 +181,56 @@ public class ToolRouter {
             }
         }
         return "";
+    }
+
+    private String collectExecutePythonDatasetIds(Map<String, Object> params) {
+        LinkedHashSet<String> datasetIds = new LinkedHashSet<>();
+        addDatasetIds(datasetIds,
+                params.get("dataset_ids"),
+                params.get("datasetIds"),
+                params.get("datasets"),
+                params.get("dataset_refs"),
+                params.get("datasetRefs"),
+                params.get("arg2"),
+                params.get("dataset_id"),
+                params.get("datasetId"),
+                params.get("arg1")
+        );
+        return String.join(",", datasetIds);
+    }
+
+    private void addDatasetIds(LinkedHashSet<String> collector, Object... candidates) {
+        if (collector == null || candidates == null || candidates.length == 0) {
+            return;
+        }
+        for (Object candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            List<String> parsed = parseDatasetIds(String.valueOf(candidate));
+            collector.addAll(parsed);
+        }
+    }
+
+    private List<String> parseDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return List.of();
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        List<String> ids = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String value = nvl(part).trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1).trim();
+            }
+            if (!value.isBlank() && !ids.contains(value)) {
+                ids.add(value);
+            }
+        }
+        return ids;
     }
 
     private Integer toNullableInt(Object... candidates) {

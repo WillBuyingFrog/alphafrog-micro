@@ -14,4 +14,7 @@ public class TodoExecutionRecord {
     private String output;
     private String summary;
     private int toolCallsUsed;
+    private String failureCategory;
+    private java.util.Map<String, Object> precheckReport;
+    private java.util.Map<String, Object> semanticJudgeReport;
 }

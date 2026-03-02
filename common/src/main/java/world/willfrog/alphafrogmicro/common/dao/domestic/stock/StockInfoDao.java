@@ -50,4 +50,30 @@ public interface StockInfoDao {
     @Select("SELECT ts_code FROM alphafrog_stock_info OFFSET #{offset} LIMIT #{limit}")
     List<String> getStockTsCode(@Param("offset") int offset, @Param("limit") int limit);
 
+    @Select("SELECT COUNT(*) FROM alphafrog_stock_info")
+    int getStockInfoCount();
+
+    @Select("SELECT * FROM alphafrog_stock_info ORDER BY ts_code LIMIT #{limit} OFFSET #{offset}")
+    @Results({
+            @Result(column = "id", property = "stockInfoId"),
+            @Result(column = "ts_code", property = "tsCode"),
+            @Result(column = "symbol", property = "symbol"),
+            @Result(column = "name", property = "name"),
+            @Result(column = "area", property = "area"),
+            @Result(column = "industry", property = "industry"),
+            @Result(column = "fullname", property = "fullName"),
+            @Result(column = "enname", property = "enName"),
+            @Result(column = "cnspell", property = "cnspell"),
+            @Result(column = "market", property = "market"),
+            @Result(column = "exchange", property = "exchange"),
+            @Result(column = "curr_type", property = "currType"),
+            @Result(column = "list_status", property = "listStatus"),
+            @Result(column = "list_date", property = "listDate"),
+            @Result(column = "delist_date", property = "delistDate"),
+            @Result(column = "is_hs", property = "isHs"),
+            @Result(column = "act_name", property = "actName"),
+            @Result(column = "act_ent_type", property = "actEntType")
+    })
+    List<StockInfo> getAllStockInfo(@Param("offset") int offset, @Param("limit") int limit);
+
 }

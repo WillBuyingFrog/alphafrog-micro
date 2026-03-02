@@ -39,36 +39,28 @@ services:
     networks:
       - alphafrog-network
 
-  # zookeeper: 已移除，使用 Kafka KRaft 模式
+  # zookeeper/kafka: 已移除，迁移至 RabbitMQ
 
-  broker:
-    image: apache/kafka:3.7.2
-    container_name: broker
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: alphafrog-rabbitmq
     environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_PROCESS_ROLES: broker,controller
-      # 容器内监听:9092, controller:9093
-      KAFKA_LISTENERS: PLAINTEXT://0.0.0.0:9092,CONTROLLER://0.0.0.0:9093
-      # 外部访问地址 (Docker网络内用 broker:9092)
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://broker:9092
-      KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT
-      KAFKA_CONTROLLER_QUORUM_VOTERS: 1@broker:9093
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_NUM_PARTITIONS: 3
-      # Memory Optimization
-      KAFKA_HEAP_OPTS: "-Xmx1g -Xms1g"
+      RABBITMQ_DEFAULT_USER: ${AF_RABBITMQ_USER:-alphafrog}
+      RABBITMQ_DEFAULT_PASS: ${AF_RABBITMQ_PASS:-Excited1s}
     ports:
-      - "9092:9092"
+      - "5672:5672"
+      - "15672:15672"
     volumes:
-      - ./data/kafka/data:/var/lib/kafka/data
+      - alphafrog_rabbitmq:/var/lib/rabbitmq
     deploy:
       resources:
         limits:
-          memory: 1.5G
+          memory: 300M
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 5
     networks:
       - alphafrog-network
 
@@ -100,6 +92,32 @@ services:
     networks:
       - alphafrog-network
 
+  meilisearch:
+    image: getmeili/meilisearch:v1.12
+    container_name: alphafrog-meilisearch
+    environment:
+      MEILI_MASTER_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
+      MEILI_HTTP_ADDR: 0.0.0.0:7700
+      MEILI_MAX_INDEXING_MEMORY: 600Mb
+      MEILI_MAX_INDEXING_THREADS: 1
+      MEILI_EXPERIMENTAL_REDUCE_INDEXING_MEMORY_USAGE: "true"
+      MEILI_EXPERIMENTAL_SEARCH_QUEUE_SIZE: 100
+    ports:
+      - "7700:7700"
+    volumes:
+      - ./data/meilisearch:/meili_data
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:7700/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          memory: 1G
+    networks:
+      - alphafrog-network
+
   domestic-stock-service:
     image: alphafrog-micro-domestic-stock-service:latest
     build: ./domesticStockService
@@ -111,6 +129,8 @@ services:
         condition: service_healthy
       nacos:
         condition: service_healthy
+      meilisearch:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -120,6 +140,8 @@ services:
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       AF_REDIS_HOST: redis
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      AF_MEILI_HOST: http://meilisearch:7700
+      AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       # Memory Optimization (Medium)
@@ -144,6 +166,8 @@ services:
         condition: service_healthy
       nacos:
         condition: service_healthy
+      meilisearch:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -153,6 +177,8 @@ services:
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       AF_REDIS_HOST: redis
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      AF_MEILI_HOST: http://meilisearch:7700
+      AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       # Memory Optimization (Medium)
@@ -175,9 +201,9 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      broker:
-        condition: service_started
       nacos:
+        condition: service_healthy
+      meilisearch:
         condition: service_healthy
     environment:
       TZ: Asia/Shanghai
@@ -186,9 +212,10 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
-      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
       AF_REDIS_HOST: redis
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      AF_MEILI_HOST: http://meilisearch:7700
+      AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       # Memory Optimization (Medium)
@@ -211,8 +238,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      broker:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
       nacos:
         condition: service_healthy
     environment:
@@ -222,7 +249,10 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
-      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_RABBITMQ_HOST: rabbitmq
+      AF_RABBITMQ_PORT: 5672
+      AF_RABBITMQ_USER: ${AF_RABBITMQ_USER:-alphafrog}
+      AF_RABBITMQ_PASS: ${AF_RABBITMQ_PASS:-Excited1s}
       AF_REDIS_HOST: redis
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
       NACOS_ADDRESS: nacos
@@ -278,6 +308,8 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -285,7 +317,10 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
-      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_RABBITMQ_HOST: rabbitmq
+      AF_RABBITMQ_PORT: 5672
+      AF_RABBITMQ_USER: ${AF_RABBITMQ_USER:-alphafrog}
+      AF_RABBITMQ_PASS: ${AF_RABBITMQ_PASS:-Excited1s}
       NACOS_ADDRESS: nacos
       NACOS_USER: ${NACOS_USER:-nacos}
       NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
@@ -365,6 +400,32 @@ services:
     networks:
       - alphafrog-network
 
+  external-info-service:
+    image: alphafrog-micro-external-info-service:latest
+    build: ./externalInfoService
+    container_name: alphafrog-external-info-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      NACOS_ADDRESS: nacos
+      AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:-/app/config/search-llm.local.json}
+      LOGGING_LEVEL_EXTERNAL_INFO: ${LOGGING_LEVEL_EXTERNAL_INFO:-INFO}
+      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+    volumes:
+      - ./externalInfoService/config:/app/config:ro
+    ports:
+      - "50061:50061"
+    deploy:
+      resources:
+        limits:
+          memory: 768M
+    networks:
+      - alphafrog-network
+
   python-sandbox-service:
     image: alphafrog-python-sandbox:latest
     build: ./pythonSandboxService
@@ -421,8 +482,8 @@ services:
     depends_on:
       redis:
         condition: service_healthy
-      broker:
-        condition: service_started
+      rabbitmq:
+        condition: service_healthy
       nacos:
         condition: service_healthy
       domestic-stock-service:
@@ -437,6 +498,8 @@ services:
         condition: service_started
       agent-service:
         condition: service_started
+      external-info-service:
+        condition: service_started
     environment:
       TZ: Asia/Shanghai
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
@@ -444,7 +507,10 @@ services:
       AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
-      AF_KAFKA_BOOTSTRAP_SERVERS: broker:9092
+      AF_RABBITMQ_HOST: rabbitmq
+      AF_RABBITMQ_PORT: 5672
+      AF_RABBITMQ_USER: ${AF_RABBITMQ_USER:-alphafrog}
+      AF_RABBITMQ_PASS: ${AF_RABBITMQ_PASS:-Excited1s}
       AF_REDIS_HOST: redis
       AF_REDIS_PORT: 6379
       AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
@@ -465,6 +531,7 @@ services:
 volumes:
   alphafrog_pgdata:
   alphafrog_redisdata:
+  alphafrog_rabbitmq:
 
 networks:
   alphafrog-network:

@@ -65,8 +65,7 @@
                     <groupId>org.apache.maven.plugins</groupId>
                     <artifactId>maven-compiler-plugin</artifactId>
                     <configuration>
-                        <!-- 确保 Lombok 等注解处理器在 Maven 编译期生效 -->
-                        <proc>full</proc>
+                        <!-- JDK17 下不支持 -proc:full，保留默认注解处理行为即可 -->
                         <release>${maven.compiler.release}</release>
                         <encoding>${project.build.sourceEncoding}</encoding>
                         <parameters>true</parameters>
@@ -84,6 +83,7 @@
     <modules>
         <module>common</module>
         <module>agentApi</module>
+        <module>externalInfoApi</module>
         <module>domesticStockApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
@@ -98,6 +98,7 @@
         <module>portfolioService</module>
         <module>frontend</module>
         <module>agentService</module>
+        <module>externalInfoService</module>
         <module>pythonSandboxApi</module>
         <module>pythonSandboxGatewayService</module>
     </modules>

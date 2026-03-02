@@ -5,7 +5,10 @@
     "moonshotai/kimi-k2.5",
     "openai/gpt-5.2",
     "qwen/qwen3-max-thinking",
-    "accounts/fireworks/models/kimi-k2p5"
+    "accounts/fireworks/models/kimi-k2p5",
+    "qwen-plus",
+    "qwen-max",
+    "qwen-turbo"
   ],
   "modelMetadata": {
     "moonshotai/kimi-k2.5": {
@@ -28,6 +31,18 @@
       "displayName": "Kimi K2.5 (Fireworks)",
       "baseRate": 0.1,
       "features": ["reasoning", "code"]
+    },
+    "qwen-plus": {
+      "displayName": "Qwen Plus",
+      "baseRate": 0.2
+    },
+    "qwen-max": {
+      "displayName": "Qwen Max",
+      "baseRate": 0.5
+    },
+    "qwen-turbo": {
+      "displayName": "Qwen Turbo",
+      "baseRate": 0.1
     }
   },
   "endpoints": {
@@ -63,6 +78,25 @@
     "openai": {
       "baseUrl": "https://api.openai.com/v1",
       "apiKey": "replace-with-your-openai-api-key"
+    },
+    "dashscope": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "replace-with-your-dashscope-api-key",
+      "region": "singapore",
+      "models": {
+        "qwen-plus": {
+          "displayName": "Qwen Plus",
+          "baseRate": 0.2
+        },
+        "qwen-max": {
+          "displayName": "Qwen Max",
+          "baseRate": 0.5
+        },
+        "qwen-turbo": {
+          "displayName": "Qwen Turbo",
+          "baseRate": 0.1
+        }
+      }
     }
   },
   "runtime": {
@@ -95,6 +129,14 @@
       "maxToolCalls": 20,
       "maxToolCallsPerSubAgent": 10,
       "maxRetriesPerTodo": 3,
+      "staticPrecheckEnabled": true,
+      "maxStaticRecoveryRetries": 2,
+      "maxRuntimeRecoveryRetries": 2,
+      "maxSemanticRecoveryRetries": 1,
+      "maxTotalRecoveryRetries": 2,
+      "staticFixEndpoint": "openrouter",
+      "staticFixModel": "openai/gpt-5.2",
+      "staticFixTemperature": 0.0,
       "failFast": false,
       "defaultExecutionMode": "AUTO"
     },
@@ -120,7 +162,11 @@
     },
     "judge": {
       "enabled": false,
+      "semanticEnabled": false,
       "temperature": 0.0,
+      "maxAttempts": 2,
+      "failOpen": true,
+      "blockOnInsufficientEvidence": false,
       "routes": [
         {
           "endpointName": "openrouter",
@@ -154,6 +200,14 @@
       }
     }
   },
+  "observability": {
+    "openrouter": {
+      "costEnrichment": {
+        "enabled": true,
+        "timeoutMs": 5000
+      }
+    }
+  },
   "prompts": {
     "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
     "todoPlannerSystemPromptTemplate": "file:prompts/todo/todo_planner_system.txt",
@@ -163,6 +217,7 @@
     "parallelFinalSystemPrompt": "file:prompts/parallel/parallel_final_system.txt",
     "parallelPatchPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_patch_planner_system.txt",
     "planJudgeSystemPromptTemplate": "file:prompts/plan/plan_judge_system.txt",
+    "semanticJudgeSystemPromptTemplate": "file:prompts/judge/semantic_judge_system.txt",
     "subAgentPlannerSystemPromptTemplate": "file:prompts/sub_agent/sub_agent_planner_system.txt",
     "subAgentSummarySystemPrompt": "file:prompts/sub_agent/sub_agent_summary_system.txt",
     "pythonRefineSystemPrompt": "file:prompts/python/python_refine_system.txt",

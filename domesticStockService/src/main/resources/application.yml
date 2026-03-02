@@ -11,10 +11,9 @@ spring:
       host: ${AF_REDIS_HOST:127.0.0.1}
       port: 6379
       password: ${AF_REDIS_PASSWORD:default}
-  elasticsearch:
-    uris: ${AF_ES_HOST:localhost}:${AF_ES_PORT:9200}
-    username: ${AF_ES_USER:elastic}
-    password: ${AF_ES_PASSWORD:elastic}
+meilisearch:
+  host: ${AF_MEILI_HOST:http://localhost:7700}
+  api-key: ${AF_MEILI_API_KEY:alphafrog_search_key}
 
 
 
@@ -39,4 +38,5 @@ tushare:
 
 
 advanced:
-  es-enabled: false
+  meili-enabled: true
+  meili-auto-sync: true

@@ -4,6 +4,10 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import io.micrometer.core.instrument.Gauge;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
@@ -23,6 +27,8 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
 @RequiredArgsConstructor
@@ -41,6 +47,21 @@ public class AgentRunExecutor {
     private final LinearWorkflowExecutor workflowExecutor;
     private final AgentMessageService messageService;
     private final ObjectMapper objectMapper;
+    private final MeterRegistry meterRegistry;
+
+    private final AtomicInteger activeRuns = new AtomicInteger(0);
+    private Timer runDurationTimer;
+
+    @PostConstruct
+    public void init() {
+        Gauge.builder("run.active", activeRuns, AtomicInteger::get)
+                .description("Currently active Agent Run count")
+                .register(meterRegistry);
+        this.runDurationTimer = Timer.builder("run.duration")
+                .description("Agent Run execution duration")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
+    }
 
     @Async
     public void executeAsync(String runId) {
@@ -52,6 +73,17 @@ public class AgentRunExecutor {
     }
 
     public void execute(String runId) {
+        long startedAt = System.currentTimeMillis();
+        activeRuns.incrementAndGet();
+        try {
+            doExecute(runId);
+        } finally {
+            activeRuns.decrementAndGet();
+            runDurationTimer.record(System.currentTimeMillis() - startedAt, TimeUnit.MILLISECONDS);
+        }
+    }
+
+    private void doExecute(String runId) {
         AgentRun run = runMapper.findById(runId);
         if (run == null) {
             log.warn("Agent run not found, ignore execute: {}", runId);

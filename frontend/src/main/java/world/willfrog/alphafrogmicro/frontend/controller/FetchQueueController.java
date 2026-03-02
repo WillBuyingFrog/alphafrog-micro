@@ -23,10 +23,9 @@ public class FetchQueueController {
         try {
             FetchQueueService.FetchQueueStats stats = fetchQueueService.getFetchQueueStats();
             JSONObject payload = new JSONObject();
-            payload.put("topic", stats.topic());
-            payload.put("groupId", stats.groupId());
+            payload.put("queue", stats.queue());
             payload.put("pending", stats.pending());
-            payload.put("partitions", stats.partitions());
+            payload.put("consumers", stats.consumers());
             return ResponseEntity.ok(payload.toString());
         } catch (Exception e) {
             log.error("Failed to fetch pending queue size", e);

@@ -3,7 +3,7 @@
 工具参数签名必须严格匹配：
 1) searchIndex/searchStock/searchFund 仅允许 keyword
 2) getIndexDaily/getStockDaily 仅允许 tsCode,startDateStr,endDateStr（日期格式必须为 YYYYMMDD）
-3) executePython 仅允许 code,dataset_id（可选 coding_context）
+3) executePython 仅允许 code,dataset_ids（单数据集或多数据集均使用 dataset_ids，多数据集用逗号分隔；可选 coding_context）
 
 占位符规则（必须遵守）：
 1) 子代理内部步骤结果引用统一使用 ${step_x.output...}，例如 ${step_0.output.data.items.0.ts_code}
@@ -12,13 +12,14 @@
 
 合法示例：
 - {"tool":"getIndexDaily","args":{"tsCode":"${step_0.output.data.items.0.ts_code}","startDateStr":"20250101","endDateStr":"20251231"},"note":"先查指数后取日线"}
-- {"tool":"executePython","args":{"dataset_id":"${step_1.output.data.dataset_id}","code":"..."},"note":"根据日线数据计算结果"}
+- {"tool":"executePython","args":{"dataset_ids":"${step_1.output.data.dataset_id}","code":"import pandas as pd\nimport glob\nimport os\nfor dataset_path in glob.glob('/sandbox/input/*'):\n    dataset_id = os.path.basename(dataset_path)\n    df = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')\n    ..."},"note":"根据日线数据计算结果"}
+- {"tool":"executePython","args":{"dataset_ids":"${step_1.output.data.dataset_id},${step_2.output.data.dataset_id}","code":"import pandas as pd\nimport glob\nimport os\ndatasets = {}\nfor dataset_path in glob.glob('/sandbox/input/*'):\n    dataset_id = os.path.basename(dataset_path)\n    datasets[dataset_id] = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')\n# 对比分析多个数据集..."},"note":"多数据集对比分析"}
 
 非法示例：
 - {"tool":"getIndexDaily","args":{"tsCode":"${step_0.output.data.items[0].ts_code}"}}
 - {"tool":"getIndexDaily","args":{"tsCode":"{todo_1.output.data.items.0.ts_code}"}}
 
-从 search 类工具返回的 items 中选取最符合用户意图的项，不要默认取第一条。若需要执行 executePython：dataset_id 必须来自已完成日线工具输出的 data.dataset_id，且 code 必须读取 /sandbox/input/<dataset_id>/<dataset_id>.csv。
+从 search 类工具返回的 items 中选取最符合用户意图的项，不要默认取第一条。若需要执行 executePython：dataset_ids 必须来自已完成日线工具输出的 data.dataset_id（多数据集用逗号分隔），且 code 必须遍历 /sandbox/input/*/ 读取所有挂载的数据集。
 
 输出格式（只输出 JSON）：
 {"steps":[{"tool":"name","args":{...},"note":"why"}],"expected":"..."}

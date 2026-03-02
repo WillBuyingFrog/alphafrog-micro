@@ -3,20 +3,19 @@ package world.willfrog.alphafrogmicro.frontend.controller;
 import com.alibaba.fastjson2.JSONObject;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.SendResult;
 import org.springframework.stereotype.Controller;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 import world.willfrog.alphafrogmicro.frontend.service.RateLimitingService;
 
 import java.util.Map;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 
 @Controller
 @Slf4j
@@ -24,7 +23,9 @@ import java.util.concurrent.CompletableFuture;
 @RequiredArgsConstructor
 public class TaskController {
 
-    private final KafkaTemplate<String, String> kafkaTemplate;
+    private static final String DEFAULT_DIRECT_EXCHANGE = "";
+
+    private final RabbitTemplate rabbitTemplate;
     private final RateLimitingService rateLimitingService;
     private final FetchTaskStatusService fetchTaskStatusService;
 
@@ -55,7 +56,8 @@ public class TaskController {
             return ResponseEntity.badRequest().body("{\"message\":\"Invalid task_type. Allowed values: fetch, analyze\"}");
         }
 
-        String topic = getTopicForTaskType(taskType);
+        String exchange = getExchangeForTaskType(taskType);
+        String routingKey = getRoutingKeyForTaskType(taskType);
         String taskUuid = null;
         String taskName = taskConfigJSON.getString("task_name");
         Integer taskSubType = taskConfigJSON.getInteger("task_sub_type");
@@ -73,23 +75,16 @@ public class TaskController {
         
         try {
             String message = taskConfigJSON.toString();
-            log.info("Attempting to send message to topic {}: {}", topic, message);
+            log.info("Attempting to send message to exchange {} with routingKey {}: {}", exchange, routingKey, message);
 
-            CompletableFuture<SendResult<String, String>> future = kafkaTemplate.send(topic, message);
-            future.whenComplete((result, ex) -> {
-                if (ex == null) {
-                    log.info("Message sent successfully to topic {} partition {} with offset {}",
-                            topic, result.getRecordMetadata().partition(), result.getRecordMetadata().offset());
-                } else {
-                    log.error("Failed to send message to topic {}", topic, ex);
-                    if (finalTaskUuid != null) {
-                        fetchTaskStatusService.markFailure(finalTaskUuid, taskName, taskSubType, -1, ex.getMessage());
-                    }
-                }
-            });
+            rabbitTemplate.convertAndSend(exchange, routingKey, message);
+            log.info("Message sent successfully to exchange {} with routingKey {}", exchange, routingKey);
 
         } catch (Exception e) {
             log.error("Error during task creation or message sending setup", e);
+            if (finalTaskUuid != null) {
+                fetchTaskStatusService.markFailure(finalTaskUuid, taskName, taskSubType, -1, e.getMessage());
+            }
             res.put("message", "Failed to create task due to an internal error during send setup.");
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR).body(res.toString());
         }
@@ -103,10 +98,21 @@ public class TaskController {
 
 
 
-    private String getTopicForTaskType(String taskType) {
+    private String getExchangeForTaskType(String taskType) {
         switch (taskType) {
             case "fetch":
-                return "fetch_topic";
+                return TaskProducerRabbitConfig.FETCH_EXCHANGE;
+            case "analyze":
+                return DEFAULT_DIRECT_EXCHANGE;
+            default:
+                return DEFAULT_DIRECT_EXCHANGE;
+        }
+    }
+
+    private String getRoutingKeyForTaskType(String taskType) {
+        switch (taskType) {
+            case "fetch":
+                return TaskProducerRabbitConfig.FETCH_TASK_ROUTING_KEY;
             case "analyze":
                 return "analyze_topic";
             default:
