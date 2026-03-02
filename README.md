@@ -10,6 +10,7 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** �
 - Java 微服务：Spring Boot 3.x + Apache Dubbo 3.x + gRPC/Proto
 - 消息队列：RabbitMQ
 - 数据存储：PostgreSQL + Redis
+- 搜索引擎：MeiliSearch
 - 服务注册：Nacos
 
 
@@ -28,12 +29,42 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** �
 | **portfolioService** | 投资组合服务 | 组合管理、持仓 CRUD、交易记录管理 |
 | **frontend** | API 网关 | 统一对外暴露 RESTful API，路由请求至各微服务 |
 | **agentService** | Agent 服务 | 自然语言任务执行、工具调用、事件流与结果管理 |
+| **externalInfoService** | 外部信息服务 | 市场新闻搜索、外部数据查询（Perplexity/Exa 集成） |
 | **pythonSandboxService** | Python 沙箱服务 | 安全执行 Python 计算任务，返回标准输出与文件产物 |
 | **pythonSandboxGatewayService** | 沙箱网关服务 | Dubbo → HTTP 转发，屏蔽协议差异 |
 
 ---
 
-## v0.4 版本功能（当前版本）
+## v0.5 版本功能（当前版本）
+
+### Agent 可观测性体系全面升级
+- **原始 HTTP 捕获**: 支持 LLM 调用全链路追踪，原始请求/响应捕获与 Provider 诊断
+- **Agent 追踪增强**: 跨工作流/子 Agent/Python 优化上下文传播，traceId 支持，推理过程提取
+- **性能指标采集**: LLM 调用开始/结束时间戳精确记录，各环节耗时测量
+- **费用与缓存追踪**: OpenRouter Spending 异步补充，cachedTokens 缓存命中监控，Fireworks 缓存支持
+- **双重安全检查**: HTTP 捕获客户端参数 + 服务端白名单验证
+
+### 任务执行可靠性增强
+- **结构化规划输出**: JSON Schema 规划输出，支持占位符解析与步骤间数据传递
+- **静态代码预检**: PythonStaticPrecheckService 执行前静态验证
+- **语义判断验证**: PythonSemanticJudgeService 基于 LLM 的执行结果验证
+- **精细化重试预算**: static/runtime/semantic/total 四级预算 + TodoFailureCategory 分类感知恢复
+
+### 基础设施重构
+- **消息队列迁移**: 从 Kafka 全面迁移至 RabbitMQ，支持手动 ACK/NACK 可靠性增强
+- **性能监控体系**: Micrometer 埋点集成，StressMetricsController 压测端点，故障注入支持
+
+### 搜索与外部信息扩展
+- **MeiliSearch 搜索**: 国内指数/股票/基金搜索链路改造，保留数据库回退机制
+- **市场新闻微服务化**: 新增 externalInfoService，支持 Perplexity/Exa 双提供商，feature/profile 配置模式
+- **DashScope 支持**: 阿里云 DashScope OpenAI 兼容接口，地域路由，Qwen3 思考模式指令
+
+### 数据库与配置变更
+- 新增 agent_run_message 等多张表支持多轮对话与额度管理
+- search-llm 配置从 agentService 迁移至 externalInfoService
+- 新增可观测性和重试预算配置选项
+
+## v0.4 版本功能
 
 ### Agent 能力增强
 - **多轮对话支持**: 基于消息历史的追问能力，支持上下文压缩（滑动窗口策略，默认保留最近5轮）
@@ -102,6 +133,84 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** �
 ---
 
 ## 便捷部署
+
+### 从 v0.4 迁移
+
+若您已部署 v0.4 版本，按以下步骤升级至 v0.5：
+
+#### 1. 备份数据
+```bash
+# 备份 PostgreSQL 数据库
+pg_dump -h your_host -U your_user -d alphafrog > alphafrog_v0.4_backup_$(date +%Y%m%d).sql
+
+# 备份现有配置
+cp agentService/config/agent-llm.local.json agentService/config/agent-llm.local.json.v0.4.backup
+cp externalInfoService/config/search-llm.local.json externalInfoService/config/search-llm.local.json.v0.4.backup 2>/dev/null || true
+```
+
+#### 2. 更新代码
+```bash
+git fetch origin
+git checkout v0.5
+# 或 git checkout tags/v0.5.0
+```
+
+#### 3. 环境配置变更
+
+**重要**: 消息队列已从 Kafka 迁移至 RabbitMQ
+
+```bash
+# 更新 .env 文件，移除 Kafka 相关配置，添加 RabbitMQ 配置
+# 添加 MeiliSearch 配置
+MEILISEARCH_URL=http://meilisearch:7700
+MEILISEARCH_API_KEY=your-master-key
+```
+
+#### 4. 配置文件更新
+
+**agent-llm.local.json** - 新增可观测性配置：
+```json
+{
+  "enableCachedTokens": true,
+  "cachedTokensTimeout": "15s",
+  "enableOpenRouterCostEnrichment": true,
+  "structuredOutput": {
+    "maxRetries": 3
+  },
+  "retryBudget": {
+    "staticPrecheck": 3,
+    "runtimeExecution": 2,
+    "semanticJudge": 2,
+    "total": 10
+  }
+}
+```
+
+#### 5. 迁移 search-llm 配置至 externalInfoService
+```bash
+# 将 search-llm.local.json 从 agentService/config/ 复制至 externalInfoService/config/
+cp agentService/config/search-llm.local.json externalInfoService/config/search-llm.local.json
+```
+
+#### 6. 初始化 MeiliSearch 索引
+```bash
+# 启动服务后，执行数据同步
+curl -X POST http://localhost:8090/api/admin/meilisearch/sync
+```
+
+#### 7. 构建并重启服务
+```bash
+# 构建镜像
+bash build_all_images.sh
+
+# 滚动重启（注意顺序：基础设施服务 -> 数据服务 -> 业务服务）
+docker-compose up -d rabbitmq meilisearch
+docker-compose up -d --no-deps --build external-info-service
+docker-compose up -d --no-deps --build agent-service
+docker-compose up -d --no-deps --build frontend
+```
+
+---
 
 ### 从 v0.3 迁移
 
@@ -302,7 +411,7 @@ psql -h your_host -U your_user -d alphafrog -c \
 
 ### 版本规划
 
-- **v0.5 规划**: 可观测性增强、金融特色压测、性能优化
+- **v0.6 规划**: 更多外部信息源接入（财经日历、公告等）、性能基准测试持续优化、多轮对话 UI 完善
 
 
 ---
@@ -315,6 +424,7 @@ psql -h your_host -U your_user -d alphafrog -c \
 - Docker & Docker Compose
 - PostgreSQL 14+
 - Redis 6+
+- MeiliSearch 1.8+
 - Nacos 2.x
 - RabbitMQ 3.13
 
@@ -367,6 +477,8 @@ alphafrog-micro/
 ├── portfolioApi/              # 投资组合服务 Proto 定义
 ├── agentService/              # Agent 服务
 ├── agentApi/                  # Agent Dubbo Proto
+├── externalInfoService/         # 外部信息服务
+├── externalInfoApi/             # 外部信息服务 Dubbo Proto
 ├── pythonSandboxService/      # Python 沙箱服务
 ├── pythonSandboxGatewayService/ # 沙箱网关服务
 ├── pythonSandboxApi/          # 沙箱 Dubbo Proto
