@@ -41,7 +41,9 @@ public class AgentLlmResolver {
         }
 
         AgentLlmProperties.Endpoint endpoint = endpointKey == null ? null : endpoints.get(endpointKey);
-        if (endpoint == null || isBlank(endpoint.getBaseUrl())) {
+        String baseUrl = endpoint == null ? null : endpoint.getBaseUrl();
+        String region = endpoint == null ? null : normalize(endpoint.getRegion());
+        if (endpoint == null || (isBlank(baseUrl) && isBlank(region))) {
             throw new IllegalArgumentException("endpoint_name 未配置或未找到: " + endpointKey);
         }
 
@@ -62,7 +64,7 @@ public class AgentLlmResolver {
             throw new IllegalArgumentException("model_name 不在允许列表: " + model);
         }
 
-        return new ResolvedLlm(endpointKey, endpoint.getBaseUrl(), model, normalize(endpoint.getApiKey()));
+        return new ResolvedLlm(endpointKey, baseUrl, model, normalize(endpoint.getApiKey()), region);
     }
 
     private Map<String, AgentLlmProperties.Endpoint> mergeEndpoints(AgentLlmProperties base, AgentLlmProperties local) {
@@ -86,6 +88,9 @@ public class AgentLlmResolver {
                 if (localEp != null && !isBlank(localEp.getApiKey())) {
                     target.setApiKey(localEp.getApiKey());
                 }
+                if (localEp != null && !isBlank(localEp.getRegion())) {
+                    target.setRegion(localEp.getRegion());
+                }
                 if (localEp != null && localEp.getModels() != null && !localEp.getModels().isEmpty()) {
                     Map<String, AgentLlmProperties.ModelMetadata> mergedModels = target.getModels();
                     for (Map.Entry<String, AgentLlmProperties.ModelMetadata> modelEntry : localEp.getModels().entrySet()) {
@@ -107,6 +112,7 @@ public class AgentLlmResolver {
         if (source != null) {
             target.setBaseUrl(source.getBaseUrl());
             target.setApiKey(source.getApiKey());
+            target.setRegion(source.getRegion());
             if (source.getModels() != null && !source.getModels().isEmpty()) {
                 Map<String, AgentLlmProperties.ModelMetadata> copied = new LinkedHashMap<>();
                 for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : source.getModels().entrySet()) {
@@ -182,6 +188,6 @@ public class AgentLlmResolver {
         return target;
     }
 
-    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey) {
+    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey, String region) {
     }
 }

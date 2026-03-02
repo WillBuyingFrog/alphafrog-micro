@@ -1,6 +1,10 @@
 package world.willfrog.agent.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import io.micrometer.core.instrument.Counter;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.Timer;
+import jakarta.annotation.PostConstruct;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -42,6 +46,11 @@ public class ToolResultCacheService {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final AgentLlmLocalConfigLoader localConfigLoader;
+    private final MeterRegistry meterRegistry;
+
+    private Counter cacheHitCounter;
+    private Counter cacheMissCounter;
+    private Timer cacheLookupTimer;
 
     @Value("${agent.tool-cache.version:v1}")
     private String defaultVersion;
@@ -54,6 +63,20 @@ public class ToolResultCacheService {
 
     @Value("${agent.tool-cache.dataset-ttl-seconds:604800}")
     private int defaultDatasetTtlSeconds;
+
+    @PostConstruct
+    public void init() {
+        this.cacheHitCounter = Counter.builder("cache.hit")
+                .description("Cache hit count")
+                .register(meterRegistry);
+        this.cacheMissCounter = Counter.builder("cache.miss")
+                .description("Cache miss count")
+                .register(meterRegistry);
+        this.cacheLookupTimer = Timer.builder("cache.lookup")
+                .description("Cache lookup duration")
+                .publishPercentiles(0.5, 0.95, 0.99)
+                .register(meterRegistry);
+    }
 
     public CachedToolCallResult executeWithCache(String toolName,
                                                  Map<String, Object> params,
@@ -84,6 +107,8 @@ public class ToolResultCacheService {
                             .build();
                     debugLog("cache hit: runId={}, tool={}, key={}, ttlRemainingMs={}, savedMs={}",
                             AgentContext.getRunId(), nvl(toolName), plan.getKey(), ttlRemainingMs, savedDurationMs);
+                    cacheHitCounter.increment();
+                    cacheLookupTimer.record(durationMs, TimeUnit.MILLISECONDS);
                     return CachedToolCallResult.builder()
                             .result(cached.getResult())
                             .durationMs(durationMs)
@@ -95,7 +120,9 @@ public class ToolResultCacheService {
         }
 
         // 未命中缓存时才执行真实工具调用（loader）。
+        cacheMissCounter.increment();
         ToolExecutionOutcome loaded = loader.get();
+        cacheLookupTimer.record(System.currentTimeMillis() - lookupStartedAt, TimeUnit.MILLISECONDS);
         if (loaded == null) {
             loaded = ToolExecutionOutcome.builder()
                     .result(fallbackToolErrorJson(toolName, "EMPTY_LOADER_RESULT", "Tool invocation error: empty loader result"))

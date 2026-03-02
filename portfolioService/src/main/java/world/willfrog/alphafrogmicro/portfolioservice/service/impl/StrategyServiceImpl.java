@@ -237,7 +237,7 @@ public class StrategyServiceImpl implements StrategyService {
         }
 
         OffsetDateTime now = OffsetDateTime.now();
-        // 写入回测任务（pending），随后由 Kafka 消费端执行回测
+        // 写入回测任务（pending），随后由 RabbitMQ 消费端执行回测
         StrategyBacktestRunPo run = new StrategyBacktestRunPo();
         run.setStrategyId(strategyId);
         run.setUserId(userId);

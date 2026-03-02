@@ -30,3 +30,11 @@ dubbo:
 
 tushare:
   token: ${TUSHARE_TOKEN}
+
+meilisearch:
+  host: ${AF_MEILI_HOST:http://localhost:7700}
+  api-key: ${AF_MEILI_API_KEY:alphafrog_search_key}
+
+advanced:
+  meili-enabled: true
+  meili-auto-sync: true

@@ -6,8 +6,9 @@ import org.springframework.boot.context.properties.ConfigurationProperties;
 @Data
 @ConfigurationProperties(prefix = "portfolio.backtest")
 public class StrategyBacktestProperties {
-    private String topic = "strategy_backtest_run";
-    private String consumerGroup = "portfolio-backtest-consumer";
+    private String exchange = "backtest.exchange";
+    private String queue = "backtest.queue.portfolio";
+    private String routingKey = "backtest.run";
     private boolean producerEnabled = true;
     private boolean consumerEnabled = true;
 }

@@ -27,6 +27,7 @@ import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.service.AgentMessageService;
 import world.willfrog.agent.service.AgentContextCompressor;
+import world.willfrog.agent.service.AgentAiServiceFactory;
 import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.tool.ToolRouter;
 
@@ -38,12 +39,15 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class LinearWorkflowExecutor implements WorkflowExecutor {
+    private static final Pattern UNRESOLVED_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
 
     private final AgentEventService eventService;
     private final AgentPromptService promptService;
@@ -59,6 +63,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final AgentLlmProperties llmProperties;
     private final AgentMessageService messageService;
     private final AgentContextCompressor contextCompressor;
+    private final AgentAiServiceFactory aiServiceFactory;
+    private final PythonStaticPrecheckService pythonStaticPrecheckService;
+    private final PythonSemanticJudgeService pythonSemanticJudgeService;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.flow.workflow.max-tool-calls:20}")
@@ -230,6 +237,10 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
 
         int attempt = 0;
+        int totalRecoveryAttempts = 0;
+        int staticRecoveryAttempts = 0;
+        int runtimeRecoveryAttempts = 0;
+        int semanticRecoveryAttempts = 0;
         TodoExecutionRecord record;
         while (true) {
             item.setStatus(TodoStatus.RUNNING);
@@ -248,6 +259,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             }
 
             attempt++;
+            TodoFailureCategory category = resolveFailureCategory(record);
+            if (!canRetryByCategory(category, staticRecoveryAttempts, runtimeRecoveryAttempts, semanticRecoveryAttempts, totalRecoveryAttempts, config)) {
+                log.debug("Todo {} retry budget exhausted, category={}, static={}, runtime={}, semantic={}, total={}",
+                        item.getId(), category, staticRecoveryAttempts, runtimeRecoveryAttempts, semanticRecoveryAttempts, totalRecoveryAttempts);
+                return record;
+            }
             if (attempt >= config.maxRetriesPerTodo()) {
                 log.debug("Todo {} failed after {} attempts, giving up", item.getId(), attempt);
                 return record;
@@ -257,7 +274,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 return record;
             }
 
-            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context);
+            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context, config);
             if (recovery == null) {
                 return record;
             }
@@ -269,10 +286,22 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             }
 
             item.setParams(newParams);
+            totalRecoveryAttempts++;
+            switch (category) {
+                case STATIC -> staticRecoveryAttempts++;
+                case SEMANTIC -> semanticRecoveryAttempts++;
+                default -> runtimeRecoveryAttempts++;
+            }
+            observabilityService.incrementRecoveryAttempt(runId, category.name());
             eventService.append(runId, userId, "TODO_RETRY", Map.of(
                     "todo_id", nvl(item.getId()),
                     "attempt", attempt + 1,
-                    "tool_calls_used", toolCallCounter.get(runId)
+                    "tool_calls_used", toolCallCounter.get(runId),
+                    "failure_category", category.name(),
+                    "static_recovery_attempts", staticRecoveryAttempts,
+                    "runtime_recovery_attempts", runtimeRecoveryAttempts,
+                    "semantic_recovery_attempts", semanticRecoveryAttempts,
+                    "total_recovery_attempts", totalRecoveryAttempts
             ));
         }
     }
@@ -281,14 +310,17 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private Map<String, Object> requestRecoveryParams(WorkflowRequest request,
                                                       TodoItem item,
                                                       TodoExecutionRecord failedRecord,
-                                                      Map<String, TodoExecutionRecord> context) {
+                                                      Map<String, TodoExecutionRecord> context,
+                                                      WorkflowConfig config) {
         String runId = request.getRun().getId();
         String userId = request.getUserId();
+        TodoFailureCategory failureCategory = resolveFailureCategory(failedRecord);
 
         eventService.append(runId, userId, "TODO_RECOVERY_STARTED", Map.of(
                 "todo_id", nvl(item.getId()),
                 "tool", nvl(item.getToolName()),
-                "error_preview", preview(failedRecord.getSummary())
+                "error_preview", preview(failedRecord.getSummary()),
+                "error_category", failureCategory.name()
         ));
 
         Map<String, Object> userPayload = new LinkedHashMap<>();
@@ -298,7 +330,10 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 "tool", nvl(item.getToolName()),
                 "params", item.getParams() == null ? Map.of() : item.getParams(),
                 "reasoning", nvl(item.getReasoning()),
-                "error", nvl(failedRecord.getSummary())
+                "error", nvl(failedRecord.getSummary()),
+                "error_category", failureCategory.name(),
+                "precheck_report", failedRecord.getPrecheckReport() == null ? Map.of() : failedRecord.getPrecheckReport(),
+                "semantic_judge_report", failedRecord.getSemanticJudgeReport() == null ? Map.of() : failedRecord.getSemanticJudgeReport()
         ));
         userPayload.put("context", context == null ? Map.of() : context);
 
@@ -306,25 +341,48 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 new SystemMessage(promptService.workflowTodoRecoverySystemPrompt()),
                 new UserMessage(safeWrite(userPayload))
         );
+        RecoveryModelSelection recoveryModel = resolveRecoveryModel(request, failedRecord, config);
 
-        Response<AiMessage> response = request.getModel().generate(messages);
+        // 设置当前 phase 并记录开始时间
+        String previousStage = AgentContext.getStage();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        AgentContext.setStage("workflow_todo_recovery");
+        long llmStartedAt = System.currentTimeMillis();
+        Response<AiMessage> response;
+        try {
+            response = recoveryModel.model().generate(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
+        long llmCompletedAt = System.currentTimeMillis();
+        long llmDurationMs = llmCompletedAt - llmStartedAt;
         String text = response.content() == null ? "" : nvl(response.content().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                request.getEndpointName(),
-                request.getEndpointBaseUrl(),
-                request.getModelName(),
+                recoveryModel.endpointName(),
+                recoveryModel.endpointBaseUrl(),
+                recoveryModel.modelName(),
                 messages,
                 request.getToolSpecifications(),
-                Map.of("stage", "workflow_todo_recovery")
+                Map.of(
+                        "stage", "workflow_todo_recovery",
+                        "error_category", failureCategory.name(),
+                        "using_static_fix_model", recoveryModel.staticFixModel()
+                )
         );
-        observabilityService.recordLlmCall(
+        String recoveryTraceId = observabilityService.recordLlmCall(
                 runId,
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
-                0L,
-                request.getEndpointName(),
-                request.getModelName(),
+                llmDurationMs,
+                llmStartedAt,
+                llmCompletedAt,
+                recoveryModel.endpointName(),
+                recoveryModel.modelName(),
                 null,
                 llmRequestSnapshot,
                 text
@@ -332,7 +390,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         eventService.append(runId, userId, "TODO_RECOVERY_COMPLETED", Map.of(
                 "todo_id", nvl(item.getId()),
-                "response_preview", preview(text)
+                "response_preview", preview(text),
+                "error_category", failureCategory.name(),
+                "recovery_model", recoveryModel.modelName(),
+                "recovery_endpoint", recoveryModel.endpointName(),
+                "using_static_fix_model", recoveryModel.staticFixModel()
         ));
 
         String json = extractJsonFromResponse(text);
@@ -344,6 +406,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             if (Boolean.TRUE.equals(parsed.get("abandon"))) {
                 return null;
             }
+            item.setDecisionLlmTraceId(recoveryTraceId);
+            item.setDecisionStage("workflow_todo_recovery");
+            item.setDecisionExcerpt(preview(text));
             return parsed;
         } catch (Exception e) {
             log.warn("Failed to parse recovery response: {}", e.getMessage());
@@ -362,6 +427,70 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return trimmed.substring(start, end + 1);
         }
         return null;
+    }
+
+    private RecoveryModelSelection resolveRecoveryModel(WorkflowRequest request,
+                                                        TodoExecutionRecord failedRecord,
+                                                        WorkflowConfig config) {
+        TodoFailureCategory category = resolveFailureCategory(failedRecord);
+        if (category == TodoFailureCategory.STATIC && !isBlank(config.staticFixModel())) {
+            try {
+                var resolved = aiServiceFactory.resolveLlm(config.staticFixEndpoint(), config.staticFixModel());
+                ChatLanguageModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
+                        resolved,
+                        List.of(),
+                        config.staticFixTemperature()
+                );
+                return new RecoveryModelSelection(
+                        model,
+                        nvl(resolved.endpointName()),
+                        nvl(resolved.baseUrl()),
+                        nvl(resolved.modelName()),
+                        true
+                );
+            } catch (Exception e) {
+                log.warn("Failed to init static fix model endpoint={}, model={}, fallback to run model, err={}",
+                        config.staticFixEndpoint(), config.staticFixModel(), e.getMessage());
+            }
+        }
+        return new RecoveryModelSelection(
+                request.getModel(),
+                nvl(request.getEndpointName()),
+                nvl(request.getEndpointBaseUrl()),
+                nvl(request.getModelName()),
+                false
+        );
+    }
+
+    private TodoFailureCategory resolveFailureCategory(TodoExecutionRecord failedRecord) {
+        if (failedRecord == null) {
+            return TodoFailureCategory.OTHER;
+        }
+        String raw = nvl(failedRecord.getFailureCategory()).trim().toUpperCase();
+        if (raw.isBlank()) {
+            return TodoFailureCategory.RUNTIME;
+        }
+        try {
+            return TodoFailureCategory.valueOf(raw);
+        } catch (Exception e) {
+            return TodoFailureCategory.RUNTIME;
+        }
+    }
+
+    private boolean canRetryByCategory(TodoFailureCategory category,
+                                       int staticRecoveryAttempts,
+                                       int runtimeRecoveryAttempts,
+                                       int semanticRecoveryAttempts,
+                                       int totalRecoveryAttempts,
+                                       WorkflowConfig config) {
+        if (totalRecoveryAttempts >= config.maxTotalRecoveryRetries()) {
+            return false;
+        }
+        return switch (category) {
+            case STATIC -> staticRecoveryAttempts < config.maxStaticRecoveryRetries();
+            case SEMANTIC -> semanticRecoveryAttempts < config.maxSemanticRecoveryRetries();
+            case RUNTIME, OTHER -> runtimeRecoveryAttempts < config.maxRuntimeRecoveryRetries();
+        };
     }
 
     private TodoExecutionRecord executeItem(WorkflowRequest request,
@@ -404,7 +533,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     .collect(Collectors.toCollection(LinkedHashSet::new));
 
             SubAgentRunner.SubAgentResult subResult;
+            AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
+            AgentContext.setStage("workflow_sub_agent");
+            AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
+            AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
             try {
                 subResult = subAgentRunner.run(
                         SubAgentRunner.SubAgentRequest.builder()
@@ -424,7 +557,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         request.getModel()
                 );
             } finally {
-                AgentContext.clearPhase();
+                restoreAgentContext(snapshot);
             }
 
             int usedCalls = subResult.getSteps() == null ? 1 : Math.max(1, subResult.getSteps().size());
@@ -468,6 +601,26 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
         String toolName = nvl(item.getToolName());
+        List<Map<String, String>> unresolvedPlaceholders = collectUnresolvedPlaceholderRefs(resolvedParams);
+        if (!unresolvedPlaceholders.isEmpty()) {
+            Map<String, String> first = unresolvedPlaceholders.get(0);
+            String errorMessage = "PARAM_PLACEHOLDER_UNRESOLVED: tool=" + toolName
+                    + ", param=" + nvl(first.get("paramKey"))
+                    + ", placeholder=" + nvl(first.get("rawPlaceholder"));
+            eventService.append(runId, userId, "TOOL_CALL_PLACEHOLDER_UNRESOLVED", Map.of(
+                    "todo_id", nvl(item.getId()),
+                    "tool_name", toolName,
+                    "toolName", toolName,
+                    "error_category", "PARAM_PLACEHOLDER_UNRESOLVED",
+                    "unresolved_placeholders", unresolvedPlaceholders
+            ));
+            return TodoExecutionRecord.builder()
+                    .success(false)
+                    .output("")
+                    .summary(errorMessage)
+                    .toolCallsUsed(0)
+                    .build();
+        }
         String displayName = toolDisplayName(toolName);
         String description = toolDescription(toolName);
         eventService.append(runId, userId, "TOOL_CALL_STARTED", Map.of(
@@ -479,12 +632,52 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 "parameters", resolvedParams
         ));
 
+        if ("executePython".equals(toolName) && config.staticPrecheckEnabled()) {
+            AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
+            AgentContext.setStage("workflow_static_precheck");
+            AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
+            AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
+            PythonStaticPrecheckService.Result precheck;
+            try {
+                precheck = pythonStaticPrecheckService.check(
+                        firstNonBlank(resolvedParams.get("code"), resolvedParams.get("arg0")),
+                        firstNonBlank(resolvedParams.get("dataset_ids"), resolvedParams.get("dataset_id"), resolvedParams.get("datasetId"), resolvedParams.get("arg1")),
+                        resolvedParams
+                );
+            } finally {
+                restoreAgentContext(snapshot);
+            }
+            if (!precheck.isPassed()) {
+                String summary = nvl(precheck.getErrorCode()) + ": " + nvl(precheck.getMessage());
+                eventService.append(runId, userId, "TOOL_CALL_STATIC_PRECHECK_FAILED", Map.of(
+                        "todo_id", nvl(item.getId()),
+                        "tool_name", toolName,
+                        "error_category", TodoFailureCategory.STATIC.name(),
+                        "summary", summary,
+                        "report", precheck.getReport() == null ? Map.of() : precheck.getReport()
+                ));
+                return TodoExecutionRecord.builder()
+                        .success(false)
+                        .output("")
+                        .summary(summary)
+                        .toolCallsUsed(0)
+                        .failureCategory(TodoFailureCategory.STATIC.name())
+                        .precheckReport(precheck.getReport())
+                        .build();
+            }
+        }
+
         ToolRouter.ToolInvocationResult invokeResult;
+        AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
         AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
+        AgentContext.setStage("workflow_tool_execution");
+        AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
+        AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
         try {
             invokeResult = toolRouter.invokeWithMeta(toolName, resolvedParams);
         } finally {
-            AgentContext.clearPhase();
+            restoreAgentContext(snapshot);
         }
 
         toolCallCounter.increment(runId, 1);
@@ -503,11 +696,57 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 "cache", toolRouter.toEventCachePayload(invokeResult)
         ));
 
+        if ("executePython".equals(toolName) && invokeResult.isSuccess() && config.semanticJudgeEnabled()) {
+            Map<String, Object> toolOutput = parseJsonObject(nvl(invokeResult.getOutput()));
+            PythonSemanticJudgeService.Result judgeResult = pythonSemanticJudgeService.judge(
+                    PythonSemanticJudgeService.Request.builder()
+                            .runId(runId)
+                            .userGoal(request.getUserGoal())
+                            .todoId(item.getId())
+                            .toolName(toolName)
+                            .todoReasoning(item.getReasoning())
+                            .runArgs(resolvedParams)
+                            .code(firstNonBlank(resolvedParams.get("code"), resolvedParams.get("arg0")))
+                            .toolOutput(toolOutput)
+                            .fallbackModel(request.getModel())
+                            .fallbackEndpointName(request.getEndpointName())
+                            .fallbackEndpointBaseUrl(request.getEndpointBaseUrl())
+                            .fallbackModelName(request.getModelName())
+                            .build()
+            );
+            boolean rejected = !judgeResult.isPass();
+            observabilityService.recordSemanticJudgeCall(runId, rejected);
+            if (rejected) {
+                eventService.append(runId, userId, "SEMANTIC_JUDGE_REJECTED", Map.of(
+                        "todo_id", nvl(item.getId()),
+                        "category", nvl(judgeResult.getCategory()),
+                        "severity", nvl(judgeResult.getSeverity()),
+                        "reason_cn", nvl(judgeResult.getReasonCn())
+                ));
+                return TodoExecutionRecord.builder()
+                        .success(false)
+                        .output(nvl(invokeResult.getOutput()))
+                        .summary("SEMANTIC_JUDGE_REJECTED: " + nvl(judgeResult.getCategory()) + ", " + nvl(judgeResult.getReasonCn()))
+                        .toolCallsUsed(1)
+                        .failureCategory(TodoFailureCategory.SEMANTIC.name())
+                        .semanticJudgeReport(judgeResult.getReport())
+                        .build();
+            }
+            return TodoExecutionRecord.builder()
+                    .success(true)
+                    .output(nvl(invokeResult.getOutput()))
+                    .summary(preview(invokeResult.getOutput()))
+                    .toolCallsUsed(1)
+                    .semanticJudgeReport(judgeResult.getReport())
+                    .build();
+        }
+
         return TodoExecutionRecord.builder()
                 .success(invokeResult.isSuccess())
                 .output(nvl(invokeResult.getOutput()))
                 .summary(preview(invokeResult.getOutput()))
                 .toolCallsUsed(1)
+                .failureCategory(invokeResult.isSuccess() ? "" : TodoFailureCategory.RUNTIME.name())
                 .build();
     }
 
@@ -562,9 +801,23 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 new UserMessage(userMessageContent)
         );
 
+        // 设置当前 phase 并记录开始时间
+        String previousStage = AgentContext.getStage();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        AgentContext.setStage("workflow_final_answer");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response = request.getModel().generate(messages);
-        long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        Response<AiMessage> response;
+        try {
+            response = request.getModel().generate(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
+        long llmCompletedAt = System.currentTimeMillis();
+        long llmDurationMs = llmCompletedAt - llmStartedAt;
         String answer = response.content() == null ? "" : nvl(response.content().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
@@ -580,6 +833,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 AgentObservabilityService.PHASE_SUMMARIZING,
                 response.tokenUsage(),
                 llmDurationMs,
+                llmStartedAt,
+                llmCompletedAt,
                 request.getEndpointName(),
                 request.getModelName(),
                 null,
@@ -602,6 +857,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 .orElse(Optional.ofNullable(llmProperties.getRuntime()).orElse(new AgentLlmProperties.Runtime()));
         AgentLlmProperties.Execution execution = runtime.getExecution();
         AgentLlmProperties.SubAgent subAgent = runtime.getSubAgent();
+        AgentLlmProperties.Judge judge = runtime.getJudge();
 
         int maxToolCalls = clampInt(firstPositive(
                 execution == null ? null : execution.getMaxToolCalls(),
@@ -627,11 +883,59 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 execution == null ? null : execution.getMaxRetriesPerTodo(),
                 defaultMaxRetriesPerTodo
         ), 1, 10);
-        return new WorkflowConfig(maxToolCalls, maxPerSubAgent, maxRetriesPerTodo, failFast, executionMode, subAgentEnabled, subAgentMaxSteps);
+        int defaultTotalRecoveryRetries = Math.max(0, maxRetriesPerTodo - 1);
+        int maxTotalRecoveryRetries = clampInt(firstNonNegative(
+                execution == null ? null : execution.getMaxTotalRecoveryRetries(),
+                defaultTotalRecoveryRetries
+        ), 0, 20);
+        int maxStaticRecoveryRetries = clampInt(firstNonNegative(
+                execution == null ? null : execution.getMaxStaticRecoveryRetries(),
+                maxTotalRecoveryRetries
+        ), 0, 20);
+        int maxRuntimeRecoveryRetries = clampInt(firstNonNegative(
+                execution == null ? null : execution.getMaxRuntimeRecoveryRetries(),
+                maxTotalRecoveryRetries
+        ), 0, 20);
+        int maxSemanticRecoveryRetries = clampInt(firstNonNegative(
+                execution == null ? null : execution.getMaxSemanticRecoveryRetries(),
+                maxTotalRecoveryRetries
+        ), 0, 20);
+        boolean staticPrecheckEnabled = execution == null || execution.getStaticPrecheckEnabled() == null
+                || execution.getStaticPrecheckEnabled();
+        boolean semanticJudgeEnabled = judge != null && judge.getSemanticEnabled() != null && judge.getSemanticEnabled();
+        String staticFixEndpoint = execution == null ? "" : nvl(execution.getStaticFixEndpoint()).trim();
+        String staticFixModel = execution == null ? "" : nvl(execution.getStaticFixModel()).trim();
+        Double staticFixTemperature = execution == null ? null : execution.getStaticFixTemperature();
+
+        return new WorkflowConfig(
+                maxToolCalls,
+                maxPerSubAgent,
+                maxRetriesPerTodo,
+                failFast,
+                executionMode,
+                subAgentEnabled,
+                subAgentMaxSteps,
+                staticPrecheckEnabled,
+                semanticJudgeEnabled,
+                maxStaticRecoveryRetries,
+                maxRuntimeRecoveryRetries,
+                maxSemanticRecoveryRetries,
+                maxTotalRecoveryRetries,
+                staticFixEndpoint,
+                staticFixModel,
+                staticFixTemperature
+        );
     }
 
     private int firstPositive(Integer value, int fallback) {
         if (value != null && value > 0) {
+            return value;
+        }
+        return fallback;
+    }
+
+    private int firstNonNegative(Integer value, int fallback) {
+        if (value != null && value >= 0) {
             return value;
         }
         return fallback;
@@ -735,11 +1039,144 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         return text == null ? "" : text;
     }
 
+    private String firstNonBlank(Object... values) {
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+            String text = String.valueOf(value).trim();
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+        return "";
+    }
+
+    private boolean isBlank(String text) {
+        return text == null || text.trim().isEmpty();
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> parseJsonObject(String text) {
+        if (text == null || text.isBlank()) {
+            return Map.of();
+        }
+        try {
+            Object parsed = objectMapper.readValue(text, Object.class);
+            if (parsed instanceof Map<?, ?> map) {
+                Map<String, Object> normalized = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    normalized.put(String.valueOf(entry.getKey()), entry.getValue());
+                }
+                return normalized;
+            }
+            return Map.of();
+        } catch (Exception e) {
+            return Map.of();
+        }
+    }
+
+    private AgentExecutionContextSnapshot snapshotAgentContext() {
+        return new AgentExecutionContextSnapshot(
+                AgentContext.getPhase(),
+                AgentContext.getStage(),
+                AgentContext.getTodoId(),
+                AgentContext.getTodoSequence(),
+                AgentContext.getSubAgentStepIndex(),
+                AgentContext.getPythonRefineAttempt(),
+                AgentContext.getDecisionTraceId(),
+                AgentContext.getDecisionStage(),
+                AgentContext.getDecisionExcerpt()
+        );
+    }
+
+    private void restoreAgentContext(AgentExecutionContextSnapshot snapshot) {
+        if (snapshot == null) {
+            AgentContext.clearPhase();
+            AgentContext.clearStage();
+            AgentContext.clearTodoContext();
+            AgentContext.clearSubAgentStepIndex();
+            AgentContext.clearPythonRefineAttempt();
+            AgentContext.clearDecisionContext();
+            return;
+        }
+        if (snapshot.phase() == null || snapshot.phase().isBlank()) {
+            AgentContext.clearPhase();
+        } else {
+            AgentContext.setPhase(snapshot.phase());
+        }
+        if (snapshot.stage() == null || snapshot.stage().isBlank()) {
+            AgentContext.clearStage();
+        } else {
+            AgentContext.setStage(snapshot.stage());
+        }
+        if (snapshot.todoId() == null || snapshot.todoId().isBlank()) {
+            AgentContext.clearTodoContext();
+        } else {
+            AgentContext.setTodoContext(snapshot.todoId(), snapshot.todoSequence());
+        }
+        AgentContext.setSubAgentStepIndex(snapshot.subAgentStepIndex());
+        AgentContext.setPythonRefineAttempt(snapshot.pythonRefineAttempt());
+        if (snapshot.decisionTraceId() == null || snapshot.decisionTraceId().isBlank()) {
+            AgentContext.clearDecisionContext();
+        } else {
+            AgentContext.setDecisionContext(snapshot.decisionTraceId(), snapshot.decisionStage(), snapshot.decisionExcerpt());
+        }
+    }
+
     private String safeWrite(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
             return "{}";
+        }
+    }
+
+    private List<Map<String, String>> collectUnresolvedPlaceholderRefs(Object value) {
+        List<Map<String, String>> refs = new ArrayList<>();
+        Set<String> dedup = new LinkedHashSet<>();
+        collectUnresolvedPlaceholderRefs(value, "", refs, dedup);
+        return refs;
+    }
+
+    @SuppressWarnings("unchecked")
+    private void collectUnresolvedPlaceholderRefs(Object value,
+                                                  String path,
+                                                  List<Map<String, String>> refs,
+                                                  Set<String> dedup) {
+        if (value == null) {
+            return;
+        }
+        if (value instanceof Map<?, ?> map) {
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                String key = String.valueOf(entry.getKey());
+                String nextPath = path.isBlank() ? key : path + "." + key;
+                collectUnresolvedPlaceholderRefs(entry.getValue(), nextPath, refs, dedup);
+            }
+            return;
+        }
+        if (value instanceof List<?> list) {
+            for (int idx = 0; idx < list.size(); idx++) {
+                String nextPath = path + "[" + idx + "]";
+                collectUnresolvedPlaceholderRefs(list.get(idx), nextPath, refs, dedup);
+            }
+            return;
+        }
+        if (!(value instanceof String text) || !text.contains("${")) {
+            return;
+        }
+        Matcher matcher = UNRESOLVED_PLACEHOLDER_PATTERN.matcher(text);
+        while (matcher.find()) {
+            String raw = matcher.group();
+            String paramKey = path.isBlank() ? "<root>" : path;
+            String dedupKey = paramKey + "|" + raw;
+            if (!dedup.add(dedupKey)) {
+                continue;
+            }
+            refs.add(Map.of(
+                    "paramKey", paramKey,
+                    "rawPlaceholder", raw
+            ));
         }
     }
 
@@ -749,7 +1186,34 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                   boolean failFast,
                                   ExecutionMode defaultExecutionMode,
                                   boolean subAgentEnabled,
-                                  int subAgentMaxSteps) {
+                                  int subAgentMaxSteps,
+                                  boolean staticPrecheckEnabled,
+                                  boolean semanticJudgeEnabled,
+                                  int maxStaticRecoveryRetries,
+                                  int maxRuntimeRecoveryRetries,
+                                  int maxSemanticRecoveryRetries,
+                                  int maxTotalRecoveryRetries,
+                                  String staticFixEndpoint,
+                                  String staticFixModel,
+                                  Double staticFixTemperature) {
+    }
+
+    private record RecoveryModelSelection(ChatLanguageModel model,
+                                          String endpointName,
+                                          String endpointBaseUrl,
+                                          String modelName,
+                                          boolean staticFixModel) {
+    }
+
+    private record AgentExecutionContextSnapshot(String phase,
+                                                 String stage,
+                                                 String todoId,
+                                                 Integer todoSequence,
+                                                 Integer subAgentStepIndex,
+                                                 Integer pythonRefineAttempt,
+                                                 String decisionTraceId,
+                                                 String decisionStage,
+                                                 String decisionExcerpt) {
     }
 
     @Data

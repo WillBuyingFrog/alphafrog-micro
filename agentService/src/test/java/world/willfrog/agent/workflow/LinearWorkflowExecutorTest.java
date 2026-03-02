@@ -24,6 +24,8 @@ import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.service.AgentMessageService;
 import world.willfrog.agent.service.AgentContextCompressor;
+import world.willfrog.agent.service.AgentAiServiceFactory;
+import world.willfrog.agent.service.AgentLlmResolver;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.List;
@@ -31,14 +33,17 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -70,6 +75,12 @@ class LinearWorkflowExecutorTest {
     private AgentMessageService messageService;
     @Mock
     private AgentContextCompressor contextCompressor;
+    @Mock
+    private AgentAiServiceFactory aiServiceFactory;
+    @Mock
+    private PythonStaticPrecheckService pythonStaticPrecheckService;
+    @Mock
+    private PythonSemanticJudgeService pythonSemanticJudgeService;
 
     private LinearWorkflowExecutor executor;
 
@@ -92,6 +103,9 @@ class LinearWorkflowExecutorTest {
                 new AgentLlmProperties(),
                 messageService,
                 contextCompressor,
+                aiServiceFactory,
+                pythonStaticPrecheckService,
+                pythonSemanticJudgeService,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
@@ -111,6 +125,10 @@ class LinearWorkflowExecutorTest {
         lenient().when(creditService.calculateToolCredits(anyString(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(1);
         lenient().when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))
                 .thenReturn(Map.of());
+        lenient().when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap()))
+                .thenReturn(PythonStaticPrecheckService.Result.builder().passed(true).build());
+        lenient().when(pythonSemanticJudgeService.judge(any()))
+                .thenReturn(PythonSemanticJudgeService.Result.pass("OK", "", Map.of()));
 
         @SuppressWarnings("unchecked")
         Response<AiMessage> response = mock(Response.class);
@@ -194,6 +212,174 @@ class LinearWorkflowExecutorTest {
         verify(toolRouter, times(1)).invokeWithMeta(eq("searchStock"), anyMap());
     }
 
+    @Test
+    void execute_shouldSkipSandboxWhenStaticPrecheckFails() {
+        when(eventService.isRunnable("run-precheck", "u1")).thenReturn(true);
+        when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap())).thenReturn(
+                PythonStaticPrecheckService.Result.builder()
+                        .passed(false)
+                        .errorCode("STATIC_PRECHECK_FAILED")
+                        .message("dataset_id 不能为空")
+                        .category(TodoFailureCategory.STATIC)
+                        .report(Map.of("issues", List.of("dataset_id 不能为空")))
+                        .build()
+        );
+
+        WorkflowExecutionResult result = executor.execute(request("run-precheck", planExecutePython("todo_1"), new AgentLlmProperties()));
+
+        assertFalse(result.isSuccess());
+        verify(toolRouter, never()).invokeWithMeta(eq("executePython"), anyMap());
+    }
+
+    @Test
+    void execute_shouldUseStaticFixModelForStaticRecovery() {
+        when(eventService.isRunnable("run-static-fix", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 2, 2, 1, 2);
+        properties.getRuntime().getExecution().setStaticFixEndpoint("openrouter");
+        properties.getRuntime().getExecution().setStaticFixModel("openai/gpt-5.2");
+        properties.getRuntime().getExecution().setStaticFixTemperature(0.0);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap())).thenReturn(
+                PythonStaticPrecheckService.Result.builder()
+                        .passed(false)
+                        .errorCode("STATIC_PRECHECK_FAILED")
+                        .message("代码引用了 dataset_id 变量但未定义")
+                        .category(TodoFailureCategory.STATIC)
+                        .report(Map.of("issues", List.of("dataset_id")))
+                        .build(),
+                PythonStaticPrecheckService.Result.builder().passed(true).build()
+        );
+
+        when(toolRouter.invokeWithMeta(eq("executePython"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(true)
+                        .output("{\"ok\":true,\"tool\":\"executePython\",\"data\":{\"stdout\":\"ok\"}}")
+                        .build()
+        );
+
+        ChatLanguageModel staticFixModel = mock(ChatLanguageModel.class);
+        when(aiServiceFactory.resolveLlm("openrouter", "openai/gpt-5.2")).thenReturn(
+                new AgentLlmResolver.ResolvedLlm("openrouter", "https://openrouter.ai/api/v1", "openai/gpt-5.2", "k", null)
+        );
+        when(aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(any(), any(), any())).thenReturn(staticFixModel);
+        Response<AiMessage> staticFixRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
+        when(staticFixModel.generate(any(List.class))).thenReturn(staticFixRecoveryResponse);
+
+        WorkflowExecutionResult result = executor.execute(request("run-static-fix", planExecutePython("todo_1"), properties));
+
+        assertTrue(result.isSuccess());
+        verify(aiServiceFactory).resolveLlm("openrouter", "openai/gpt-5.2");
+        verify(staticFixModel, times(1)).generate(any(List.class));
+    }
+
+    @Test
+    void execute_shouldRetryOnSemanticRejectAndRespectBudget() {
+        when(eventService.isRunnable("run-semantic", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, true, 2, 2, 1, 2);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap()))
+                .thenReturn(PythonStaticPrecheckService.Result.builder().passed(true).build());
+        when(toolRouter.invokeWithMeta(eq("executePython"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(true)
+                        .output("{\"ok\":true,\"tool\":\"executePython\",\"data\":{\"stdout\":\"v\"}}")
+                        .build()
+        );
+        when(pythonSemanticJudgeService.judge(any())).thenReturn(
+                PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of("k", "v")),
+                PythonSemanticJudgeService.Result.pass("OK", "通过", Map.of("k", "v2"))
+        );
+        Response<AiMessage> semanticRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
+        Response<AiMessage> semanticFinalResponse = mockResponse("final");
+        when(model.generate(any(List.class))).thenReturn(semanticRecoveryResponse, semanticFinalResponse);
+
+        WorkflowExecutionResult result = executor.execute(request("run-semantic", planExecutePython("todo_1"), properties));
+
+        assertTrue(result.isSuccess());
+        verify(pythonSemanticJudgeService, times(2)).judge(any());
+        verify(observabilityService, times(2)).recordSemanticJudgeCall(eq("run-semantic"), anyBoolean());
+        verify(toolRouter, times(2)).invokeWithMeta(eq("executePython"), anyMap());
+    }
+
+    @Test
+    void execute_shouldStopWhenStaticRetryBudgetExceeded() {
+        when(eventService.isRunnable("run-static-budget", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 1, 3, 1, 4);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+        when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap())).thenReturn(
+                PythonStaticPrecheckService.Result.builder()
+                        .passed(false)
+                        .errorCode("STATIC_PRECHECK_FAILED")
+                        .message("dataset_id 不能为空")
+                        .category(TodoFailureCategory.STATIC)
+                        .build()
+        );
+        Response<AiMessage> staticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
+        Response<AiMessage> staticBudgetFinalResponse = mockResponse("final");
+        when(model.generate(any(List.class))).thenReturn(staticBudgetRecoveryResponse, staticBudgetFinalResponse);
+
+        WorkflowExecutionResult result = executor.execute(request("run-static-budget", planExecutePython("todo_1"), properties));
+
+        assertFalse(result.isSuccess());
+        verify(toolRouter, never()).invokeWithMeta(eq("executePython"), anyMap());
+        ArgumentCaptor<Map<String, Object>> retryPayload = ArgumentCaptor.forClass(Map.class);
+        verify(eventService, times(1)).append(eq("run-static-budget"), eq("u1"), eq("TODO_RETRY"), retryPayload.capture());
+        assertEquals("STATIC", retryPayload.getValue().get("failure_category"));
+    }
+
+    @Test
+    void execute_shouldStopWhenSemanticRetryBudgetExceeded() {
+        when(eventService.isRunnable("run-semantic-budget", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, true, 2, 2, 1, 4);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(pythonStaticPrecheckService.check(anyString(), anyString(), anyMap()))
+                .thenReturn(PythonStaticPrecheckService.Result.builder().passed(true).build());
+        when(toolRouter.invokeWithMeta(eq("executePython"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(true)
+                        .output("{\"ok\":true,\"tool\":\"executePython\",\"data\":{\"stdout\":\"v\"}}")
+                        .build()
+        );
+        when(pythonSemanticJudgeService.judge(any())).thenReturn(
+                PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of()),
+                PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率仍异常", Map.of())
+        );
+        Response<AiMessage> semanticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
+        Response<AiMessage> semanticBudgetFinalResponse = mockResponse("final");
+        when(model.generate(any(List.class))).thenReturn(semanticBudgetRecoveryResponse, semanticBudgetFinalResponse);
+
+        WorkflowExecutionResult result = executor.execute(request("run-semantic-budget", planExecutePython("todo_1"), properties));
+
+        assertFalse(result.isSuccess());
+        verify(toolRouter, times(2)).invokeWithMeta(eq("executePython"), anyMap());
+        verify(eventService, times(1)).append(eq("run-semantic-budget"), eq("u1"), eq("TODO_RETRY"), anyMap());
+    }
+
+    @Test
+    void execute_shouldStopWhenRuntimeRetryBudgetExceeded() {
+        when(eventService.isRunnable("run-runtime-budget", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 2, 1, 1, 4);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(false)
+                        .output("{\"ok\":false,\"error\":{\"message\":\"provider timeout\"}}")
+                        .build()
+        );
+        Response<AiMessage> runtimeRecoveryResponse = mockResponse("{\"params\":{\"keyword\":\"k-retry\"}}");
+        Response<AiMessage> runtimeFinalResponse = mockResponse("final");
+        when(model.generate(any(List.class))).thenReturn(runtimeRecoveryResponse, runtimeFinalResponse);
+
+        WorkflowExecutionResult result = executor.execute(request("run-runtime-budget", planWithTools(1), properties));
+
+        assertFalse(result.isSuccess());
+        verify(toolRouter, times(2)).invokeWithMeta(eq("searchStock"), anyMap());
+        verify(eventService, times(1)).append(eq("run-runtime-budget"), eq("u1"), eq("TODO_RETRY"), anyMap());
+    }
+
     private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan, AgentLlmProperties properties) {
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -204,7 +390,10 @@ class LinearWorkflowExecutorTest {
                 .userGoal("goal")
                 .todoPlan(plan)
                 .model(model)
-                .toolSpecifications(List.of(ToolSpecification.builder().name("searchStock").description("d").build()))
+                .toolSpecifications(List.of(
+                        ToolSpecification.builder().name("searchStock").description("d").build(),
+                        ToolSpecification.builder().name("executePython").description("d").build()
+                ))
                 .endpointName("ep")
                 .endpointBaseUrl("base")
                 .modelName("m")
@@ -225,5 +414,59 @@ class LinearWorkflowExecutorTest {
                     .build());
         }
         return plan;
+    }
+
+    private TodoPlan planExecutePython(String todoId) {
+        TodoPlan plan = new TodoPlan();
+        plan.getItems().add(TodoItem.builder()
+                .id(todoId)
+                .sequence(1)
+                .type(TodoType.TOOL_CALL)
+                .toolName("executePython")
+                .params(Map.of(
+                        "dataset_ids", "d1",
+                        "code", "print('ok')"
+                ))
+                .executionMode(ExecutionMode.AUTO)
+                .status(TodoStatus.PENDING)
+                .build());
+        return plan;
+    }
+
+    private AgentLlmProperties runtimeConfig(boolean staticPrecheckEnabled,
+                                             boolean semanticEnabled,
+                                             int maxStaticRecoveryRetries,
+                                             int maxRuntimeRecoveryRetries,
+                                             int maxSemanticRecoveryRetries,
+                                             int maxRetriesPerTodo) {
+        AgentLlmProperties properties = new AgentLlmProperties();
+        AgentLlmProperties.Execution execution = new AgentLlmProperties.Execution();
+        execution.setStaticPrecheckEnabled(staticPrecheckEnabled);
+        execution.setMaxStaticRecoveryRetries(maxStaticRecoveryRetries);
+        execution.setMaxRuntimeRecoveryRetries(maxRuntimeRecoveryRetries);
+        execution.setMaxSemanticRecoveryRetries(maxSemanticRecoveryRetries);
+        execution.setMaxTotalRecoveryRetries(maxRetriesPerTodo - 1);
+        execution.setMaxRetriesPerTodo(maxRetriesPerTodo);
+
+        AgentLlmProperties.Judge judge = new AgentLlmProperties.Judge();
+        judge.setSemanticEnabled(semanticEnabled);
+        judge.setFailOpen(true);
+        judge.setMaxAttempts(1);
+        judge.setBlockOnInsufficientEvidence(false);
+        AgentLlmProperties.Runtime runtime = new AgentLlmProperties.Runtime();
+        runtime.setExecution(execution);
+        runtime.setJudge(judge);
+        properties.setRuntime(runtime);
+        return properties;
+    }
+
+    @SuppressWarnings("unchecked")
+    private Response<AiMessage> mockResponse(String text) {
+        Response<AiMessage> response = mock(Response.class);
+        AiMessage aiMessage = mock(AiMessage.class);
+        when(aiMessage.text()).thenReturn(text);
+        when(response.content()).thenReturn(aiMessage);
+        when(response.tokenUsage()).thenReturn(null);
+        return response;
     }
 }

@@ -210,7 +210,7 @@ docker build \
 - 您已经准备好以下基础设施：
     - **Nacos**：用于服务注册与配置管理。请参考 [Nacos 官方文档](https://nacos.io/) 进行安装和配置。
     - **PostgreSQL 数据库**：用于存储服务所需的数据。
-    - **Kafka Broker**：用于消息队列通信。
+    - **RabbitMQ**：用于消息队列通信。
 
 此外，请确保您已拉取了 `alphafrog-micro-deploy` 仓库：
 ```bash
@@ -264,7 +264,10 @@ docker run -d  -p 20082:20082 --name ${app_name} \
 -e AF_DB_MAIN_USER="myuser" \
 -e AF_DB_MAIN_PASSWORD="mypassword" \
 -e AF_DB_MAIN_DATABASE="mydatabase" \
--e AF_KAFKA_BOOTSTRAP_SERVERS="mybootstrapservers" \
+-e AF_RABBITMQ_HOST="myrabbitmqhost" \
+-e AF_RABBITMQ_PORT="5672" \
+-e AF_RABBITMQ_USER="myrabbitmquser" \
+-e AF_RABBITMQ_PASS="myrabbitmqpass" \
 -e NACOS_ADDRESS="myaddress" \
 -e TUSHARE_TOKEN="mytoken" \
 ${app_name}
@@ -276,7 +279,10 @@ ${app_name}
 - `-e`：设置环境变量，以下是各变量的含义：
     - `TZ=Asia/Shanghai`：时区设置为上海时间。
     - `AF_DB_MAIN_*`：PostgreSQL 数据库的连接信息，请替换为您实际的数据库地址、端口、用户名、密码和数据库名。
-    - `AF_KAFKA_BOOTSTRAP_SERVERS`：Kafka 的 Bootstrap Servers 地址。
+    - `AF_RABBITMQ_HOST`：RabbitMQ 的主机地址。
+    - `AF_RABBITMQ_PORT`：RabbitMQ 的端口（默认 5672）。
+    - `AF_RABBITMQ_USER`：RabbitMQ 的用户名。
+    - `AF_RABBITMQ_PASS`：RabbitMQ 的密码。
     - `NACOS_ADDRESS`：Nacos 的地址（如 `http://nacos-server:8848`）。
     - `TUSHARE_TOKEN`：Tushare API 的 Token（如果使用该功能）。
 

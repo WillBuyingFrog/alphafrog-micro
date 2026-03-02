@@ -12,6 +12,7 @@ import java.util.Map;
 import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.when;
 
@@ -82,5 +83,55 @@ class AgentModelCatalogServiceTest {
         assertEquals("openrouter", item.endpoint());
         assertEquals(List.of("moonshotai/int4", "fireworks"), item.validProviders());
         assertEquals(0.3D, item.baseRate());
+    }
+
+    @Test
+    void listModels_shouldKeepDashScopeEndpointWhenOnlyRegionConfigured() {
+        AgentLlmProperties properties = new AgentLlmProperties();
+
+        AgentLlmProperties.Endpoint dashscope = new AgentLlmProperties.Endpoint();
+        dashscope.setRegion("singapore");
+        AgentLlmProperties.ModelMetadata qwenPlus = new AgentLlmProperties.ModelMetadata();
+        qwenPlus.setDisplayName("Qwen Plus");
+        qwenPlus.setBaseRate(0.2D);
+        dashscope.setModels(Map.of("qwen-plus", qwenPlus));
+
+        AgentLlmProperties local = new AgentLlmProperties();
+        local.setEndpoints(Map.of("dashscope", dashscope));
+
+        when(localConfigLoader.current()).thenReturn(Optional.of(local));
+
+        AgentModelCatalogService service = new AgentModelCatalogService(properties, localConfigLoader);
+        List<AgentModelCatalogService.ModelCatalogItem> models = service.listModels();
+
+        assertEquals(1, models.size());
+        AgentModelCatalogService.ModelCatalogItem item = models.get(0);
+        assertEquals("qwen-plus", item.id());
+        assertEquals("dashscope", item.endpoint());
+    }
+
+    @Test
+    void listModels_shouldStillFilterNonDashScopeEndpointWithoutBaseUrl() {
+        AgentLlmProperties properties = new AgentLlmProperties();
+        AgentLlmProperties.Endpoint openrouter = new AgentLlmProperties.Endpoint();
+        openrouter.setBaseUrl("https://openrouter.ai/api/v1");
+        properties.setEndpoints(Map.of("openrouter", openrouter));
+
+        AgentLlmProperties.Endpoint custom = new AgentLlmProperties.Endpoint();
+        custom.setRegion("singapore");
+        AgentLlmProperties.ModelMetadata customModel = new AgentLlmProperties.ModelMetadata();
+        customModel.setDisplayName("Custom");
+        customModel.setBaseRate(0.2D);
+        custom.setModels(Map.of("custom-model", customModel));
+
+        AgentLlmProperties local = new AgentLlmProperties();
+        local.setEndpoints(Map.of("custom", custom));
+
+        when(localConfigLoader.current()).thenReturn(Optional.of(local));
+
+        AgentModelCatalogService service = new AgentModelCatalogService(properties, localConfigLoader);
+        List<AgentModelCatalogService.ModelCatalogItem> models = service.listModels();
+
+        assertFalse(models.stream().anyMatch(item -> "custom".equals(item.endpoint())));
     }
 }

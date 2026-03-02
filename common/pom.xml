@@ -67,6 +67,11 @@
             <artifactId>httpcore5</artifactId>
             <version>5.3</version>
         </dependency>
+        <dependency>
+            <groupId>com.meilisearch.sdk</groupId>
+            <artifactId>meilisearch-java</artifactId>
+            <version>0.20.0</version>
+        </dependency>
 
 
 

@@ -4,11 +4,11 @@
 
 ## 项目简介
 
-AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的微服务架构项目，旨在提供国内 A 股市场的股票、基金、指数等金融数据的采集、存储、查询与分析能力。=
+AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** 的微服务架构项目，旨在提供国内 A 股市场的股票、基金、指数等金融数据的采集、存储、查询与分析能力。=
 
 **目前使用的技术栈**：
 - Java 微服务：Spring Boot 3.x + Apache Dubbo 3.x + gRPC/Proto
-- 消息队列：Apache Kafka (KRaft 模式)
+- 消息队列：RabbitMQ
 - 数据存储：PostgreSQL + Redis
 - 服务注册：Nacos
 
@@ -24,7 +24,7 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 | **domesticStockService** | 境内股票服务 | 股票基本信息查询、关键词搜索、日线行情查询 |
 | **domesticFundService** | 境内基金服务 | 基金信息查询、净值查询、持仓查询、关键词搜索 |
 | **domesticIndexService** | 境内指数服务 | 指数信息查询、日线行情、成分股权重查询 |
-| **domesticFetchService** | 数据爬取服务 | 支持同步/异步爬取股票、基金、指数数据，基于 Kafka 的任务调度 |
+| **domesticFetchService** | 数据爬取服务 | 支持同步/异步爬取股票、基金、指数数据，基于 RabbitMQ 的任务调度 |
 | **portfolioService** | 投资组合服务 | 组合管理、持仓 CRUD、交易记录管理 |
 | **frontend** | API 网关 | 统一对外暴露 RESTful API，路由请求至各微服务 |
 | **agentService** | Agent 服务 | 自然语言任务执行、工具调用、事件流与结果管理 |
@@ -82,7 +82,7 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 
 ### 数据采集
 - **同步爬取**: 通过 API 即时爬取并返回数据
-- **异步任务**: 通过 Kafka 消息队列的任务调度，支持批量历史数据爬取
+- **异步任务**: 通过 RabbitMQ 消息队列的任务调度，支持批量历史数据爬取
 - **任务管理**: 支持任务 UUID 查询、状态追踪、结果回传
 
 ### 投资组合服务 (v0.2-portfolio 新增)
@@ -95,7 +95,7 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + Kafka** 的�
 - **权限控制**: 基于用户 ID 的数据隔离与访问控制
 
 ### 基础设施
-- **Docker 部署**: 支持 Docker Compose 一键部署 (Kafka KRaft 模式)
+- **Docker 部署**: 支持 Docker Compose 一键部署
 - **数据完整性检查**: 指数数据完整性校验 + Redis 缓存
 - **Debug 模式**: 可配置的详细日志输出
 
@@ -217,6 +217,56 @@ cp agentService/config/agent-llm.local.example.json agentService/config/agent-ll
 vim agentService/config/agent-llm.local.json
 ```
 
+#### 3.1 配置 Search LLM（Market News 非兼容重构）
+
+> 自 2026-02 版本起，`search-llm.local.json` 已切换为 **feature + profiles** 结构。  
+> 旧结构（如 `defaultProvider`、`marketNews.*` 顶层字段）已废弃，加载时会显式报错，不再 fallback。
+
+```bash
+# 复制示例配置
+cp agentService/config/search-llm.local.example.json agentService/config/search-llm.local.json
+
+# 编辑配置，填入您的 API Keys
+vim agentService/config/search-llm.local.json
+```
+
+最小可运行示例（仅展示关键字段）：
+
+```json
+{
+  "providers": {
+    "exa": {
+      "baseUrl": "https://api.exa.ai",
+      "apiKey": "your-key",
+      "searchPath": "/search",
+      "authHeader": "x-api-key"
+    }
+  },
+  "features": {
+    "marketNews": {
+      "defaultProvider": "exa",
+      "defaultLimit": 8,
+      "profiles": [
+        {
+          "name": "cn",
+          "query": "今日A股市场行情",
+          "includeDomains": ["sina.com.cn"],
+          "languages": ["zh"]
+        }
+      ]
+    }
+  }
+}
+```
+
+必填项：
+- `features.marketNews.profiles[].name`
+- `features.marketNews.profiles[].query` 或 `features.marketNews.profiles[].queries`
+
+默认行为：
+- profile 未指定 `provider` 时使用 `features.marketNews.defaultProvider`
+- API 入参未指定 `limit` 时使用 `features.marketNews.defaultLimit`
+
 #### 4. 构建并启动
 ```bash
 # 一键构建所有镜像
@@ -266,7 +316,7 @@ psql -h your_host -U your_user -d alphafrog -c \
 - PostgreSQL 14+
 - Redis 6+
 - Nacos 2.x
-- Apache Kafka 3.x (KRaft 模式)
+- RabbitMQ 3.13
 
 ### 构建项目
 ```bash
