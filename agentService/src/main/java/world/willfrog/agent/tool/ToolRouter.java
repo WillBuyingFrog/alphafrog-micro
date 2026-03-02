@@ -13,7 +13,10 @@ import world.willfrog.agent.config.StressTestProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 
+import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -149,15 +152,7 @@ public class ToolRouter {
                 );
                 case "executePython" -> pythonSandboxTools.executePython(
                         str(params.get("code"), params.get("arg0")),
-                        str(params.get("dataset_id"), params.get("datasetId"), params.get("arg1")),
-                        str(
-                                params.get("dataset_ids"),
-                                params.get("datasetIds"),
-                                params.get("datasets"),
-                                params.get("dataset_refs"),
-                                params.get("datasetRefs"),
-                                params.get("arg2")
-                        ),
+                        collectExecutePythonDatasetIds(params),
                         str(params.get("libraries"), params.get("arg3")),
                         toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
                 );
@@ -186,6 +181,56 @@ public class ToolRouter {
             }
         }
         return "";
+    }
+
+    private String collectExecutePythonDatasetIds(Map<String, Object> params) {
+        LinkedHashSet<String> datasetIds = new LinkedHashSet<>();
+        addDatasetIds(datasetIds,
+                params.get("dataset_ids"),
+                params.get("datasetIds"),
+                params.get("datasets"),
+                params.get("dataset_refs"),
+                params.get("datasetRefs"),
+                params.get("arg2"),
+                params.get("dataset_id"),
+                params.get("datasetId"),
+                params.get("arg1")
+        );
+        return String.join(",", datasetIds);
+    }
+
+    private void addDatasetIds(LinkedHashSet<String> collector, Object... candidates) {
+        if (collector == null || candidates == null || candidates.length == 0) {
+            return;
+        }
+        for (Object candidate : candidates) {
+            if (candidate == null) {
+                continue;
+            }
+            List<String> parsed = parseDatasetIds(String.valueOf(candidate));
+            collector.addAll(parsed);
+        }
+    }
+
+    private List<String> parseDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return List.of();
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        List<String> ids = new ArrayList<>();
+        for (String part : raw.split(",")) {
+            String value = nvl(part).trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1).trim();
+            }
+            if (!value.isBlank() && !ids.contains(value)) {
+                ids.add(value);
+            }
+        }
+        return ids;
     }
 
     private Integer toNullableInt(Object... candidates) {

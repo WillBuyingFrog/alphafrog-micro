@@ -370,6 +370,16 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getPrompts().getDatasetFieldSpecs() == null) {
             cfg.getPrompts().setDatasetFieldSpecs(null);
         }
+        if (cfg.getObservability() == null) {
+            cfg.setObservability(null);
+        }
+        if (cfg.getObservability() != null && cfg.getObservability().getOpenrouter() == null) {
+            cfg.getObservability().setOpenrouter(null);
+        }
+        if (cfg.getObservability() != null && cfg.getObservability().getOpenrouter() != null 
+                && cfg.getObservability().getOpenrouter().getCostEnrichment() == null) {
+            cfg.getObservability().getOpenrouter().setCostEnrichment(null);
+        }
         return cfg;
     }
 }

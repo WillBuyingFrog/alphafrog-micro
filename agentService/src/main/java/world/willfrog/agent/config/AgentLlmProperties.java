@@ -16,6 +16,7 @@ public class AgentLlmProperties {
     private List<String> models = new ArrayList<>();
     private Map<String, ModelMetadata> modelMetadata = new HashMap<>();
     private Runtime runtime = new Runtime();
+    private Observability observability = new Observability();
     private Prompts prompts = new Prompts();
 
     public String getDefaultEndpoint() {
@@ -72,6 +73,14 @@ public class AgentLlmProperties {
 
     public void setRuntime(Runtime runtime) {
         this.runtime = runtime == null ? new Runtime() : runtime;
+    }
+
+    public Observability getObservability() {
+        return observability;
+    }
+
+    public void setObservability(Observability observability) {
+        this.observability = observability == null ? new Observability() : observability;
     }
 
     public static class Endpoint {
@@ -798,6 +807,51 @@ public class AgentLlmProperties {
 
         public void setSummaryMaxMessages(Integer summaryMaxMessages) {
             this.summaryMaxMessages = summaryMaxMessages;
+        }
+    }
+
+    public static class Observability {
+        private OpenRouter openrouter = new OpenRouter();
+
+        public OpenRouter getOpenrouter() {
+            return openrouter;
+        }
+
+        public void setOpenrouter(OpenRouter openrouter) {
+            this.openrouter = openrouter == null ? new OpenRouter() : openrouter;
+        }
+    }
+
+    public static class OpenRouter {
+        private CostEnrichment costEnrichment = new CostEnrichment();
+
+        public CostEnrichment getCostEnrichment() {
+            return costEnrichment;
+        }
+
+        public void setCostEnrichment(CostEnrichment costEnrichment) {
+            this.costEnrichment = costEnrichment == null ? new CostEnrichment() : costEnrichment;
+        }
+    }
+
+    public static class CostEnrichment {
+        private Boolean enabled = false;
+        private Integer timeoutMs = 5000;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Integer getTimeoutMs() {
+            return timeoutMs;
+        }
+        
+        public void setTimeoutMs(Integer timeoutMs) {
+            this.timeoutMs = timeoutMs;
         }
     }
 

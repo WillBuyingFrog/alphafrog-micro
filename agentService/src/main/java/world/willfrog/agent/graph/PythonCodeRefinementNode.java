@@ -368,11 +368,10 @@ public class PythonCodeRefinementNode {
         if (request.getInitialRunArgs() != null) {
             merged.putAll(request.getInitialRunArgs());
         }
-        if (!safe(request.getDatasetId()).isBlank()) {
-            merged.putIfAbsent("dataset_id", request.getDatasetId().trim());
-        }
-        if (!safe(request.getDatasetIds()).isBlank()) {
-            merged.putIfAbsent("dataset_ids", request.getDatasetIds().trim());
+        // 优先使用 dataset_ids（复数），兼容 dataset_id（单数）
+        String datasetIds = firstNonBlank(request.getDatasetIds(), request.getDatasetId());
+        if (!safe(datasetIds).isBlank()) {
+            merged.putIfAbsent("dataset_ids", datasetIds.trim());
         }
         if (!safe(request.getLibraries()).isBlank()) {
             merged.putIfAbsent("libraries", request.getLibraries().trim());
@@ -396,12 +395,8 @@ public class PythonCodeRefinementNode {
         if (raw == null) {
             return out;
         }
-        String datasetId = firstNonBlank(raw.get("dataset_id"), raw.get("datasetId"));
-        datasetId = normalizeDatasetId(datasetId);
-        if (!datasetId.isBlank()) {
-            out.put("dataset_id", datasetId);
-        }
-        String datasetIds = firstNonBlank(raw.get("dataset_ids"), raw.get("datasetIds"));
+        // 优先使用 dataset_ids（复数），兼容 dataset_id（单数）
+        String datasetIds = firstNonBlank(raw.get("dataset_ids"), raw.get("datasetIds"), raw.get("dataset_id"), raw.get("datasetId"));
         datasetIds = normalizeDatasetIds(datasetIds);
         if (!datasetIds.isBlank()) {
             out.put("dataset_ids", datasetIds);

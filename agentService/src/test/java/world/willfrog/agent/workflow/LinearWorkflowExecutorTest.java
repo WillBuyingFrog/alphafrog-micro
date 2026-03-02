@@ -263,7 +263,7 @@ class LinearWorkflowExecutorTest {
                 new AgentLlmResolver.ResolvedLlm("openrouter", "https://openrouter.ai/api/v1", "openai/gpt-5.2", "k", null)
         );
         when(aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(any(), any(), any())).thenReturn(staticFixModel);
-        Response<AiMessage> staticFixRecoveryResponse = mockResponse("{\"params\":{\"dataset_id\":\"d1\",\"code\":\"print(1)\"}}");
+        Response<AiMessage> staticFixRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
         when(staticFixModel.generate(any(List.class))).thenReturn(staticFixRecoveryResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-static-fix", planExecutePython("todo_1"), properties));
@@ -291,7 +291,7 @@ class LinearWorkflowExecutorTest {
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of("k", "v")),
                 PythonSemanticJudgeService.Result.pass("OK", "通过", Map.of("k", "v2"))
         );
-        Response<AiMessage> semanticRecoveryResponse = mockResponse("{\"params\":{\"dataset_id\":\"d1\",\"code\":\"print(2)\"}}");
+        Response<AiMessage> semanticRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
         Response<AiMessage> semanticFinalResponse = mockResponse("final");
         when(model.generate(any(List.class))).thenReturn(semanticRecoveryResponse, semanticFinalResponse);
 
@@ -316,7 +316,7 @@ class LinearWorkflowExecutorTest {
                         .category(TodoFailureCategory.STATIC)
                         .build()
         );
-        Response<AiMessage> staticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_id\":\"d1\",\"code\":\"print(1)\"}}");
+        Response<AiMessage> staticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
         Response<AiMessage> staticBudgetFinalResponse = mockResponse("final");
         when(model.generate(any(List.class))).thenReturn(staticBudgetRecoveryResponse, staticBudgetFinalResponse);
 
@@ -347,7 +347,7 @@ class LinearWorkflowExecutorTest {
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of()),
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率仍异常", Map.of())
         );
-        Response<AiMessage> semanticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_id\":\"d1\",\"code\":\"print(2)\"}}");
+        Response<AiMessage> semanticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
         Response<AiMessage> semanticBudgetFinalResponse = mockResponse("final");
         when(model.generate(any(List.class))).thenReturn(semanticBudgetRecoveryResponse, semanticBudgetFinalResponse);
 
@@ -424,7 +424,7 @@ class LinearWorkflowExecutorTest {
                 .type(TodoType.TOOL_CALL)
                 .toolName("executePython")
                 .params(Map.of(
-                        "dataset_id", "d1",
+                        "dataset_ids", "d1",
                         "code", "print('ok')"
                 ))
                 .executionMode(ExecutionMode.AUTO)

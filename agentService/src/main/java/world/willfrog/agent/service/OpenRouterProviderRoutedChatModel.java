@@ -17,6 +17,7 @@ import lombok.extern.slf4j.Slf4j;
 import world.willfrog.agent.context.AgentContext;
 
 import java.net.URI;
+import java.net.URISyntaxException;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
@@ -87,6 +88,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
     // ALP-25 新增：HTTP 记录和观测
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
+    private final OpenRouterCostService openRouterCostService;
     private final String endpointName;
 
     /**
@@ -256,7 +258,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
-                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
+                String traceId = reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
+                String runId = AgentContext.getRunId();
+                if (shouldEnrichOpenRouterCost(runId, traceId, completion.id())) {
+                    openRouterCostService.enrichCostInfoAsync(runId, traceId, completion.id(), apiKey, baseUrl);
+                }
             }
             
             return Response.from(aiMessage, tokenUsage, finishReason, metadata);
@@ -312,7 +318,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
      * @param durationMs 请求耗时
      * @param errorMessage 错误信息（null 表示成功）
      */
-    private void reportLlmCall(
+    private String reportLlmCall(
             RawHttpLogger.HttpRequestRecord request,
             RawHttpLogger.HttpResponseRecord response,
             String curlCommand,
@@ -321,7 +327,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             String errorMessage) {
         
         if (observabilityService == null) {
-            return;
+            return null;
         }
         
         // 从 ThreadLocal 获取当前 run 信息
@@ -330,17 +336,19 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
         
         if (runId == null || runId.isBlank()) {
             // 不在 Agent 执行上下文中，不上报（避免污染其他线程的数据）
-            return;
+            return null;
         }
         
         // 从响应中提取 token usage
         TokenUsage tokenUsage = OpenAiCompatibleChatModelSupport.extractTokenUsageFromResponse(objectMapper, response, log);
+        Integer cachedTokens = OpenAiCompatibleChatModelSupport.extractCachedTokensFromResponse(objectMapper, response, log);
         long completedAtMillis = startedAtMillis + durationMs;
         
-        observabilityService.recordLlmCallWithRawHttp(
+        return observabilityService.recordLlmCallWithRawHttp(
                 runId,
                 phase != null ? phase : "unknown",
                 tokenUsage,
+                cachedTokens,
                 durationMs,
                 startedAtMillis,
                 completedAtMillis,
@@ -351,6 +359,37 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
                 response,
                 curlCommand
         );
+    }
+
+    private boolean shouldEnrichOpenRouterCost(String runId, String traceId, String generationId) {
+        return isOpenRouterEndpoint(baseUrl)
+                && openRouterCostService != null
+                && runId != null
+                && !runId.isBlank()
+                && traceId != null
+                && generationId != null
+                && !generationId.isBlank();
+    }
+
+    private boolean isOpenRouterEndpoint(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(url.trim());
+            return isOpenRouterHost(uri.getHost());
+        } catch (IllegalArgumentException e) {
+            try {
+                URI uri = new URI(url.trim());
+                return isOpenRouterHost(uri.getHost());
+            } catch (URISyntaxException ignored) {
+                return false;
+            }
+        }
+    }
+
+    private boolean isOpenRouterHost(String host) {
+        return host != null && (host.equals("openrouter.ai") || host.endsWith(".openrouter.ai"));
     }
     
 }

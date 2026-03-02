@@ -642,7 +642,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             try {
                 precheck = pythonStaticPrecheckService.check(
                         firstNonBlank(resolvedParams.get("code"), resolvedParams.get("arg0")),
-                        firstNonBlank(resolvedParams.get("dataset_id"), resolvedParams.get("datasetId"), resolvedParams.get("arg1")),
+                        firstNonBlank(resolvedParams.get("dataset_ids"), resolvedParams.get("dataset_id"), resolvedParams.get("datasetId"), resolvedParams.get("arg1")),
                         resolvedParams
                 );
             } finally {

@@ -3,11 +3,12 @@
 补充约束：
 - 只能输出该工具真实签名中的字段，禁止编造 query/market 等不存在参数。
 - 如果工具是 getIndexDaily/getStockDaily：必须包含 ts_code、start_date、end_date（YYYYMMDD）。
-- 如果工具是 executePython：dataset_id 必须来自 ${todo_x.output.data.dataset_id}；code 必须从 /sandbox/input/<dataset_id>/<dataset_id>.csv 读取数据，禁止假设 data 变量存在。
+- 如果工具是 executePython：dataset_ids 必须来自已完成日线工具的 ${todo_x.output.data.dataset_id}，多数据集用逗号分隔；code 必须遍历 /sandbox/input/*/ 读取所有挂载的数据集，禁止假设 data 变量存在。
 - 如果工具是 executePython：禁止使用 /datasets 路径读写文件；如需输出文件请写入 /tmp。
-- 发生 STATIC_PRECHECK_FAILED 时，优先修复参数和代码中的静态问题（dataset_id、路径、未定义变量），再考虑业务逻辑。
+- 发生 STATIC_PRECHECK_FAILED 时，优先修复参数和代码中的静态问题（dataset_ids、路径、未定义变量），再考虑业务逻辑。
 
 示例（严格按当前实现字段）：
 - getIndexDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20250101","end_date":"20251231"}
 - getStockDaily: {"ts_code":"${todo_1.output.data.items.0.ts_code}","start_date":"20240101","end_date":"20241231"}
-- executePython: {"dataset_id":"${todo_2.output.data.dataset_id}","code":"..."}
+- executePython（单数据集）: {"dataset_ids":"${todo_2.output.data.dataset_id}","code":"import pandas as pd\nimport glob\nimport os\nfor dataset_path in glob.glob('/sandbox/input/*'):\n    dataset_id = os.path.basename(dataset_path)\n    df = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')\n    ..."}
+- executePython（多数据集对比）: {"dataset_ids":"${todo_2.output.data.dataset_id},${todo_3.output.data.dataset_id}","code":"import pandas as pd\nimport glob\nimport os\ndatasets = {}\nfor dataset_path in glob.glob('/sandbox/input/*'):\n    dataset_id = os.path.basename(dataset_path)\n    datasets[dataset_id] = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')\n# 对比分析..."}

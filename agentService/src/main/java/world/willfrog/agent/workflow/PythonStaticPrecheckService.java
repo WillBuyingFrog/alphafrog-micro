@@ -3,6 +3,7 @@ package world.willfrog.agent.workflow;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -16,18 +17,19 @@ public class PythonStaticPrecheckService {
     private static final Pattern DATASET_ID_DEFINE_PATTERN = Pattern.compile("\\bdataset_id\\s*=");
     private static final Pattern FORBIDDEN_DATASETS_PATH_PATTERN = Pattern.compile("(?i)(^|[^A-Za-z0-9_])/datasets(/|\\b)");
 
-    public Result check(String code, String datasetId, Map<String, Object> runArgs) {
+    public Result check(String code, String datasetIds, Map<String, Object> runArgs) {
         List<String> issues = new ArrayList<>();
         Map<String, Object> report = new LinkedHashMap<>();
         String normalizedCode = code == null ? "" : code;
-        String normalizedDatasetId = datasetId == null ? "" : datasetId.trim();
+        String normalizedDatasetIds = datasetIds == null ? "" : datasetIds.trim();
+        List<String> parsedDatasetIds = parseDatasetIds(normalizedDatasetIds);
 
         if (normalizedCode.isBlank()) {
             issues.add("code 不能为空");
         }
-        if (normalizedDatasetId.isBlank()) {
-            issues.add("dataset_id 不能为空");
-        } else if (!DATASET_ID_PATTERN.matcher(normalizedDatasetId).matches()) {
+        if (parsedDatasetIds.isEmpty()) {
+            issues.add("dataset_ids 不能为空");
+        } else if (parsedDatasetIds.stream().anyMatch(id -> !DATASET_ID_PATTERN.matcher(id).matches())) {
             issues.add("dataset_id 格式非法，仅允许字母数字._-");
         }
 
@@ -42,7 +44,8 @@ public class PythonStaticPrecheckService {
         }
 
         report.put("code_length", normalizedCode.length());
-        report.put("dataset_id", normalizedDatasetId);
+        report.put("dataset_id", parsedDatasetIds.isEmpty() ? "" : parsedDatasetIds.get(0));
+        report.put("dataset_ids", parsedDatasetIds);
         report.put("run_args", runArgs == null ? Map.of() : runArgs);
         report.put("issues", issues);
 
@@ -63,6 +66,27 @@ public class PythonStaticPrecheckService {
                 .message("")
                 .report(report)
                 .build();
+    }
+
+    private List<String> parseDatasetIds(String datasetIds) {
+        if (datasetIds == null || datasetIds.isBlank()) {
+            return List.of();
+        }
+        String raw = datasetIds.trim();
+        if (raw.startsWith("[") && raw.endsWith("]")) {
+            raw = raw.substring(1, raw.length() - 1);
+        }
+        LinkedHashSet<String> ids = new LinkedHashSet<>();
+        for (String part : raw.split(",")) {
+            String value = part == null ? "" : part.trim();
+            if (value.startsWith("\"") && value.endsWith("\"") && value.length() >= 2) {
+                value = value.substring(1, value.length() - 1).trim();
+            }
+            if (!value.isBlank()) {
+                ids.add(value);
+            }
+        }
+        return new ArrayList<>(ids);
     }
 
     @lombok.Builder

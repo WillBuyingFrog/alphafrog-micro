@@ -59,6 +59,7 @@ agent:
       enabled: ${AF_AGENT_OBS_LLM_TRACE_ENABLED:false}
       max-calls: ${AF_AGENT_OBS_LLM_TRACE_MAX_CALLS:100}
       max-text-chars: ${AF_AGENT_OBS_LLM_TRACE_MAX_TEXT_CHARS:20000}
+      capture-cached-tokens: ${AF_AGENT_OBS_CAPTURE_CACHED_TOKENS:true}
     raw-http:
       enabled: ${AF_AGENT_OBS_RAW_HTTP_ENABLED:true}
       capture-body-max-chars: ${AF_AGENT_OBS_RAW_HTTP_MAX_CHARS:100000}
@@ -66,6 +67,10 @@ agent:
       generate-curl: ${AF_AGENT_OBS_RAW_HTTP_CURL:true}
       capture-endpoints: ${AF_AGENT_OBS_CAPTURE_ENDPOINTS:}
       exclude-endpoints: ${AF_AGENT_OBS_EXCLUDE_ENDPOINTS:}
+    openrouter:
+      cost-enrichment:
+        enabled: ${AF_AGENT_OBS_OPENROUTER_COST_ENABLED:false}
+        timeout-ms: ${AF_AGENT_OBS_OPENROUTER_COST_TIMEOUT_MS:5000}
   artifact:
     retention-days:
       normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}
@@ -108,7 +113,7 @@ agent:
         重要约束：
         1. 你通常并不知道数据库中的精确 ts_code（例如 000300.SH），必须先调用 searchStock/searchFund/searchIndex 检索后再调用按代码查询的工具；从搜索结果 data.items 中选取最符合用户意图的项（比对 name 与用户目标），不要默认取第一条。
         2. 禁止猜测代码，禁止使用不存在的工具名。
-        3. 当市场数据工具返回 dataset_id 后，必须调用 executePython 对数据进行计算与分析。
+        3. 当市场数据工具返回 dataset_id（s）后，必须调用 executePython 对数据进行计算与分析。
         4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。
         5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
       todo-planner-system-prompt-template: >
@@ -133,7 +138,7 @@ agent:
         可并行任务应设置为空依赖；有依赖任务用 dependsOn。
         任务间引用协议必须统一为 ${task_id.output} 或 ${task_id.output.path.to.field}。
         禁止使用 {{...}}、{...}、task.output 这类非标准写法；禁止在 args 里输出无法解析的占位符。
-        search 类工具输出字段示例：${task_search.output.data.items.0.ts_code}；日线工具 dataset_id 字段示例：${task_daily.output.data.dataset_id}。引用 search 类任务 items 时，必须根据用户目标选取 name 最匹配的项，不可默认使用 items.0。
+        search 类工具输出字段示例：${task_search.output.data.items.0.ts_code}；日线工具 dataset_id 字段示例：${task_daily.output.data.dataset_id}（单数据集）或 ${task_daily.output.data.dataset_ids.0}（多数据集数组）。引用 search 类任务 items 时，必须根据用户目标选取 name 最匹配的项，不可默认使用 items.0。
       parallel-patch-planner-system-prompt-template: >
         你是运行中 DAG 的局部重规划器。只输出 JSON，格式严格为 {"reason":"...","replace_task_ids":["..."],"tasks":[...]}。
         tasks 的字段与主计划一致：id,type( tool | sub_agent ),tool,args,dependsOn,goal,maxSteps,description。
@@ -148,7 +153,7 @@ agent:
         严禁把 sub_agent、workflow、tool、agent 作为步骤工具名。工具参数必须严格匹配真实签名：
         searchIndex/searchStock/searchFund 使用 keyword；
         getIndexDaily/getStockDaily 使用 tsCode,startDateStr,endDateStr（日期格式必须为YYYYMMDD）；
-        executePython 使用 code,dataset_id；可选传 coding_context（仅保留与编码最相关上下文）。
+        executePython 使用 code,dataset_ids（多数据集用逗号分隔，如 "ds1,ds2"）；可选传 coding_context（仅保留与编码最相关上下文）。
         从 search 类工具返回的 items 中选取最符合用户意图的项，不要默认取第一条。
         输出格式：{"steps":[{"tool":"name","args":{...},"note":"why"}],"expected":"..."}。
       sub-agent-summary-system-prompt: |
@@ -156,10 +161,10 @@ agent:
         结论需优先包含关键数值、时间范围与约束条件，避免冗长叙述。
       python-refine-system-prompt: >
         你是代码执行代理。请基于目标、相关上下文和执行反馈，输出可直接运行的 Python 代码和运行参数。
-        必须只输出 JSON，格式为 {"code":"...","run_args":{"dataset_id":"...","dataset_ids":"...","libraries":"...","timeout_seconds":30},"reason":"..."}。
-        run_args 中最关键是 dataset_id，必须指向真实可访问的数据目录。
+        必须只输出 JSON，格式为 {"code":"...","run_args":{"dataset_ids":"...","libraries":"...","timeout_seconds":30},"reason":"..."}。
+        run_args 中最关键是 dataset_ids（单数据集传一个ID，多数据集用逗号分隔），必须指向真实可访问的数据目录。
       python-refine-requirements:
-        - 你可以在本轮修正 run_args，尤其是 dataset_id/dataset_ids。
+        - 你可以在本轮修正 run_args，尤其是 dataset_ids（多数据集用逗号分隔）。
         - 代码中不要假设未定义变量，直接按可访问文件路径读取数据。
         - 数据文件路径固定为 /sandbox/input/<dataset_id>/<dataset_id>.csv。
         - 读取数据时必须使用 pd.read_csv(f"/sandbox/input/{dataset_id}/{dataset_id}.csv")，禁止使用未定义的函数如 load_dataset() 或 get_dataset()。
@@ -169,7 +174,7 @@ agent:
         - 价格字段请优先使用 close/open 等数值列，避免把 ts_code 当作价格。
         - ts_code 是数据库内区分不同资产的标识字段，不可用于涨跌幅数值计算。
         - 优先输出 JSON 结果，便于后续流程消费。
-        - 若上轮报 dataset_id 相关错误，必须优先修正 run_args 再生成代码。
+        - 若上轮报 dataset_ids 相关错误，必须优先修正 run_args 再生成代码。
       python-refine-output-instruction: 请只返回 JSON，不要返回 markdown。
       dataset-field-specs:
         - name: ts_code

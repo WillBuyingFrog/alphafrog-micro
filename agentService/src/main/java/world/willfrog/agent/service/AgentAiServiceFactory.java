@@ -21,6 +21,7 @@ public class AgentAiServiceFactory {
     private final ObjectMapper objectMapper;
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
+    private final OpenRouterCostService openRouterCostService;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -106,6 +107,7 @@ public class AgentAiServiceFactory {
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
+                    openRouterCostService,
                     resolved.endpointName()
             );
         }
@@ -136,6 +138,7 @@ public class AgentAiServiceFactory {
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
+                    openRouterCostService,
                     resolved.endpointName()
             );
         }

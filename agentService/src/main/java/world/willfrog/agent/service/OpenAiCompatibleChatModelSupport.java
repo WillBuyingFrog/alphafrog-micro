@@ -47,6 +47,57 @@ final class OpenAiCompatibleChatModelSupport {
         return null;
     }
 
+    /**
+     * 从 LLM 响应中提取 cached tokens。
+     *
+     * <p>支持以下格式：</p>
+     * <ul>
+     *   <li>OpenRouter / Dashscope: {@code usage.prompt_tokens_details.cached_tokens}</li>
+     *   <li>Fireworks: {@code perf_metrics.cached_prompt_tokens}</li>
+     * </ul>
+     *
+     * @param objectMapper Jackson ObjectMapper
+     * @param response     原始 HTTP 响应
+     * @param log          日志
+     * @return cached tokens 数量，如果不存在则返回 null
+     */
+    static Integer extractCachedTokensFromResponse(ObjectMapper objectMapper,
+                                                   RawHttpLogger.HttpResponseRecord response,
+                                                   Logger log) {
+        if (response == null || response.getBody() == null || response.getBody().isBlank()) {
+            return null;
+        }
+
+        try {
+            Map<String, Object> json = objectMapper.readValue(response.getBody(), new TypeReference<>() {
+            });
+            Object usage = json.get("usage");
+            if (usage instanceof Map<?, ?> usageMap) {
+                // OpenRouter / Dashscope: usage.prompt_tokens_details.cached_tokens
+                Object promptTokensDetails = usageMap.get("prompt_tokens_details");
+                if (promptTokensDetails instanceof Map<?, ?> detailsMap) {
+                    Integer cached = toInt(detailsMap.get("cached_tokens"));
+                    if (cached != null) {
+                        return cached;
+                    }
+                }
+            }
+            
+            // Fireworks: perf_metrics.cached_prompt_tokens
+            Object perfMetrics = json.get("perf_metrics");
+            if (perfMetrics instanceof Map<?, ?> perfMap) {
+                Integer cached = toInt(perfMap.get("cached_prompt_tokens"));
+                if (cached != null) {
+                    return cached;
+                }
+            }
+        } catch (Exception e) {
+            log.debug("Failed to extract cached tokens from response: {}", e.getMessage());
+        }
+
+        return null;
+    }
+
     static Map<String, String> buildRequestHeaders(String apiKey) {
         Map<String, String> headers = new LinkedHashMap<>();
         headers.put("Content-Type", "application/json");

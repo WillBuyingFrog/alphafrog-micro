@@ -26,7 +26,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 mock(AgentLlmResolver.class),
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
-                mock(AgentObservabilityService.class)
+                mock(AgentObservabilityService.class),
+                mock(OpenRouterCostService.class)
         );
         ReflectionTestUtils.setField(factory, "openAiApiKey", "fallback-key");
         ReflectionTestUtils.setField(factory, "maxTokens", 1024);
@@ -53,7 +54,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 mock(AgentLlmResolver.class),
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
-                mock(AgentObservabilityService.class)
+                mock(AgentObservabilityService.class),
+                mock(OpenRouterCostService.class)
         );
         ReflectionTestUtils.setField(factory, "openAiApiKey", "fallback-key");
         ReflectionTestUtils.setField(factory, "maxTokens", 1024);

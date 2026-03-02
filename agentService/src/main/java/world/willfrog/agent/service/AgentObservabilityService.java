@@ -49,6 +49,9 @@ public class AgentObservabilityService {
     @Value("${agent.observability.llm-trace.max-text-chars:20000}")
     private int llmTraceMaxTextChars;
 
+    @Value("${agent.observability.llm-trace.capture-cached-tokens:true}")
+    private boolean captureCachedTokens;
+
     @Value("${agent.observability.llm-trace.reasoning-max-chars:20000}")
     private int llmTraceReasoningMaxChars;
 
@@ -281,7 +284,7 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
-        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, durationMs, 0, 0, endpointName, modelName,
+        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, null, durationMs, 0, 0, endpointName, modelName,
                 errorMessage, httpRequest, httpResponse, curlCommand);
     }
 
@@ -289,6 +292,24 @@ public class AgentObservabilityService {
             String runId,
             String phase,
             TokenUsage tokenUsage,
+            long durationMs,
+            long startedAtMillis,
+            long completedAtMillis,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
+        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, null, durationMs, startedAtMillis, completedAtMillis,
+                endpointName, modelName, errorMessage, httpRequest, httpResponse, curlCommand);
+    }
+
+    public String recordLlmCallWithRawHttp(
+            String runId,
+            String phase,
+            TokenUsage tokenUsage,
+            Integer cachedTokens,
             long durationMs,
             long startedAtMillis,
             long completedAtMillis,
@@ -322,6 +343,7 @@ public class AgentObservabilityService {
                     "output", tokenUsage.outputTokenCount(),
                     "total", tokenUsage.totalTokenCount()
             ));
+            payload.put("cachedTokens", cachedTokens);
             payload.put("httpRequest", httpRequest != null ? Map.of(
                     "url", nvl(httpRequest.getUrl()),
                     "method", nvl(httpRequest.getMethod()),
@@ -343,7 +365,7 @@ public class AgentObservabilityService {
             phaseMetrics.setCount(phaseMetrics.getCount() + 1);
             phaseMetrics.setLlmCalls(phaseMetrics.getLlmCalls() + 1);
             phaseMetrics.setDurationMs(phaseMetrics.getDurationMs() + clampDuration(durationMs));
-            applyTokens(state.getSummary(), phaseMetrics, tokenUsage);
+            applyTokens(state.getSummary(), phaseMetrics, tokenUsage, cachedTokens);
             
             if (endpointName != null && !endpointName.isBlank()) {
                 state.getDiagnostics().setLastEndpoint(endpointName);
@@ -364,6 +386,7 @@ public class AgentObservabilityService {
                     runId, 
                     phase, 
                     stage,
+                    cachedTokens,
                     durationMs, 
                     startedAtMillis,
                     completedAtMillis,
@@ -377,6 +400,41 @@ public class AgentObservabilityService {
             );
         });
         return traceId;
+    }
+
+    /**
+     * 补充 Spending 信息（OpenRouter 异步回调）
+     *
+     * @param runId     Run ID
+     * @param traceId   LLM Trace ID
+     * @param actualCost    OpenRouter 总费用
+     * @param upstreamCost  OpenRouter 上游成本
+     * @param cacheDiscount OpenRouter 缓存折扣
+     * @param isByok        OpenRouter 是否 BYOK
+     */
+    public void enrichLlmCallSpending(String runId,
+                                      String traceId,
+                                      Double actualCost,
+                                      Double upstreamCost,
+                                      Double cacheDiscount,
+                                      Boolean isByok) {
+        if (runId == null || runId.isBlank() || traceId == null || traceId.isBlank()) {
+            return;
+        }
+        mutate(runId, state -> {
+            if (state.getDiagnostics() == null || state.getDiagnostics().getLlmTraces() == null) {
+                return;
+            }
+            for (LlmTrace trace : state.getDiagnostics().getLlmTraces()) {
+                if (traceId.equals(trace.getTraceId())) {
+                    trace.setActualCost(actualCost);
+                    trace.setUpstreamCost(upstreamCost);
+                    trace.setCacheDiscount(cacheDiscount);
+                    trace.setIsByok(isByok);
+                    break;
+                }
+            }
+        });
     }
 
     public void recordToolCall(String runId,
@@ -635,6 +693,10 @@ public class AgentObservabilityService {
     }
 
     private void applyTokens(Summary summary, PhaseMetrics phaseMetrics, TokenUsage usage) {
+        applyTokens(summary, phaseMetrics, usage, null);
+    }
+
+    private void applyTokens(Summary summary, PhaseMetrics phaseMetrics, TokenUsage usage, Integer cachedTokens) {
         if (usage == null) {
             return;
         }
@@ -647,6 +709,10 @@ public class AgentObservabilityService {
         phaseMetrics.setInputTokens(phaseMetrics.getInputTokens() + Math.max(0L, input));
         phaseMetrics.setOutputTokens(phaseMetrics.getOutputTokens() + Math.max(0L, output));
         phaseMetrics.setTotalTokens(phaseMetrics.getTotalTokens() + Math.max(0L, total));
+        if (captureCachedTokens && cachedTokens != null && cachedTokens > 0) {
+            summary.setCachedTokens(summary.getCachedTokens() + cachedTokens);
+            phaseMetrics.setCachedTokens(phaseMetrics.getCachedTokens() + cachedTokens);
+        }
     }
 
     private void updateCacheSummary(Summary summary, boolean cacheEligible, boolean cacheHit, long estimatedSavedDurationMs) {
@@ -867,6 +933,7 @@ public class AgentObservabilityService {
             String runId,
             String phase,
             String stage,
+            Integer cachedTokens,
             long durationMs,
             long startedAtMillis,
             long completedAtMillis,
@@ -903,6 +970,7 @@ public class AgentObservabilityService {
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        trace.setCachedTokens(captureCachedTokens ? cachedTokens : null);
         
         // 设置原始 HTTP 请求信息
         if (httpRequest != null) {
@@ -1210,6 +1278,7 @@ public class AgentObservabilityService {
         private long inputTokens;
         private long outputTokens;
         private long totalTokens;
+        private long cachedTokens;
         private Double estimatedCost;
         private long startedAtMillis;
         private long completedAtMillis;
@@ -1228,6 +1297,7 @@ public class AgentObservabilityService {
         private long inputTokens;
         private long outputTokens;
         private long totalTokens;
+        private long cachedTokens;
         private long errorCount;
         private long llmCalls;
         private long toolCalls;
@@ -1267,6 +1337,22 @@ public class AgentObservabilityService {
         private String reasoningText;
         private Object reasoningDetails;
         private boolean reasoningTruncated;
+        
+        // ========== Token Cache 追踪 ==========
+        
+        /** Cache 命中 token 数 */
+        private Integer cachedTokens;
+        
+        // ========== OpenRouter Spending ==========
+        
+        /** OpenRouter: 总费用 */
+        private Double actualCost;
+        /** OpenRouter: 上游成本 */
+        private Double upstreamCost;
+        /** OpenRouter: 缓存折扣 */
+        private Double cacheDiscount;
+        /** OpenRouter: 是否 BYOK */
+        private Boolean isByok;
         
         // ========== ALP-25 新增：原始 HTTP 信息 ==========
         
