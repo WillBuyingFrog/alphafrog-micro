@@ -144,6 +144,9 @@ public class AgentModelCatalogService {
                 if (source != null && !isBlank(source.getApiKey())) {
                     target.setApiKey(source.getApiKey().trim());
                 }
+                if (source != null && !isBlank(source.getRegion())) {
+                    target.setRegion(source.getRegion().trim());
+                }
                 if (source != null && source.getModels() != null && !source.getModels().isEmpty()) {
                     for (Map.Entry<String, AgentLlmProperties.ModelMetadata> modelEntry : source.getModels().entrySet()) {
                         String modelKey = normalize(modelEntry.getKey());
@@ -160,7 +163,7 @@ public class AgentModelCatalogService {
         // 记录被过滤的 endpoint
         List<String> removedEndpoints = new ArrayList<>();
         merged.entrySet().removeIf(entry -> {
-            boolean shouldRemove = entry.getValue() == null || isBlank(entry.getValue().getBaseUrl());
+            boolean shouldRemove = shouldRemoveEndpoint(entry.getKey(), entry.getValue());
             if (shouldRemove) {
                 removedEndpoints.add(entry.getKey());
             }
@@ -290,6 +293,7 @@ public class AgentModelCatalogService {
         if (source != null) {
             target.setBaseUrl(source.getBaseUrl());
             target.setApiKey(source.getApiKey());
+            target.setRegion(source.getRegion());
             if (source.getModels() != null && !source.getModels().isEmpty()) {
                 Map<String, AgentLlmProperties.ModelMetadata> copiedModels = new LinkedHashMap<>();
                 for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : source.getModels().entrySet()) {
@@ -303,6 +307,25 @@ public class AgentModelCatalogService {
             }
         }
         return target;
+    }
+
+    private boolean shouldRemoveEndpoint(String endpointName, AgentLlmProperties.Endpoint endpoint) {
+        if (endpoint == null) {
+            return true;
+        }
+        if (!isBlank(endpoint.getBaseUrl())) {
+            return false;
+        }
+        return !isRegionOnlyDashScopeEndpoint(endpointName, endpoint);
+    }
+
+    private boolean isRegionOnlyDashScopeEndpoint(String endpointName, AgentLlmProperties.Endpoint endpoint) {
+        String normalizedEndpoint = normalize(endpointName);
+        if (normalizedEndpoint == null || endpoint == null) {
+            return false;
+        }
+        return "dashscope".equalsIgnoreCase(normalizedEndpoint)
+                && !isBlank(endpoint.getRegion());
     }
 
     private AgentLlmProperties.ModelMetadata copyModelMetadata(AgentLlmProperties.ModelMetadata source) {

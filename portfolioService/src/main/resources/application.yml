@@ -9,17 +9,14 @@ spring:
   jackson:
     serialization:
       write-dates-as-timestamps: false
-  kafka:
-    bootstrap-servers: ${AF_KAFKA_BOOTSTRAP_SERVERS}
-    admin:
-      auto-create: true
-    consumer:
-      auto-offset-reset: earliest
-      key-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-      value-deserializer: org.apache.kafka.common.serialization.StringDeserializer
-    producer:
-      key-serializer: org.apache.kafka.common.serialization.StringSerializer
-      value-serializer: org.apache.kafka.common.serialization.StringSerializer
+  rabbitmq:
+    host: ${AF_RABBITMQ_HOST:localhost}
+    port: ${AF_RABBITMQ_PORT:5672}
+    username: ${AF_RABBITMQ_USER:guest}
+    password: ${AF_RABBITMQ_PASS:guest}
+    listener:
+      simple:
+        acknowledge-mode: manual
 
 server:
   port: 8084
@@ -35,8 +32,9 @@ logging:
 
 portfolio:
   backtest:
-    topic: ${AF_BACKTEST_TOPIC:strategy_backtest_run}
-    consumer-group: ${AF_BACKTEST_GROUP:portfolio-backtest-consumer}
+    exchange: ${AF_BACKTEST_EXCHANGE:backtest.exchange}
+    queue: ${AF_BACKTEST_QUEUE:backtest.queue.portfolio}
+    routing-key: ${AF_BACKTEST_ROUTING_KEY:backtest.run}
     producer-enabled: true
     consumer-enabled: true
 

@@ -3,6 +3,8 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatLanguageModel;
+import io.micrometer.core.instrument.MeterRegistry;
+import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -77,8 +79,10 @@ class AgentRunExecutorTest {
                 todoPlanner,
                 workflowExecutor,
                 messageService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                new SimpleMeterRegistry()
         );
+        executor.init();
 
         when(eventService.extractEndpointName(anyString())).thenReturn("");
         when(eventService.extractModelName(anyString())).thenReturn("");
@@ -89,7 +93,7 @@ class AgentRunExecutorTest {
         when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
-                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", ""));
+                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null));
         when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
         lenient().when(creditService.calculateRunTotalCredits(anyString(), anyString(), any())).thenReturn(0);
     }

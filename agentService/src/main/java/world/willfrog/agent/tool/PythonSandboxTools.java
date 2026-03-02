@@ -26,25 +26,23 @@ public class PythonSandboxTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_id. OPTIONAL: dataset_ids (comma-separated extra dataset ids), libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Dataset files are mounted under /sandbox/input/<dataset_id>/ (default: <dataset_id>.csv and <dataset_id>.meta.json). Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
-    public String executePython(String code, String dataset_id, String dataset_ids, String libraries, Integer timeout_seconds) {
+    @Tool("Execute Python code in a secure sandbox. REQUIRED: code, dataset_ids. OPTIONAL: libraries (comma-separated, e.g. 'numpy,pandas'), timeout_seconds. Dataset files are mounted under /sandbox/input/<dataset_id>/ (default: <dataset_id>.csv and <dataset_id>.meta.json). Multiple datasets: use comma-separated dataset_ids (e.g., 'ds1,ds2,ds3'). Runtime preinstalled: numpy==2.4.1, pandas==2.3.3, matplotlib==3.10.8, scipy==1.17.0. Service stack: fastapi==0.128.0, uvicorn[standard]==0.40.0, pydantic==2.12.5, llm-sandbox[docker]==0.3.33. Please prioritize using the preinstalled runtime libraries to reduce latency.")
+    public String executePython(String code, String dataset_ids, String libraries, Integer timeout_seconds) {
         try {
             String[] parsedDatasetIds = parseDatasetIds(dataset_ids);
-            String primaryDatasetId = dataset_id == null ? "" : dataset_id.trim();
-            if (primaryDatasetId.isBlank() && parsedDatasetIds.length > 0) {
-                primaryDatasetId = parsedDatasetIds[0];
+            if (parsedDatasetIds.length == 0) {
+                return fail("executePython", "MISSING_DATASET_IDS", "dataset_ids is required and cannot be empty", Map.of());
             }
-            log.info("Executing python task for dataset: {} (extras={})", primaryDatasetId, parsedDatasetIds.length);
+            String primaryDatasetId = parsedDatasetIds[0];
+            log.info("Executing python task for datasets: primary={}, total={}", primaryDatasetId, parsedDatasetIds.length);
 
             ExecuteRequest.Builder requestBuilder = ExecuteRequest.newBuilder()
                     .setCode(nvl(code))
                     .setDatasetId(primaryDatasetId);
 
-            for (String extraId : parsedDatasetIds) {
-                if (extraId.equals(primaryDatasetId)) {
-                    continue;
-                }
-                requestBuilder.addDatasetIds(extraId);
+            // Add all datasets (including primary for consistency)
+            for (String datasetId : parsedDatasetIds) {
+                requestBuilder.addDatasetIds(datasetId);
             }
 
             if (libraries != null && !libraries.isBlank()) {

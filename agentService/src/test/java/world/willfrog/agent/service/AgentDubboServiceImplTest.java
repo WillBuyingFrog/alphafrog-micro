@@ -256,4 +256,5 @@ class AgentDubboServiceImplTest {
         assertEquals(5000, resp.getTotalCredits());
         assertEquals("PENDING", resp.getStatus());
     }
+
 }

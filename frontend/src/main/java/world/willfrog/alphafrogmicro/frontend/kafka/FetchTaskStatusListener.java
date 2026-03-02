@@ -1,11 +1,14 @@
 package world.willfrog.alphafrogmicro.frontend.kafka;
 
 import com.alibaba.fastjson2.JSONObject;
+import com.rabbitmq.client.Channel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.support.AmqpHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
 @Service
@@ -13,13 +16,15 @@ import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 @Slf4j
 public class FetchTaskStatusListener {
 
-    private static final String FETCH_TASK_RESULT_TOPIC = "fetch_task_result";
     private static final int MAX_MESSAGE_LOG_LENGTH = 2000;
 
     private final FetchTaskStatusService fetchTaskStatusService;
 
-    @KafkaListener(topics = FETCH_TASK_RESULT_TOPIC, groupId = "alphafrog-micro-frontend")
-    public void listenFetchTaskStatus(String message, Acknowledgment acknowledgment) {
+    @RabbitListener(queues = TaskProducerRabbitConfig.FETCH_RESULT_QUEUE)
+    public void listenFetchTaskStatus(String message,
+                                      Channel channel,
+                                      @Header(AmqpHeaders.DELIVERY_TAG) long tag) {
+        boolean success = false;
         try {
             if (log.isDebugEnabled()) {
                 log.debug("Received fetch task status raw message len={} payload={}",
@@ -30,7 +35,7 @@ public class FetchTaskStatusListener {
             String taskUuid = payload.getString("task_uuid");
             if (taskUuid == null || taskUuid.isBlank()) {
                 log.warn("Ignore fetch task status without task_uuid: {}", message);
-                return;
+                throw new IllegalArgumentException("task_uuid is missing or blank in fetch task status message");
             }
             String taskName = payload.getString("task_name");
             Integer taskSubType = payload.getInteger("task_sub_type");
@@ -48,14 +53,18 @@ public class FetchTaskStatusListener {
             } else {
                 fetchTaskStatusService.updateStatus(taskUuid, taskName, taskSubType, status, fetchedItemsCount, msg);
             }
+            success = true;
         } catch (Exception e) {
             log.error("Failed to handle fetch task status: {}", message, e);
         } finally {
-            if (acknowledgment != null) {
-                acknowledgment.acknowledge();
-                if (log.isDebugEnabled()) {
-                    log.debug("Fetch task status message acknowledged");
+            try {
+                if (success) {
+                    channel.basicAck(tag, false);
+                } else {
+                    channel.basicNack(tag, false, false);
                 }
+            } catch (Exception ackException) {
+                log.error("Failed to ack/nack fetch task status message", ackException);
             }
         }
     }

@@ -65,7 +65,7 @@ public class TodoParamResolver {
             String todoId = matcher.group(1);
             String path = matcher.group(2);
             Object replacement = readPath(context.get(todoId), path);
-            out.append(replacement == null ? "" : String.valueOf(replacement));
+            out.append(replacement == null ? matcher.group(0) : String.valueOf(replacement));
             last = matcher.end();
         }
         out.append(text.substring(last));

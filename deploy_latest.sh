@@ -19,6 +19,7 @@ Services:
   admin-service
   portfolio-service
   agent-service
+  external-info-service
   frontend
 EOF
 }
@@ -31,6 +32,7 @@ ALL_SERVICES=(
   admin-service
   portfolio-service
   agent-service
+  external-info-service
   python-sandbox-service
   python-sandbox-gateway-service
   frontend
@@ -44,6 +46,7 @@ declare -A SERVICE_BUILD=(
   [admin-service]="adminService/docker_build.sh"
   [portfolio-service]="portfolioService/docker_build.sh"
   [agent-service]="agentService/docker_build.sh"
+  [external-info-service]="externalInfoService/docker_build.sh"
   [python-sandbox-service]="pythonSandboxService/docker_build.sh"
   [python-sandbox-gateway-service]="pythonSandboxGatewayService/docker_build.sh"
   [frontend]="frontend/docker_build.sh"
@@ -57,6 +60,7 @@ declare -A SERVICE_MODULE=(
   [admin-service]="adminService"
   [portfolio-service]="portfolioService"
   [agent-service]="agentService"
+  [external-info-service]="externalInfoService"
   [python-sandbox-gateway-service]="pythonSandboxGatewayService"
   [frontend]="frontend"
 )

@@ -6,4 +6,4 @@
 4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。
 5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
 6. 工具参数引用格式必须使用 ${todo_id.output...} 或 ${todo_id.output.data.items.0.ts_code}；索引必须用 items.0，禁止 {todo_1...}、task.output 或 items[0] 写法。
-7. executePython 的 dataset_id 必须来自已完成日线工具的 data.dataset_id，且只能包含字母数字、点、下划线或连字符。
+7. executePython 的 dataset_ids 必须来自已完成日线工具的 data.dataset_id（单数据集或多数据集均使用 dataset_ids，多数据集用逗号分隔）；code 必须遍历 /sandbox/input/*/ 读取所有挂载的数据集进行分析。

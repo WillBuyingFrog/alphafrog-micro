@@ -1,11 +1,14 @@
 package world.willfrog.alphafrogmicro.domestic.fetch;
 
 import com.alibaba.fastjson.JSONObject;
+import com.rabbitmq.client.Channel;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.kafka.annotation.KafkaListener;
-import org.springframework.kafka.core.KafkaTemplate;
-import org.springframework.kafka.support.Acknowledgment;
+import org.springframework.amqp.rabbit.annotation.RabbitListener;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.amqp.support.AmqpHeaders;
+import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.domestic.fetch.config.DomesticFetchRabbitConfig;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 
 @Service
@@ -16,40 +19,40 @@ public class FetchTopicConsumer {
     private final DomesticFundFetchServiceImpl domesticFundFetchService;
     private final DomesticStockFetchServiceImpl domesticStockFetchService;
     private final DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
-    private final KafkaTemplate<String, String> kafkaTemplate;
-
-    private static final String FETCH_TASK_RESULT_TOPIC = "fetch_task_result";
+    private final RabbitTemplate rabbitTemplate;
 
     public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
                               DomesticFundFetchServiceImpl domesticFundFetchService,
                               DomesticStockFetchServiceImpl domesticStockFetchService,
                               DomesticTradeCalendarFetchService domesticTradeCalendarFetchService,
-                              KafkaTemplate<String, String> kafkaTemplate) {
+                              RabbitTemplate rabbitTemplate) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
         this.domesticStockFetchService = domesticStockFetchService;
         this.domesticTradeCalendarFetchService = domesticTradeCalendarFetchService;
-        this.kafkaTemplate = kafkaTemplate;
+        this.rabbitTemplate = rabbitTemplate;
     }
 
 
-    @KafkaListener(topics = "fetch_topic", groupId = "alphafrog-micro")
-    public void listenFetchTask(String message, Acknowledgment acknowledgment){
+    @RabbitListener(queues = DomesticFetchRabbitConfig.FETCH_TASK_QUEUE)
+    public void listenFetchTask(String message,
+                                Channel channel,
+                                @Header(AmqpHeaders.DELIVERY_TAG) long tag){
+        boolean success = false;
         log.info("Received fetch task [V2-DEBUG]: {}", message);
-        JSONObject rawMessageJSON;
-        try{
-            rawMessageJSON = JSONObject.parseObject(message);
-        } catch (Exception e) {
-            log.error("Failed to parse message: {}", message);
-            acknowledgment.acknowledge();
-            return;
-        }
 
-        String taskUuid = rawMessageJSON.getString("task_uuid");
-        String taskName = rawMessageJSON.getString("task_name");
-        Integer taskSubTypeValue = rawMessageJSON.getInteger("task_sub_type");
+        String taskUuid = null;
+        String taskName = null;
+        Integer taskSubTypeValue = null;
 
         try{
+            JSONObject rawMessageJSON = JSONObject.parseObject(message);
+            if (rawMessageJSON == null) {
+                throw new IllegalArgumentException("Invalid message JSON payload");
+            }
+            taskUuid = rawMessageJSON.getString("task_uuid");
+            taskName = rawMessageJSON.getString("task_name");
+            taskSubTypeValue = rawMessageJSON.getInteger("task_sub_type");
             int taskSubType = rawMessageJSON.getIntValue("task_sub_type");
             JSONObject taskParams = rawMessageJSON.getJSONObject("task_params");
             if (taskParams == null) {
@@ -60,7 +63,6 @@ public class FetchTopicConsumer {
 
             if (taskName == null) {
                 result = -2;
-                acknowledgment.acknowledge();
                 sendTaskResult(taskUuid, null, taskSubTypeValue, result, "Missing task_name");
                 return;
             }
@@ -248,14 +250,25 @@ public class FetchTopicConsumer {
                     result = -2;
                     break;
             }
-            acknowledgment.acknowledge();
             log.info("Task result : {}", result);
             sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, null);
+            success = true;
         } catch (Exception e){
             log.error("Failed to start task: {}", message);
             log.error("Stack trace", e);
-            acknowledgment.acknowledge();
-            sendTaskResult(taskUuid, taskName, taskSubTypeValue, -1, e.getMessage());
+            if (taskUuid != null && !taskUuid.isBlank()) {
+                sendTaskResult(taskUuid, taskName, taskSubTypeValue, -1, e.getMessage());
+            }
+        } finally {
+            try {
+                if (success) {
+                    channel.basicAck(tag, false);
+                } else {
+                    channel.basicNack(tag, false, false);
+                }
+            } catch (Exception ackException) {
+                log.error("Failed to ack/nack fetch task message", ackException);
+            }
         }
     }
 
@@ -282,9 +295,15 @@ public class FetchTopicConsumer {
         payload.put("updated_at", System.currentTimeMillis());
         try {
             if (log.isDebugEnabled()) {
-                log.debug("Sending fetch task result topic={} payload={}", FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
+                log.debug("Sending fetch task result exchange={} routingKey={} payload={}",
+                        DomesticFetchRabbitConfig.FETCH_RESULT_EXCHANGE,
+                        DomesticFetchRabbitConfig.FETCH_RESULT_ROUTING_KEY,
+                        payload.toJSONString());
             }
-            kafkaTemplate.send(FETCH_TASK_RESULT_TOPIC, payload.toJSONString());
+            rabbitTemplate.convertAndSend(
+                    DomesticFetchRabbitConfig.FETCH_RESULT_EXCHANGE,
+                    DomesticFetchRabbitConfig.FETCH_RESULT_ROUTING_KEY,
+                    payload.toJSONString());
         } catch (Exception e) {
             log.error("Failed to send fetch task result for {}", taskUuid, e);
         }

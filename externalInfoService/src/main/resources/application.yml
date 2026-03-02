@@ -1,0 +1,72 @@
+server:
+  port: 18096
+
+spring:
+  application:
+    name: external-info-service
+
+dubbo:
+  application:
+    name: external-info-service
+  protocol:
+    name: tri
+    port: 50061
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+
+external-info:
+  search-llm:
+    config-file: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:}
+    config-refresh-interval-ms: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_REFRESH_INTERVAL_MS:10000}
+    providers:
+      perplexity:
+        base-url: ${AF_EXTERNAL_INFO_SEARCH_PPLX_BASE_URL:https://api.perplexity.ai}
+        api-key: ${AF_EXTERNAL_INFO_SEARCH_PPLX_API_KEY:}
+        search-path: ${AF_EXTERNAL_INFO_SEARCH_PPLX_SEARCH_PATH:/search}
+        auth-header: ${AF_EXTERNAL_INFO_SEARCH_PPLX_AUTH_HEADER:Authorization}
+        auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_PPLX_AUTH_PREFIX:Bearer }
+        connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_PPLX_CONNECT_TIMEOUT_SECONDS:20}
+        request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_PPLX_REQUEST_TIMEOUT_SECONDS:45}
+      exa:
+        base-url: ${AF_EXTERNAL_INFO_SEARCH_EXA_BASE_URL:https://api.exa.ai}
+        api-key: ${AF_EXTERNAL_INFO_SEARCH_EXA_API_KEY:}
+        search-path: ${AF_EXTERNAL_INFO_SEARCH_EXA_SEARCH_PATH:/search}
+        auth-header: ${AF_EXTERNAL_INFO_SEARCH_EXA_AUTH_HEADER:x-api-key}
+        auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_EXA_AUTH_PREFIX:}
+        connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_CONNECT_TIMEOUT_SECONDS:20}
+        request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_REQUEST_TIMEOUT_SECONDS:45}
+    features:
+      market-news:
+        default-provider: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_DEFAULT_PROVIDER:exa}
+        default-limit: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_DEFAULT_LIMIT:8}
+        max-results: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_MAX_RESULTS:20}
+        exa-search-type: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_EXA_TYPE:auto}
+        exa-category: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_EXA_CATEGORY:news}
+        profiles:
+          - name: cn
+            provider: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_CN_PROVIDER:exa}
+            query: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_CN_QUERY:今日A股市场行情 行业板块热点}
+            include-domains: [sina.com.cn, eastmoney.com, cls.cn, yicai.com]
+            languages: [zh]
+            country: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_CN_COUNTRY:CN}
+            category-hint: market
+          - name: policy
+            provider: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_POLICY_PROVIDER:perplexity}
+            query: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_POLICY_QUERY:央行政策公告 金融监管动态}
+            include-domains: [pbc.gov.cn, gov.cn]
+            languages: [zh]
+            country: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_POLICY_COUNTRY:CN}
+            category-hint: policy
+          - name: us
+            provider: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_US_PROVIDER:exa}
+            query: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_US_QUERY:US stocks market news}
+            include-domains: [wsj.com, bloomberg.com, reuters.com]
+            languages: [en]
+            country: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_US_COUNTRY:US}
+            category-hint: global
+    prompts:
+      market-news-query-template: ${AF_EXTERNAL_INFO_SEARCH_PROMPTS_MARKET_NEWS_QUERY_TEMPLATE:}
+
+logging:
+  level:
+    world.willfrog.externalinfo: ${LOGGING_LEVEL_EXTERNAL_INFO:INFO}

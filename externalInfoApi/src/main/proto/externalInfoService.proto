@@ -1,0 +1,34 @@
+syntax = "proto3";
+
+package world.willfrog.alphafrogmicro.externalinfo.idl;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.alphafrogmicro.externalinfo.idl";
+option java_outer_classname = "ExternalInfoServiceProto";
+
+message GetTodayMarketNewsRequest {
+  int32 limit = 1;
+  string provider = 2;
+  repeated string languages = 3;
+  string start_published_date = 4;
+  string end_published_date = 5;
+}
+
+message MarketNewsItemMessage {
+  string id = 1;
+  string timestamp = 2;
+  string title = 3;
+  string source = 4;
+  string category = 5;
+  string url = 6;
+}
+
+message GetTodayMarketNewsResponse {
+  repeated MarketNewsItemMessage data = 1;
+  string updated_at = 2;
+  string provider = 3;
+}
+
+service ExternalInfoDubboService {
+  rpc GetTodayMarketNews(GetTodayMarketNewsRequest) returns (GetTodayMarketNewsResponse);
+}

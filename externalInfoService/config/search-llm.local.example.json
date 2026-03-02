@@ -1,0 +1,67 @@
+{
+  "providers": {
+    "perplexity": {
+      "baseUrl": "https://api.perplexity.ai",
+      "apiKey": "replace-with-your-perplexity-api-key",
+      "searchPath": "/search",
+      "authHeader": "Authorization",
+      "authPrefix": "Bearer ",
+      "connectTimeoutSeconds": 20,
+      "requestTimeoutSeconds": 45
+    },
+    "exa": {
+      "baseUrl": "https://api.exa.ai",
+      "apiKey": "replace-with-your-exa-api-key",
+      "searchPath": "/search",
+      "authHeader": "x-api-key",
+      "authPrefix": "",
+      "connectTimeoutSeconds": 20,
+      "requestTimeoutSeconds": 45
+    }
+  },
+  "features": {
+    "marketNews": {
+      "defaultProvider": "exa",
+      "defaultLimit": 8,
+      "maxResults": 20,
+      "exaSearchType": "auto",
+      "exaCategory": "news",
+      "profiles": [
+        {
+          "name": "cn",
+          "provider": "exa",
+          "query": "今日A股市场行情 行业板块热点",
+          "includeDomains": ["sina.com.cn", "eastmoney.com", "cls.cn", "yicai.com"],
+          "excludeDomains": [],
+          "languages": ["zh"],
+          "country": "CN",
+          "limit": 10,
+          "categoryHint": "market"
+        },
+        {
+          "name": "policy",
+          "provider": "perplexity",
+          "queries": ["央行政策公告", "金融监管动态"],
+          "includeDomains": ["pbc.gov.cn", "gov.cn"],
+          "excludeDomains": [],
+          "languages": ["zh"],
+          "country": "CN",
+          "categoryHint": "policy"
+        },
+        {
+          "name": "us",
+          "provider": "exa",
+          "query": "US stocks market news",
+          "includeDomains": ["wsj.com", "bloomberg.com", "reuters.com"],
+          "excludeDomains": [],
+          "languages": ["en"],
+          "country": "US",
+          "categoryHint": "global"
+        }
+      ]
+    }
+  },
+  "prompts": {
+    "marketNewsQueryTemplate": "file:prompts/search/market_news_query.txt"
+  }
+}

@@ -57,7 +57,7 @@ class AgentArtifactServiceTest {
         e1.setRunId("run-1");
         e1.setSeq(1);
         e1.setEventType("TODO_LIST_CREATED");
-        e1.setPayloadJson("{\"plan\":{\"items\":[{\"id\":\"todo_1\",\"toolName\":\"executePython\",\"params\":{\"code\":\"print(1)\",\"dataset_id\":\"ds1\"}}]}}");
+        e1.setPayloadJson("{\"plan\":{\"items\":[{\"id\":\"todo_1\",\"toolName\":\"executePython\",\"params\":{\"code\":\"print(1)\",\"dataset_ids\":\"ds1\"}}]}}");
         e1.setCreatedAt(OffsetDateTime.now());
 
         AgentRunEvent e2 = new AgentRunEvent();

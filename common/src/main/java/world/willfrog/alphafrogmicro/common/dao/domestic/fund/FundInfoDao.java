@@ -45,5 +45,28 @@ public interface FundInfoDao {
     @Select("SELECT ts_code FROM alphafrog_fund_info LIMIT #{limit} OFFSET #{offset}")
     List<String> getFundTsCode(@Param("offset") int offset, @Param("limit") int limit);
 
+    @Select("SELECT COUNT(*) FROM alphafrog_fund_info")
+    int getFundInfoCount();
+
+    @Select("SELECT * FROM alphafrog_fund_info ORDER BY ts_code LIMIT #{limit} OFFSET #{offset}")
+    @Results({
+            @Result(column = "ts_code", property = "tsCode"),
+            @Result(column = "fund_type", property = "fundType"),
+            @Result(column = "found_date", property = "foundDate"),
+            @Result(column = "due_date", property = "dueDate"),
+            @Result(column = "list_date", property = "listDate"),
+            @Result(column = "issue_date", property = "issueDate"),
+            @Result(column = "delist_date", property = "delistDate"),
+            @Result(column = "issue_amount", property = "issueAmount"),
+            @Result(column = "m_fee", property = "mFee"),
+            @Result(column = "c_fee", property = "cFee"),
+            @Result(column = "duration_year", property = "durationYear"),
+            @Result(column = "p_value", property = "pValue"),
+            @Result(column = "min_amount", property = "minAmount"),
+            @Result(column = "exp_return", property = "expReturn"),
+            @Result(column = "purc_startdate", property = "purcStartDate"),
+            @Result(column = "redm_startdate", property = "redmStartDate")
+    })
+    List<FundInfo> getAllFundInfo(@Param("offset") int offset, @Param("limit") int limit);
 
 }
