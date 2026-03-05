@@ -2,8 +2,8 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.ai4j.openai4j.chat.ChatCompletionResponse;
-import dev.langchain4j.model.openai.InternalOpenAiHelper;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionResponse;
+import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import org.slf4j.Logger;
@@ -115,7 +115,7 @@ final class OpenAiCompatibleChatModelSupport {
             return null;
         }
         try {
-            return InternalOpenAiHelper.finishReasonFrom(raw);
+            return OpenAiUtils.finishReasonFrom(raw);
         } catch (Exception e) {
             return null;
         }

@@ -3,8 +3,9 @@ package world.willfrog.agent.workflow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -57,7 +58,7 @@ class TodoPlannerTest {
     @Mock
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
-    private ChatLanguageModel model;
+    private ChatModel model;
     @Mock
     private AgentMessageService messageService;
     @Mock
@@ -94,13 +95,13 @@ class TodoPlannerTest {
     void plan_shouldGenerateTodoListAndPersist() {
         AgentRun run = run("run-1");
 
-        @SuppressWarnings("unchecked")
-        Response<AiMessage> response = mock(Response.class);
         AiMessage aiMessage = mock(AiMessage.class);
         when(aiMessage.text()).thenReturn("{\"analysis\":\"a\",\"items\":[{\"id\":\"todo_1\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{\"keyword\":\"平安\"}}]}");
-        when(response.content()).thenReturn(aiMessage);
-        when(response.tokenUsage()).thenReturn(null);
-        when(model.generate(any(List.class))).thenReturn(response);
+        ChatResponse response = ChatResponse.builder()
+                .aiMessage(aiMessage)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+        when(model.chat(any(List.class))).thenReturn(response);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)
@@ -123,13 +124,13 @@ class TodoPlannerTest {
     void plan_shouldTruncateByMaxTodos() {
         AgentRun run = run("run-2");
 
-        @SuppressWarnings("unchecked")
-        Response<AiMessage> response = mock(Response.class);
         AiMessage aiMessage = mock(AiMessage.class);
         when(aiMessage.text()).thenReturn("{\"items\":[{\"id\":\"1\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"},{\"id\":\"2\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"},{\"id\":\"3\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"}]}");
-        when(response.content()).thenReturn(aiMessage);
-        when(response.tokenUsage()).thenReturn(null);
-        when(model.generate(any(List.class))).thenReturn(response);
+        ChatResponse response = ChatResponse.builder()
+                .aiMessage(aiMessage)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+        when(model.chat(any(List.class))).thenReturn(response);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)
@@ -149,13 +150,13 @@ class TodoPlannerTest {
     void plan_shouldFailWhenToolNotAllowed() {
         AgentRun run = run("run-3");
 
-        @SuppressWarnings("unchecked")
-        Response<AiMessage> response = mock(Response.class);
         AiMessage aiMessage = mock(AiMessage.class);
         when(aiMessage.text()).thenReturn("{\"items\":[{\"id\":\"todo_1\",\"type\":\"TOOL_CALL\",\"toolName\":\"unknownTool\"}]}");
-        when(response.content()).thenReturn(aiMessage);
-        when(response.tokenUsage()).thenReturn(null);
-        when(model.generate(any(List.class))).thenReturn(response);
+        ChatResponse response = ChatResponse.builder()
+                .aiMessage(aiMessage)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+        when(model.chat(any(List.class))).thenReturn(response);
 
         assertThrows(IllegalStateException.class, () -> planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)

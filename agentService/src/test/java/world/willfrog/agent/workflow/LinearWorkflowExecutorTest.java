@@ -3,8 +3,9 @@ package world.willfrog.agent.workflow;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -70,7 +71,7 @@ class LinearWorkflowExecutorTest {
     @Mock
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
-    private ChatLanguageModel model;
+    private ChatModel model;
     @Mock
     private AgentMessageService messageService;
     @Mock
@@ -131,12 +132,8 @@ class LinearWorkflowExecutorTest {
                 .thenReturn(PythonSemanticJudgeService.Result.pass("OK", "", Map.of()));
 
         @SuppressWarnings("unchecked")
-        Response<AiMessage> response = mock(Response.class);
-        AiMessage aiMessage = mock(AiMessage.class);
-        lenient().when(aiMessage.text()).thenReturn("done");
-        lenient().when(response.content()).thenReturn(aiMessage);
-        lenient().when(response.tokenUsage()).thenReturn(null);
-        lenient().when(model.generate(any(List.class))).thenReturn(response);
+        ChatResponse response = mockResponse("done");
+        lenient().when(model.chat(any(List.class))).thenReturn(response);
     }
 
     @Test
@@ -258,19 +255,19 @@ class LinearWorkflowExecutorTest {
                         .build()
         );
 
-        ChatLanguageModel staticFixModel = mock(ChatLanguageModel.class);
+        ChatModel staticFixModel = mock(ChatModel.class);
         when(aiServiceFactory.resolveLlm("openrouter", "openai/gpt-5.2")).thenReturn(
                 new AgentLlmResolver.ResolvedLlm("openrouter", "https://openrouter.ai/api/v1", "openai/gpt-5.2", "k", null)
         );
         when(aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(any(), any(), any())).thenReturn(staticFixModel);
-        Response<AiMessage> staticFixRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
-        when(staticFixModel.generate(any(List.class))).thenReturn(staticFixRecoveryResponse);
+        ChatResponse staticFixRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
+        when(staticFixModel.chat(any(List.class))).thenReturn(staticFixRecoveryResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-static-fix", planExecutePython("todo_1"), properties));
 
         assertTrue(result.isSuccess());
         verify(aiServiceFactory).resolveLlm("openrouter", "openai/gpt-5.2");
-        verify(staticFixModel, times(1)).generate(any(List.class));
+        verify(staticFixModel, times(1)).chat(any(List.class));
     }
 
     @Test
@@ -291,9 +288,9 @@ class LinearWorkflowExecutorTest {
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of("k", "v")),
                 PythonSemanticJudgeService.Result.pass("OK", "通过", Map.of("k", "v2"))
         );
-        Response<AiMessage> semanticRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
-        Response<AiMessage> semanticFinalResponse = mockResponse("final");
-        when(model.generate(any(List.class))).thenReturn(semanticRecoveryResponse, semanticFinalResponse);
+        ChatResponse semanticRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
+        ChatResponse semanticFinalResponse = mockResponse("final");
+        when(model.chat(any(List.class))).thenReturn(semanticRecoveryResponse, semanticFinalResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-semantic", planExecutePython("todo_1"), properties));
 
@@ -316,9 +313,9 @@ class LinearWorkflowExecutorTest {
                         .category(TodoFailureCategory.STATIC)
                         .build()
         );
-        Response<AiMessage> staticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
-        Response<AiMessage> staticBudgetFinalResponse = mockResponse("final");
-        when(model.generate(any(List.class))).thenReturn(staticBudgetRecoveryResponse, staticBudgetFinalResponse);
+        ChatResponse staticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(1)\"}}");
+        ChatResponse staticBudgetFinalResponse = mockResponse("final");
+        when(model.chat(any(List.class))).thenReturn(staticBudgetRecoveryResponse, staticBudgetFinalResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-static-budget", planExecutePython("todo_1"), properties));
 
@@ -347,9 +344,9 @@ class LinearWorkflowExecutorTest {
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率异常", Map.of()),
                 PythonSemanticJudgeService.Result.reject("NUMERIC_ANOMALY", "HIGH", "收益率仍异常", Map.of())
         );
-        Response<AiMessage> semanticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
-        Response<AiMessage> semanticBudgetFinalResponse = mockResponse("final");
-        when(model.generate(any(List.class))).thenReturn(semanticBudgetRecoveryResponse, semanticBudgetFinalResponse);
+        ChatResponse semanticBudgetRecoveryResponse = mockResponse("{\"params\":{\"dataset_ids\":\"d1\",\"code\":\"print(2)\"}}");
+        ChatResponse semanticBudgetFinalResponse = mockResponse("final");
+        when(model.chat(any(List.class))).thenReturn(semanticBudgetRecoveryResponse, semanticBudgetFinalResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-semantic-budget", planExecutePython("todo_1"), properties));
 
@@ -369,9 +366,9 @@ class LinearWorkflowExecutorTest {
                         .output("{\"ok\":false,\"error\":{\"message\":\"provider timeout\"}}")
                         .build()
         );
-        Response<AiMessage> runtimeRecoveryResponse = mockResponse("{\"params\":{\"keyword\":\"k-retry\"}}");
-        Response<AiMessage> runtimeFinalResponse = mockResponse("final");
-        when(model.generate(any(List.class))).thenReturn(runtimeRecoveryResponse, runtimeFinalResponse);
+        ChatResponse runtimeRecoveryResponse = mockResponse("{\"params\":{\"keyword\":\"k-retry\"}}");
+        ChatResponse runtimeFinalResponse = mockResponse("final");
+        when(model.chat(any(List.class))).thenReturn(runtimeRecoveryResponse, runtimeFinalResponse);
 
         WorkflowExecutionResult result = executor.execute(request("run-runtime-budget", planWithTools(1), properties));
 
@@ -460,13 +457,12 @@ class LinearWorkflowExecutorTest {
         return properties;
     }
 
-    @SuppressWarnings("unchecked")
-    private Response<AiMessage> mockResponse(String text) {
-        Response<AiMessage> response = mock(Response.class);
+    private ChatResponse mockResponse(String text) {
         AiMessage aiMessage = mock(AiMessage.class);
         when(aiMessage.text()).thenReturn(text);
-        when(response.content()).thenReturn(aiMessage);
-        when(response.tokenUsage()).thenReturn(null);
-        return response;
+        return ChatResponse.builder()
+                .aiMessage(aiMessage)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
     }
 }

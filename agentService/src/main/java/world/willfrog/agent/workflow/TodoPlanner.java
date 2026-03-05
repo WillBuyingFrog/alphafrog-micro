@@ -8,8 +8,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -148,7 +148,7 @@ public class TodoPlanner {
                     new SystemMessage(prompt),
                     new UserMessage(userMessageContent)
             );
-            Response<AiMessage> response;
+            ChatResponse response;
             long llmStartedAt = System.currentTimeMillis();
             long llmCompletedAt;
             String raw;
@@ -169,9 +169,9 @@ public class TodoPlanner {
                 AgentContext.clearStructuredOutputSpec();
             }
             try {
-                response = request.getModel().generate(messages);
+                response = request.getModel().chat(messages);
                 llmCompletedAt = System.currentTimeMillis();
-                raw = response.content() == null ? "" : nvl(response.content().text());
+                raw = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
                 Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                         request.getEndpointName(),
                         request.getEndpointBaseUrl(),
@@ -187,7 +187,7 @@ public class TodoPlanner {
                 planningTraceId = observabilityService.recordLlmCall(
                         runId,
                         AgentObservabilityService.PHASE_PLANNING,
-                        response.tokenUsage(),
+                        response.metadata() != null ? response.metadata().tokenUsage() : null,
                         llmCompletedAt - llmStartedAt,
                         llmStartedAt,
                         llmCompletedAt,
@@ -532,7 +532,7 @@ public class TodoPlanner {
         private AgentRun run;
         private String userId;
         private String userGoal;
-        private ChatLanguageModel model;
+        private ChatModel model;
         private List<ToolSpecification> toolSpecifications;
         private String endpointName;
         private String endpointBaseUrl;

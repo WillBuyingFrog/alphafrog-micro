@@ -5,8 +5,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -130,7 +130,7 @@ public class SubAgentRunner {
      * @param model   聊天模型
      * @return 子代理执行结果
      */
-    public SubAgentResult run(SubAgentRequest request, ChatLanguageModel model) {
+    public SubAgentResult run(SubAgentRequest request, ChatModel model) {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
@@ -177,10 +177,10 @@ public class SubAgentRunner {
                 }
                 long llmStartedAt = System.currentTimeMillis();
                 try {
-                    Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
+                    ChatResponse planResp = model.chat(planMessages);
                     long llmCompletedAt = System.currentTimeMillis();
                     long llmDurationMs = llmCompletedAt - llmStartedAt;
-                    String planText = planResp.content() == null ? "" : nvl(planResp.content().text());
+                    String planText = planResp.aiMessage() == null ? "" : nvl(planResp.aiMessage().text());
                     Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                             request.getEndpointName(),
                             request.getEndpointBaseUrl(),
@@ -196,7 +196,7 @@ public class SubAgentRunner {
                     planTraceId = observabilityService.recordLlmCall(
                             request.getRunId(),
                             AgentObservabilityService.PHASE_SUB_AGENT,
-                            planResp.tokenUsage(),
+                            planResp.metadata() != null ? planResp.metadata().tokenUsage() : null,
                             llmDurationMs,
                             llmStartedAt,
                             llmCompletedAt,
@@ -376,10 +376,10 @@ public class SubAgentRunner {
             );
             AgentContext.setStage("sub_agent_summary");
             long llmStartedAt = System.currentTimeMillis();
-            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
+            ChatResponse finalResp = model.chat(summaryMessages);
             long llmCompletedAt = System.currentTimeMillis();
             long llmDurationMs = llmCompletedAt - llmStartedAt;
-            String finalText = finalResp.content().text();
+            String finalText = finalResp.aiMessage().text();
             Map<String, Object> summaryRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                     request.getEndpointName(),
                     request.getEndpointBaseUrl(),
@@ -391,7 +391,7 @@ public class SubAgentRunner {
             observabilityService.recordLlmCall(
                     request.getRunId(),
                     AgentObservabilityService.PHASE_SUB_AGENT,
-                    finalResp.tokenUsage(),
+                    finalResp.metadata() != null ? finalResp.metadata().tokenUsage() : null,
                     llmDurationMs,
                     llmStartedAt,
                     llmCompletedAt,

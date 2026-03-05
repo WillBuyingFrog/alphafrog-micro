@@ -6,8 +6,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -348,9 +348,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
         AgentContext.setStage("workflow_todo_recovery");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response;
+        ChatResponse response;
         try {
-            response = recoveryModel.model().generate(messages);
+            response = recoveryModel.model().chat(messages);
         } finally {
             if (previousStage == null || previousStage.isBlank()) {
                 AgentContext.clearStage();
@@ -360,7 +360,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
-        String text = response.content() == null ? "" : nvl(response.content().text());
+        String text = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                 recoveryModel.endpointName(),
@@ -377,7 +377,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         String recoveryTraceId = observabilityService.recordLlmCall(
                 runId,
                 AgentObservabilityService.PHASE_SUMMARIZING,
-                response.tokenUsage(),
+                response.metadata() != null ? response.metadata().tokenUsage() : null,
                 llmDurationMs,
                 llmStartedAt,
                 llmCompletedAt,
@@ -436,7 +436,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         if (category == TodoFailureCategory.STATIC && !isBlank(config.staticFixModel())) {
             try {
                 var resolved = aiServiceFactory.resolveLlm(config.staticFixEndpoint(), config.staticFixModel());
-                ChatLanguageModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
+                ChatModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
                         resolved,
                         List.of(),
                         config.staticFixTemperature()
@@ -806,9 +806,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
         AgentContext.setStage("workflow_final_answer");
         long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response;
+        ChatResponse response;
         try {
-            response = request.getModel().generate(messages);
+            response = request.getModel().chat(messages);
         } finally {
             if (previousStage == null || previousStage.isBlank()) {
                 AgentContext.clearStage();
@@ -818,7 +818,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
-        String answer = response.content() == null ? "" : nvl(response.content().text());
+        String answer = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                 request.getEndpointName(),
@@ -831,7 +831,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         observabilityService.recordLlmCall(
                 runId,
                 AgentObservabilityService.PHASE_SUMMARIZING,
-                response.tokenUsage(),
+                response.metadata() != null ? response.metadata().tokenUsage() : null,
                 llmDurationMs,
                 llmStartedAt,
                 llmCompletedAt,
@@ -1198,7 +1198,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                   Double staticFixTemperature) {
     }
 
-    private record RecoveryModelSelection(ChatLanguageModel model,
+    private record RecoveryModelSelection(ChatModel model,
                                           String endpointName,
                                           String endpointBaseUrl,
                                           String modelName,
@@ -1223,7 +1223,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         private String userId;
         private String userGoal;
         private TodoPlan todoPlan;
-        private ChatLanguageModel model;
+        private ChatModel model;
         private List<ToolSpecification> toolSpecifications;
         private String endpointName;
         private String endpointBaseUrl;

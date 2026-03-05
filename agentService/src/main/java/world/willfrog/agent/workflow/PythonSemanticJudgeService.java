@@ -6,8 +6,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
@@ -88,9 +88,9 @@ public class PythonSemanticJudgeService {
                 AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
                 AgentContext.setStage("workflow_semantic_judge");
                 long llmStartedAt = System.currentTimeMillis();
-                Response<AiMessage> response;
+                ChatResponse response;
                 try {
-                    response = selected.model.generate(messages);
+                    response = selected.model.chat(messages);
                 } finally {
                     if (previousStage == null || previousStage.isBlank()) {
                         AgentContext.clearStage();
@@ -99,7 +99,7 @@ public class PythonSemanticJudgeService {
                     }
                 }
                 long llmCompletedAt = System.currentTimeMillis();
-                String text = response.content() == null ? "" : nvl(response.content().text());
+                String text = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
 
                 Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                         selected.selection.getEndpointName(),
@@ -112,7 +112,7 @@ public class PythonSemanticJudgeService {
                 observabilityService.recordLlmCall(
                         request.getRunId(),
                         AgentObservabilityService.PHASE_SUMMARIZING,
-                        response.tokenUsage(),
+                        response.metadata() != null ? response.metadata().tokenUsage() : null,
                         llmCompletedAt - llmStartedAt,
                         llmStartedAt,
                         llmCompletedAt,
@@ -183,7 +183,7 @@ public class PythonSemanticJudgeService {
             for (JudgeModelSelectorService.Selection candidate : candidates) {
                 try {
                     var resolved = aiServiceFactory.resolveLlm(candidate.getEndpointName(), candidate.getModelName());
-                    ChatLanguageModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
+                    ChatModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
                             resolved,
                             List.of(),
                             config.temperature()
@@ -313,7 +313,7 @@ public class PythonSemanticJudgeService {
         private Map<String, Object> runArgs;
         private String code;
         private Map<String, Object> toolOutput;
-        private ChatLanguageModel fallbackModel;
+        private ChatModel fallbackModel;
         private String fallbackEndpointName;
         private String fallbackEndpointBaseUrl;
         private String fallbackModelName;
@@ -357,7 +357,7 @@ public class PythonSemanticJudgeService {
     }
 
     private record SelectionAndModel(JudgeModelSelectorService.Selection selection,
-                                     ChatLanguageModel model) {
+                                     ChatModel model) {
     }
 
     private record Validation(boolean valid, String message) {
