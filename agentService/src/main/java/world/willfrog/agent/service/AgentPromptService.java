@@ -45,8 +45,22 @@ public class AgentPromptService {
 
     /**
      * 返回需要由调用方注入到 user message 的动态上下文前缀。
+     *
      * <p>将日期等每次请求都会变化的内容从 system prompt 移至 user message，
      * 使 system prompt 保持字节级稳定，有利于 LLM provider 的 Prompt Caching。</p>
+     *
+     * <p><b>使用示例：</b></p>
+     * <pre>{@code
+     * String systemPrompt = promptService.todoPlannerSystemPrompt(tools, max);
+     * String dynamicPrefix = promptService.dynamicContextPrefix();
+     * List<ChatMessage> messages = List.of(
+     *     new SystemMessage(systemPrompt),
+     *     new UserMessage(dynamicPrefix + "\n" + userRequest)
+     * );
+     * }</pre>
+     *
+     * <p><b>注意：</b>当前 {@link #composeSystemPrompt(String)} 已将日期移到系统 Prompt 末尾，
+     * 调用方可选择进一步使用此方法将日期完全移至 user message 以获得更高缓存命中率。</p>
      */
     public String dynamicContextPrefix() {
         return "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
