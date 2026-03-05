@@ -43,6 +43,15 @@ public class AgentPromptService {
         return composeSystemPrompt(specific);
     }
 
+    /**
+     * 返回需要由调用方注入到 user message 的动态上下文前缀。
+     * <p>将日期等每次请求都会变化的内容从 system prompt 移至 user message，
+     * 使 system prompt 保持字节级稳定，有利于 LLM provider 的 Prompt Caching。</p>
+     */
+    public String dynamicContextPrefix() {
+        return "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
+    }
+
     public String workflowFinalSystemPrompt() {
         return composeSystemPrompt(firstNonBlank(
                 currentPrompts().getWorkflowFinalSystemPrompt(),
@@ -170,19 +179,35 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt(), ""));
     }
 
+    /**
+     * 组合系统 Prompt（Cache 优化版本）。
+     *
+     * <p>Prompt 前缀稳定化：将静态指令（global + specific）放在前面形成稳定前缀，
+     * 动态内容（日期）放在末尾，不影响 prefix caching。</p>
+     *
+     * <pre>
+     * ┌────────────────────────────────────┐
+     * │ [可缓存的静态前缀]                  │
+     * │ ├── 全局系统指令 (global)           │
+     * │ └── 角色/任务指令 (specific)        │
+     * │ [动态后缀 - 不影响 prefix cache]    │
+     * │ └── 今天日期                        │
+     * └────────────────────────────────────┘
+     * </pre>
+     */
     private String composeSystemPrompt(String specificPrompt) {
         String global = firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), "");
         String specific = firstNonBlank(specificPrompt, "");
         String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
 
         List<String> parts = new ArrayList<>();
-        parts.add(todayLine);
         if (!global.isBlank()) {
             parts.add(global);
         }
         if (!specific.isBlank() && !specific.equals(global)) {
             parts.add(specific);
         }
+        parts.add(todayLine);
         return String.join("\n", parts).trim();
     }
 
