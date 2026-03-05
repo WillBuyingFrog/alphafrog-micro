@@ -458,10 +458,8 @@ class LinearWorkflowExecutorTest {
     }
 
     private ChatResponse mockResponse(String text) {
-        AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn(text);
         return ChatResponse.builder()
-                .aiMessage(aiMessage)
+                .aiMessage(new AiMessage(text))
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
     }
