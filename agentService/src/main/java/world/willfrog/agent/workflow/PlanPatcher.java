@@ -41,7 +41,7 @@ public class PlanPatcher {
 
         String id = nvl((String) newTodoMap.get("id"));
         if (id.isBlank()) {
-            id = "todo_patch_" + System.currentTimeMillis();
+            id = "todo_patch_" + java.util.UUID.randomUUID().toString().substring(0, 8);
         }
 
         String toolName = nvl((String) newTodoMap.get("toolName"));

@@ -48,6 +48,7 @@ import java.util.stream.Collectors;
 @Slf4j
 public class LinearWorkflowExecutor implements WorkflowExecutor {
     private static final Pattern UNRESOLVED_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
+    private static final int MAX_LOCAL_REPLANS_LIMIT = 5;
 
     private final AgentEventService eventService;
     private final AgentPromptService promptService;
@@ -947,7 +948,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         int maxLocalReplans = clampInt(firstNonNegative(
                 planning == null ? null : planning.getMaxLocalReplans(),
                 0
-        ), 0, 5);
+        ), 0, MAX_LOCAL_REPLANS_LIMIT);
 
         return new WorkflowConfig(
                 maxToolCalls,
