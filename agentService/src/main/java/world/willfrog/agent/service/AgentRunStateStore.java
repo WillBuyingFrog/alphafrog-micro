@@ -32,6 +32,7 @@ public class AgentRunStateStore {
 
     private static final String WORKFLOW_STATE_KEY = ":workflow_state";
     private static final String TOOL_CALL_COUNT_KEY = ":tool_call_count";
+    private static final String PATCHED_PLAN_KEY = ":patched_plan";
 
     // legacy keys for read compatibility
     private static final String TASK_INDEX_KEY = ":tasks";
@@ -183,6 +184,32 @@ public class AgentRunStateStore {
         redisTemplate.delete(workflowStateKey(runId));
     }
 
+    public void savePatchedPlan(String runId, String planJson) {
+        if (blank(runId)) {
+            return;
+        }
+        redisTemplate.opsForValue().set(patchedPlanKey(runId), nvl(planJson));
+        touch(patchedPlanKey(runId));
+    }
+
+    public Optional<String> loadPatchedPlan(String runId) {
+        if (blank(runId)) {
+            return Optional.empty();
+        }
+        String json = redisTemplate.opsForValue().get(patchedPlanKey(runId));
+        if (json == null || json.isBlank()) {
+            return Optional.empty();
+        }
+        return Optional.of(json);
+    }
+
+    public void clearPatchedPlan(String runId) {
+        if (blank(runId)) {
+            return;
+        }
+        redisTemplate.delete(patchedPlanKey(runId));
+    }
+
     public int incrementToolCallCount(String runId, int delta) {
         if (blank(runId)) {
             return 0;
@@ -249,6 +276,7 @@ public class AgentRunStateStore {
         redisTemplate.delete(observabilityKey(runId));
         redisTemplate.delete(workflowStateKey(runId));
         redisTemplate.delete(toolCallCountKey(runId));
+        redisTemplate.delete(patchedPlanKey(runId));
     }
 
     public void clearTasks(String runId) {
@@ -440,6 +468,10 @@ public class AgentRunStateStore {
 
     private String toolCallCountKey(String runId) {
         return PREFIX + runId + TOOL_CALL_COUNT_KEY;
+    }
+
+    private String patchedPlanKey(String runId) {
+        return PREFIX + runId + PATCHED_PLAN_KEY;
     }
 
     private String taskIndexKey(String runId) {

@@ -66,6 +66,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final AgentAiServiceFactory aiServiceFactory;
     private final PythonStaticPrecheckService pythonStaticPrecheckService;
     private final PythonSemanticJudgeService pythonSemanticJudgeService;
+    private final PlanJudge planJudge;
+    private final PatchPlanner patchPlanner;
+    private final PlanPatcher planPatcher;
     private final ObjectMapper objectMapper;
 
     @Value("${agent.flow.workflow.max-tool-calls:20}")
@@ -108,11 +111,13 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         toolCallCounter.reset(runId);
         toolCallCounter.set(runId, state.getToolCallsUsed());
 
-        List<TodoItem> items = request.getTodoPlan().getItems() == null ? List.of() : request.getTodoPlan().getItems();
+        List<TodoItem> items = request.getTodoPlan().getItems() == null
+                ? new ArrayList<>() : new ArrayList<>(request.getTodoPlan().getItems());
         List<TodoItem> completed = new ArrayList<>(state.getCompletedItems());
         List<TodoItem> allProcessedItems = new ArrayList<>(completed);
         Map<String, TodoExecutionRecord> context = new LinkedHashMap<>(state.getContext());
         boolean hasFailure = false;
+        int localReplanCount = 0;
 
         for (int idx = Math.max(0, state.getCurrentIndex()); idx < items.size(); idx++) {
             if (!eventService.isRunnable(runId, userId)) {
@@ -166,6 +171,37 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         "output_preview", preview(record.getOutput()),
                         "tool_calls_used", toolCallCounter.get(runId)
                 ));
+
+                if (config.maxLocalReplans() > 0 && localReplanCount < config.maxLocalReplans()) {
+                    TodoPlan currentPlan = TodoPlan.builder().analysis(request.getTodoPlan().getAnalysis()).items(items).build();
+                    JudgeDecision decision = planJudge.judge(record, currentPlan, context, request.getUserGoal(), request.getModel());
+                    eventService.append(runId, userId, "PLAN_JUDGE_DECISION", Map.of(
+                            "todo_id", nvl(item.getId()),
+                            "decision", decision.name(),
+                            "local_replan_count", localReplanCount
+                    ));
+
+                    if (decision == JudgeDecision.PATCH_PLAN) {
+                        PlanPatch patch = patchPlanner.generatePatch(record, currentPlan, context, request.getUserGoal(), request.getModel());
+                        if (patch != null) {
+                            TodoPlan patched = planPatcher.applyPatch(currentPlan, patch);
+                            items.clear();
+                            items.addAll(patched.getItems());
+                            localReplanCount++;
+                            stateStore.savePatchedPlan(runId, safeWrite(patched));
+                            eventService.append(runId, userId, "PLAN_PATCHED", Map.of(
+                                    "patch_type", patch.getPatchType().name(),
+                                    "target_todo_id", nvl(patch.getTargetTodoId()),
+                                    "reason", nvl(patch.getReason()),
+                                    "new_plan_size", items.size(),
+                                    "local_replan_count", localReplanCount
+                            ));
+                            hasFailure = false;
+                            idx--;
+                            continue;
+                        }
+                    }
+                }
             }
             allProcessedItems.add(item);
 
@@ -907,6 +943,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         String staticFixModel = execution == null ? "" : nvl(execution.getStaticFixModel()).trim();
         Double staticFixTemperature = execution == null ? null : execution.getStaticFixTemperature();
 
+        AgentLlmProperties.Planning planning = runtime.getPlanning();
+        int maxLocalReplans = clampInt(firstNonNegative(
+                planning == null ? null : planning.getMaxLocalReplans(),
+                0
+        ), 0, 5);
+
         return new WorkflowConfig(
                 maxToolCalls,
                 maxPerSubAgent,
@@ -923,7 +965,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 maxTotalRecoveryRetries,
                 staticFixEndpoint,
                 staticFixModel,
-                staticFixTemperature
+                staticFixTemperature,
+                maxLocalReplans
         );
     }
 
@@ -1195,7 +1238,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                   int maxTotalRecoveryRetries,
                                   String staticFixEndpoint,
                                   String staticFixModel,
-                                  Double staticFixTemperature) {
+                                  Double staticFixTemperature,
+                                  int maxLocalReplans) {
     }
 
     private record RecoveryModelSelection(ChatModel model,
