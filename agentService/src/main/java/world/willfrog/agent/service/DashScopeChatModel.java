@@ -2,16 +2,18 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.ai4j.openai4j.chat.ChatCompletionRequest;
-import dev.ai4j.openai4j.chat.ChatCompletionResponse;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionRequest;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionResponse;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.InternalOpenAiHelper;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import dev.langchain4j.model.output.FinishReason;
-import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -23,7 +25,6 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -34,7 +35,7 @@ import java.util.Map;
  */
 @RequiredArgsConstructor
 @Slf4j
-public class DashScopeChatModel implements ChatLanguageModel {
+public class DashScopeChatModel implements ChatModel {
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -52,12 +53,9 @@ public class DashScopeChatModel implements ChatLanguageModel {
     private final String endpointName;
 
     @Override
-    public Response<AiMessage> generate(List<ChatMessage> messages) {
-        return generate(messages, List.of());
-    }
-
-    @Override
-    public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+    public ChatResponse doChat(ChatRequest chatRequest) {
+        List<ChatMessage> messages = chatRequest.messages();
+        List<ToolSpecification> toolSpecifications = chatRequest.toolSpecifications();
         String requestJson = null;
         long requestStartedAt = System.currentTimeMillis();
 
@@ -72,12 +70,12 @@ public class DashScopeChatModel implements ChatLanguageModel {
         try {
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
-                    .messages(InternalOpenAiHelper.toOpenAiMessages(messages == null ? List.of() : messages))
+                    .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
                     .temperature(temperature)
                     .maxCompletionTokens(maxTokens);
 
             if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
-                builder.tools(InternalOpenAiHelper.toTools(toolSpecifications, false));
+                builder.tools(OpenAiUtils.toTools(toolSpecifications, false));
             }
 
             ChatCompletionRequest request = builder.build();
@@ -141,31 +139,26 @@ public class DashScopeChatModel implements ChatLanguageModel {
             }
 
             ChatCompletionResponse completion = objectMapper.readValue(responseJson, ChatCompletionResponse.class);
-            AiMessage aiMessage = InternalOpenAiHelper.aiMessageFrom(completion);
+            AiMessage aiMessage = OpenAiUtils.aiMessageFrom(completion);
             ThinkingContent thinking = extractThinkingContent(aiMessage == null ? null : aiMessage.text());
             if (aiMessage != null && thinking.hasThinking()) {
                 List<dev.langchain4j.agent.tool.ToolExecutionRequest> tools = aiMessage.toolExecutionRequests();
                 aiMessage = new AiMessage(thinking.content(), tools == null ? List.of() : tools);
             }
-            TokenUsage tokenUsage = InternalOpenAiHelper.tokenUsageFrom(completion.usage());
+            TokenUsage tokenUsage = OpenAiUtils.tokenUsageFrom(completion.usage());
             FinishReason finishReason = OpenAiCompatibleChatModelSupport.extractFinishReason(completion);
-
-            Map<String, Object> metadata = new LinkedHashMap<>();
-            if (completion.id() != null) {
-                metadata.put("id", completion.id());
-            }
-            if (completion.model() != null) {
-                metadata.put("model", completion.model());
-            }
-            if (thinking.hasThinking()) {
-                metadata.put("thinking", thinking.thinking());
-            }
 
             if (shouldCapture && observabilityService != null) {
                 reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
             }
 
-            return Response.from(aiMessage, tokenUsage, finishReason, metadata);
+            return ChatResponse.builder()
+                    .aiMessage(aiMessage)
+                    .metadata(ChatResponseMetadata.builder()
+                            .tokenUsage(tokenUsage)
+                            .finishReason(finishReason)
+                            .build())
+                    .build();
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

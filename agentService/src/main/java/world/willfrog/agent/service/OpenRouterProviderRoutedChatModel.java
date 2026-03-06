@@ -2,15 +2,17 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.ai4j.openai4j.chat.ChatCompletionRequest;
-import dev.ai4j.openai4j.chat.ChatCompletionResponse;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionRequest;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionResponse;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.openai.InternalOpenAiHelper;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.chat.response.ChatResponseMetadata;
+import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import dev.langchain4j.model.output.FinishReason;
-import dev.langchain4j.model.output.Response;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -68,7 +70,7 @@ import java.util.Map;
  */
 @RequiredArgsConstructor
 @Slf4j
-public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
+public class OpenRouterProviderRoutedChatModel implements ChatModel {
 
     private static final HttpClient HTTP_CLIENT = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(30))
@@ -92,17 +94,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
     private final String endpointName;
 
     /**
-     * 生成 AI 回复（不带工具）。
-     * 
-     * <p>代理到 {@link #generate(List, List)}，tools 参数为空列表。</p>
-     */
-    @Override
-    public Response<AiMessage> generate(List<ChatMessage> messages) {
-        return generate(messages, List.of());
-    }
-
-    /**
-     * 生成 AI 回复（带工具支持）。
+     * 生成 AI 回复。
      * 
      * <p>核心方法，处理完整的 LLM 调用流程：</p>
      * <ol>
@@ -120,13 +112,14 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
      * </ol>
      * <p>只有两个条件同时满足时才记录 HTTP。压测时请设置 captureLlmRequests=false。</p>
      * 
-     * @param messages 对话消息列表
-     * @param toolSpecifications 可用工具定义
+     * @param chatRequest 聊天请求
      * @return AI 回复响应
      * @throws IllegalStateException 当 HTTP 请求失败或响应解析失败时抛出
      */
     @Override
-    public Response<AiMessage> generate(List<ChatMessage> messages, List<ToolSpecification> toolSpecifications) {
+    public ChatResponse doChat(ChatRequest chatRequest) {
+        List<ChatMessage> messages = chatRequest.messages();
+        List<ToolSpecification> toolSpecifications = chatRequest.toolSpecifications();
         String requestJson = null;
         long requestStartedAt = System.currentTimeMillis();
         
@@ -146,12 +139,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             // ========== 1. 构建请求 ==========
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
-                    .messages(InternalOpenAiHelper.toOpenAiMessages(messages == null ? List.of() : messages))
+                    .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
                     .temperature(temperature)
                     .maxCompletionTokens(maxTokens);
             
             if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
-                builder.tools(InternalOpenAiHelper.toTools(toolSpecifications, false));
+                builder.tools(OpenAiUtils.toTools(toolSpecifications, false));
             }
             
             ChatCompletionRequest request = builder.build();
@@ -243,18 +236,9 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
             // 解析响应体
             ChatCompletionResponse completion = objectMapper.readValue(responseJson, ChatCompletionResponse.class);
 
-            AiMessage aiMessage = InternalOpenAiHelper.aiMessageFrom(completion);
-            TokenUsage tokenUsage = InternalOpenAiHelper.tokenUsageFrom(completion.usage());
+            AiMessage aiMessage = OpenAiUtils.aiMessageFrom(completion);
+            TokenUsage tokenUsage = OpenAiUtils.tokenUsageFrom(completion.usage());
             FinishReason finishReason = OpenAiCompatibleChatModelSupport.extractFinishReason(completion);
-            
-            // 构建 metadata
-            Map<String, Object> metadata = new LinkedHashMap<>();
-            if (completion.id() != null) {
-                metadata.put("id", completion.id());
-            }
-            if (completion.model() != null) {
-                metadata.put("model", completion.model());
-            }
             
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
@@ -265,7 +249,13 @@ public class OpenRouterProviderRoutedChatModel implements ChatLanguageModel {
                 }
             }
             
-            return Response.from(aiMessage, tokenUsage, finishReason, metadata);
+            return ChatResponse.builder()
+                    .aiMessage(aiMessage)
+                    .metadata(ChatResponseMetadata.builder()
+                            .tokenUsage(tokenUsage)
+                            .finishReason(finishReason)
+                            .build())
+                    .build();
             
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();

@@ -1,7 +1,7 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -38,7 +38,7 @@ public class AgentAiServiceFactory {
     @Value("${agent.llm.openrouter.title:}")
     private String openRouterTitle;
 
-    public ChatLanguageModel buildChatModel(String endpointName, String modelName) {
+    public ChatModel buildChatModel(String endpointName, String modelName) {
         return buildChatModelWithProviderOrder(resolveLlm(endpointName, modelName), List.of());
     }
 
@@ -46,11 +46,11 @@ public class AgentAiServiceFactory {
         return llmResolver.resolve(endpointName, modelName);
     }
 
-    public ChatLanguageModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
+    public ChatModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
         return buildChatModelWithProviderOrder(resolved, List.of());
     }
 
-    public ChatLanguageModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved, Double temperatureOverride) {
+    public ChatModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved, Double temperatureOverride) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
@@ -76,7 +76,7 @@ public class AgentAiServiceFactory {
         return builder.build();
     }
 
-    public ChatLanguageModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
+    public ChatModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
                                                                            List<String> providerOrder,
                                                                            Double temperatureOverride) {
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
@@ -114,7 +114,7 @@ public class AgentAiServiceFactory {
         return buildChatModelWithTemperature(resolved, temperatureOverride);
     }
 
-    public ChatLanguageModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
+    public ChatModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
@@ -177,7 +177,7 @@ public class AgentAiServiceFactory {
         return value == null || value.trim().isEmpty();
     }
 
-    private ChatLanguageModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
+    private ChatModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
                                                       String apiKey,
                                                       double finalTemperature) {
         return new DashScopeChatModel(

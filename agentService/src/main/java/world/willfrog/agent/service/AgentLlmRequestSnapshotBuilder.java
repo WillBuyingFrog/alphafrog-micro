@@ -2,10 +2,10 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.ai4j.openai4j.chat.ChatCompletionRequest;
+import dev.langchain4j.model.openai.internal.chat.ChatCompletionRequest;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.ChatMessage;
-import dev.langchain4j.model.openai.InternalOpenAiHelper;
+import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -47,12 +47,12 @@ public class AgentLlmRequestSnapshotBuilder {
         try {
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(nvl(modelName))
-                    .messages(InternalOpenAiHelper.toOpenAiMessages(messages == null ? List.of() : messages))
+                    .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
                     .temperature(temperature)
                     .maxTokens(maxTokens);
 
             if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
-                builder.tools(InternalOpenAiHelper.toTools(toolSpecifications, false));
+                builder.tools(OpenAiUtils.toTools(toolSpecifications, false));
             }
 
             ChatCompletionRequest request = builder.build();

@@ -3,11 +3,10 @@ package world.willfrog.agent.service;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.tool.MarketDataTools;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 
 import java.util.List;
 
@@ -35,14 +34,14 @@ public class AgentOrchestrator {
      */
     public String execute(String userGoal) {
         log.info("Receiving user goal: {}", userGoal);
-        ChatLanguageModel model = aiServiceFactory.buildChatModel(null, null);
+        ChatModel model = aiServiceFactory.buildChatModel(null, null);
 
         // 1. Plan
-        Response<AiMessage> planResponse = model.generate(List.of(
+        ChatResponse planResponse = model.chat(List.of(
                 new SystemMessage(promptService.orchestratorPlanningSystemPrompt()),
                 new UserMessage(userGoal)
         ));
-        String planJson = planResponse.content().text();
+        String planJson = planResponse.aiMessage().text();
         log.info("Generated Plan: {}", planJson);
 
         // 2. Execute (Mock execution for now)
@@ -55,11 +54,11 @@ public class AgentOrchestrator {
         executionLogs.append("Execution: Simulated execution of plan.\n");
 
         // 3. Summarize
-        Response<AiMessage> summaryResponse = model.generate(List.of(
+        ChatResponse summaryResponse = model.chat(List.of(
                 new SystemMessage(promptService.orchestratorSummarySystemPrompt()),
                 new UserMessage(executionLogs.toString())
         ));
-        String summary = summaryResponse.content().text();
+        String summary = summaryResponse.aiMessage().text();
         log.info("Summary: {}", summary);
 
         return summary;

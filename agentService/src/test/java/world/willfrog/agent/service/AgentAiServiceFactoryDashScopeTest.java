@@ -1,7 +1,7 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.Test;
@@ -41,7 +41,7 @@ class AgentAiServiceFactoryDashScopeTest {
                 region
         );
 
-        ChatLanguageModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of("fireworks"));
+        ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of("fireworks"));
 
         assertInstanceOf(DashScopeChatModel.class, model);
         String baseUrl = (String) ReflectionTestUtils.getField(model, "baseUrl");
@@ -69,7 +69,7 @@ class AgentAiServiceFactoryDashScopeTest {
                 "us"
         );
 
-        ChatLanguageModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
+        ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
 
         assertInstanceOf(DashScopeChatModel.class, model);
         String baseUrl = (String) ReflectionTestUtils.getField(model, "baseUrl");

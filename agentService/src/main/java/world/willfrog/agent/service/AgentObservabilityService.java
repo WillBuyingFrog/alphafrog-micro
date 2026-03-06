@@ -232,7 +232,7 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            appendLlmTrace(state.getDiagnostics(), traceId, runId, phase, stage, durationMs, startedAtMillis, completedAtMillis,
+            appendLlmTrace(state.getDiagnostics(), traceId, runId, phase, stage, tokenUsage, durationMs, startedAtMillis, completedAtMillis,
                     endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview, reasoning);
         });
         return traceId;
@@ -386,6 +386,7 @@ public class AgentObservabilityService {
                     runId, 
                     phase, 
                     stage,
+                    tokenUsage,
                     cachedTokens,
                     durationMs, 
                     startedAtMillis,
@@ -858,6 +859,7 @@ public class AgentObservabilityService {
                                 String runId,
                                 String phase,
                                 String stage,
+                                TokenUsage tokenUsage,
                                 long durationMs,
                                 long startedAtMillis,
                                 long completedAtMillis,
@@ -892,6 +894,12 @@ public class AgentObservabilityService {
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        // 设置 Token 统计
+        if (tokenUsage != null) {
+            trace.setInputTokens(tokenUsage.inputTokenCount() != null ? tokenUsage.inputTokenCount().longValue() : null);
+            trace.setOutputTokens(tokenUsage.outputTokenCount() != null ? tokenUsage.outputTokenCount().longValue() : null);
+            trace.setTotalTokens(tokenUsage.totalTokenCount() != null ? tokenUsage.totalTokenCount().longValue() : null);
+        }
         traces.add(trace);
         int limit = llmTraceCallLimit();
         while (traces.size() > limit) {
@@ -933,6 +941,7 @@ public class AgentObservabilityService {
             String runId,
             String phase,
             String stage,
+            TokenUsage tokenUsage,
             Integer cachedTokens,
             long durationMs,
             long startedAtMillis,
@@ -970,6 +979,12 @@ public class AgentObservabilityService {
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        // 设置 Token 统计
+        if (tokenUsage != null) {
+            trace.setInputTokens(tokenUsage.inputTokenCount() != null ? tokenUsage.inputTokenCount().longValue() : null);
+            trace.setOutputTokens(tokenUsage.outputTokenCount() != null ? tokenUsage.outputTokenCount().longValue() : null);
+            trace.setTotalTokens(tokenUsage.totalTokenCount() != null ? tokenUsage.totalTokenCount().longValue() : null);
+        }
         trace.setCachedTokens(captureCachedTokens ? cachedTokens : null);
         
         // 设置原始 HTTP 请求信息
@@ -1337,6 +1352,15 @@ public class AgentObservabilityService {
         private String reasoningText;
         private Object reasoningDetails;
         private boolean reasoningTruncated;
+        
+        // ========== Token 统计 ==========
+        
+        /** 输入 Token 数 */
+        private Long inputTokens;
+        /** 输出 Token 数 */
+        private Long outputTokens;
+        /** 总 Token 数 */
+        private Long totalTokens;
         
         // ========== Token Cache 追踪 ==========
         

@@ -4,8 +4,8 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
@@ -348,7 +348,7 @@ public class AgentContextCompressor {
             if (dialogue.isBlank()) {
                 return "";
             }
-            ChatLanguageModel model = buildSummaryModel(config);
+            ChatModel model = buildSummaryModel(config);
             if (model == null) {
                 return "";
             }
@@ -356,8 +356,8 @@ public class AgentContextCompressor {
                     new SystemMessage(buildSummarySystemPrompt(config.summaryMaxChars())),
                     new UserMessage(dialogue)
             );
-            Response<AiMessage> response = model.generate(chatMessages);
-            String summary = response == null || response.content() == null ? "" : nvl(response.content().text());
+            ChatResponse response = model.chat(chatMessages);
+            String summary = response == null || response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
             return trimToMaxChars(summary, config.summaryMaxChars());
         } catch (Exception e) {
             log.warn("Failed to summarize history, fallback to sliding window: {}", e.getMessage());
@@ -365,7 +365,7 @@ public class AgentContextCompressor {
         }
     }
 
-    private ChatLanguageModel buildSummaryModel(CompressionConfig config) {
+    private ChatModel buildSummaryModel(CompressionConfig config) {
         try {
             AgentLlmResolver.ResolvedLlm resolved = aiServiceFactory.resolveLlm(config.summaryEndpoint(), config.summaryModel());
             Double temperature = config.summaryTemperature() <= 0 ? DEFAULT_SUMMARY_TEMPERATURE : config.summaryTemperature();

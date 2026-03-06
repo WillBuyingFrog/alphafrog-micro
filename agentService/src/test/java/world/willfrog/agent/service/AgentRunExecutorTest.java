@@ -2,7 +2,7 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -59,7 +59,7 @@ class AgentRunExecutorTest {
     @Mock
     private LinearWorkflowExecutor workflowExecutor;
     @Mock
-    private ChatLanguageModel chatLanguageModel;
+    private ChatModel chatLanguageModel;
     @Mock
     private AgentMessageService messageService;
 
