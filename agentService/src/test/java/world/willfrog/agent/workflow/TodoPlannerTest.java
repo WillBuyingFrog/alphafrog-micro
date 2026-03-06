@@ -96,7 +96,11 @@ class TodoPlannerTest {
         AgentRun run = run("run-1");
 
         AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn("{\"analysis\":\"a\",\"items\":[{\"id\":\"todo_1\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{\"keyword\":\"平安\"}}]}");
+        when(aiMessage.text()).thenReturn(
+            "{\"analysis\":\"分析用户查询需求\",\"items\":[" +
+            "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{\"keyword\":\"平安\"},\"reasoning\":\"需要搜索股票信息\",\"executionMode\":\"AUTO\"}" +
+            "]}"
+        );
         ChatResponse response = ChatResponse.builder()
                 .aiMessage(aiMessage)
                 .metadata(ChatResponseMetadata.builder().build())
@@ -121,11 +125,18 @@ class TodoPlannerTest {
     }
 
     @Test
-    void plan_shouldTruncateByMaxTodos() {
+    void plan_shouldRespectMaxTodos() {
         AgentRun run = run("run-2");
 
         AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn("{\"items\":[{\"id\":\"1\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"},{\"id\":\"2\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"},{\"id\":\"3\",\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\"}]}");
+        // 返回2个 items（等于 maxTodos=2），验证正常工作
+        when(aiMessage.text()).thenReturn(
+            "{\"analysis\":\"需要查询多个股票\",\"items\":[" +
+            "{\"id\":\"1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第一个股票\",\"executionMode\":\"AUTO\"},"
++
+            "{\"id\":\"2\",\"sequence\":2,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第二个股票\",\"executionMode\":\"AUTO\"}" +
+            "]}"
+        );
         ChatResponse response = ChatResponse.builder()
                 .aiMessage(aiMessage)
                 .metadata(ChatResponseMetadata.builder().build())
@@ -151,7 +162,11 @@ class TodoPlannerTest {
         AgentRun run = run("run-3");
 
         AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn("{\"items\":[{\"id\":\"todo_1\",\"type\":\"TOOL_CALL\",\"toolName\":\"unknownTool\"}]}");
+        when(aiMessage.text()).thenReturn(
+            "{\"analysis\":\"测试非法工具\",\"items\":[" +
+            "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"unknownTool\",\"params\":{},\"reasoning\":\"尝试使用非法工具\",\"executionMode\":\"AUTO\"}" +
+            "]}"
+        );
         ChatResponse response = ChatResponse.builder()
                 .aiMessage(aiMessage)
                 .metadata(ChatResponseMetadata.builder().build())
