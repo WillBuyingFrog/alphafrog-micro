@@ -22,6 +22,10 @@ public class PlanPatcher {
             case INSERT -> insertTodo(original, patch);
             case DELETE -> deleteTodo(original, patch);
             case REPLACE -> replaceTodo(original, patch);
+            case ADD_DEPENDENCY, MARK_PARALLEL -> {
+                log.debug("Patch type {} is deferred to DAG workflow, keep plan unchanged", patch.getPatchType());
+                yield original;
+            }
         };
     }
 

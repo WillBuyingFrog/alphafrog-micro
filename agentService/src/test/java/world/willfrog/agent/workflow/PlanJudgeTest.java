@@ -32,7 +32,7 @@ class PlanJudgeTest {
     @Test
     void parseDecision_jsonWithContinue() {
         String text = "{\"decision\": \"CONTINUE\"}";
-        assertEquals(JudgeDecision.CONTINUE, planJudge.parseDecision(text));
+        assertEquals(JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS, planJudge.parseDecision(text));
     }
 
     @Test
@@ -56,7 +56,13 @@ class PlanJudgeTest {
     @Test
     void parseDecision_rawTextWithContinue() {
         String text = "CONTINUE";
-        assertEquals(JudgeDecision.CONTINUE, planJudge.parseDecision(text));
+        assertEquals(JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS, planJudge.parseDecision(text));
+    }
+
+    @Test
+    void parseDecision_rawTextWithContinueWithRecoveryParams() {
+        String text = "CONTINUE_WITH_RECOVERY_PARAMS";
+        assertEquals(JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS, planJudge.parseDecision(text));
     }
 
     @Test

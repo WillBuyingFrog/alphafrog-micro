@@ -85,6 +85,41 @@ class PatchPlannerTest {
     }
 
     @Test
+    void parsePatch_validAddDependencyPatch() {
+        String text = """
+                {
+                  "patchType": "ADD_DEPENDENCY",
+                  "targetTodoId": "todo_3",
+                  "patchData": {
+                    "dependsOn": ["todo_1"]
+                  },
+                  "reason": "补充依赖关系"
+                }
+                """;
+        PlanPatch patch = patchPlanner.parsePatch(text);
+        assertNotNull(patch);
+        assertEquals(PatchType.ADD_DEPENDENCY, patch.getPatchType());
+    }
+
+    @Test
+    void parsePatch_validMarkParallelPatch() {
+        String text = """
+                {
+                  "patchType": "MARK_PARALLEL",
+                  "targetTodoId": "todo_4",
+                  "patchData": {
+                    "parallelizable": true,
+                    "groupKey": "batch_analysis"
+                  },
+                  "reason": "标记可并行"
+                }
+                """;
+        PlanPatch patch = patchPlanner.parsePatch(text);
+        assertNotNull(patch);
+        assertEquals(PatchType.MARK_PARALLEL, patch.getPatchType());
+    }
+
+    @Test
     void parsePatch_invalidPatchTypeReturnsNull() {
         String text = "{\"patchType\": \"INVALID\", \"targetTodoId\": \"todo_1\"}";
         PlanPatch patch = patchPlanner.parsePatch(text);

@@ -143,6 +143,34 @@ class PlanPatcherTest {
         assertEquals(2, patched.getItems().size());
     }
 
+    @Test
+    void applyPatch_addDependencyNoopInLinearMode() {
+        TodoPlan plan = planWithTodos("todo_1", "todo_2");
+        PlanPatch patch = PlanPatch.builder()
+                .patchType(PatchType.ADD_DEPENDENCY)
+                .targetTodoId("todo_2")
+                .patchData(Map.of("dependsOn", java.util.List.of("todo_1")))
+                .reason("由 DAG 工作流处理")
+                .build();
+
+        TodoPlan patched = patcher.applyPatch(plan, patch);
+        assertEquals(plan, patched);
+    }
+
+    @Test
+    void applyPatch_markParallelNoopInLinearMode() {
+        TodoPlan plan = planWithTodos("todo_1", "todo_2");
+        PlanPatch patch = PlanPatch.builder()
+                .patchType(PatchType.MARK_PARALLEL)
+                .targetTodoId("todo_2")
+                .patchData(Map.of("parallelizable", true, "groupKey", "batch"))
+                .reason("由 DAG 工作流处理")
+                .build();
+
+        TodoPlan patched = patcher.applyPatch(plan, patch);
+        assertEquals(plan, patched);
+    }
+
     private TodoPlan planWithTodos(String... ids) {
         TodoPlan plan = new TodoPlan();
         plan.setAnalysis("test analysis");

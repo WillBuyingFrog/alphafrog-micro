@@ -94,8 +94,11 @@ public class PlanJudge {
         if (upper.contains("PATCH_PLAN")) {
             return JudgeDecision.PATCH_PLAN;
         }
+        if (upper.contains("CONTINUE_WITH_RECOVERY_PARAMS")) {
+            return JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS;
+        }
         if (upper.contains("CONTINUE")) {
-            return JudgeDecision.CONTINUE;
+            return JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS;
         }
         if (upper.contains("RETRY")) {
             return JudgeDecision.RETRY;
