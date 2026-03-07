@@ -43,6 +43,9 @@ public class ReactConversationContext {
     /** 默认最大消息数（不含 System Message）。 */
     static final int DEFAULT_MAX_MESSAGES = 50;
 
+    /** 最少保留的非系统消息数，确保至少能容纳一组 user-assistant 交互。 */
+    private static final int MIN_CONVERSATION_MESSAGES = 2;
+
     private final List<ChatMessage> messages;
     private final int maxMessages;
 
@@ -59,7 +62,7 @@ public class ReactConversationContext {
      * @param maxMessages 最大消息数（不含 System Message），超过时自动移除最早的消息
      */
     public ReactConversationContext(int maxMessages) {
-        this.maxMessages = Math.max(maxMessages, 2);
+        this.maxMessages = Math.max(maxMessages, MIN_CONVERSATION_MESSAGES);
         this.messages = new ArrayList<>();
     }
 
@@ -140,6 +143,7 @@ public class ReactConversationContext {
 
     /**
      * 当非系统消息数超过 maxMessages 时，移除最早的非系统消息。
+     * 始终保留至少一条非系统消息，避免裁剪到只剩 System Message。
      */
     private void trimIfNeeded() {
         int startIdx = (!messages.isEmpty() && messages.get(0) instanceof SystemMessage) ? 1 : 0;

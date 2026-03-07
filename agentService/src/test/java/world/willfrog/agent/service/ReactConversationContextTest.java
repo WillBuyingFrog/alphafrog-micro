@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 /**
@@ -66,11 +67,9 @@ class ReactConversationContextTest {
         ReactConversationContext ctx = new ReactConversationContext();
         ctx.addUserMessage("test");
         List<ChatMessage> msgs = ctx.getMessages();
-        try {
-            msgs.add(new UserMessage("hack"));
-        } catch (UnsupportedOperationException e) {
-            // expected
-        }
+        assertThrows(UnsupportedOperationException.class,
+                () -> msgs.add(new UserMessage("hack")),
+                "getMessages 返回的列表不应允许外部修改");
         assertEquals(1, ctx.size(), "原始列表不应被外部修改");
     }
 
