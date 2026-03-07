@@ -4,5 +4,6 @@ public enum JudgeDecision {
     CONTINUE_WITH_RECOVERY_PARAMS,
     PATCH_PLAN,
     RETRY,
-    FAIL
+    FAIL,
+    ABORT   // 关键步骤失败，终止整个 workflow
 }

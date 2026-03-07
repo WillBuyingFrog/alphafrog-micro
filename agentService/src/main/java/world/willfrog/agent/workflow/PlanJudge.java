@@ -91,6 +91,10 @@ public class PlanJudge {
 
     private JudgeDecision parseDecisionString(String raw) {
         String upper = nvl(raw).trim().toUpperCase();
+        // ABORT 优先判断（避免被 FAIL 包含）
+        if (upper.contains("ABORT")) {
+            return JudgeDecision.ABORT;
+        }
         if (upper.contains("PATCH_PLAN")) {
             return JudgeDecision.PATCH_PLAN;
         }
@@ -103,6 +107,7 @@ public class PlanJudge {
         if (upper.contains("RETRY")) {
             return JudgeDecision.RETRY;
         }
+        // 默认 FAIL（向后兼容）
         return JudgeDecision.FAIL;
     }
 

@@ -182,6 +182,26 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                             "local_replan_count", localReplanCount
                     ));
 
+                    if (decision == JudgeDecision.ABORT) {
+                        // 关键步骤失败，终止整个 workflow
+                        log.info("PlanJudge decided to ABORT workflow due to critical todo failure: {}", item.getId());
+                        String abortExplanation = generateAbortExplanation(request, item, record, context);
+                        eventService.append(runId, userId, "WORKFLOW_ABORTED", Map.of(
+                                "todo_id", nvl(item.getId()),
+                                "reason", "critical_todo_failed",
+                                "decision", decision.name()
+                        ));
+                        return WorkflowExecutionResult.builder()
+                                .paused(false)
+                                .success(false)
+                                .failureReason("critical_todo_failed:" + nvl(item.getId()))
+                                .finalAnswer(abortExplanation)
+                                .completedItems(allProcessedItems)
+                                .context(context)
+                                .toolCallsUsed(toolCallCounter.get(runId))
+                                .build();
+                    }
+
                     if (decision == JudgeDecision.PATCH_PLAN) {
                         PlanPatch patch = patchPlanner.generatePatch(record, currentPlan, context, request.getUserGoal(), request.getModel());
                         if (patch != null) {
@@ -886,6 +906,87 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 "model", nvl(request.getModelName())
         ));
         return answer;
+    }
+
+    /**
+     * 生成 workflow 终止的解释说明
+     * 当关键 todo 失败，PlanJudge 决定 ABORT 时调用
+     */
+    private String generateAbortExplanation(WorkflowRequest request,
+                                            TodoItem failedItem,
+                                            TodoExecutionRecord failedRecord,
+                                            Map<String, TodoExecutionRecord> context) {
+        String runId = request.getRun().getId();
+        String userId = request.getUserId();
+        
+        eventService.append(runId, userId, "ABORT_EXPLANATION_GENERATING", Map.of(
+                "failed_todo_id", nvl(failedItem.getId()),
+                "tool_name", nvl(failedItem.getToolName()),
+                "failure_summary", preview(failedRecord.getSummary())
+        ));
+
+        // 构建简化的上下文信息
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("user_goal", nvl(request.getUserGoal()));
+        payload.put("failed_step", Map.of(
+                "id", nvl(failedItem.getId()),
+                "tool", nvl(failedItem.getToolName()),
+                "reasoning", nvl(failedItem.getReasoning()),
+                "error", nvl(failedRecord.getSummary())
+        ));
+        payload.put("completed_steps", context == null ? 0 : context.size());
+
+        String userMessage = "由于关键步骤失败，workflow 需要终止。请向用户解释：\n\n"
+                + "1. 哪个步骤失败了\n"
+                + "2. 为什么这个步骤很关键\n"
+                + "3. 为什么不能继续给出完整结论\n\n"
+                + "失败信息: " + safeWrite(payload) + "\n\n"
+                + "请以礼貌、清晰的语气说明情况。";
+
+        List<ChatMessage> messages = List.of(
+                new SystemMessage("你是任务执行助手。当关键步骤失败时，向用户解释为什么无法完成任务。"),
+                new UserMessage(userMessage)
+        );
+
+        String previousStage = AgentContext.getStage();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+        AgentContext.setStage("workflow_abort_explanation");
+        long llmStartedAt = System.currentTimeMillis();
+        ChatResponse response;
+        try {
+            response = request.getModel().chat(messages);
+        } finally {
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
+        long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
+        String explanation = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
+
+        // 记录 LLM 调用
+        if (response.metadata() != null && response.metadata().tokenUsage() != null) {
+            observabilityService.recordLlmCall(
+                    runId,
+                    AgentObservabilityService.PHASE_SUMMARIZING,
+                    response.metadata().tokenUsage(),
+                    llmDurationMs,
+                    llmStartedAt,
+                    System.currentTimeMillis(),
+                    request.getEndpointName(),
+                    request.getModelName(),
+                    null,
+                    null,
+                    explanation
+            );
+        }
+
+        eventService.append(runId, userId, "ABORT_EXPLANATION_COMPLETED", Map.of(
+                "explanation_preview", preview(explanation)
+        ));
+
+        return explanation;
     }
 
     private WorkflowConfig resolveConfig() {
