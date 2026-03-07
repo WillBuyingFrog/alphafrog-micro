@@ -18,10 +18,12 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
- * AgentPromptService 的 Prompt 前缀稳定化测试。
+ * AgentPromptService 的 Prompt 完全静态化测试。
  *
- * <p>验证系统 Prompt 的静态前缀在不同请求间保持字节级相同，
- * 以支持 OpenAI / OpenRouter 的 Prompt Caching。</p>
+ * <p>验证系统 Prompt 不包含任何动态内容（如日期），使 System Prompt
+ * 在不同请求间保持字节级相同，最大化 LLM provider 的 Prompt Caching 命中率。</p>
+ *
+ * <p>动态上下文（日期）应通过 {@code dynamicContextPrefix()} 注入到 User Message。</p>
  */
 @ExtendWith(MockitoExtension.class)
 class AgentPromptServiceCacheTest {
@@ -52,18 +54,18 @@ class AgentPromptServiceCacheTest {
     }
 
     @Test
-    void composeSystemPrompt_dateShouldBeAtEnd() {
+    void composeSystemPrompt_shouldNotContainDate() {
         String prompt = promptService.agentRunSystemPrompt();
         String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
-        assertTrue(prompt.endsWith(todayLine),
-                "日期应在系统 Prompt 末尾（动态后缀），当前结尾: " + prompt.substring(Math.max(0, prompt.length() - 50)));
+        assertFalse(prompt.contains(todayLine),
+                "System Prompt 不应包含日期（日期应通过 dynamicContextPrefix 注入到 User Message）");
     }
 
     @Test
-    void composeSystemPrompt_dateShouldNotBeAtBeginning() {
+    void composeSystemPrompt_shouldBeFullyStatic() {
         String prompt = promptService.agentRunSystemPrompt();
-        assertFalse(prompt.startsWith("今天是"),
-                "日期不应在系统 Prompt 开头（会破坏 prefix cache）");
+        assertEquals(GLOBAL_PROMPT, prompt,
+                "仅含全局指令时，System Prompt 应完全等于全局指令（无动态后缀）");
     }
 
     @Test
@@ -82,6 +84,14 @@ class AgentPromptServiceCacheTest {
         String prefix1 = prompt1.substring(0, GLOBAL_PROMPT.length());
         String prefix2 = prompt2.substring(0, GLOBAL_PROMPT.length());
         assertEquals(prefix1, prefix2, "不同动态参数下，全局指令前缀应字节级相同");
+    }
+
+    @Test
+    void todoPlannerPrompt_shouldNotContainDate() {
+        String prompt = promptService.todoPlannerSystemPrompt("searchIndex", 5);
+        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
+        assertFalse(prompt.contains(todayLine),
+                "todo planner 的 System Prompt 不应包含日期");
     }
 
     @Test

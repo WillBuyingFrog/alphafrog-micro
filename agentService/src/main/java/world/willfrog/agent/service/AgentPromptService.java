@@ -46,8 +46,8 @@ public class AgentPromptService {
     /**
      * 返回需要由调用方注入到 user message 的动态上下文前缀。
      *
-     * <p>将日期等每次请求都会变化的内容从 system prompt 移至 user message，
-     * 使 system prompt 保持字节级稳定，有利于 LLM provider 的 Prompt Caching。</p>
+     * <p>日期等动态内容已从 system prompt 中完全移除，调用方<b>必须</b>
+     * 将此前缀注入到 user message 开头，以确保 LLM 获得正确的时间上下文。</p>
      *
      * <p><b>使用示例：</b></p>
      * <pre>{@code
@@ -58,9 +58,6 @@ public class AgentPromptService {
      *     new UserMessage(dynamicPrefix + "\n" + userRequest)
      * );
      * }</pre>
-     *
-     * <p><b>注意：</b>当前 {@link #composeSystemPrompt(String)} 已将日期移到系统 Prompt 末尾，
-     * 调用方可选择进一步使用此方法将日期完全移至 user message 以获得更高缓存命中率。</p>
      */
     public String dynamicContextPrefix() {
         return "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
@@ -206,23 +203,23 @@ public class AgentPromptService {
     /**
      * 组合系统 Prompt（Cache 优化版本）。
      *
-     * <p>Prompt 前缀稳定化：将静态指令（global + specific）放在前面形成稳定前缀，
-     * 动态内容（日期）放在末尾，不影响 prefix caching。</p>
+     * <p>Prompt 完全静态化：仅包含不变的全局指令 + 角色/任务指令，
+     * 日期等动态内容由调用方通过 {@link #dynamicContextPrefix()} 注入到 User Message，
+     * 实现 System Prompt 字节级一致，最大化 LLM provider 的 Prompt Caching 命中率。</p>
      *
      * <pre>
      * ┌────────────────────────────────────┐
-     * │ [可缓存的静态前缀]                  │
+     * │ [完全静态 - 100% 可缓存]            │
      * │ ├── 全局系统指令 (global)           │
      * │ └── 角色/任务指令 (specific)        │
-     * │ [动态后缀 - 不影响 prefix cache]    │
-     * │ └── 今天日期                        │
      * └────────────────────────────────────┘
      * </pre>
+     *
+     * @see #dynamicContextPrefix()
      */
     private String composeSystemPrompt(String specificPrompt) {
         String global = firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), "");
         String specific = firstNonBlank(specificPrompt, "");
-        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
 
         List<String> parts = new ArrayList<>();
         if (!global.isBlank()) {
@@ -231,7 +228,6 @@ public class AgentPromptService {
         if (!specific.isBlank() && !specific.equals(global)) {
             parts.add(specific);
         }
-        parts.add(todayLine);
         return String.join("\n", parts).trim();
     }
 

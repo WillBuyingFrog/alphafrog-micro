@@ -39,7 +39,7 @@ public class PlanJudge {
 
         List<ChatMessage> messages = List.of(
                 new SystemMessage(systemPrompt),
-                new UserMessage(userMessage)
+                new UserMessage(promptService.dynamicContextPrefix() + "\n" + userMessage)
         );
 
         try {

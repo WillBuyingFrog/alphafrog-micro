@@ -135,11 +135,13 @@ public class TodoPlanner {
             String prompt = promptService.todoPlannerSystemPrompt(toolList, maxTodos);
 
             String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+            String dynamicPrefix = promptService.dynamicContextPrefix();
             String userMessageContent;
             if (dialogueContext.isBlank()) {
-                userMessageContent = request.getUserGoal();
+                userMessageContent = dynamicPrefix + "\n" + request.getUserGoal();
             } else {
-                userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+                userMessageContent = dynamicPrefix + "\n"
+                        + "历史对话压缩内容：\n" + dialogueContext
                         + "\n\n当前轮次用户需求：" + request.getUserGoal()
                         + "\n\n请参考历史对话，以当前轮次用户需求为重点规划。";
             }

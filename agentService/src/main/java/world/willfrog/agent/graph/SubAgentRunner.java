@@ -158,7 +158,8 @@ public class SubAgentRunner {
                 observabilityService.incrementPlanningAttempts(request.getRunId(), true);
                 List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
-                        new UserMessage("目标: " + request.getGoal()
+                        new UserMessage(promptService.dynamicContextPrefix() + "\n"
+                                + "目标: " + request.getGoal()
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
                 );
@@ -372,7 +373,8 @@ public class SubAgentRunner {
             String executedStepsJson = objectMapper.writeValueAsString(executedSteps);
             List<dev.langchain4j.data.message.ChatMessage> summaryMessages = List.of(
                     new SystemMessage(summaryPrompt),
-                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
+                    new UserMessage(promptService.dynamicContextPrefix() + "\n"
+                            + "目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
             );
             AgentContext.setStage("sub_agent_summary");
             long llmStartedAt = System.currentTimeMillis();

@@ -396,7 +396,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
         List<ChatMessage> messages = List.of(
                 new SystemMessage(promptService.workflowTodoRecoverySystemPrompt()),
-                new UserMessage(safeWrite(userPayload))
+                new UserMessage(promptService.dynamicContextPrefix() + "\n" + safeWrite(userPayload))
         );
         RecoveryModelSelection recoveryModel = resolveRecoveryModel(request, failedRecord, config);
 
@@ -840,13 +840,16 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         // 加载消息历史（多轮对话支持）
         String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
 
+        String dynamicPrefix = promptService.dynamicContextPrefix();
         String userMessageContent;
         if (dialogueContext.isBlank()) {
-            userMessageContent = "当前轮次用户需求: " + nvl(request.getUserGoal())
+            userMessageContent = dynamicPrefix + "\n"
+                    + "当前轮次用户需求: " + nvl(request.getUserGoal())
                     + "\n执行摘要: " + safeWrite(summary)
                     + "\n执行上下文: " + safeWrite(context);
         } else {
-            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+            userMessageContent = dynamicPrefix + "\n"
+                    + "历史对话压缩内容：\n" + dialogueContext
                     + "\n\n当前轮次用户需求: " + nvl(request.getUserGoal())
                     + "\n执行摘要: " + safeWrite(summary)
                     + "\n执行上下文: " + safeWrite(context)
@@ -936,7 +939,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         ));
         payload.put("completed_steps", context == null ? 0 : context.size());
 
-        String userMessage = "由于关键步骤失败，workflow 需要终止。请向用户解释：\n\n"
+        String userMessage = promptService.dynamicContextPrefix() + "\n"
+                + "由于关键步骤失败，workflow 需要终止。请向用户解释：\n\n"
                 + "1. 哪个步骤失败了\n"
                 + "2. 为什么这个步骤很关键\n"
                 + "3. 为什么不能继续给出完整结论\n\n"
