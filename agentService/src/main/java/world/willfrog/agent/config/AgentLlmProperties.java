@@ -864,6 +864,7 @@ public class AgentLlmProperties {
         private String parallelFinalSystemPrompt;
         private String parallelPatchPlannerSystemPromptTemplate;
         private String planJudgeSystemPromptTemplate;
+        private String planJudgeRuntimeSystemPromptTemplate;
         private String semanticJudgeSystemPromptTemplate;
         private String subAgentPlannerSystemPromptTemplate;
         private String subAgentSummarySystemPrompt;
@@ -938,6 +939,14 @@ public class AgentLlmProperties {
 
         public void setPlanJudgeSystemPromptTemplate(String planJudgeSystemPromptTemplate) {
             this.planJudgeSystemPromptTemplate = planJudgeSystemPromptTemplate;
+        }
+
+        public String getPlanJudgeRuntimeSystemPromptTemplate() {
+            return planJudgeRuntimeSystemPromptTemplate;
+        }
+
+        public void setPlanJudgeRuntimeSystemPromptTemplate(String planJudgeRuntimeSystemPromptTemplate) {
+            this.planJudgeRuntimeSystemPromptTemplate = planJudgeRuntimeSystemPromptTemplate;
         }
 
         public String getSemanticJudgeSystemPromptTemplate() {

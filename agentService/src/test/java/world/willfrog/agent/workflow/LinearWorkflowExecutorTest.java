@@ -82,6 +82,12 @@ class LinearWorkflowExecutorTest {
     private PythonStaticPrecheckService pythonStaticPrecheckService;
     @Mock
     private PythonSemanticJudgeService pythonSemanticJudgeService;
+    @Mock
+    private PlanJudge planJudge;
+    @Mock
+    private PatchPlanner patchPlanner;
+
+    private PlanPatcher planPatcher;
 
     private LinearWorkflowExecutor executor;
 
@@ -89,6 +95,7 @@ class LinearWorkflowExecutorTest {
     void setUp() {
         ToolCallCounter counter = new ToolCallCounter(stateStore);
         TodoParamResolver resolver = new TodoParamResolver();
+        planPatcher = new PlanPatcher();
         executor = new LinearWorkflowExecutor(
                 eventService,
                 promptService,
@@ -107,6 +114,9 @@ class LinearWorkflowExecutorTest {
                 aiServiceFactory,
                 pythonStaticPrecheckService,
                 pythonSemanticJudgeService,
+                planJudge,
+                patchPlanner,
+                planPatcher,
                 new ObjectMapper()
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
@@ -375,6 +385,106 @@ class LinearWorkflowExecutorTest {
         assertFalse(result.isSuccess());
         verify(toolRouter, times(2)).invokeWithMeta(eq("searchStock"), anyMap());
         verify(eventService, times(1)).append(eq("run-runtime-budget"), eq("u1"), eq("TODO_RETRY"), anyMap());
+    }
+
+    @Test
+    void execute_shouldPatchPlanWhenJudgeDecidesPatchPlan() {
+        when(eventService.isRunnable("run-patch", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 0, 0, 0, 1);
+        AgentLlmProperties.Planning planning = new AgentLlmProperties.Planning();
+        planning.setMaxLocalReplans(1);
+        properties.getRuntime().setPlanning(planning);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(false)
+                        .output("{\"ok\":false,\"error\":{\"message\":\"not found\"}}")
+                        .build(),
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(true)
+                        .output("{\"ok\":true}")
+                        .build()
+        );
+
+        TodoPlan currentPlan = planWithTools(1);
+        TodoExecutionRecord failedRecord = TodoExecutionRecord.builder()
+                .success(false)
+                .output("{\"ok\":false}")
+                .summary("tool_failed")
+                .failureCategory("RUNTIME")
+                .build();
+
+        when(planJudge.judge(any(), any(), anyMap(), anyString(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
+
+        PlanPatch patch = PlanPatch.builder()
+                .patchType(PatchType.REPLACE)
+                .targetTodoId("todo_1")
+                .patchData(Map.of("newParams", Map.of("keyword", "retry_keyword")))
+                .reason("修改查询条件重试")
+                .build();
+        when(patchPlanner.generatePatch(any(), any(), anyMap(), anyString(), any())).thenReturn(patch);
+
+        WorkflowExecutionResult result = executor.execute(request("run-patch", planWithTools(1), properties));
+
+        assertTrue(result.isSuccess());
+        verify(planJudge).judge(any(), any(), anyMap(), anyString(), any());
+        verify(patchPlanner).generatePatch(any(), any(), anyMap(), anyString(), any());
+        verify(stateStore).savePatchedPlan(eq("run-patch"), anyString());
+        verify(eventService).append(eq("run-patch"), eq("u1"), eq("PLAN_JUDGE_DECISION"), anyMap());
+        verify(eventService).append(eq("run-patch"), eq("u1"), eq("PLAN_PATCHED"), anyMap());
+    }
+
+    @Test
+    void execute_shouldNotPatchPlanWhenMaxLocalReplansIsZero() {
+        when(eventService.isRunnable("run-no-patch", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 0, 0, 0, 1);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(false)
+                        .output("{\"ok\":false,\"error\":{\"message\":\"not found\"}}")
+                        .build()
+        );
+
+        WorkflowExecutionResult result = executor.execute(request("run-no-patch", planWithTools(1), properties));
+
+        assertFalse(result.isSuccess());
+        verify(planJudge, never()).judge(any(), any(), anyMap(), anyString(), any());
+    }
+
+    @Test
+    void execute_shouldRespectMaxLocalReplansLimit() {
+        when(eventService.isRunnable("run-replan-limit", "u1")).thenReturn(true);
+        AgentLlmProperties properties = runtimeConfig(true, false, 0, 0, 0, 1);
+        AgentLlmProperties.Planning planning = new AgentLlmProperties.Planning();
+        planning.setMaxLocalReplans(1);
+        properties.getRuntime().setPlanning(planning);
+        when(localConfigLoader.current()).thenReturn(Optional.of(properties));
+
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(false)
+                        .output("{\"ok\":false}")
+                        .build()
+        );
+
+        when(planJudge.judge(any(), any(), anyMap(), anyString(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
+
+        PlanPatch patch = PlanPatch.builder()
+                .patchType(PatchType.REPLACE)
+                .targetTodoId("todo_1")
+                .patchData(Map.of("newParams", Map.of("keyword", "retry_kw")))
+                .reason("重试")
+                .build();
+        when(patchPlanner.generatePatch(any(), any(), anyMap(), anyString(), any())).thenReturn(patch);
+
+        WorkflowExecutionResult result = executor.execute(request("run-replan-limit", planWithTools(1), properties));
+
+        assertFalse(result.isSuccess());
+        verify(planJudge, times(1)).judge(any(), any(), anyMap(), anyString(), any());
+        verify(patchPlanner, times(1)).generatePatch(any(), any(), anyMap(), anyString(), any());
     }
 
     private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan, AgentLlmProperties properties) {

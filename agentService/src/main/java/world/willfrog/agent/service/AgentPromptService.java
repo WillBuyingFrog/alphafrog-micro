@@ -122,6 +122,16 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getPlanJudgeSystemPromptTemplate(), ""));
     }
 
+    public String planJudgeRuntimeSystemPrompt() {
+        // 优先使用运行时 Plan Judge prompt，如果没有配置则使用默认的
+        String runtimePrompt = firstNonBlank(currentPrompts().getPlanJudgeRuntimeSystemPromptTemplate(), "");
+        if (!runtimePrompt.isEmpty()) {
+            return composeSystemPrompt(runtimePrompt);
+        }
+        // 向后兼容：如果没有配置运行时 prompt，使用原来的 prompt
+        return planJudgeSystemPrompt();
+    }
+
     public String semanticJudgeSystemPrompt() {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getSemanticJudgeSystemPromptTemplate(), ""));
     }
