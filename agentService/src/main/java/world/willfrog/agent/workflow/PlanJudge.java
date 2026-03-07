@@ -28,7 +28,7 @@ public class PlanJudge {
                                Map<String, TodoExecutionRecord> context,
                                String userGoal,
                                ChatModel model) {
-        String systemPrompt = promptService.planJudgeSystemPrompt();
+        String systemPrompt = promptService.planJudgeRuntimeSystemPrompt();
         if (systemPrompt == null || systemPrompt.isBlank()) {
             log.debug("PlanJudge system prompt is empty, defaulting to FAIL");
             return JudgeDecision.FAIL;

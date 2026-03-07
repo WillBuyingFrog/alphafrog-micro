@@ -217,6 +217,7 @@
     "parallelFinalSystemPrompt": "file:prompts/parallel/parallel_final_system.txt",
     "parallelPatchPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_patch_planner_system.txt",
     "planJudgeSystemPromptTemplate": "file:prompts/plan/plan_judge_system.txt",
+    "planJudgeRuntimeSystemPromptTemplate": "file:prompts/plan/plan_judge_runtime_system.txt",
     "semanticJudgeSystemPromptTemplate": "file:prompts/judge/semantic_judge_system.txt",
     "subAgentPlannerSystemPromptTemplate": "file:prompts/sub_agent/sub_agent_planner_system.txt",
     "subAgentSummarySystemPrompt": "file:prompts/sub_agent/sub_agent_summary_system.txt",
