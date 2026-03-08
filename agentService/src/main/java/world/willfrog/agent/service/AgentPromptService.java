@@ -200,6 +200,84 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt(), ""));
     }
 
+    // ─────────────────────────────────────────────────────────────
+    // ReAct 统一 System Prompt + Stage Instruction（#28）
+    // ─────────────────────────────────────────────────────────────
+
+    /**
+     * 统一的 ReAct System Prompt —— 仅包含全局指令，所有阶段共享。
+     *
+     * <p>Stage-specific 指令改为通过 {@code stageInstruction()} 方法注入到 User Message，
+     * 使得 System Prompt 在整个 Agent Run 生命周期内保持字节级一致，
+     * 最大化 Fireworks / OpenRouter 的 KV 前缀缓存命中率。</p>
+     *
+     * @see #planningAnalysisStageInstruction(String, int)
+     * @see #planningStructuredStageInstruction()
+     * @see #recoveryStageInstruction()
+     * @see #finalAnswerStageInstruction()
+     */
+    public String reactSystemPrompt() {
+        return firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), "");
+    }
+
+    /**
+     * 规划分析阶段指令 —— 注入到 User Message，引导 LLM 先输出自然语言分析。
+     */
+    public String planningAnalysisStageInstruction(String toolWhitelist, int maxTodos) {
+        String template = firstNonBlank(
+                currentPrompts().getTodoPlannerSystemPromptTemplate(),
+                """
+                你是任务规划专家。请把用户目标拆解为 Todo List。
+                规则:
+                1) 只能使用工具: {{toolWhitelist}}
+                2) 总步骤数不超过 {{maxTodos}}
+                3) type 仅允许 TOOL_CALL/SUB_AGENT/THOUGHT
+                4) executionMode 仅允许 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT
+                """
+        );
+        String rendered = render(template, Map.of(
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos)
+        ));
+        return "[Stage: PLANNING_ANALYSIS]\n" + rendered
+                + "\n请先用自然语言分析用户需求和执行思路，暂时不要输出 JSON。";
+    }
+
+    /**
+     * 规划结构化转换阶段指令 —— 引导 LLM 将自然语言分析转为结构化 JSON。
+     */
+    public String planningStructuredStageInstruction() {
+        return "[Stage: PLANNING_STRUCTURED]\n"
+                + "请将上述分析转化为严格的 JSON 格式输出，只输出 JSON，不要包含其他文字。\n"
+                + "格式: {\"analysis\":\"你的分析摘要\",\"items\":["
+                + "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\","
+                + "\"toolName\":\"...\",\"params\":{...},"
+                + "\"reasoning\":\"...\",\"executionMode\":\"AUTO\"}]}";
+    }
+
+    /**
+     * Recovery 阶段指令 —— 注入到 User Message，引导 LLM 生成恢复参数。
+     */
+    public String recoveryStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getWorkflowTodoRecoverySystemPrompt(),
+                ""
+        );
+        return "[Stage: TODO_RECOVERY]\n" + specific;
+    }
+
+    /**
+     * Final Answer 阶段指令 —— 注入到 User Message，引导 LLM 生成最终回答。
+     */
+    public String finalAnswerStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getWorkflowFinalSystemPrompt(),
+                currentPrompts().getParallelFinalSystemPrompt(),
+                ""
+        );
+        return "[Stage: FINAL_ANSWER]\n" + specific;
+    }
+
     /**
      * 组合系统 Prompt（Cache 优化版本）。
      *

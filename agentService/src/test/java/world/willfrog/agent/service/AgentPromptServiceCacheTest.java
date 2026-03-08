@@ -100,4 +100,49 @@ class AgentPromptServiceCacheTest {
         String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
         assertEquals(todayLine, prefix, "动态上下文前缀应包含今天日期");
     }
+
+    // ─── ReAct 统一 System Prompt + Stage Instruction 测试 ───
+
+    @Test
+    void reactSystemPrompt_shouldReturnGlobalOnly() {
+        String reactSys = promptService.reactSystemPrompt();
+        assertEquals(GLOBAL_PROMPT, reactSys,
+                "reactSystemPrompt 应只返回全局指令，不包含任何 stage-specific 内容");
+    }
+
+    @Test
+    void reactSystemPrompt_shouldBeIdenticalAcrossStages() {
+        // 验证 reactSystemPrompt 在不同阶段调用时返回完全一致的结果
+        String r1 = promptService.reactSystemPrompt();
+        String r2 = promptService.reactSystemPrompt();
+        assertEquals(r1, r2, "reactSystemPrompt 在不同时间调用应返回字节级一致的结果");
+    }
+
+    @Test
+    void planningAnalysisStageInstruction_shouldContainStageMarker() {
+        String instruction = promptService.planningAnalysisStageInstruction("searchIndex, queryFund", 5);
+        assertTrue(instruction.contains("[Stage: PLANNING_ANALYSIS]"),
+                "planning analysis 阶段指令应包含 Stage 标记");
+    }
+
+    @Test
+    void planningStructuredStageInstruction_shouldContainStageMarker() {
+        String instruction = promptService.planningStructuredStageInstruction();
+        assertTrue(instruction.contains("[Stage: PLANNING_STRUCTURED]"),
+                "planning structured 阶段指令应包含 Stage 标记");
+    }
+
+    @Test
+    void recoveryStageInstruction_shouldContainStageMarker() {
+        String instruction = promptService.recoveryStageInstruction();
+        assertTrue(instruction.contains("[Stage: TODO_RECOVERY]"),
+                "recovery 阶段指令应包含 Stage 标记");
+    }
+
+    @Test
+    void finalAnswerStageInstruction_shouldContainStageMarker() {
+        String instruction = promptService.finalAnswerStageInstruction();
+        assertTrue(instruction.contains("[Stage: FINAL_ANSWER]"),
+                "final answer 阶段指令应包含 Stage 标记");
+    }
 }
