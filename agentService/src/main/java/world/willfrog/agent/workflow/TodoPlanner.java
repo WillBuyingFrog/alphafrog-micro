@@ -162,62 +162,60 @@ public class TodoPlanner {
             AgentContext.setStage("todo_planning_analysis");
             AgentContext.clearStructuredOutputSpec();
 
-            long analysisStartedAt = System.currentTimeMillis();
             ChatResponse analysisResponse;
             String analysisText;
-            try {
-                analysisResponse = request.getModel().chat(ctx.getMessages());
-                analysisText = analysisResponse.aiMessage() == null ? "" : nvl(analysisResponse.aiMessage().text());
-            } finally {
-                AgentContext.setStage("todo_planning_analysis");
-            }
-            long analysisCompletedAt = System.currentTimeMillis();
-
-            Map<String, Object> analysisSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                    request.getEndpointName(),
-                    request.getEndpointBaseUrl(),
-                    request.getModelName(),
-                    ctx.getMessages(),
-                    request.getToolSpecifications(),
-                    Map.of("stage", "todo_planning_analysis", "attempt", attempt)
-            );
-            observabilityService.recordLlmCall(
-                    runId,
-                    AgentObservabilityService.PHASE_PLANNING,
-                    analysisResponse.metadata() != null ? analysisResponse.metadata().tokenUsage() : null,
-                    analysisCompletedAt - analysisStartedAt,
-                    analysisStartedAt,
-                    analysisCompletedAt,
-                    request.getEndpointName(),
-                    request.getModelName(),
-                    null,
-                    analysisSnapshot,
-                    analysisText
-            );
-
-            ctx.addAssistantMessage(analysisText);
-
-            // ── Step 2：结构化 JSON 转换 ──
-            ctx.addUserMessage(structuredStage);
-
-            AgentContext.setStage("todo_planning");
-            if (structuredEnabled) {
-                AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
-                        "todo_plan",
-                        planningStructuredStrict(),
-                        StructuredPlanningSupport.todoPlanningJsonSchema(),
-                        planningRequireProviderParameters(),
-                        planningAllowProviderFallbacks()
-                ));
-            } else {
-                AgentContext.clearStructuredOutputSpec();
-            }
-
-            long structuredStartedAt = System.currentTimeMillis();
             ChatResponse structuredResponse;
             String raw;
             String planningTraceId;
             try {
+                // ── Step 1 LLM call ──
+                long analysisStartedAt = System.currentTimeMillis();
+                analysisResponse = request.getModel().chat(ctx.getMessages());
+                analysisText = analysisResponse.aiMessage() == null ? "" : nvl(analysisResponse.aiMessage().text());
+                long analysisCompletedAt = System.currentTimeMillis();
+
+                Map<String, Object> analysisSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        ctx.getMessages(),
+                        request.getToolSpecifications(),
+                        Map.of("stage", "todo_planning_analysis", "attempt", attempt)
+                );
+                observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_PLANNING,
+                        analysisResponse.metadata() != null ? analysisResponse.metadata().tokenUsage() : null,
+                        analysisCompletedAt - analysisStartedAt,
+                        analysisStartedAt,
+                        analysisCompletedAt,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        analysisSnapshot,
+                        analysisText
+                );
+
+                ctx.addAssistantMessage(analysisText);
+
+                // ── Step 2：结构化 JSON 转换 ──
+                ctx.addUserMessage(structuredStage);
+
+                AgentContext.setStage("todo_planning");
+                if (structuredEnabled) {
+                    AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                            "todo_plan",
+                            planningStructuredStrict(),
+                            StructuredPlanningSupport.todoPlanningJsonSchema(),
+                            planningRequireProviderParameters(),
+                            planningAllowProviderFallbacks()
+                    ));
+                } else {
+                    AgentContext.clearStructuredOutputSpec();
+                }
+
+                // ── Step 2 LLM call ──
+                long structuredStartedAt = System.currentTimeMillis();
                 structuredResponse = request.getModel().chat(ctx.getMessages());
                 raw = structuredResponse.aiMessage() == null ? "" : nvl(structuredResponse.aiMessage().text());
                 Map<String, Object> structuredSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
