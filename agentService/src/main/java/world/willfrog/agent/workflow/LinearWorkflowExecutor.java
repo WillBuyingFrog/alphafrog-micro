@@ -184,7 +184,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
                 if (config.maxLocalReplans() > 0 && localReplanCount < config.maxLocalReplans()) {
                     TodoPlan currentPlan = TodoPlan.builder().analysis(request.getTodoPlan().getAnalysis()).items(items).build();
-                    JudgeDecision decision = planJudge.judge(record, currentPlan, context, request.getUserGoal(), request.getModel());
+                    JudgeDecision decision = planJudge.judge(reactCtx, record, currentPlan, context, request.getModel());
                     eventService.append(runId, userId, "PLAN_JUDGE_DECISION", Map.of(
                             "todo_id", nvl(item.getId()),
                             "decision", decision.name(),
@@ -212,7 +212,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     }
 
                     if (decision == JudgeDecision.PATCH_PLAN) {
-                        PlanPatch patch = patchPlanner.generatePatch(record, currentPlan, context, request.getUserGoal(), request.getModel());
+                        PlanPatch patch = patchPlanner.generatePatch(reactCtx, record, currentPlan, context, request.getModel());
                         if (patch != null) {
                             TodoPlan patched = planPatcher.applyPatch(currentPlan, patch);
                             items.clear();
@@ -226,6 +226,10 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                     "new_plan_size", items.size(),
                                     "local_replan_count", localReplanCount
                             ));
+                            // ReAct: 将 Patch 结果作为 Observation 添加到上下文
+                            reactCtx.addUserMessage("[Observation] Plan patched: " + patch.getPatchType().name()
+                                    + ", target=" + nvl(patch.getTargetTodoId())
+                                    + ", reason=" + nvl(patch.getReason()));
                             hasFailure = false;
                             idx--;
                             continue;

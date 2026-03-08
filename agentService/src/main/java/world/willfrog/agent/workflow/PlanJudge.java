@@ -10,6 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.ReactConversationContext;
 
 import java.util.LinkedHashMap;
 import java.util.List;
@@ -23,6 +24,42 @@ public class PlanJudge {
     private final AgentPromptService promptService;
     private final ObjectMapper objectMapper;
 
+    /**
+     * ReAct 累积模式：通过 ReactConversationContext 进行判断，共享 System Prompt 前缀，
+     * 最大化 LLM provider 的 KV 缓存命中率。
+     */
+    public JudgeDecision judge(ReactConversationContext reactCtx,
+                               TodoExecutionRecord record,
+                               TodoPlan currentPlan,
+                               Map<String, TodoExecutionRecord> context,
+                               ChatModel model) {
+        String stageInstruction = promptService.planJudgeStageInstruction();
+        if (stageInstruction == null || stageInstruction.isBlank()) {
+            log.debug("PlanJudge stage instruction is empty, defaulting to FAIL");
+            return JudgeDecision.FAIL;
+        }
+
+        Map<String, Object> payload = buildJudgePayload(record, currentPlan, context, null);
+        String userMessage = safeWrite(payload);
+
+        String userContent = promptService.dynamicContextPrefix() + "\n"
+                + stageInstruction + "\n" + userMessage;
+        reactCtx.addUserMessage(userContent);
+
+        try {
+            ChatResponse response = model.chat(reactCtx.getMessages());
+            String text = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
+            reactCtx.addAssistantMessage(text);
+            return parseDecision(text);
+        } catch (Exception e) {
+            log.warn("PlanJudge LLM call (ReAct) failed: {}", e.getMessage());
+            return JudgeDecision.FAIL;
+        }
+    }
+
+    /**
+     * 独立调用模式（向后兼容）：使用独立的 System Prompt 调用 LLM。
+     */
     public JudgeDecision judge(TodoExecutionRecord record,
                                TodoPlan currentPlan,
                                Map<String, TodoExecutionRecord> context,
@@ -57,7 +94,9 @@ public class PlanJudge {
                                                    Map<String, TodoExecutionRecord> context,
                                                    String userGoal) {
         Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("user_goal", nvl(userGoal));
+        if (userGoal != null) {
+            payload.put("user_goal", nvl(userGoal));
+        }
         payload.put("failed_record", Map.of(
                 "success", record.isSuccess(),
                 "summary", nvl(record.getSummary()),

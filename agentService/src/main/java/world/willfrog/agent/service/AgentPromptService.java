@@ -279,6 +279,35 @@ public class AgentPromptService {
     }
 
     /**
+     * Plan Judge 阶段指令 —— 注入到 User Message，引导 LLM 做出失败判断决策。
+     *
+     * <p>在 ReAct 累积模式下，Judge 不再使用独立的 System Prompt，
+     * 而是通过此阶段指令注入到对话上下文中，共享同一个 System Prompt 前缀。</p>
+     */
+    public String planJudgeStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getPlanJudgeRuntimeSystemPromptTemplate(),
+                currentPrompts().getPlanJudgeSystemPromptTemplate(),
+                ""
+        );
+        return "[Stage: PLAN_JUDGE]\n" + specific;
+    }
+
+    /**
+     * Patch Planner 阶段指令 —— 注入到 User Message，引导 LLM 生成计划补丁。
+     *
+     * <p>在 ReAct 累积模式下，Patch Planner 不再使用独立的 System Prompt，
+     * 而是通过此阶段指令注入到对话上下文中，共享同一个 System Prompt 前缀。</p>
+     */
+    public String patchPlannerStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getParallelPatchPlannerSystemPromptTemplate(),
+                ""
+        );
+        return "[Stage: PATCH_PLAN]\n" + specific;
+    }
+
+    /**
      * 组合系统 Prompt（Cache 优化版本）。
      *
      * <p>Prompt 完全静态化：仅包含不变的全局指令 + 角色/任务指令，
@@ -328,6 +357,7 @@ public class AgentPromptService {
         merged.setParallelFinalSystemPrompt(firstNonBlank(local.getParallelFinalSystemPrompt(), base.getParallelFinalSystemPrompt()));
         merged.setParallelPatchPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPatchPlannerSystemPromptTemplate(), base.getParallelPatchPlannerSystemPromptTemplate()));
         merged.setPlanJudgeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeSystemPromptTemplate(), base.getPlanJudgeSystemPromptTemplate()));
+        merged.setPlanJudgeRuntimeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeRuntimeSystemPromptTemplate(), base.getPlanJudgeRuntimeSystemPromptTemplate()));
         merged.setSemanticJudgeSystemPromptTemplate(firstNonBlank(local.getSemanticJudgeSystemPromptTemplate(), base.getSemanticJudgeSystemPromptTemplate()));
         merged.setSubAgentPlannerSystemPromptTemplate(firstNonBlank(local.getSubAgentPlannerSystemPromptTemplate(), base.getSubAgentPlannerSystemPromptTemplate()));
         merged.setSubAgentSummarySystemPrompt(firstNonBlank(local.getSubAgentSummarySystemPrompt(), base.getSubAgentSummarySystemPrompt()));

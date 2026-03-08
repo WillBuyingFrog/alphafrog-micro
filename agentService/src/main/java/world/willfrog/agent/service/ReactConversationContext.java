@@ -142,6 +142,20 @@ public class ReactConversationContext {
     }
 
     /**
+     * 创建分支上下文（用于 DAG 并行执行时的分支隔离）。
+     *
+     * <p>复制当前消息列表到新实例，分支上下文独立于主上下文，
+     * 修改分支不会影响原上下文。</p>
+     *
+     * @return 新的分支上下文（包含当前所有消息的副本）
+     */
+    public ReactConversationContext branch() {
+        ReactConversationContext branchCtx = new ReactConversationContext(this.maxMessages);
+        branchCtx.messages.addAll(this.messages);
+        return branchCtx;
+    }
+
+    /**
      * 当非系统消息数超过 maxMessages 时，移除最早的非系统消息。
      * 始终保留至少一条非系统消息，避免裁剪到只剩 System Message。
      */

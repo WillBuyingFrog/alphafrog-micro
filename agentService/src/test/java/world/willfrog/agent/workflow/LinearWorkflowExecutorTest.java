@@ -136,6 +136,8 @@ class LinearWorkflowExecutorTest {
         lenient().when(promptService.reactSystemPrompt()).thenReturn("unified-system");
         lenient().when(promptService.recoveryStageInstruction()).thenReturn("[Stage: TODO_RECOVERY]");
         lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]");
+        lenient().when(promptService.planJudgeStageInstruction()).thenReturn("[Stage: PLAN_JUDGE]");
+        lenient().when(promptService.patchPlannerStageInstruction()).thenReturn("[Stage: PATCH_PLAN]");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(localConfigLoader.current()).thenReturn(Optional.empty());
         lenient().when(creditService.calculateToolCredits(anyString(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(1);
@@ -420,7 +422,7 @@ class LinearWorkflowExecutorTest {
                 .failureCategory("RUNTIME")
                 .build();
 
-        when(planJudge.judge(any(), any(), anyMap(), anyString(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
+        when(planJudge.judge(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
 
         PlanPatch patch = PlanPatch.builder()
                 .patchType(PatchType.REPLACE)
@@ -428,13 +430,13 @@ class LinearWorkflowExecutorTest {
                 .patchData(Map.of("newParams", Map.of("keyword", "retry_keyword")))
                 .reason("修改查询条件重试")
                 .build();
-        when(patchPlanner.generatePatch(any(), any(), anyMap(), anyString(), any())).thenReturn(patch);
+        when(patchPlanner.generatePatch(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any())).thenReturn(patch);
 
         WorkflowExecutionResult result = executor.execute(request("run-patch", planWithTools(1), properties));
 
         assertTrue(result.isSuccess());
-        verify(planJudge).judge(any(), any(), anyMap(), anyString(), any());
-        verify(patchPlanner).generatePatch(any(), any(), anyMap(), anyString(), any());
+        verify(planJudge).judge(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
+        verify(patchPlanner).generatePatch(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
         verify(stateStore).savePatchedPlan(eq("run-patch"), anyString());
         verify(eventService).append(eq("run-patch"), eq("u1"), eq("PLAN_JUDGE_DECISION"), anyMap());
         verify(eventService).append(eq("run-patch"), eq("u1"), eq("PLAN_PATCHED"), anyMap());
@@ -456,7 +458,7 @@ class LinearWorkflowExecutorTest {
         WorkflowExecutionResult result = executor.execute(request("run-no-patch", planWithTools(1), properties));
 
         assertFalse(result.isSuccess());
-        verify(planJudge, never()).judge(any(), any(), anyMap(), anyString(), any());
+        verify(planJudge, never()).judge(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
     }
 
     @Test
@@ -475,7 +477,7 @@ class LinearWorkflowExecutorTest {
                         .build()
         );
 
-        when(planJudge.judge(any(), any(), anyMap(), anyString(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
+        when(planJudge.judge(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any())).thenReturn(JudgeDecision.PATCH_PLAN);
 
         PlanPatch patch = PlanPatch.builder()
                 .patchType(PatchType.REPLACE)
@@ -483,13 +485,13 @@ class LinearWorkflowExecutorTest {
                 .patchData(Map.of("newParams", Map.of("keyword", "retry_kw")))
                 .reason("重试")
                 .build();
-        when(patchPlanner.generatePatch(any(), any(), anyMap(), anyString(), any())).thenReturn(patch);
+        when(patchPlanner.generatePatch(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any())).thenReturn(patch);
 
         WorkflowExecutionResult result = executor.execute(request("run-replan-limit", planWithTools(1), properties));
 
         assertFalse(result.isSuccess());
-        verify(planJudge, times(1)).judge(any(), any(), anyMap(), anyString(), any());
-        verify(patchPlanner, times(1)).generatePatch(any(), any(), anyMap(), anyString(), any());
+        verify(planJudge, times(1)).judge(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
+        verify(patchPlanner, times(1)).generatePatch(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
     }
 
     private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan, AgentLlmProperties properties) {
