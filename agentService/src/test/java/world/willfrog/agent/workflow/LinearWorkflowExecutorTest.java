@@ -132,6 +132,11 @@ class LinearWorkflowExecutorTest {
         lenient().when(stateStore.incrementToolCallCount(anyString(), anyInt())).thenReturn(1);
         lenient().when(promptService.workflowFinalSystemPrompt()).thenReturn("final");
         lenient().when(promptService.workflowTodoRecoverySystemPrompt()).thenReturn("recovery");
+        // ReAct 统一 prompt 方法
+        lenient().when(promptService.reactSystemPrompt()).thenReturn("unified-system");
+        lenient().when(promptService.recoveryStageInstruction()).thenReturn("[Stage: TODO_RECOVERY]");
+        lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]");
+        lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(localConfigLoader.current()).thenReturn(Optional.empty());
         lenient().when(creditService.calculateToolCredits(anyString(), org.mockito.ArgumentMatchers.anyBoolean())).thenReturn(1);
         lenient().when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))

@@ -28,6 +28,7 @@ import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.service.AgentMessageService;
 import world.willfrog.agent.service.AgentContextCompressor;
 import world.willfrog.agent.service.AgentAiServiceFactory;
+import world.willfrog.agent.service.ReactConversationContext;
 import world.willfrog.agent.entity.AgentRunMessage;
 import world.willfrog.agent.tool.ToolRouter;
 
@@ -112,6 +113,10 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         toolCallCounter.reset(runId);
         toolCallCounter.set(runId, state.getToolCallsUsed());
 
+        // ── ReAct 累积式上下文：统一 System Prompt，按 run 维度持有 ──
+        ReactConversationContext reactCtx = new ReactConversationContext();
+        reactCtx.setSystemMessage(promptService.reactSystemPrompt());
+
         List<TodoItem> items = request.getTodoPlan().getItems() == null
                 ? new ArrayList<>() : new ArrayList<>(request.getTodoPlan().getItems());
         List<TodoItem> completed = new ArrayList<>(state.getCompletedItems());
@@ -146,7 +151,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             }
 
             TodoItem item = items.get(idx);
-            TodoExecutionRecord record = executeTodoWithRetry(request, item, context, allProcessedItems, config);
+            TodoExecutionRecord record = executeTodoWithRetry(request, item, context, allProcessedItems, config, reactCtx);
             item.setCompletedAt(Instant.now());
             item.setResultSummary(nvl(record.getSummary()));
             item.setOutput(nvl(record.getOutput()));
@@ -155,6 +160,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 item.setStatus(TodoStatus.COMPLETED);
                 completed.add(item);
                 context.put(item.getId(), record);
+                // ── ReAct: 累积 todo 完成观测 ──
+                reactCtx.addUserMessage("[Observation] " + nvl(item.getId()) + " 完成: " + preview(record.getSummary()));
                 eventService.append(runId, userId, "TODO_FINISHED", Map.of(
                         "todo_id", nvl(item.getId()),
                         "success", true,
@@ -165,6 +172,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             } else {
                 item.setStatus(TodoStatus.FAILED);
                 hasFailure = true;
+                // ── ReAct: 累积 todo 失败观测 ──
+                reactCtx.addUserMessage("[Observation] " + nvl(item.getId()) + " 失败: " + preview(record.getSummary()));
                 eventService.append(runId, userId, "TODO_FAILED", Map.of(
                         "todo_id", nvl(item.getId()),
                         "success", false,
@@ -185,7 +194,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     if (decision == JudgeDecision.ABORT) {
                         // 关键步骤失败，终止整个 workflow
                         log.info("PlanJudge decided to ABORT workflow due to critical todo failure: {}", item.getId());
-                        String abortExplanation = generateAbortExplanation(request, item, record, context);
+                        String abortExplanation = generateAbortExplanation(request, item, record, context, reactCtx);
                         eventService.append(runId, userId, "WORKFLOW_ABORTED", Map.of(
                                 "todo_id", nvl(item.getId()),
                                 "reason", "critical_todo_failed",
@@ -236,7 +245,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             stateStore.saveWorkflowState(runId, checkpoint);
 
             if (!record.isSuccess() && config.failFast()) {
-                String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
+                String finalAnswer = generateFinalAnswer(request, allProcessedItems, context, reactCtx);
                 return WorkflowExecutionResult.builder()
                         .paused(false)
                         .success(false)
@@ -250,7 +259,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
 
         stateStore.clearWorkflowState(runId);
-        String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
+        String finalAnswer = generateFinalAnswer(request, allProcessedItems, context, reactCtx);
         if (hasFailure) {
             return WorkflowExecutionResult.builder()
                     .paused(false)
@@ -277,7 +286,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                                      TodoItem item,
                                                      Map<String, TodoExecutionRecord> context,
                                                      List<TodoItem> allProcessedItems,
-                                                     WorkflowConfig config) {
+                                                     WorkflowConfig config,
+                                                     ReactConversationContext reactCtx) {
         String runId = request.getRun().getId();
         String userId = request.getUserId();
         TodoType type = item.getType() == null ? TodoType.TOOL_CALL : item.getType();
@@ -331,7 +341,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 return record;
             }
 
-            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context, config);
+            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context, config, reactCtx);
             if (recovery == null) {
                 return record;
             }
@@ -368,7 +378,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                                                       TodoItem item,
                                                       TodoExecutionRecord failedRecord,
                                                       Map<String, TodoExecutionRecord> context,
-                                                      WorkflowConfig config) {
+                                                      WorkflowConfig config,
+                                                      ReactConversationContext reactCtx) {
         String runId = request.getRun().getId();
         String userId = request.getUserId();
         TodoFailureCategory failureCategory = resolveFailureCategory(failedRecord);
@@ -394,10 +405,13 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         ));
         userPayload.put("context", context == null ? Map.of() : context);
 
-        List<ChatMessage> messages = List.of(
-                new SystemMessage(promptService.workflowTodoRecoverySystemPrompt()),
-                new UserMessage(safeWrite(userPayload))
-        );
+        // ── ReAct: 累积 recovery 请求到上下文 ──
+        String recoveryStage = promptService.recoveryStageInstruction();
+        String recoveryUserContent = promptService.dynamicContextPrefix() + "\n"
+                + recoveryStage + "\n" + safeWrite(userPayload);
+        reactCtx.addUserMessage(recoveryUserContent);
+
+        List<ChatMessage> messages = reactCtx.getMessages();
         RecoveryModelSelection recoveryModel = resolveRecoveryModel(request, failedRecord, config);
 
         // 设置当前 phase 并记录开始时间
@@ -418,6 +432,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
         String text = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
+
+        // ── ReAct: 累积 recovery 响应 ──
+        reactCtx.addAssistantMessage(text);
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                 recoveryModel.endpointName(),
@@ -819,7 +836,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
     private String generateFinalAnswer(WorkflowRequest request,
                                        List<TodoItem> completed,
-                                       Map<String, TodoExecutionRecord> context) {
+                                       Map<String, TodoExecutionRecord> context,
+                                       ReactConversationContext reactCtx) {
         String runId = request.getRun().getId();
         String userId = request.getUserId();
         eventService.append(runId, userId, "FINAL_ANSWER_GENERATING", Map.of(
@@ -840,23 +858,26 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         // 加载消息历史（多轮对话支持）
         String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
 
+        // ── ReAct: 使用累积上下文 + Final Answer 阶段指令 ──
+        String finalStage = promptService.finalAnswerStageInstruction();
+        String dynamicPrefix = promptService.dynamicContextPrefix();
         String userMessageContent;
         if (dialogueContext.isBlank()) {
-            userMessageContent = "当前轮次用户需求: " + nvl(request.getUserGoal())
+            userMessageContent = dynamicPrefix + "\n" + finalStage + "\n"
+                    + "当前轮次用户需求: " + nvl(request.getUserGoal())
                     + "\n执行摘要: " + safeWrite(summary)
                     + "\n执行上下文: " + safeWrite(context);
         } else {
-            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
+            userMessageContent = dynamicPrefix + "\n" + finalStage + "\n"
+                    + "历史对话压缩内容：\n" + dialogueContext
                     + "\n\n当前轮次用户需求: " + nvl(request.getUserGoal())
                     + "\n执行摘要: " + safeWrite(summary)
                     + "\n执行上下文: " + safeWrite(context)
                     + "\n\n请参考历史对话，以当前轮次用户需求为重点回答。";
         }
 
-        List<ChatMessage> messages = List.of(
-                new SystemMessage(promptService.workflowFinalSystemPrompt()),
-                new UserMessage(userMessageContent)
-        );
+        reactCtx.addUserMessage(userMessageContent);
+        List<ChatMessage> messages = reactCtx.getMessages();
 
         // 设置当前 phase 并记录开始时间
         String previousStage = AgentContext.getStage();
@@ -876,6 +897,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         long llmCompletedAt = System.currentTimeMillis();
         long llmDurationMs = llmCompletedAt - llmStartedAt;
         String answer = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
+
+        // ── ReAct: 累积 final answer 响应 ──
+        reactCtx.addAssistantMessage(answer);
 
         Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                 request.getEndpointName(),
@@ -915,7 +939,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private String generateAbortExplanation(WorkflowRequest request,
                                             TodoItem failedItem,
                                             TodoExecutionRecord failedRecord,
-                                            Map<String, TodoExecutionRecord> context) {
+                                            Map<String, TodoExecutionRecord> context,
+                                            ReactConversationContext reactCtx) {
         String runId = request.getRun().getId();
         String userId = request.getUserId();
         
@@ -936,17 +961,18 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         ));
         payload.put("completed_steps", context == null ? 0 : context.size());
 
-        String userMessage = "由于关键步骤失败，workflow 需要终止。请向用户解释：\n\n"
+        // ── ReAct: 使用累积上下文 ──
+        String userMessage = promptService.dynamicContextPrefix() + "\n"
+                + "[Stage: ABORT_EXPLANATION]\n"
+                + "由于关键步骤失败，workflow 需要终止。请向用户解释：\n\n"
                 + "1. 哪个步骤失败了\n"
                 + "2. 为什么这个步骤很关键\n"
                 + "3. 为什么不能继续给出完整结论\n\n"
                 + "失败信息: " + safeWrite(payload) + "\n\n"
                 + "请以礼貌、清晰的语气说明情况。";
 
-        List<ChatMessage> messages = List.of(
-                new SystemMessage("你是任务执行助手。当关键步骤失败时，向用户解释为什么无法完成任务。"),
-                new UserMessage(userMessage)
-        );
+        reactCtx.addUserMessage(userMessage);
+        List<ChatMessage> messages = reactCtx.getMessages();
 
         String previousStage = AgentContext.getStage();
         AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
@@ -964,6 +990,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
         }
         long llmDurationMs = System.currentTimeMillis() - llmStartedAt;
         String explanation = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
+
+        // ── ReAct: 累积 abort explanation 响应 ──
+        reactCtx.addAssistantMessage(explanation);
 
         // 记录 LLM 调用
         if (response.metadata() != null && response.metadata().tokenUsage() != null) {

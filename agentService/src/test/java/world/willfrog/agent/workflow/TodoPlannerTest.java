@@ -87,6 +87,11 @@ class TodoPlannerTest {
         lenient().when(llmRequestSnapshotBuilder.buildChatCompletionsRequest(anyString(), anyString(), anyString(), any(), any(), anyMap()))
                 .thenReturn(Map.of());
         lenient().when(promptService.todoPlannerSystemPrompt(anyString(), any(Integer.class))).thenReturn("todo-prompt");
+        // ReAct 两步规划所需的 prompt 方法
+        lenient().when(promptService.reactSystemPrompt()).thenReturn("unified-system");
+        lenient().when(promptService.planningAnalysisStageInstruction(anyString(), any(Integer.class))).thenReturn("[Stage: PLANNING_ANALYSIS]");
+        lenient().when(promptService.planningStructuredStageInstruction()).thenReturn("[Stage: PLANNING_STRUCTURED]");
+        lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(stateStore.isPlanOverride(anyString())).thenReturn(false);
         lenient().when(stateStore.loadPlan(anyString())).thenReturn(Optional.empty());
     }
@@ -95,17 +100,30 @@ class TodoPlannerTest {
     void plan_shouldGenerateTodoListAndPersist() {
         AgentRun run = run("run-1");
 
-        AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn(
+        // Step 1: 自然语言分析 response
+        AiMessage analysisMsg = mock(AiMessage.class);
+        when(analysisMsg.text()).thenReturn("经过分析，用户需要搜索平安相关的股票信息。");
+        ChatResponse analysisResp = ChatResponse.builder()
+                .aiMessage(analysisMsg)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+
+        // Step 2: 结构化 JSON response
+        AiMessage structuredMsg = mock(AiMessage.class);
+        when(structuredMsg.text()).thenReturn(
             "{\"analysis\":\"分析用户查询需求\",\"items\":[" +
             "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{\"keyword\":\"平安\"},\"reasoning\":\"需要搜索股票信息\",\"executionMode\":\"AUTO\"}" +
             "]}"
         );
-        ChatResponse response = ChatResponse.builder()
-                .aiMessage(aiMessage)
+        ChatResponse structuredResp = ChatResponse.builder()
+                .aiMessage(structuredMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
-        when(model.chat(any(List.class))).thenReturn(response);
+
+        // 两步规划：第一次返回分析，第二次返回结构化 JSON
+        when(model.chat(any(List.class)))
+                .thenReturn(analysisResp)
+                .thenReturn(structuredResp);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)
@@ -120,6 +138,8 @@ class TodoPlannerTest {
 
         assertEquals(1, plan.getItems().size());
         assertEquals("searchStock", plan.getItems().get(0).getToolName());
+        // 验证 analysis 使用了自然语言分析的结果
+        assertEquals("经过分析，用户需要搜索平安相关的股票信息。", plan.getAnalysis());
         verify(runMapper).updatePlan(eq("run-1"), eq("u1"), eq(AgentRunStatus.EXECUTING), anyString());
         verify(eventService).append(eq("run-1"), eq("u1"), eq("TODO_LIST_CREATED"), anyMap());
     }
@@ -128,20 +148,31 @@ class TodoPlannerTest {
     void plan_shouldRespectMaxTodos() {
         AgentRun run = run("run-2");
 
-        AiMessage aiMessage = mock(AiMessage.class);
-        // 返回2个 items（等于 maxTodos=2），验证正常工作
-        when(aiMessage.text()).thenReturn(
+        // Step 1: analysis
+        AiMessage analysisMsg = mock(AiMessage.class);
+        when(analysisMsg.text()).thenReturn("需要查询多个股票信息。");
+        ChatResponse analysisResp = ChatResponse.builder()
+                .aiMessage(analysisMsg)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+
+        // Step 2: structured
+        AiMessage structuredMsg = mock(AiMessage.class);
+        when(structuredMsg.text()).thenReturn(
             "{\"analysis\":\"需要查询多个股票\",\"items\":[" +
             "{\"id\":\"1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第一个股票\",\"executionMode\":\"AUTO\"},"
 +
             "{\"id\":\"2\",\"sequence\":2,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第二个股票\",\"executionMode\":\"AUTO\"}" +
             "]}"
         );
-        ChatResponse response = ChatResponse.builder()
-                .aiMessage(aiMessage)
+        ChatResponse structuredResp = ChatResponse.builder()
+                .aiMessage(structuredMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
-        when(model.chat(any(List.class))).thenReturn(response);
+
+        when(model.chat(any(List.class)))
+                .thenReturn(analysisResp)
+                .thenReturn(structuredResp);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)
@@ -161,17 +192,29 @@ class TodoPlannerTest {
     void plan_shouldFailWhenToolNotAllowed() {
         AgentRun run = run("run-3");
 
-        AiMessage aiMessage = mock(AiMessage.class);
-        when(aiMessage.text()).thenReturn(
+        // Step 1: analysis
+        AiMessage analysisMsg = mock(AiMessage.class);
+        when(analysisMsg.text()).thenReturn("尝试使用未知工具。");
+        ChatResponse analysisResp = ChatResponse.builder()
+                .aiMessage(analysisMsg)
+                .metadata(ChatResponseMetadata.builder().build())
+                .build();
+
+        // Step 2: structured with illegal tool
+        AiMessage structuredMsg = mock(AiMessage.class);
+        when(structuredMsg.text()).thenReturn(
             "{\"analysis\":\"测试非法工具\",\"items\":[" +
             "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"unknownTool\",\"params\":{},\"reasoning\":\"尝试使用非法工具\",\"executionMode\":\"AUTO\"}" +
             "]}"
         );
-        ChatResponse response = ChatResponse.builder()
-                .aiMessage(aiMessage)
+        ChatResponse structuredResp = ChatResponse.builder()
+                .aiMessage(structuredMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
-        when(model.chat(any(List.class))).thenReturn(response);
+
+        when(model.chat(any(List.class)))
+                .thenReturn(analysisResp)
+                .thenReturn(structuredResp);
 
         assertThrows(IllegalStateException.class, () -> planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)

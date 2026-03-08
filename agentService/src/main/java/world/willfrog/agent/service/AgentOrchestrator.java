@@ -39,7 +39,7 @@ public class AgentOrchestrator {
         // 1. Plan
         ChatResponse planResponse = model.chat(List.of(
                 new SystemMessage(promptService.orchestratorPlanningSystemPrompt()),
-                new UserMessage(userGoal)
+                new UserMessage(promptService.dynamicContextPrefix() + "\n" + userGoal)
         ));
         String planJson = planResponse.aiMessage().text();
         log.info("Generated Plan: {}", planJson);
@@ -56,7 +56,7 @@ public class AgentOrchestrator {
         // 3. Summarize
         ChatResponse summaryResponse = model.chat(List.of(
                 new SystemMessage(promptService.orchestratorSummarySystemPrompt()),
-                new UserMessage(executionLogs.toString())
+                new UserMessage(promptService.dynamicContextPrefix() + "\n" + executionLogs.toString())
         ));
         String summary = summaryResponse.aiMessage().text();
         log.info("Summary: {}", summary);

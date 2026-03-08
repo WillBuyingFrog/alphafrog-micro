@@ -82,7 +82,7 @@ public class PythonSemanticJudgeService {
                 payload.put("judge_attempt", attempt);
                 List<ChatMessage> messages = List.of(
                         new SystemMessage(promptService.semanticJudgeSystemPrompt()),
-                        new UserMessage(writeJson(payload))
+                        new UserMessage(promptService.dynamicContextPrefix() + "\n" + writeJson(payload))
                 );
                 String previousStage = AgentContext.getStage();
                 AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);

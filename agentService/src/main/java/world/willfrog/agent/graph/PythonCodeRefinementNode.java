@@ -250,7 +250,7 @@ public class PythonCodeRefinementNode {
         try {
             List<dev.langchain4j.data.message.ChatMessage> llmMessages = List.of(
                     new SystemMessage(systemPrompt),
-                    new UserMessage(userPrompt.toString())
+                    new UserMessage(promptService.dynamicContextPrefix() + "\n" + userPrompt.toString())
             );
             // 设置当前 phase 并记录开始时间
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
