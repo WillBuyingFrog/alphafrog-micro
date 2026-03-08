@@ -16,11 +16,11 @@ import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
@@ -95,12 +95,19 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         ReactConversationContext globalReactCtx = new ReactConversationContext();
         globalReactCtx.setSystemMessage(promptService.reactSystemPrompt());
 
+        WorkflowState existingState = stateStore.loadWorkflowState(runId)
+                .filter(state -> state.getExecutionMode() == PlanExecutionMode.DAG)
+                .orElse(null);
+
         // 3. 初始化状态
         Map<String, TodoExecutionRecord> context = new ConcurrentHashMap<>();
         Set<String> completedNodes = ConcurrentHashMap.newKeySet();
         Set<String> failedNodes = ConcurrentHashMap.newKeySet();
+        Set<String> runningNodes = ConcurrentHashMap.newKeySet();
         List<TodoItem> completedItems = new ArrayList<>();
-        AtomicInteger totalToolCalls = new AtomicInteger(0);
+        int initialToolCalls = existingState == null ? 0 : Math.max(0, existingState.getToolCallsUsed());
+        AtomicInteger totalToolCalls = new AtomicInteger(initialToolCalls);
+        toolCallCounter.set(runId, initialToolCalls);
 
         // 可变入度表（并发安全）
         Map<String, AtomicInteger> mutableInDegree = new ConcurrentHashMap<>();
@@ -122,7 +129,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             // 5. 提交初始就绪节点
             for (String readyNodeId : graph.getReadyNodes()) {
                 submitNode(readyNodeId, graph, request, globalReactCtx, context,
-                        completedNodes, failedNodes, completedItems, totalToolCalls,
+                        completedNodes, failedNodes, runningNodes, completedItems, totalToolCalls,
                         mutableInDegree, executorService, allDone,
                         parentRunId, parentUserId, parentDebugMode);
             }
@@ -164,6 +171,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 "failed_nodes", failedNodes.size(),
                 "total_tool_calls", totalToolCalls.get()
         ));
+        stateStore.clearWorkflowState(runId);
 
         return WorkflowExecutionResult.builder()
                 .success(!hasFailure)
@@ -182,6 +190,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                             Map<String, TodoExecutionRecord> context,
                             Set<String> completedNodes,
                             Set<String> failedNodes,
+                            Set<String> runningNodes,
                             List<TodoItem> completedItems,
                             AtomicInteger totalToolCalls,
                             Map<String, AtomicInteger> mutableInDegree,
@@ -205,6 +214,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
                 String runId = request.getRun().getId();
                 String userId = request.getUserId();
+                runningNodes.add(nodeId);
+                saveDagWorkflowState(runId, completedItems, context, totalToolCalls, completedNodes, runningNodes);
 
                 eventService.append(runId, userId, "DAG_NODE_STARTED", Map.of(
                         "node_id", nodeId,
@@ -213,25 +224,29 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 ));
 
                 // 执行节点
-                TodoExecutionRecord record = executeDagNode(request, item, context);
+                ReactConversationContext branchCtx = globalReactCtx.branch();
+                TodoExecutionRecord record = executeDagNode(request, item, context, branchCtx);
                 item.setCompletedAt(Instant.now());
                 item.setResultSummary(nvl(record.getSummary()));
                 item.setOutput(nvl(record.getOutput()));
-                totalToolCalls.incrementAndGet();
+                int toolCallsDelta = Math.max(0, record.getToolCallsUsed());
+                if (toolCallsDelta > 0) {
+                    totalToolCalls.addAndGet(toolCallsDelta);
+                    toolCallCounter.increment(runId, toolCallsDelta);
+                }
 
                 if (record.isSuccess()) {
                     item.setStatus(TodoStatus.COMPLETED);
                     completedNodes.add(nodeId);
                     context.put(nodeId, record);
+                    runningNodes.remove(nodeId);
                     synchronized (completedItems) {
                         completedItems.add(item);
                     }
 
-                    // 同步合并 Observation 到 Global Context
-                    synchronized (globalReactCtx) {
-                        globalReactCtx.addUserMessage("[Observation] " + nvl(item.getId())
-                                + " 完成: " + preview(record.getSummary()));
-                    }
+                    mergeBranchObservation(globalReactCtx, branchCtx,
+                            "[Observation] " + nvl(item.getId()) + " 完成: " + preview(record.getSummary()));
+                    saveDagWorkflowState(runId, completedItems, context, totalToolCalls, completedNodes, runningNodes);
 
                     eventService.append(runId, userId, "DAG_NODE_COMPLETED", Map.of(
                             "node_id", nodeId,
@@ -244,7 +259,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                         AtomicInteger degree = mutableInDegree.get(successor);
                         if (degree != null && degree.decrementAndGet() == 0) {
                             submitNode(successor, graph, request, globalReactCtx, context,
-                                    completedNodes, failedNodes, completedItems, totalToolCalls,
+                                    completedNodes, failedNodes, runningNodes, completedItems, totalToolCalls,
                                     mutableInDegree, executorService, allDone,
                                     parentRunId, parentUserId, parentDebugMode);
                         }
@@ -253,11 +268,10 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     item.setStatus(TodoStatus.FAILED);
                     failedNodes.add(nodeId);
                     context.put(nodeId, record);
-
-                    synchronized (globalReactCtx) {
-                        globalReactCtx.addUserMessage("[Observation] " + nvl(item.getId())
-                                + " 失败: " + preview(record.getSummary()));
-                    }
+                    runningNodes.remove(nodeId);
+                    mergeBranchObservation(globalReactCtx, branchCtx,
+                            "[Observation] " + nvl(item.getId()) + " 失败: " + preview(record.getSummary()));
+                    saveDagWorkflowState(runId, completedItems, context, totalToolCalls, completedNodes, runningNodes);
 
                     eventService.append(runId, userId, "DAG_NODE_FAILED", Map.of(
                             "node_id", nodeId,
@@ -271,6 +285,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             } catch (Exception e) {
                 log.error("DAG node execution error: nodeId={}", nodeId, e);
                 failedNodes.add(nodeId);
+                runningNodes.remove(nodeId);
+                saveDagWorkflowState(request.getRun().getId(), completedItems, context, totalToolCalls, completedNodes, runningNodes);
                 skipDependentNodes(nodeId, graph, failedNodes, allDone, mutableInDegree);
             } finally {
                 allDone.countDown();
@@ -298,10 +314,15 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
     private TodoExecutionRecord executeDagNode(LinearWorkflowExecutor.WorkflowRequest request,
                                                TodoItem item,
-                                               Map<String, TodoExecutionRecord> context) {
+                                               Map<String, TodoExecutionRecord> context,
+                                               ReactConversationContext branchCtx) {
         TodoType type = item.getType() == null ? TodoType.TOOL_CALL : item.getType();
+        branchCtx.addUserMessage("[Branch] 执行节点: " + nvl(item.getId())
+                + " type=" + type.name()
+                + " tool=" + nvl(item.getToolName()));
 
         if (type == TodoType.THOUGHT) {
+            branchCtx.addAssistantMessage(nvl(item.getReasoning()));
             return TodoExecutionRecord.builder()
                     .success(true)
                     .output(nvl(item.getReasoning()))
@@ -311,6 +332,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         }
 
         if (type != TodoType.TOOL_CALL) {
+            branchCtx.addAssistantMessage("Unsupported type: " + type);
             return TodoExecutionRecord.builder()
                     .success(false)
                     .output("DAG executor only supports TOOL_CALL and THOUGHT types")
@@ -328,6 +350,9 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         String toolName = nvl(item.getToolName());
         try {
             ToolRouter.ToolInvocationResult toolResult = toolRouter.invokeWithMeta(toolName, resolvedParams);
+            branchCtx.addAssistantMessage(toolResult.isSuccess()
+                    ? preview(toolResult.getOutput())
+                    : "Tool call failed: " + preview(toolResult.getOutput()));
             return TodoExecutionRecord.builder()
                     .success(toolResult.isSuccess())
                     .output(nvl(toolResult.getOutput()))
@@ -339,6 +364,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     .build();
         } catch (Exception e) {
             log.warn("DAG node tool call failed: nodeId={}, tool={}, error={}", item.getId(), toolName, e.getMessage());
+            branchCtx.addAssistantMessage("Tool call exception: " + e.getMessage());
             return TodoExecutionRecord.builder()
                     .success(false)
                     .output("Exception: " + e.getMessage())
@@ -354,6 +380,11 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                                           Map<String, TodoExecutionRecord> context,
                                           ReactConversationContext reactCtx) {
         try {
+            ChatModel model = request.getModel();
+            if (model == null) {
+                log.warn("Failed to generate DAG final answer: model is null");
+                return "执行完成，但生成最终回答时缺少模型。";
+            }
             String stageInstruction = promptService.finalAnswerStageInstruction();
             StringBuilder sb = new StringBuilder();
             sb.append(promptService.dynamicContextPrefix()).append("\n");
@@ -371,7 +402,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
             synchronized (reactCtx) {
                 reactCtx.addUserMessage(sb.toString());
-                ChatResponse response = request.getModel().chat(reactCtx.getMessages());
+                ChatResponse response = model.chat(reactCtx.getMessages());
                 String text = response.aiMessage() == null ? "" : nvl(response.aiMessage().text());
                 reactCtx.addAssistantMessage(text);
                 return text;
@@ -389,5 +420,36 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
     private String nvl(String text) {
         return text == null ? "" : text;
+    }
+
+    private void mergeBranchObservation(ReactConversationContext globalReactCtx,
+                                        ReactConversationContext branchCtx,
+                                        String observation) {
+        if (observation == null || observation.isBlank()) {
+            return;
+        }
+        branchCtx.addUserMessage(observation);
+        synchronized (globalReactCtx) {
+            globalReactCtx.addUserMessage(observation);
+        }
+    }
+
+    private void saveDagWorkflowState(String runId,
+                                      List<TodoItem> completedItems,
+                                      Map<String, TodoExecutionRecord> context,
+                                      AtomicInteger totalToolCalls,
+                                      Set<String> completedNodes,
+                                      Set<String> runningNodes) {
+        synchronized (completedItems) {
+            stateStore.saveWorkflowState(runId, WorkflowState.builder()
+                    .executionMode(PlanExecutionMode.DAG)
+                    .completedItems(new ArrayList<>(completedItems))
+                    .context(new LinkedHashMap<>(context))
+                    .toolCallsUsed(totalToolCalls.get())
+                    .savedAt(Instant.now())
+                    .completedNodeIds(new HashSet<>(completedNodes))
+                    .runningNodeIds(new HashSet<>(runningNodes))
+                    .build());
+        }
     }
 }

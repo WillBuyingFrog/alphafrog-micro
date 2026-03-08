@@ -25,9 +25,11 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.atLeastOnce;
+import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
@@ -109,6 +111,9 @@ class DagWorkflowExecutorTest {
 
         assertTrue(result.isSuccess());
         assertEquals(1, result.getCompletedItems().size());
+        verify(stateStore, atLeastOnce()).saveWorkflowState(eq("run-single"), any());
+        verify(stateStore).clearWorkflowState("run-single");
+        verify(toolCallCounter).increment("run-single", 1);
     }
 
     @Test
@@ -222,6 +227,7 @@ class DagWorkflowExecutorTest {
 
         assertTrue(result.isSuccess());
         assertEquals(1, result.getCompletedItems().size());
+        verify(toolCallCounter, never()).increment(eq("run-thought"), anyInt());
     }
 
     @Test
@@ -244,6 +250,30 @@ class DagWorkflowExecutorTest {
 
         verify(eventService).append(eq("run-events"), eq("u1"), eq("DAG_EXECUTION_STARTED"), anyMap());
         verify(eventService).append(eq("run-events"), eq("u1"), eq("DAG_EXECUTION_COMPLETED"), anyMap());
+    }
+
+    @Test
+    void execute_failedNodeStillPersistsDagState() {
+        when(toolRouter.invokeWithMeta(eq("searchStock"), anyMap())).thenReturn(
+                ToolRouter.ToolInvocationResult.builder()
+                        .success(false)
+                        .output("error")
+                        .build()
+        );
+
+        TodoPlan plan = TodoPlan.builder().items(List.of(
+                TodoItem.builder()
+                        .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                        .toolName("searchStock").params(Map.of("keyword", "沪深300"))
+                        .build()
+        )).build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-state-fail", plan));
+
+        assertFalse(result.isSuccess());
+        verify(stateStore, atLeastOnce()).saveWorkflowState(eq("run-state-fail"), any());
+        verify(stateStore).clearWorkflowState("run-state-fail");
+        verify(toolCallCounter).increment("run-state-fail", 1);
     }
 
     private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan) {
