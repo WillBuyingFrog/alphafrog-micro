@@ -91,6 +91,13 @@ public class TodoPlanner {
                 throw new IllegalStateException("todo_plan_empty");
             }
 
+            // 设置执行模式（从请求传入，用于 DAG/Linear 选择）
+            PlanExecutionMode mode = request.getExecutionMode();
+            if (mode == null) {
+                mode = PlanExecutionMode.AUTO;
+            }
+            todoPlan.setExecutionMode(mode);
+
             String planJson = safeWrite(todoPlan);
             runMapper.updatePlan(runId, userId, AgentRunStatus.EXECUTING, planJson);
             stateStore.recordPlan(runId, planJson, true);
@@ -585,5 +592,6 @@ public class TodoPlanner {
         private String endpointName;
         private String endpointBaseUrl;
         private String modelName;
+        private PlanExecutionMode executionMode;
     }
 }

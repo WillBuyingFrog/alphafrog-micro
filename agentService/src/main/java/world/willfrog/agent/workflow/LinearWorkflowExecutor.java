@@ -677,10 +677,17 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     .build();
         }
 
+        log.info("executeItem: Resolving params for todo={}, tool={}, context keys={}", 
+                item.getId(), item.getToolName(), context != null ? context.keySet() : "null");
         Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
+        log.info("executeItem: Resolved params for todo={}, original params={}, resolved params={}", 
+                item.getId(), item.getParams(), resolvedParams);
+        
         String toolName = nvl(item.getToolName());
         List<Map<String, String>> unresolvedPlaceholders = collectUnresolvedPlaceholderRefs(resolvedParams);
         if (!unresolvedPlaceholders.isEmpty()) {
+            log.warn("executeItem: Unresolved placeholders detected for todo={}: {}", 
+                    item.getId(), unresolvedPlaceholders);
             Map<String, String> first = unresolvedPlaceholders.get(0);
             String errorMessage = "PARAM_PLACEHOLDER_UNRESOLVED: tool=" + toolName
                     + ", param=" + nvl(first.get("paramKey"))

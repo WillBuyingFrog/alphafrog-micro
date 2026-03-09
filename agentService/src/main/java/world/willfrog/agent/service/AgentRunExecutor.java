@@ -20,6 +20,7 @@ import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
 import world.willfrog.agent.workflow.WorkflowExecutor;
@@ -155,6 +156,16 @@ public class AgentRunExecutor {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }
 
+            // 解析执行模式
+            String executionModeStr = eventService.extractExecutionMode(run.getExt());
+            PlanExecutionMode executionMode;
+            try {
+                executionMode = PlanExecutionMode.valueOf(executionModeStr.toUpperCase());
+            } catch (Exception e) {
+                executionMode = PlanExecutionMode.AUTO;
+            }
+            log.info("Run {} execution mode: {}", runId, executionMode);
+
             var todoPlan = todoPlanner.plan(TodoPlanner.PlanRequest.builder()
                     .run(run)
                     .userId(userId)
@@ -164,6 +175,7 @@ public class AgentRunExecutor {
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
                     .modelName(modelName)
+                    .executionMode(executionMode)
                     .build());
 
             // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）

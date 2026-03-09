@@ -268,6 +268,20 @@ public class AgentEventService {
         return extractBooleanFromExt(extJson, "debug_mode", "debugMode", "debug_mode");
     }
 
+    /**
+     * 从 ext JSON 中提取执行模式。
+     *
+     * @param extJson ext 字段 JSON
+     * @return execution_mode 字段值，默认为 AUTO
+     */
+    public String extractExecutionMode(String extJson) {
+        String mode = extractField(extJson, "execution_mode");
+        if (mode == null || mode.isBlank()) {
+            mode = extractField(extJson, "executionMode");
+        }
+        return mode == null || mode.isBlank() ? "AUTO" : mode;
+    }
+
     public List<String> extractOpenRouterProviderOrder(String extJson) {
         if (extJson == null || extJson.isBlank()) {
             return List.of();
