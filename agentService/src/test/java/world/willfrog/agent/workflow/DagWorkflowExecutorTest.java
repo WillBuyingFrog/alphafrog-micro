@@ -12,6 +12,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentObservabilityService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -38,9 +39,11 @@ class DagWorkflowExecutorTest {
     @BeforeEach
     void setUp() {
         ReactTodoExecutor reactTodoExecutor = mock(ReactTodoExecutor.class);
+        AgentObservabilityService observabilityService = mock(AgentObservabilityService.class);
         executor = new DagWorkflowExecutor(
                 eventService,
-                reactTodoExecutor
+                reactTodoExecutor,
+                observabilityService
         );
 
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);

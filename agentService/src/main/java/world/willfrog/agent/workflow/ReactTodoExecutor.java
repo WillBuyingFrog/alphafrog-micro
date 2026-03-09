@@ -6,14 +6,17 @@ import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import dev.langchain4j.model.output.TokenUsage;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
+import java.time.Instant;
 import java.util.*;
 
 /**
@@ -27,8 +30,30 @@ public class ReactTodoExecutor {
     private final AgentPromptService promptService;
     private final ToolRouter toolRouter;
     private final ObjectMapper objectMapper;
+    private final AgentObservabilityService observabilityService;
 
     public TodoExecutionRecord execute(String description, TodoExecutionContext context, ChatModel model) {
+        return executeWithObservability(description, context, model, null, null);
+    }
+    
+    /**
+     * 执行 Todo 并记录完整的可观测性数据。
+     * 
+     * @param description 任务描述
+     * @param context 执行上下文
+     * @param model LLM 模型
+     * @param runId Run ID（用于观测）
+     * @param phase 执行阶段（用于观测）
+     * @return 执行记录
+     */
+    public TodoExecutionRecord executeWithObservability(String description, 
+                                                         TodoExecutionContext context, 
+                                                         ChatModel model,
+                                                         String runId,
+                                                         String phase) {
+        long llmStartTime = System.currentTimeMillis();
+        String llmTraceId = null;
+        
         try {
             // 构建 ReAct 消息
             List<ChatMessage> messages = buildMessages(description, context);
@@ -36,6 +61,23 @@ public class ReactTodoExecutor {
             // 调用 LLM 决策
             ChatResponse response = model.chat(messages);
             String llmOutput = response.aiMessage() != null ? response.aiMessage().text() : "";
+            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
+            
+            // 记录 LLM 调用
+            if (runId != null && !runId.isBlank()) {
+                TokenUsage tokenUsage = response.tokenUsage();
+                llmTraceId = observabilityService.recordLlmCall(
+                        runId,
+                        phase != null ? phase : "dag_execution",
+                        tokenUsage,
+                        llmDurationMs,
+                        null, // endpointName - 从上下文中获取
+                        null, // modelName
+                        null, // errorMessage
+                        buildRequestSnapshot(messages, description),
+                        llmOutput
+                );
+            }
             
             // 解析决策
             LlmDecision decision = parseDecision(llmOutput);
@@ -46,20 +88,49 @@ public class ReactTodoExecutor {
                         .success(true)
                         .output(decision.getAnswer())
                         .summary("Completed without tool")
+                        .llmTraceId(llmTraceId)
                         .build();
             }
             
             // 执行工具
-            return executeTool(decision, context);
+            TodoExecutionRecord record = executeTool(decision, context, runId, phase);
+            record.setLlmTraceId(llmTraceId);
+            return record;
             
         } catch (Exception e) {
             log.error("Failed to execute todo: {}", description, e);
+            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
+            
+            // 记录失败的 LLM 调用
+            if (runId != null && !runId.isBlank()) {
+                observabilityService.recordLlmCall(
+                        runId,
+                        phase != null ? phase : "dag_execution",
+                        null,
+                        llmDurationMs,
+                        null,
+                        null,
+                        e.getMessage(),
+                        null,
+                        null
+                );
+            }
+            
             return TodoExecutionRecord.builder()
                     .success(false)
                     .output("")
                     .summary("Error: " + e.getMessage())
+                    .llmTraceId(llmTraceId)
                     .build();
         }
+    }
+    
+    private Map<String, Object> buildRequestSnapshot(List<ChatMessage> messages, String description) {
+        Map<String, Object> snapshot = new HashMap<>();
+        snapshot.put("stage", "dag_node_decision");
+        snapshot.put("description", description);
+        snapshot.put("messageCount", messages.size());
+        return snapshot;
     }
 
     private List<ChatMessage> buildMessages(String description, TodoExecutionContext context) {
@@ -136,7 +207,13 @@ public class ReactTodoExecutor {
         }
     }
 
-    private TodoExecutionRecord executeTool(LlmDecision decision, TodoExecutionContext context) {
+    private TodoExecutionRecord executeTool(LlmDecision decision, 
+                                             TodoExecutionContext context,
+                                             String runId,
+                                             String phase) {
+        long toolStartTime = System.currentTimeMillis();
+        String toolName = decision.getToolName();
+        
         try {
             Map<String, Object> params = new HashMap<>(decision.getParams());
             
@@ -145,21 +222,66 @@ public class ReactTodoExecutor {
                 params.put("_dataset_refs", context.getDatasetRefs());
             }
             
-            String result = toolRouter.invoke(decision.getToolName(), params);
+            String result = toolRouter.invoke(toolName, params);
+            long toolDurationMs = System.currentTimeMillis() - toolStartTime;
             boolean success = !result.contains("\"ok\":false");
+            
+            // 记录工具调用观测数据
+            if (runId != null && !runId.isBlank()) {
+                recordToolCallObservability(runId, phase, toolName, params, result, 
+                        toolDurationMs, success, null);
+            }
             
             return TodoExecutionRecord.builder()
                     .success(success)
                     .output(result)
                     .summary(success ? "Success" : "Failed")
+                    .toolName(toolName)
+                    .toolParams(params)
+                    .toolDurationMs(toolDurationMs)
                     .build();
             
         } catch (Exception e) {
+            long toolDurationMs = System.currentTimeMillis() - toolStartTime;
+            
+            // 记录失败的工具调用
+            if (runId != null && !runId.isBlank()) {
+                recordToolCallObservability(runId, phase, toolName, decision.getParams(), "",
+                        toolDurationMs, false, e.getMessage());
+            }
+            
             return TodoExecutionRecord.builder()
                     .success(false)
                     .output("")
                     .summary("Tool error: " + e.getMessage())
+                    .toolName(toolName)
+                    .toolDurationMs(toolDurationMs)
                     .build();
+        }
+    }
+    
+    private void recordToolCallObservability(String runId, String phase, String toolName,
+                                              Map<String, Object> params, String output,
+                                              long durationMs, boolean success, String errorMessage) {
+        try {
+            observabilityService.recordToolCall(
+                    runId,
+                    phase != null ? phase : "dag_execution",
+                    toolName,
+                    params,
+                    output,
+                    durationMs,
+                    success,
+                    false, // cacheEligible
+                    false, // cacheHit
+                    null,  // cacheKey
+                    null,  // cacheSource
+                    0L,    // cacheTtlRemainingMs
+                    0L,    // estimatedSavedDurationMs
+                    errorMessage
+            );
+        } catch (Exception e) {
+            log.warn("Failed to record tool call observability: {}", e.getMessage());
         }
     }
 
@@ -196,5 +318,13 @@ public class ReactTodoExecutor {
         private boolean success;
         private String output;
         private String summary;
+        
+        // 观测数据字段
+        private String llmTraceId;
+        private String toolName;
+        private Map<String, Object> toolParams;
+        private Long toolDurationMs;
+        private Instant startedAt;
+        private Instant completedAt;
     }
 }
