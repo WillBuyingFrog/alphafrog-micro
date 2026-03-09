@@ -199,7 +199,11 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         }
         
         // 等待所有节点完成
-        allDone.get(30, TimeUnit.MINUTES);
+        try {
+            allDone.get(30, TimeUnit.MINUTES);
+        } catch (ExecutionException | TimeoutException e) {
+            throw new RuntimeException("DAG execution failed", e);
+        }
         
         // 按原始顺序返回结果
         List<ReactTodoExecutor.TodoExecutionRecord> orderedResults = new ArrayList<>();
