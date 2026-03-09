@@ -65,12 +65,12 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
         try {
             // 并行执行 DAG
-            List<TodoExecutionRecord> results = executeDagParallel(
+            List<ReactTodoExecutor.TodoExecutionRecord> results = executeDagParallel(
                     graph, sharedContext, request
             );
 
             // 检查是否有失败
-            Optional<TodoExecutionRecord> failed = results.stream()
+            Optional<ReactTodoExecutor.TodoExecutionRecord> failed = results.stream()
                     .filter(r -> !r.isSuccess())
                     .findFirst();
 
@@ -149,7 +149,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                             buildTodoContext(item, sharedContext, request);
                     
                     // 执行节点
-                    TodoExecutionRecord record = reactTodoExecutor.execute(
+                    ReactTodoExecutor.TodoExecutionRecord record = reactTodoExecutor.execute(
                             item.getDescription(),
                             todoContext,
                             request.getModel()
