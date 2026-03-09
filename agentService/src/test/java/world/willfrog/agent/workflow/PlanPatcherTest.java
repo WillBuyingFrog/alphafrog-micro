@@ -179,7 +179,7 @@ class PlanPatcherTest {
             plan.getItems().add(TodoItem.builder()
                     .id(id)
                     .sequence(seq++)
-                    .type(TodoType.TOOL_CALL)
+                    .description("")
                     .toolName("searchStock")
                     .params(new LinkedHashMap<>(Map.of("keyword", "k")))
                     .status(TodoStatus.PENDING)

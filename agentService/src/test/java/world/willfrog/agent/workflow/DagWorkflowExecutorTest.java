@@ -16,6 +16,7 @@ import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,28 +55,15 @@ class DagWorkflowExecutorTest {
     private ChatModel model;
 
     private DagWorkflowExecutor executor;
-    private DagBuilder dagBuilder;
-    private TodoParamResolver paramResolver;
 
     @BeforeEach
     void setUp() {
-        dagBuilder = new DagBuilder();
-        paramResolver = new TodoParamResolver();
+        ReactTodoExecutor reactTodoExecutor = mock(ReactTodoExecutor.class);
         executor = new DagWorkflowExecutor(
                 eventService,
-                promptService,
-                toolRouter,
-                stateStore,
-                observabilityService,
-                dagBuilder,
-                toolCallCounter,
-                paramResolver,
-                new ObjectMapper()
+                reactTodoExecutor
         );
 
-        lenient().when(promptService.reactSystemPrompt()).thenReturn("unified-system");
-        lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]");
-        lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);
 
         ChatResponse response = mockResponse("完成");
@@ -102,7 +90,7 @@ class DagWorkflowExecutorTest {
 
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                 .build());
 
@@ -127,11 +115,11 @@ class DagWorkflowExecutorTest {
 
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                 .build());
         items.add(TodoItem.builder()
-                .id("todo_2").sequence(2).type(TodoType.TOOL_CALL)
+                .id("todo_2").sequence(2).description("")
                 .toolName("searchStock").params(Map.of("keyword", "中证500"))
                 .build());
 
@@ -153,11 +141,11 @@ class DagWorkflowExecutorTest {
 
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                 .build());
         items.add(TodoItem.builder()
-                .id("todo_2").sequence(2).type(TodoType.TOOL_CALL)
+                .id("todo_2").sequence(2).description("")
                 .toolName("searchStock").params(Map.of("keyword", "结果"))
                 .dependsOn(List.of("todo_1"))
                 .build());
@@ -180,11 +168,11 @@ class DagWorkflowExecutorTest {
 
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                 .build());
         items.add(TodoItem.builder()
-                .id("todo_2").sequence(2).type(TodoType.TOOL_CALL)
+                .id("todo_2").sequence(2).description("")
                 .toolName("searchStock").params(Map.of("keyword", "依赖"))
                 .dependsOn(List.of("todo_1"))
                 .build());
@@ -199,11 +187,11 @@ class DagWorkflowExecutorTest {
     void execute_circularDependencyFailsGracefully() {
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").dependsOn(List.of("todo_2"))
                 .build());
         items.add(TodoItem.builder()
-                .id("todo_2").sequence(2).type(TodoType.TOOL_CALL)
+                .id("todo_2").sequence(2).description("")
                 .toolName("searchStock").dependsOn(List.of("todo_1"))
                 .build());
 
@@ -218,7 +206,7 @@ class DagWorkflowExecutorTest {
     void execute_thoughtNodesSucceedImmediately() {
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.THOUGHT)
+                .id("todo_1").sequence(1).description("")
                 .reasoning("思考步骤")
                 .build());
 
@@ -241,7 +229,7 @@ class DagWorkflowExecutorTest {
 
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
-                .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                .id("todo_1").sequence(1).description("")
                 .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                 .build());
 
@@ -263,7 +251,7 @@ class DagWorkflowExecutorTest {
 
         TodoPlan plan = TodoPlan.builder().items(List.of(
                 TodoItem.builder()
-                        .id("todo_1").sequence(1).type(TodoType.TOOL_CALL)
+                        .id("todo_1").sequence(1).description("")
                         .toolName("searchStock").params(Map.of("keyword", "沪深300"))
                         .build()
         )).build();
@@ -276,15 +264,15 @@ class DagWorkflowExecutorTest {
         verify(toolCallCounter).increment("run-state-fail", 1);
     }
 
-    private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan) {
+    private WorkflowRequest request(String runId, TodoPlan plan) {
         AgentRun run = new AgentRun();
         run.setId(runId);
         run.setUserId("u1");
-        return LinearWorkflowExecutor.WorkflowRequest.builder()
+        return WorkflowRequest.builder()
                 .run(run)
                 .userId("u1")
                 .userGoal("test goal")
-                .todoPlan(plan)
+                .plan(plan)
                 .model(model)
                 .endpointName("ep")
                 .endpointBaseUrl("base")

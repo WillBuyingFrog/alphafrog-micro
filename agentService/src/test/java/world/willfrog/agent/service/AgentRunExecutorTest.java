@@ -16,7 +16,7 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
 import world.willfrog.agent.workflow.TodoPlanner;
@@ -58,8 +58,6 @@ class AgentRunExecutorTest {
     @Mock
     private TodoPlanner todoPlanner;
     @Mock
-    private LinearWorkflowExecutor workflowExecutor;
-    @Mock
     private WorkflowExecutorFactory workflowExecutorFactory;
     @Mock
     private ChatModel chatLanguageModel;
@@ -80,7 +78,6 @@ class AgentRunExecutorTest {
                 observabilityService,
                 creditService,
                 todoPlanner,
-                workflowExecutor,
                 workflowExecutorFactory,
                 messageService,
                 new ObjectMapper(),

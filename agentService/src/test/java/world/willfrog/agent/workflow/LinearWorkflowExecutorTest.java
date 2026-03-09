@@ -28,6 +28,7 @@ import world.willfrog.agent.service.AgentContextCompressor;
 import world.willfrog.agent.service.AgentAiServiceFactory;
 import world.willfrog.agent.service.AgentLlmResolver;
 import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.List;
 import java.util.Map;
@@ -494,15 +495,15 @@ class LinearWorkflowExecutorTest {
         verify(patchPlanner, times(1)).generatePatch(any(world.willfrog.agent.service.ReactConversationContext.class), any(), any(), anyMap(), any());
     }
 
-    private LinearWorkflowExecutor.WorkflowRequest request(String runId, TodoPlan plan, AgentLlmProperties properties) {
+    private WorkflowRequest request(String runId, TodoPlan plan, AgentLlmProperties properties) {
         AgentRun run = new AgentRun();
         run.setId(runId);
         run.setUserId("u1");
-        return LinearWorkflowExecutor.WorkflowRequest.builder()
+        return WorkflowRequest.builder()
                 .run(run)
                 .userId("u1")
                 .userGoal("goal")
-                .todoPlan(plan)
+                .plan(plan)
                 .model(model)
                 .toolSpecifications(List.of(
                         ToolSpecification.builder().name("searchStock").description("d").build(),
@@ -520,7 +521,7 @@ class LinearWorkflowExecutorTest {
             plan.getItems().add(TodoItem.builder()
                     .id("todo_" + i)
                     .sequence(i)
-                    .type(TodoType.TOOL_CALL)
+                    .description("")
                     .toolName("searchStock")
                     .params(Map.of("keyword", "k" + i))
                     .executionMode(ExecutionMode.AUTO)
@@ -535,7 +536,7 @@ class LinearWorkflowExecutorTest {
         plan.getItems().add(TodoItem.builder()
                 .id(todoId)
                 .sequence(1)
-                .type(TodoType.TOOL_CALL)
+                .description("")
                 .toolName("executePython")
                 .params(Map.of(
                         "dataset_ids", "d1",
