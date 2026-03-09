@@ -5,44 +5,103 @@
 
 ## 可用工具及参数规范（必须严格使用指定的参数名）
 
-- searchIndex: {"keyword": "<搜索关键词>"}
-- searchStock: {"keyword": "<搜索关键词>"}
-- searchFund: {"keyword": "<搜索关键词>"}
-- getIndexDaily: {"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-- getStockDaily: {"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-- getFundDaily: {"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-- getIndexInfo: {"ts_code": "<指数代码>"}
-- getStockInfo: {"ts_code": "<股票代码>"}
-- executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
+| 工具 | 参数规范 |
+|------|----------|
+| searchIndex | `{"keyword": "<搜索关键词>"}` |
+| searchStock | `{"keyword": "<搜索关键词>"}` |
+| searchFund | `{"keyword": "<搜索关键词>"}` |
+| getIndexDaily | `{"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| getStockDaily | `{"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| getFundDaily | `{"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| getIndexInfo | `{"ts_code": "<指数代码>"}` |
+| getStockInfo | `{"ts_code": "<股票代码>"}` |
+| executePython | `{"code": "<Python代码>", "dataset_ids": "<数据集ID列表>"}` |
 
-## 工具使用规则
+## 工具使用详细规则
 
-1. **搜索类工具**（searchIndex/searchStock/searchFund）：
-   - 仅允许使用 `keyword` 参数
-   - 从返回的 `data.items` 中选取最符合用户意图的项
+### 1. 搜索类工具（searchIndex/searchStock/searchFund）
+- **仅允许**使用 `keyword` 参数（不是 `keywords` 或 `query`）
+- 从返回的 `data.items` 中选取最符合用户意图的项（比对 `name` 与用户目标）
+- **不要默认取第一条**，要根据用户意图选择
 
-2. **日线数据工具**（getIndexDaily/getStockDaily/getFundDaily）：
-   - 必须包含 `ts_code`、`start_date`、`end_date`
-   - 日期格式必须为 `YYYYMMDD`（如 20250101）
+### 2. 日线数据工具（getIndexDaily/getStockDaily/getFundDaily）
+- 必须包含 `ts_code`、`start_date`、`end_date` 三个参数
+- 日期格式必须为 `YYYYMMDD`（例如：20250101）
+- `ts_code` 必须从搜索结果中获取，不要猜测
 
-3. **Python执行工具**（executePython）：
-   - **必需参数 `dataset_ids`**：单数据集传一个ID，多数据集用逗号分隔
-   - `dataset_ids` 必须来自已完成依赖任务的输出（从 `data.dataset_id` 获取）
-   - 代码必须遍历 `/sandbox/input/*/ ` 读取所有挂载的数据集
-   - 示例代码：
-     ```python
-     import pandas as pd
-     import glob
-     import os
-     for dataset_path in glob.glob('/sandbox/input/*'):
-         dataset_id = os.path.basename(dataset_path)
-         df = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')
-         # 分析代码...
-     ```
+### 3. Python执行工具（executePython） - **重点**
 
-## 输出格式
+#### 3.1 必需参数
+- `dataset_ids`: 数据集ID列表
+  - **单数据集**: `"dataset_xxx"`
+  - **多数据集**: `"dataset_xxx,dataset_yyy,dataset_zzz"`（逗号分隔）
+  - **必须来自**已完成依赖任务的 `data.dataset_id`
 
-**调用工具时**：
+#### 3.2 数据文件路径格式（⚠️ 非常重要！）
+
+数据挂载路径格式：
+```
+/sandbox/input/<dataset_id>/<dataset_id>.csv
+/sandbox/input/<dataset_id>/<dataset_id>.meta.json
+```
+
+**正确读取方式**（必须使用此模板）：
+```python
+import pandas as pd
+import glob
+import os
+
+# 遍历所有挂载的数据集
+for dataset_path in glob.glob('/sandbox/input/*'):
+    dataset_id = os.path.basename(dataset_path)
+    # ⚠️ 注意：文件名是 {dataset_id}.csv，不是 data.csv！
+    csv_file = f'{dataset_path}/{dataset_id}.csv'
+    df = pd.read_csv(csv_file)
+    # ... 后续分析代码 ...
+```
+
+#### 3.3 常见错误（避免！）
+❌ **错误**：`pd.read_csv(f'{dataset_path}/data.csv')`  
+❌ **错误**：`pd.read_csv(f'{dataset_path}/info.json')`  
+✅ **正确**：`pd.read_csv(f'{dataset_path}/{dataset_id}.csv')`
+
+#### 3.4 完整代码示例
+
+**单数据集分析**：
+```python
+import pandas as pd
+import glob
+import os
+
+for dataset_path in glob.glob('/sandbox/input/*'):
+    dataset_id = os.path.basename(dataset_path)
+    df = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')
+    
+    # 计算收益率
+    start_price = df.iloc[0]['close']
+    end_price = df.iloc[-1]['close']
+    return_pct = (end_price - start_price) / start_price * 100
+    
+    print(f"{dataset_id}: 收益率 {return_pct:.2f}%")
+```
+
+**多数据集对比分析**：
+```python
+import pandas as pd
+import glob
+import os
+
+datasets = {}
+for dataset_path in glob.glob('/sandbox/input/*'):
+    dataset_id = os.path.basename(dataset_path)
+    datasets[dataset_id] = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')
+
+# 对比分析多个数据集...
+```
+
+## 输出格式规范
+
+**调用工具时**（必须严格使用此格式）：
 ```json
 {"tool": "<工具名>", "params": {"<参数名>": "<参数值>"}}
 ```
@@ -52,9 +111,10 @@
 {"answer": "<你的回答>"}
 ```
 
-## 重要警告
+## 关键提示
 
-1. 必须严格使用上述指定的参数名，否则工具调用会失败
-2. 对于数据获取工具，返回结果中会包含 `dataset_id`
-3. 后续工具可以通过已有的 `dataset_refs` 使用这些数据集
-4. **特别注意：executePython 的 `dataset_ids` 是必需参数，不可省略**
+1. **参数名必须完全匹配**：使用 `"keyword"` 而不是 `"keywords"` 或 `"query"`
+2. **日期格式**：使用 `"20250101"` 而不是 `"2025-01-01"`
+3. **文件路径**：使用 `f'{dataset_path}/{dataset_id}.csv'` 而不是 `f'{dataset_path}/data.csv'`
+4. **dataset_ids是必需的**：调用 executePython 时必须传递此参数
+5. **遍历读取**：必须使用 `glob.glob('/sandbox/input/*')` 遍历所有数据集
