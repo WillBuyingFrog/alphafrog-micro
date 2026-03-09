@@ -18,7 +18,7 @@ public class TodoParamResolver {
 
     public Map<String, Object> resolve(Map<String, Object> params, Map<String, TodoExecutionRecord> context) {
         Map<String, Object> source = params == null ? Map.of() : params;
-        log.debug("TodoParamResolver.resolve called with context keys: {}", context != null ? context.keySet() : "null");
+        log.info("TodoParamResolver.resolve called with context keys: {}", context != null ? context.keySet() : "null");
         Object resolved = resolveAny(source, context == null ? Map.of() : context);
         if (resolved instanceof Map<?, ?> map) {
             Map<String, Object> out = new LinkedHashMap<>();
@@ -67,20 +67,20 @@ public class TodoParamResolver {
             out.append(text, last, matcher.start());
             String todoId = matcher.group(1);
             String path = matcher.group(2);
-            log.debug("Resolving placeholder: todoId={}, path={}, raw={}", todoId, path, matcher.group(0));
+            log.info("Resolving placeholder: todoId={}, path={}, raw={}", todoId, path, matcher.group(0));
             
             TodoExecutionRecord record = context.get(todoId);
             if (record == null) {
                 log.warn("TodoExecutionRecord not found in context for todoId: {}. Available keys: {}", 
                         todoId, context.keySet());
             } else {
-                log.debug("Found record for todoId: {}, success={}, output length={}", 
+                log.info("Found record for todoId: {}, success={}, output length={}", 
                         todoId, record.isSuccess(), 
                         record.getOutput() != null ? record.getOutput().length() : 0);
             }
             
             Object replacement = readPath(record, path);
-            log.debug("Replacement result for {}.{}: {}", todoId, path, replacement);
+            log.info("Replacement result for {}.{}: {}", todoId, path, replacement);
             
             out.append(replacement == null ? matcher.group(0) : String.valueOf(replacement));
             last = matcher.end();
@@ -108,7 +108,7 @@ public class TodoParamResolver {
         Object parsed;
         try {
             parsed = new com.fasterxml.jackson.databind.ObjectMapper().readValue(raw, Object.class);
-            log.debug("readPath: JSON parsed successfully, type={}", parsed != null ? parsed.getClass().getSimpleName() : "null");
+            log.info("readPath: JSON parsed successfully, type={}", parsed != null ? parsed.getClass().getSimpleName() : "null");
         } catch (Exception e) {
             log.warn("readPath: Failed to parse JSON output: {}", e.getMessage());
             return null;
@@ -116,16 +116,16 @@ public class TodoParamResolver {
 
         Object cursor = parsed;
         String[] tokens = path.split("\\.");
-        log.debug("readPath: path tokens={}", (Object[]) tokens);
+        log.info("readPath: path tokens={}", (Object[]) tokens);
         
         for (int i = 0; i < tokens.length; i++) {
             String token = tokens[i];
-            log.debug("readPath: processing token[{}]='{}', cursor type={}", 
+            log.info("readPath: processing token[{}]='{}', cursor type={}", 
                     i, token, cursor != null ? cursor.getClass().getSimpleName() : "null");
             
             if (cursor instanceof Map<?, ?> map) {
                 cursor = map.get(token);
-                log.debug("readPath: map.get('{}') = {}", token, 
+                log.info("readPath: map.get('{}') = {}", token, 
                         cursor != null ? cursor.getClass().getSimpleName() : "null");
             } else if (cursor instanceof List<?> list) {
                 int idx;
@@ -140,7 +140,7 @@ public class TodoParamResolver {
                     return null;
                 }
                 cursor = list.get(idx);
-                log.debug("readPath: list.get({}) = {}", idx, 
+                log.info("readPath: list.get({}) = {}", idx, 
                         cursor != null ? cursor.getClass().getSimpleName() : "null");
             } else {
                 log.warn("readPath: Cannot navigate into type {} with token '{}'", 
@@ -149,7 +149,7 @@ public class TodoParamResolver {
             }
         }
         
-        log.debug("readPath: final result = {}", cursor);
+        log.info("readPath: final result = {}", cursor);
         return cursor;
     }
 }
