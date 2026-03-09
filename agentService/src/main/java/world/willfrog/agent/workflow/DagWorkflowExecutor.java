@@ -122,6 +122,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         Map<String, CountDownLatch> nodeLatches = new ConcurrentHashMap<>();
         Map<String, ReactTodoExecutor.TodoExecutionRecord> results = new ConcurrentHashMap<>();
         Map<String, Future<?>> runningTasks = new ConcurrentHashMap<>();
+        // 跟踪节点成功/失败状态（用于依赖检查）
+        Map<String, Boolean> nodeSuccessStatus = new ConcurrentHashMap<>();
         
         // 为每个节点创建 latch（1 = 需要等待一个完成）
         for (TodoItem item : items) {
@@ -142,37 +144,71 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     CountDownLatch latch = nodeLatches.get(item.getId());
                     latch.await();
                     
-                    log.info("Executing DAG node {}: {}", item.getId(), item.getDescription());
+                    // 检查依赖是否成功
+                    Set<String> dependencies = graph.getDependencies(item.getId());
+                    boolean allDepsSuccess = true;
+                    String failedDep = null;
+                    for (String depId : dependencies) {
+                        Boolean depSuccess = nodeSuccessStatus.get(depId);
+                        if (depSuccess == null || !depSuccess) {
+                            allDepsSuccess = false;
+                            failedDep = depId;
+                            break;
+                        }
+                    }
                     
-                    // 从全局上下文构建当前节点的执行上下文
-                    ReactTodoExecutor.TodoExecutionContext todoContext = 
-                            buildTodoContext(item, sharedContext, request);
+                    ReactTodoExecutor.TodoExecutionRecord record;
                     
-                    // 执行节点
-                    ReactTodoExecutor.TodoExecutionRecord record = reactTodoExecutor.execute(
-                            item.getDescription(),
-                            todoContext,
-                            request.getModel()
-                    );
-                    
-                    results.put(item.getId(), record);
-                    
-                    if (record.isSuccess()) {
-                        // 将结果同步到全局上下文
-                        sharedContext.addCompletedTodo(item, record);
+                    if (!allDepsSuccess) {
+                        // 依赖失败，跳过执行
+                        log.warn("Skipping node {} due to failed dependency: {}", item.getId(), failedDep);
+                        record = ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(false)
+                                .output("")
+                                .summary("Skipped: dependency " + failedDep + " failed")
+                                .build();
+                        results.put(item.getId(), record);
+                        nodeSuccessStatus.put(item.getId(), false);
                         
-                        // 提取 dataset_id
-                        extractDatasetId(record, sharedContext);
-                        
-                        eventService.append(runId, userId, "DAG_NODE_COMPLETED", Map.of(
-                                "todo_id", item.getId(),
-                                "success", true
-                        ));
-                    } else {
                         eventService.append(runId, userId, "DAG_NODE_FAILED", Map.of(
                                 "todo_id", item.getId(),
                                 "error", record.getSummary()
                         ));
+                    } else {
+                        // 依赖成功，执行当前节点
+                        log.info("Executing DAG node {}: {}", item.getId(), item.getDescription());
+                        
+                        // 从全局上下文构建当前节点的执行上下文
+                        ReactTodoExecutor.TodoExecutionContext todoContext = 
+                                buildTodoContext(item, sharedContext, request);
+                        
+                        // 执行节点
+                        record = reactTodoExecutor.execute(
+                                item.getDescription(),
+                                todoContext,
+                                request.getModel()
+                        );
+                        
+                        results.put(item.getId(), record);
+                        nodeSuccessStatus.put(item.getId(), record.isSuccess());
+                        
+                        if (record.isSuccess()) {
+                            // 将结果同步到全局上下文
+                            sharedContext.addCompletedTodo(item, record);
+                            
+                            // 提取 dataset_id
+                            extractDatasetId(record, sharedContext);
+                            
+                            eventService.append(runId, userId, "DAG_NODE_COMPLETED", Map.of(
+                                    "todo_id", item.getId(),
+                                    "success", true
+                            ));
+                        } else {
+                            eventService.append(runId, userId, "DAG_NODE_FAILED", Map.of(
+                                    "todo_id", item.getId(),
+                                    "error", record.getSummary()
+                            ));
+                        }
                     }
                     
                     // 通知后续节点
@@ -191,6 +227,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                             .success(false)
                             .summary("Execution error: " + e.getMessage())
                             .build());
+                    nodeSuccessStatus.put(item.getId(), false);
                     allDone.completeExceptionally(e);
                 }
             });
