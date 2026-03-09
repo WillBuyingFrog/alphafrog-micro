@@ -19,12 +19,12 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.workflow.LinearWorkflowExecutor;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
 import world.willfrog.agent.workflow.WorkflowExecutor;
 import world.willfrog.agent.workflow.WorkflowExecutorFactory;
+import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -47,7 +47,6 @@ public class AgentRunExecutor {
     private final AgentObservabilityService observabilityService;
     private final AgentCreditService creditService;
     private final TodoPlanner todoPlanner;
-    private final LinearWorkflowExecutor workflowExecutor;
     private final WorkflowExecutorFactory workflowExecutorFactory;
     private final AgentMessageService messageService;
     private final ObjectMapper objectMapper;
@@ -180,7 +179,7 @@ public class AgentRunExecutor {
 
             // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）
             WorkflowExecutor selectedExecutor = workflowExecutorFactory.select(todoPlan);
-            WorkflowExecutionResult result = selectedExecutor.execute(LinearWorkflowExecutor.WorkflowRequest.builder()
+            WorkflowExecutionResult result = selectedExecutor.execute(WorkflowRequest.builder()
                     .run(run)
                     .userId(userId)
                     .userGoal(userGoal)

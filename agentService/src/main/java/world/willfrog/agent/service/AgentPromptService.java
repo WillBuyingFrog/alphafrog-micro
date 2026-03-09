@@ -244,15 +244,28 @@ public class AgentPromptService {
     }
 
     /**
-     * 规划结构化转换阶段指令 —— 引导 LLM 将自然语言分析转为结构化 JSON。
+     * 规划结构化转换阶段指令 —— 引导 LLM 将自然语言分析转为简化的 Todo JSON。
+     * 
+     * <p>ReAct 模式下，Todo 只包含简短描述，具体工具调用由执行阶段的 LLM 自主决策。</p>
      */
     public String planningStructuredStageInstruction() {
         return "[Stage: PLANNING_STRUCTURED]\n"
-                + "请将上述分析转化为严格的 JSON 格式输出，只输出 JSON，不要包含其他文字。\n"
-                + "格式: {\"analysis\":\"你的分析摘要\",\"items\":["
-                + "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\","
-                + "\"toolName\":\"...\",\"params\":{...},"
-                + "\"reasoning\":\"...\",\"executionMode\":\"AUTO\"}]}";
+                + "请将上述分析转化为简化的 Todo List JSON，只输出 JSON，不要包含其他文字。\n"
+                + "\n"
+                + "格式示例：\n"
+                + "{\"analysis\":\"分析摘要\",\"items\":["
+                + "{\"id\":\"todo_1\",\"sequence\":1,\"description\":\"查询贵州茅台的股票代码\","
+                + "\"dependsOn\":[]},"
+                + "{\"id\":\"todo_2\",\"sequence\":2,\"description\":\"获取茅台2025年的日线数据\","
+                + "\"dependsOn\":[\"todo_1\"]},"
+                + "{\"id\":\"todo_3\",\"sequence\":3,\"description\":\"分析数据并回答用户关于涨跌幅的问题\","
+                + "\"dependsOn\":[\"todo_2\"]}]}\n"
+                + "\n"
+                + "注意：\n"
+                + "1. 每个 Todo 只需要 description 字段（1-3句话描述任务）\n"
+                + "2. 不要包含 toolName、params 等具体执行细节\n"
+                + "3. DAG 模式下可选 dependsOn 指定依赖关系（默认空数组）\n"
+                + "4. Todo 的具体执行将由 ReAct Agent 在执行时自主决策";
     }
 
     /**

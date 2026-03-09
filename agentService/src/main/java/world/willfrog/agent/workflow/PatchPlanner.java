@@ -110,8 +110,7 @@ public class PatchPlanner {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("id", nvl(item.getId()));
                 row.put("sequence", item.getSequence());
-                row.put("type", item.getType() == null ? "" : item.getType().name());
-                row.put("toolName", nvl(item.getToolName()));
+                row.put("description", nvl(item.getDescription()));
                 row.put("status", item.getStatus() == null ? "" : item.getStatus().name());
                 planItems.add(row);
             }
