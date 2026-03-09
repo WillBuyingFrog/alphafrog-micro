@@ -51,12 +51,29 @@ public class ReactTodoExecutor {
                                                          ChatModel model,
                                                          String runId,
                                                          String phase) {
+        return executeWithRetry(description, context, model, runId, phase, 0);
+    }
+    
+    /**
+     * 执行 Todo 带重试机制。
+     * 
+     * @param retryCount 当前重试次数
+     */
+    private TodoExecutionRecord executeWithRetry(String description, 
+                                                  TodoExecutionContext context, 
+                                                  ChatModel model,
+                                                  String runId,
+                                                  String phase,
+                                                  int retryCount) {
+        final int MAX_RETRIES = 2;
         long llmStartTime = System.currentTimeMillis();
         String llmTraceId = null;
         
         try {
-            // 构建 ReAct 消息
-            List<ChatMessage> messages = buildMessages(description, context);
+            // 构建 ReAct 消息（重试时添加错误上下文）
+            List<ChatMessage> messages = buildMessagesWithRetryContext(
+                    description, context, retryCount
+            );
             
             // 调用 LLM 决策
             ChatResponse response = model.chat(messages);
@@ -71,9 +88,9 @@ public class ReactTodoExecutor {
                         phase != null ? phase : "dag_execution",
                         tokenUsage,
                         llmDurationMs,
-                        null, // endpointName - 从上下文中获取
-                        null, // modelName
-                        null, // errorMessage
+                        null,
+                        null,
+                        null,
                         buildRequestSnapshot(messages, description),
                         llmOutput
                 );
@@ -89,12 +106,27 @@ public class ReactTodoExecutor {
                         .output(decision.getAnswer())
                         .summary("Completed without tool")
                         .llmTraceId(llmTraceId)
+                        .retryCount(retryCount)
                         .build();
             }
             
             // 执行工具
             TodoExecutionRecord record = executeTool(decision, context, runId, phase);
             record.setLlmTraceId(llmTraceId);
+            record.setRetryCount(retryCount);
+            
+            // 如果失败且未达到最大重试次数，进行重试
+            if (!record.isSuccess() && retryCount < MAX_RETRIES) {
+                String errorHint = extractErrorHint(record.getOutput());
+                log.warn("Todo execution failed, will retry {}/{}: {}, error: {}", 
+                        retryCount + 1, MAX_RETRIES, description, errorHint);
+                
+                // 构建带错误提示的新上下文
+                TodoExecutionContext retryContext = buildRetryContext(context, errorHint);
+                
+                return executeWithRetry(description, retryContext, model, runId, phase, retryCount + 1);
+            }
+            
             return record;
             
         } catch (Exception e) {
@@ -116,13 +148,94 @@ public class ReactTodoExecutor {
                 );
             }
             
+            // 异常时也尝试重试
+            if (retryCount < MAX_RETRIES) {
+                log.warn("Todo execution exception, will retry {}/{}: {}", 
+                        retryCount + 1, MAX_RETRIES, e.getMessage());
+                return executeWithRetry(description, context, model, runId, phase, retryCount + 1);
+            }
+            
             return TodoExecutionRecord.builder()
                     .success(false)
                     .output("")
-                    .summary("Error: " + e.getMessage())
+                    .summary("Error after " + (MAX_RETRIES + 1) + " attempts: " + e.getMessage())
                     .llmTraceId(llmTraceId)
+                    .retryCount(retryCount)
                     .build();
         }
+    }
+    
+    /**
+     * 构建带重试上下文的 ReAct 消息。
+     */
+    private List<ChatMessage> buildMessagesWithRetryContext(String description, 
+                                                             TodoExecutionContext context,
+                                                             int retryCount) {
+        List<ChatMessage> messages = buildMessages(description, context);
+        
+        // 如果是重试，在最后添加重试提示
+        if (retryCount > 0) {
+            String retryHint = String.format(
+                    "\n\n⚠️ 这是第 %d 次重试。之前的尝试失败了，请仔细检查工具参数名是否与规范完全一致！",
+                    retryCount
+            );
+            
+            // 修改最后一条 UserMessage，添加重试提示
+            for (int i = messages.size() - 1; i >= 0; i--) {
+                ChatMessage msg = messages.get(i);
+                if (msg instanceof UserMessage) {
+                    String text = ((UserMessage) msg).singleText();
+                    messages.set(i, new UserMessage(text + retryHint));
+                    break;
+                }
+            }
+        }
+        
+        return messages;
+    }
+    
+    /**
+     * 构建带重试提示的新上下文。
+     */
+    private TodoExecutionContext buildRetryContext(TodoExecutionContext original, String errorHint) {
+        // 复制原上下文，添加错误提示到 completedTodos
+        List<CompletedTodoInfo> updatedTodos = new ArrayList<>(original.getCompletedTodos());
+        updatedTodos.add(CompletedTodoInfo.builder()
+                .todoId("_retry_hint_")
+                .description("Previous attempt failed with error")
+                .output(errorHint)
+                .summary("Please fix the parameter names and try again. " +
+                        "Ensure you use the exact parameter names specified in the tool documentation.")
+                .build());
+        
+        return TodoExecutionContext.builder()
+                .userGoal(original.getUserGoal())
+                .availableTools(original.getAvailableTools())
+                .completedTodos(updatedTodos)
+                .datasetRefs(original.getDatasetRefs())
+                .build();
+    }
+    
+    /**
+     * 从工具输出中提取错误提示。
+     */
+    private String extractErrorHint(String output) {
+        try {
+            Map<String, Object> result = objectMapper.readValue(output, Map.class);
+            Map<String, Object> error = (Map<String, Object>) result.get("error");
+            if (error != null) {
+                String message = (String) error.get("message");
+                String code = (String) error.get("code");
+                if (code != null && code.equals("NO_DATA") && message != null 
+                        && message.contains("keyword")) {
+                    return "Invalid keyword parameter. Use 'keyword' not 'keywords' or 'query'.";
+                }
+                return message != null ? message : code;
+            }
+        } catch (Exception e) {
+            // 忽略解析错误
+        }
+        return output;
     }
     
     private Map<String, Object> buildRequestSnapshot(List<ChatMessage> messages, String description) {
@@ -136,16 +249,23 @@ public class ReactTodoExecutor {
     private List<ChatMessage> buildMessages(String description, TodoExecutionContext context) {
         List<ChatMessage> messages = new ArrayList<>();
         
-        // System Prompt
+        // System Prompt - 包含详细的工具参数说明
         StringBuilder system = new StringBuilder();
         system.append("你是金融数据分析助手。\n\n");
         system.append("用户目标：").append(context.getUserGoal()).append("\n\n");
-        system.append("可用工具：\n");
+        
+        // 添加工具参数规范说明
+        system.append("可用工具及参数规范（必须严格使用指定的参数名）：\n\n");
+        
         for (String tool : context.getAvailableTools()) {
-            system.append("  - ").append(tool).append("\n");
+            String paramSpec = getToolParamSpec(tool);
+            system.append(String.format("  %s: %s\n", tool, paramSpec));
         }
-        system.append("\n对于数据获取工具，返回结果中会包含 dataset_id，\n");
-        system.append("后续工具可以通过 _dataset_refs 参数使用这些数据集。\n");
+        
+        system.append("\n重要提示：\n");
+        system.append("1. 必须严格使用上述指定的参数名，否则工具调用会失败\n");
+        system.append("2. 对于数据获取工具，返回结果中会包含 dataset_id\n");
+        system.append("3. 后续工具可以通过 _dataset_refs 参数使用这些数据集\n");
         
         messages.add(new SystemMessage(system.toString()));
         
@@ -171,12 +291,31 @@ public class ReactTodoExecutor {
         }
         
         userMsg.append("请决定如何完成。\n");
-        userMsg.append("调用工具输出: {\"tool\":\"...\",\"params\":{...}}\n");
-        userMsg.append("直接回答输出: {\"answer\":\"...\"}");
+        userMsg.append("调用工具输出格式: {\"tool\":\"<工具名>\",\"params\":{<参数名>:<参数值>}}\n");
+        userMsg.append("直接回答输出格式: {\"answer\":\"<你的回答>\"}\n");
+        userMsg.append("\n警告：params 中的参数名必须与工具规范完全一致！");
         
         messages.add(new UserMessage(userMsg.toString()));
         
         return messages;
+    }
+    
+    /**
+     * 获取工具的参数规范说明。
+     */
+    private String getToolParamSpec(String toolName) {
+        return switch (toolName) {
+            case "searchIndex" -> "{\"keyword\": \"<搜索关键词>\"}";
+            case "searchStock" -> "{\"keyword\": \"<搜索关键词>\"}";
+            case "searchFund" -> "{\"keyword\": \"<搜索关键词>\"}";
+            case "getIndexDaily" -> "{\"ts_code\": \"<指数代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
+            case "getStockDaily" -> "{\"ts_code\": \"<股票代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
+            case "getFundDaily" -> "{\"ts_code\": \"<基金代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
+            case "getIndexInfo" -> "{\"ts_code\": \"<指数代码>\"}";
+            case "getStockInfo" -> "{\"ts_code\": \"<股票代码>\"}";
+            case "executePython" -> "{\"code\": \"<Python代码>\", \"libraries\": [\"<可选的库>\"]}";
+            default -> "{...}";
+        };
     }
 
     private LlmDecision parseDecision(String output) {
@@ -326,5 +465,9 @@ public class ReactTodoExecutor {
         private Long toolDurationMs;
         private Instant startedAt;
         private Instant completedAt;
+        
+        // 重试相关
+        @Builder.Default
+        private int retryCount = 0;
     }
 }
