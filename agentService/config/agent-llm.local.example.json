@@ -226,6 +226,7 @@
     "pythonRefineOutputInstruction": "file:prompts/python/python_refine_output_instruction.txt",
     "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
     "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
-    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt"
+    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
+    "dagReactSystemPromptFile": "agentService/config/prompts/todo/dag_react_system.txt"
   }
 }

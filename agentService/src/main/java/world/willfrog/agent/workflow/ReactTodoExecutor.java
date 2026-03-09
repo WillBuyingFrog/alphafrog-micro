@@ -175,17 +175,23 @@ public class ReactTodoExecutor {
         
         // 如果是重试，在最后添加重试提示
         if (retryCount > 0) {
-            String retryHint = String.format(
-                    "\n\n⚠️ 这是第 %d 次重试。之前的尝试失败了，请仔细检查工具参数名是否与规范完全一致！",
-                    retryCount
-            );
+            StringBuilder retryHint = new StringBuilder();
+            retryHint.append("\n\n");
+            retryHint.append("╔══════════════════════════════════════════════════════════════╗\n");
+            retryHint.append(String.format("║ ⚠️  这是第 %d 次重试                                          ║\n", retryCount));
+            retryHint.append("╚══════════════════════════════════════════════════════════════╝\n\n");
+            retryHint.append("之前的尝试失败了。请仔细检查：\n");
+            retryHint.append("1. 工具参数名是否与 System Prompt 中的规范完全一致\n");
+            retryHint.append("2. 是否遗漏了必需参数（如 executePython 的 dataset_ids）\n");
+            retryHint.append("3. 数据集ID是否来自'已有数据集'列表\n\n");
+            retryHint.append("如果再次失败，请参考 '_retry_hint_' 中的详细修正建议。");
             
             // 修改最后一条 UserMessage，添加重试提示
             for (int i = messages.size() - 1; i >= 0; i--) {
                 ChatMessage msg = messages.get(i);
                 if (msg instanceof UserMessage) {
                     String text = ((UserMessage) msg).singleText();
-                    messages.set(i, new UserMessage(text + retryHint));
+                    messages.set(i, new UserMessage(text + retryHint.toString()));
                     break;
                 }
             }
@@ -200,12 +206,36 @@ public class ReactTodoExecutor {
     private TodoExecutionContext buildRetryContext(TodoExecutionContext original, String errorHint) {
         // 复制原上下文，添加错误提示到 completedTodos
         List<CompletedTodoInfo> updatedTodos = new ArrayList<>(original.getCompletedTodos());
+        
+        // 构建详细的错误提示，包含正确的参数规范
+        StringBuilder detailedHint = new StringBuilder();
+        detailedHint.append("错误信息：").append(errorHint).append("\n\n");
+        
+        // 针对特定错误提供具体的修正建议
+        if (errorHint.contains("dataset_ids") || errorHint.contains("MISSING_DATASET_IDS")) {
+            detailedHint.append("修正建议：\n");
+            detailedHint.append("1. executePython 工具需要 dataset_ids 参数，该参数是必需的\n");
+            detailedHint.append("2. dataset_ids 必须使用上述'已有数据集'中的ID\n");
+            detailedHint.append("3. 单数据集：dataset_ids: \"dataset_xxx\"\n");
+            detailedHint.append("4. 多数据集：dataset_ids: \"dataset_xxx,dataset_yyy\"（逗号分隔）\n");
+            detailedHint.append("5. 代码中需要遍历 /sandbox/input/*/ 读取数据\n\n");
+            detailedHint.append("正确示例：\n");
+            detailedHint.append("{\"tool\":\"executePython\",\"params\":{\"dataset_ids\":\"xxx\",\"code\":\"import pandas as pd; ...\"}}");
+        } else if (errorHint.contains("keyword")) {
+            detailedHint.append("修正建议：\n");
+            detailedHint.append("搜索类工具必须使用 'keyword' 参数（不是 'keywords' 或 'query'）\n");
+            detailedHint.append("正确示例：{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}");
+        } else {
+            detailedHint.append("修正建议：\n");
+            detailedHint.append("请确保使用正确的参数名，参考 System Prompt 中的工具规范。\n");
+            detailedHint.append("特别注意 executePython 的 dataset_ids 参数是必需的！");
+        }
+        
         updatedTodos.add(CompletedTodoInfo.builder()
                 .todoId("_retry_hint_")
-                .description("Previous attempt failed with error")
-                .output(errorHint)
-                .summary("Please fix the parameter names and try again. " +
-                        "Ensure you use the exact parameter names specified in the tool documentation.")
+                .description("⚠️ 前一次尝试失败，需要修正")
+                .output(detailedHint.toString())
+                .summary("请根据错误信息修正参数后重试。特别注意参数名必须完全匹配规范。")
                 .build());
         
         return TodoExecutionContext.builder()
@@ -249,23 +279,18 @@ public class ReactTodoExecutor {
     private List<ChatMessage> buildMessages(String description, TodoExecutionContext context) {
         List<ChatMessage> messages = new ArrayList<>();
         
-        // System Prompt - 包含详细的工具参数说明
-        StringBuilder system = new StringBuilder();
-        system.append("你是金融数据分析助手。\n\n");
+        // System Prompt - 从配置文件加载，包含完整的工具参数规范
+        String baseSystemPrompt = promptService.dagReactSystemPrompt();
+        
+        // 动态添加用户目标和可用工具列表
+        StringBuilder system = new StringBuilder(baseSystemPrompt);
+        system.append("\n\n## 当前上下文\n\n");
         system.append("用户目标：").append(context.getUserGoal()).append("\n\n");
         
-        // 添加工具参数规范说明
-        system.append("可用工具及参数规范（必须严格使用指定的参数名）：\n\n");
-        
-        for (String tool : context.getAvailableTools()) {
-            String paramSpec = getToolParamSpec(tool);
-            system.append(String.format("  %s: %s\n", tool, paramSpec));
+        // 添加可用的具体工具列表
+        if (!context.getAvailableTools().isEmpty()) {
+            system.append("当前可用工具：").append(String.join(", ", context.getAvailableTools())).append("\n");
         }
-        
-        system.append("\n重要提示：\n");
-        system.append("1. 必须严格使用上述指定的参数名，否则工具调用会失败\n");
-        system.append("2. 对于数据获取工具，返回结果中会包含 dataset_id\n");
-        system.append("3. 后续工具可以通过 _dataset_refs 参数使用这些数据集\n");
         
         messages.add(new SystemMessage(system.toString()));
         
@@ -284,16 +309,17 @@ public class ReactTodoExecutor {
         userMsg.append("当前任务: ").append(description).append("\n\n");
         
         if (!context.getDatasetRefs().isEmpty()) {
-            userMsg.append("已有数据集:\n");
+            userMsg.append("已有数据集 (可用于 dataset_ids 参数):\n");
             context.getDatasetRefs().forEach((id, path) -> 
-                    userMsg.append(String.format("  - %s: %s\n", id, path)));
+                    userMsg.append(String.format("  - %s\n", id)));
             userMsg.append("\n");
+            userMsg.append("⚠️ 注意：如果调用 executePython，必须将上述 dataset ID 通过 dataset_ids 参数传入！\n\n");
         }
         
         userMsg.append("请决定如何完成。\n");
         userMsg.append("调用工具输出格式: {\"tool\":\"<工具名>\",\"params\":{<参数名>:<参数值>}}\n");
         userMsg.append("直接回答输出格式: {\"answer\":\"<你的回答>\"}\n");
-        userMsg.append("\n警告：params 中的参数名必须与工具规范完全一致！");
+        userMsg.append("\n⚠️ 警告：params 中的参数名必须与工具规范完全一致！");
         
         messages.add(new UserMessage(userMsg.toString()));
         
@@ -301,7 +327,8 @@ public class ReactTodoExecutor {
     }
     
     /**
-     * 获取工具的参数规范说明。
+     * 获取工具的参数规范说明（用于错误提示和日志）。
+     * 注意：System Prompt 中的规范来自 promptService.dagReactSystemPrompt() 配置文件。
      */
     private String getToolParamSpec(String toolName) {
         return switch (toolName) {
@@ -313,7 +340,7 @@ public class ReactTodoExecutor {
             case "getFundDaily" -> "{\"ts_code\": \"<基金代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
             case "getIndexInfo" -> "{\"ts_code\": \"<指数代码>\"}";
             case "getStockInfo" -> "{\"ts_code\": \"<股票代码>\"}";
-            case "executePython" -> "{\"code\": \"<Python代码>\", \"libraries\": [\"<可选的库>\"]}";
+            case "executePython" -> "{\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID，逗号分隔>\", \"libraries\": \"<可选：库名逗号分隔>\"}";
             default -> "{...}";
         };
     }

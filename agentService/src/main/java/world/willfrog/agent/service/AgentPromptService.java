@@ -200,6 +200,80 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt(), ""));
     }
 
+    /**
+     * DAG ReAct 执行阶段的 System Prompt。
+     * 用于 ReactTodoExecutor 构建 DAG 节点执行时的 System Message。
+     *
+     * 加载优先级：
+     * 1. agent.llm.prompts.dagReactSystemPrompt（直接配置内容）
+     * 2. agent.llm.prompts.dagReactSystemPromptFile（配置文件路径）
+     * 3. 代码中的默认 Prompt
+     */
+    public String dagReactSystemPrompt() {
+        // 1. 优先使用直接配置的内容
+        String directPrompt = currentPrompts().getDagReactSystemPrompt();
+        if (!directPrompt.isBlank()) {
+            return directPrompt;
+        }
+
+        // 2. 尝试从配置的文件路径加载
+        String filePath = currentPrompts().getDagReactSystemPromptFile();
+        if (!filePath.isBlank()) {
+            String fileContent = loadPromptFromConfiguredPath(filePath);
+            if (!fileContent.isBlank()) {
+                return fileContent;
+            }
+        }
+
+        // 3. 使用默认 Prompt
+        return defaultDagReactSystemPrompt();
+    }
+
+    /**
+     * 从配置的文件路径加载 Prompt 内容。
+     * 支持绝对路径或相对于工作目录的路径。
+     */
+    private String loadPromptFromConfiguredPath(String filePath) {
+        try {
+            java.nio.file.Path path = java.nio.file.Path.of(filePath);
+            if (java.nio.file.Files.exists(path)) {
+                return java.nio.file.Files.readString(path, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load prompt from configured path: {}, error: {}", filePath, e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * 默认的 DAG ReAct System Prompt（当配置文件不存在时使用）。
+     */
+    private String defaultDagReactSystemPrompt() {
+        return """
+            你是金融数据分析助手，负责执行DAG中的单个任务节点。
+
+            ## 可用工具及参数规范（必须严格使用指定的参数名）
+            - searchIndex: {"keyword": "<搜索关键词>"}
+            - searchStock: {"keyword": "<搜索关键词>"}
+            - searchFund: {"keyword": "<搜索关键词>"}
+            - getIndexDaily: {"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getStockDaily: {"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getFundDaily: {"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getIndexInfo: {"ts_code": "<指数代码>"}
+            - getStockInfo: {"ts_code": "<股票代码>"}
+            - executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
+
+            ## 重要警告
+            1. 必须严格使用上述指定的参数名，否则工具调用会失败
+            2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id
+            3. 代码必须遍历 /sandbox/input/*/ 读取所有挂载的数据集
+
+            ## 输出格式
+            调用工具: {"tool": "<工具名>", "params": {"<参数名>": "<参数值>"}}
+            直接回答: {"answer": "<你的回答>"}
+            """;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // ReAct 统一 System Prompt + Stage Instruction（#28）
     // ─────────────────────────────────────────────────────────────
@@ -380,6 +454,8 @@ public class AgentPromptService {
         merged.setOrchestratorSummarySystemPrompt(firstNonBlank(local.getOrchestratorSummarySystemPrompt(), base.getOrchestratorSummarySystemPrompt()));
         merged.setPythonRefineRequirements(selectList(local.getPythonRefineRequirements(), base.getPythonRefineRequirements()));
         merged.setDatasetFieldSpecs(selectList(local.getDatasetFieldSpecs(), base.getDatasetFieldSpecs()));
+        merged.setDagReactSystemPrompt(firstNonBlank(local.getDagReactSystemPrompt(), base.getDagReactSystemPrompt()));
+        merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
         return merged;
     }
 

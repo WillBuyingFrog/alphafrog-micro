@@ -876,6 +876,8 @@ public class AgentLlmProperties {
         private String datasetFieldSpecsFile;
         private String orchestratorPlanningSystemPrompt;
         private String orchestratorSummarySystemPrompt;
+        private String dagReactSystemPrompt;
+        private String dagReactSystemPromptFile;
 
         public String getAgentRunSystemPrompt() {
             return agentRunSystemPrompt;
@@ -1035,6 +1037,22 @@ public class AgentLlmProperties {
 
         public void setOrchestratorSummarySystemPrompt(String orchestratorSummarySystemPrompt) {
             this.orchestratorSummarySystemPrompt = orchestratorSummarySystemPrompt;
+        }
+
+        public String getDagReactSystemPrompt() {
+            return dagReactSystemPrompt;
+        }
+
+        public void setDagReactSystemPrompt(String dagReactSystemPrompt) {
+            this.dagReactSystemPrompt = dagReactSystemPrompt;
+        }
+
+        public String getDagReactSystemPromptFile() {
+            return dagReactSystemPromptFile;
+        }
+
+        public void setDagReactSystemPromptFile(String dagReactSystemPromptFile) {
+            this.dagReactSystemPromptFile = dagReactSystemPromptFile;
         }
     }
 
