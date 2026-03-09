@@ -21,6 +21,7 @@ import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
+import world.willfrog.agent.workflow.WorkflowExecutor;
 import world.willfrog.agent.workflow.WorkflowExecutorFactory;
 
 import java.util.List;
@@ -59,6 +60,8 @@ class AgentRunExecutorTest {
     private TodoPlanner todoPlanner;
     @Mock
     private WorkflowExecutorFactory workflowExecutorFactory;
+    @Mock
+    private WorkflowExecutor workflowExecutor;
     @Mock
     private ChatModel chatLanguageModel;
     @Mock

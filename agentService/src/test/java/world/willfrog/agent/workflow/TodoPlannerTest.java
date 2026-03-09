@@ -108,12 +108,12 @@ class TodoPlannerTest {
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
-        // Step 2: 结构化 JSON response
+        // Step 2: 结构化 JSON response - ReAct 简化格式
         AiMessage structuredMsg = mock(AiMessage.class);
         when(structuredMsg.text()).thenReturn(
-            "{\"analysis\":\"分析用户查询需求\",\"items\":[" +
-            "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{\"keyword\":\"平安\"},\"reasoning\":\"需要搜索股票信息\",\"executionMode\":\"AUTO\"}" +
-            "]}"
+            "{\"analysis\":\"分析用户查询需求\",\"items\":["
+            + "{\"id\":\"todo_1\",\"sequence\":1,\"description\":\"搜索平安相关的股票信息\"}"
+            + "]}"
         );
         ChatResponse structuredResp = ChatResponse.builder()
                 .aiMessage(structuredMsg)
@@ -137,7 +137,8 @@ class TodoPlannerTest {
                 .build());
 
         assertEquals(1, plan.getItems().size());
-        assertEquals("searchStock", plan.getItems().get(0).getToolName());
+        assertEquals("todo_1", plan.getItems().get(0).getId());
+        assertEquals("搜索平安相关的股票信息", plan.getItems().get(0).getDescription());
         // 验证 analysis 使用了自然语言分析的结果
         assertEquals("经过分析，用户需要搜索平安相关的股票信息。", plan.getAnalysis());
         verify(runMapper).updatePlan(eq("run-1"), eq("u1"), eq(AgentRunStatus.EXECUTING), anyString());
@@ -156,14 +157,13 @@ class TodoPlannerTest {
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
-        // Step 2: structured
+        // Step 2: structured - ReAct 简化格式 with 2 items
         AiMessage structuredMsg = mock(AiMessage.class);
         when(structuredMsg.text()).thenReturn(
-            "{\"analysis\":\"需要查询多个股票\",\"items\":[" +
-            "{\"id\":\"1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第一个股票\",\"executionMode\":\"AUTO\"},"
-+
-            "{\"id\":\"2\",\"sequence\":2,\"type\":\"TOOL_CALL\",\"toolName\":\"searchStock\",\"params\":{},\"reasoning\":\"搜索第二个股票\",\"executionMode\":\"AUTO\"}" +
-            "]}"
+            "{\"analysis\":\"需要查询多个股票\",\"items\":["
+            + "{\"id\":\"1\",\"sequence\":1,\"description\":\"搜索第一个股票\"},"
+            + "{\"id\":\"2\",\"sequence\":2,\"description\":\"搜索第二个股票\"}"
+            + "]}"
         );
         ChatResponse structuredResp = ChatResponse.builder()
                 .aiMessage(structuredMsg)
@@ -189,23 +189,23 @@ class TodoPlannerTest {
     }
 
     @Test
-    void plan_shouldFailWhenToolNotAllowed() {
+    void plan_shouldFailWhenMissingDescription() {
         AgentRun run = run("run-3");
 
         // Step 1: analysis
         AiMessage analysisMsg = mock(AiMessage.class);
-        when(analysisMsg.text()).thenReturn("尝试使用未知工具。");
+        when(analysisMsg.text()).thenReturn("尝试创建任务。");
         ChatResponse analysisResp = ChatResponse.builder()
                 .aiMessage(analysisMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
-        // Step 2: structured with illegal tool
+        // Step 2: structured with missing description (should fail validation)
         AiMessage structuredMsg = mock(AiMessage.class);
         when(structuredMsg.text()).thenReturn(
-            "{\"analysis\":\"测试非法工具\",\"items\":[" +
-            "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\",\"toolName\":\"unknownTool\",\"params\":{},\"reasoning\":\"尝试使用非法工具\",\"executionMode\":\"AUTO\"}" +
-            "]}"
+            "{\"analysis\":\"测试无效任务\",\"items\":["
+            + "{\"id\":\"todo_1\",\"sequence\":1}"
+            + "]}"
         );
         ChatResponse structuredResp = ChatResponse.builder()
                 .aiMessage(structuredMsg)
@@ -216,6 +216,7 @@ class TodoPlannerTest {
                 .thenReturn(analysisResp)
                 .thenReturn(structuredResp);
 
+        // ReAct 模式下，缺少 description 会导致结构化验证失败
         assertThrows(IllegalStateException.class, () -> planner.plan(TodoPlanner.PlanRequest.builder()
                 .run(run)
                 .userId("u1")
