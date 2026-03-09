@@ -183,7 +183,7 @@ public class AgentRunExecutor {
                     .run(run)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .todoPlan(todoPlan)
+                    .plan(todoPlan)
                     .model(chatModel)
                     .toolSpecifications(toolSpecifications)
                     .endpointName(endpointName)
