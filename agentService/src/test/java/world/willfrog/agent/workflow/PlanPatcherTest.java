@@ -24,10 +24,7 @@ class PlanPatcherTest {
 
         Map<String, Object> newTodo = new LinkedHashMap<>();
         newTodo.put("id", "todo_1_1");
-        newTodo.put("type", "TOOL_CALL");
-        newTodo.put("toolName", "searchFund");
-        newTodo.put("params", Map.of("keyword", "fund_k"));
-        newTodo.put("reasoning", "补充查询基金");
+        newTodo.put("description", "补充查询基金");
 
         PlanPatch patch = PlanPatch.builder()
                 .patchType(PatchType.INSERT)
@@ -43,7 +40,6 @@ class PlanPatcherTest {
         assertEquals("todo_1", patched.getItems().get(0).getId());
         assertEquals("todo_1_1", patched.getItems().get(1).getId());
         assertEquals("todo_2", patched.getItems().get(2).getId());
-        assertEquals("searchFund", patched.getItems().get(1).getToolName());
         assertEquals(1, patched.getItems().get(0).getSequence());
         assertEquals(2, patched.getItems().get(1).getSequence());
         assertEquals(3, patched.getItems().get(2).getSequence());
@@ -55,8 +51,7 @@ class PlanPatcherTest {
 
         Map<String, Object> newTodo = new LinkedHashMap<>();
         newTodo.put("id", "todo_2");
-        newTodo.put("type", "TOOL_CALL");
-        newTodo.put("toolName", "searchStock");
+        newTodo.put("description", "追加步骤");
 
         PlanPatch patch = PlanPatch.builder()
                 .patchType(PatchType.INSERT)
@@ -92,16 +87,15 @@ class PlanPatcherTest {
     }
 
     @Test
-    void applyPatch_replaceTodoParams() {
+    void applyPatch_replaceTodoDescription() {
         TodoPlan plan = planWithTodos("todo_1");
-        plan.getItems().get(0).setToolName("searchStock");
-        plan.getItems().get(0).setParams(Map.of("keyword", "old_keyword"));
+        plan.getItems().get(0).setDescription("old description");
 
         PlanPatch patch = PlanPatch.builder()
                 .patchType(PatchType.REPLACE)
                 .targetTodoId("todo_1")
-                .patchData(Map.of("newParams", Map.of("keyword", "new_keyword")))
-                .reason("修改查询条件")
+                .patchData(Map.of("newDescription", "new description"))
+                .reason("修改任务描述")
                 .build();
 
         TodoPlan patched = patcher.applyPatch(plan, patch);
@@ -109,7 +103,7 @@ class PlanPatcherTest {
         assertNotNull(patched);
         assertEquals(1, patched.getItems().size());
         assertEquals("todo_1", patched.getItems().get(0).getId());
-        assertEquals("new_keyword", patched.getItems().get(0).getParams().get("keyword"));
+        assertEquals("new description", patched.getItems().get(0).getDescription());
         assertEquals(TodoStatus.PENDING, patched.getItems().get(0).getStatus());
     }
 
@@ -179,9 +173,7 @@ class PlanPatcherTest {
             plan.getItems().add(TodoItem.builder()
                     .id(id)
                     .sequence(seq++)
-                    .type(TodoType.TOOL_CALL)
-                    .toolName("searchStock")
-                    .params(new LinkedHashMap<>(Map.of("keyword", "k")))
+                    .description("test description")
                     .status(TodoStatus.PENDING)
                     .build());
         }

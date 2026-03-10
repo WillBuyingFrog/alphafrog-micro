@@ -91,6 +91,13 @@ public class TodoPlanner {
                 throw new IllegalStateException("todo_plan_empty");
             }
 
+            // 设置执行模式（从请求传入，用于 DAG/Linear 选择）
+            PlanExecutionMode mode = request.getExecutionMode();
+            if (mode == null) {
+                mode = PlanExecutionMode.AUTO;
+            }
+            todoPlan.setExecutionMode(mode);
+
             String planJson = safeWrite(todoPlan);
             runMapper.updatePlan(runId, userId, AgentRunStatus.EXECUTING, planJson);
             stateStore.recordPlan(runId, planJson, true);
@@ -265,12 +272,6 @@ public class TodoPlanner {
                 }
                 TodoPlan todoPlan = parsePlanNode(root);
                 todoPlan.setAnalysis(analysisText);
-                String excerpt = raw.length() > 1000 ? raw.substring(0, 1000) : raw;
-                for (TodoItem item : todoPlan.getItems() == null ? List.<TodoItem>of() : todoPlan.getItems()) {
-                    item.setDecisionLlmTraceId(planningTraceId);
-                    item.setDecisionStage("todo_planning");
-                    item.setDecisionExcerpt(excerpt);
-                }
                 observabilityService.setLastPlanningErrorCategory(runId, "");
                 return todoPlan;
             } catch (StructuredPlanningSupport.StructuredPlanningException e) {
@@ -304,28 +305,17 @@ public class TodoPlanner {
             if (normalized.size() >= maxTodos) {
                 break;
             }
-            TodoType type = raw.getType() == null ? TodoType.TOOL_CALL : raw.getType();
             String id = nvl(raw.getId());
             if (id.isBlank()) {
                 id = "todo_" + seq;
             }
 
-            if (type == TodoType.TOOL_CALL && !toolWhitelist.contains(nvl(raw.getToolName()))) {
-                throw new IllegalArgumentException("tool_not_allowed:" + nvl(raw.getToolName()));
-            }
-
             TodoItem item = TodoItem.builder()
                     .id(id)
                     .sequence(seq)
-                    .type(type)
-                    .toolName(nvl(raw.getToolName()))
-                    .params(raw.getParams() == null ? Map.of() : raw.getParams())
-                    .reasoning(nvl(raw.getReasoning()))
-                    .executionMode(raw.getExecutionMode() == null ? ExecutionMode.AUTO : raw.getExecutionMode())
+                    .description(nvl(raw.getDescription()))
+                    .dependsOn(raw.getDependsOn() == null ? List.of() : raw.getDependsOn())
                     .status(TodoStatus.PENDING)
-                    .decisionLlmTraceId(nvl(raw.getDecisionLlmTraceId()))
-                    .decisionStage(nvl(raw.getDecisionStage()))
-                    .decisionExcerpt(nvl(raw.getDecisionExcerpt()))
                     .createdAt(Instant.now())
                     .build();
             normalized.add(item);
@@ -361,18 +351,22 @@ public class TodoPlanner {
         if (itemsNode.isArray()) {
             int seq = 1;
             for (JsonNode node : itemsNode) {
+                // 解析依赖关系（DAG 模式下可能存在）
+                List<String> dependsOn = new ArrayList<>();
+                JsonNode dependsOnNode = node.path("dependsOn");
+                if (dependsOnNode.isArray()) {
+                    for (JsonNode depNode : dependsOnNode) {
+                        dependsOn.add(depNode.asText());
+                    }
+                }
+
                 TodoItem item = TodoItem.builder()
                         .id(nvl(node.path("id").asText("")))
                         .sequence(node.path("sequence").asInt(seq))
-                        .type(parseType(node.path("type").asText("TOOL_CALL")))
-                        .toolName(nvl(node.path("toolName").asText("")))
-                        .params(toMap(node.path("params")))
-                        .reasoning(nvl(node.path("reasoning").asText("")))
-                        .executionMode(parseExecutionMode(node.path("executionMode").asText("AUTO")))
-                        .decisionLlmTraceId(nvl(node.path("decisionLlmTraceId").asText("")))
-                        .decisionStage(nvl(node.path("decisionStage").asText("")))
-                        .decisionExcerpt(nvl(node.path("decisionExcerpt").asText("")))
+                        .description(nvl(node.path("description").asText("")))
+                        .dependsOn(dependsOn)
                         .status(TodoStatus.PENDING)
+                        .createdAt(Instant.now())
                         .build();
                 items.add(item);
                 seq++;
@@ -585,5 +579,6 @@ public class TodoPlanner {
         private String endpointName;
         private String endpointBaseUrl;
         private String modelName;
+        private PlanExecutionMode executionMode;
     }
 }

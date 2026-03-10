@@ -166,4 +166,71 @@ class ReactConversationContextTest {
         }
         assertEquals(ReactConversationContext.DEFAULT_MAX_MESSAGES, ctx.conversationSize());
     }
+
+    @Test
+    void branch_shouldCreateIndependentCopy() {
+        ReactConversationContext ctx = new ReactConversationContext();
+        ctx.setSystemMessage("系统指令");
+        ctx.addUserMessage("U1");
+        ctx.addAssistantMessage("A1");
+
+        ReactConversationContext branch = ctx.branch();
+
+        // 分支应包含所有消息
+        assertEquals(3, branch.size());
+        assertEquals(2, branch.conversationSize());
+        assertInstanceOf(SystemMessage.class, branch.getMessages().get(0));
+        assertInstanceOf(UserMessage.class, branch.getMessages().get(1));
+        assertInstanceOf(AiMessage.class, branch.getMessages().get(2));
+
+        // 修改分支不应影响原上下文
+        branch.addUserMessage("U2-branch");
+        assertEquals(3, ctx.size());
+        assertEquals(4, branch.size());
+
+        // 修改原上下文不应影响分支
+        ctx.addUserMessage("U2-main");
+        assertEquals(4, ctx.size());
+        assertEquals(4, branch.size());
+    }
+
+    @Test
+    void branch_shouldPreserveSystemMessage() {
+        ReactConversationContext ctx = new ReactConversationContext();
+        ctx.setSystemMessage("静态系统指令");
+
+        ReactConversationContext branch = ctx.branch();
+        assertEquals(1, branch.size());
+        assertEquals("静态系统指令", ((SystemMessage) branch.getMessages().get(0)).text());
+    }
+
+    @Test
+    void branch_shouldCopyMaxMessages() {
+        ReactConversationContext ctx = new ReactConversationContext(4);
+        ctx.setSystemMessage("sys");
+        ctx.addUserMessage("U1");
+        ctx.addAssistantMessage("A1");
+
+        ReactConversationContext branch = ctx.branch();
+        // 分支应有相同的 maxMessages
+        // 添加超过限制的消息应触发 trim
+        branch.addUserMessage("U2");
+        branch.addAssistantMessage("A2");
+        branch.addUserMessage("U3");
+        branch.addAssistantMessage("A3");
+        branch.addUserMessage("U4");
+
+        // 不超过 maxMessages (4 non-system)
+        assertEquals(4, branch.conversationSize());
+    }
+
+    @Test
+    void branch_emptyContextShouldBranchCleanly() {
+        ReactConversationContext ctx = new ReactConversationContext();
+        ReactConversationContext branch = ctx.branch();
+        assertEquals(0, branch.size());
+        branch.addUserMessage("U1");
+        assertEquals(1, branch.size());
+        assertEquals(0, ctx.size());
+    }
 }

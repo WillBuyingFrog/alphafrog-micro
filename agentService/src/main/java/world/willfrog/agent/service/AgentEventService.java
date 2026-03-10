@@ -100,6 +100,12 @@ public class AgentEventService {
             ext.put("planner_candidate_count", plannerCandidateCount);
         }
         ext.put("checkpoint_version", resolveCheckpointVersion());
+        
+        // 从 contextJson 中提取 execution_mode
+        String executionMode = extractExecutionModeFromContext(contextJson);
+        if (executionMode != null && !executionMode.isBlank()) {
+            ext.put("execution_mode", executionMode);
+        }
 
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -266,6 +272,39 @@ public class AgentEventService {
      */
     public boolean extractDebugMode(String extJson) {
         return extractBooleanFromExt(extJson, "debug_mode", "debugMode", "debug_mode");
+    }
+
+    /**
+     * 从 ext JSON 中提取执行模式。
+     *
+     * @param extJson ext 字段 JSON
+     * @return execution_mode 字段值，默认为 AUTO
+     */
+    public String extractExecutionMode(String extJson) {
+        String mode = extractField(extJson, "execution_mode");
+        if (mode == null || mode.isBlank()) {
+            mode = extractField(extJson, "executionMode");
+        }
+        return mode == null || mode.isBlank() ? "AUTO" : mode;
+    }
+    
+    /**
+     * 从 contextJson 中提取执行模式。
+     */
+    private String extractExecutionModeFromContext(String contextJson) {
+        if (contextJson == null || contextJson.isBlank()) {
+            return null;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(contextJson, Map.class);
+            Object mode = map.get("execution_mode");
+            if (mode == null) {
+                mode = map.get("executionMode");
+            }
+            return mode != null ? mode.toString() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public List<String> extractOpenRouterProviderOrder(String extJson) {

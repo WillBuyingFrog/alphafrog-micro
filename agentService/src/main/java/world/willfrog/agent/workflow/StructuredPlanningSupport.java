@@ -12,14 +12,15 @@ import java.util.regex.Pattern;
 
 /**
  * planning / sub-agent planning 的结构化输出工具。
+ * 
+ * <p>ReAct 模式下，Todo Plan 只包含简化的任务描述，
+ * 具体工具调用由执行阶段的 LLM 自主决策。</p>
  */
 public final class StructuredPlanningSupport {
 
     public static final String CATEGORY_JSON_PARSE_ERROR = "JSON_PARSE_ERROR";
     public static final String CATEGORY_SCHEMA_VALIDATION_ERROR = "SCHEMA_VALIDATION_ERROR";
 
-    private static final Set<String> TODO_TYPES = Set.of("TOOL_CALL", "SUB_AGENT", "THOUGHT");
-    private static final Set<String> EXECUTION_MODES = Set.of("AUTO", "FORCE_SIMPLE", "FORCE_SUB_AGENT");
     private static final Pattern PLACEHOLDER = Pattern.compile("\\$\\{([A-Za-z0-9_-]+)\\.output(?:\\.([A-Za-z0-9_.-]+))?}");
 
     private StructuredPlanningSupport() {
@@ -67,31 +68,14 @@ public final class StructuredPlanningSupport {
             if (!itemNode.has("sequence") || !itemNode.get("sequence").isInt()) {
                 return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_missing_sequence@" + index);
             }
-            String type = upper(itemNode.path("type").asText(""));
-            if (!TODO_TYPES.contains(type)) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_type@" + index);
+            // ReAct 模式下，只需要 description 字段
+            if (!isText(itemNode.get("description"))) {
+                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_missing_description@" + index);
             }
-            if (!isText(itemNode.get("toolName"))) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_missing_tool_name@" + index);
-            }
-            String toolName = itemNode.path("toolName").asText("");
-            if ("TOOL_CALL".equals(type) && (toolWhitelist == null || !toolWhitelist.contains(toolName))) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_tool_not_allowed@" + index);
-            }
-            JsonNode params = itemNode.get("params");
-            if (params == null || !params.isObject()) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_params_not_object@" + index);
-            }
-            ValidationResult placeholderCheck = validatePlaceholders(params, true);
-            if (!placeholderCheck.valid()) {
-                return ValidationResult.invalid(placeholderCheck.category(), placeholderCheck.message() + "@" + index);
-            }
-            if (!isText(itemNode.get("reasoning"))) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_missing_reasoning@" + index);
-            }
-            String mode = upper(itemNode.path("executionMode").asText(""));
-            if (!EXECUTION_MODES.contains(mode)) {
-                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_execution_mode@" + index);
+            // 依赖关系是可选的（DAG 模式）
+            JsonNode dependsOnNode = itemNode.get("dependsOn");
+            if (dependsOnNode != null && !dependsOnNode.isArray()) {
+                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_depends_on@" + index);
             }
             index++;
         }
@@ -187,6 +171,12 @@ public final class StructuredPlanningSupport {
         return ValidationResult.ok();
     }
 
+    /**
+     * ReAct 模式下的简化 Todo Plan JSON Schema。
+     * 
+     * <p>只包含 id、sequence、description 和可选的 dependsOn，
+     * 具体工具调用由执行阶段的 LLM 自主决策。</p>
+     */
     public static Map<String, Object> todoPlanningJsonSchema() {
         return Map.of(
                 "type", "object",
@@ -200,15 +190,19 @@ public final class StructuredPlanningSupport {
                                 "items", Map.of(
                                         "type", "object",
                                         "additionalProperties", false,
-                                        "required", List.of("id", "sequence", "type", "toolName", "params", "reasoning", "executionMode"),
+                                        "required", List.of("id", "sequence", "description"),
                                         "properties", Map.of(
                                                 "id", Map.of("type", "string"),
                                                 "sequence", Map.of("type", "integer"),
-                                                "type", Map.of("type", "string", "enum", List.of("TOOL_CALL", "SUB_AGENT", "THOUGHT")),
-                                                "toolName", Map.of("type", "string"),
-                                                "params", Map.of("type", "object"),
-                                                "reasoning", Map.of("type", "string"),
-                                                "executionMode", Map.of("type", "string", "enum", List.of("AUTO", "FORCE_SIMPLE", "FORCE_SUB_AGENT"))
+                                                "description", Map.of(
+                                                        "type", "string",
+                                                        "description", "1-3句话描述该Todo要完成的任务"
+                                                ),
+                                                "dependsOn", Map.of(
+                                                        "type", "array",
+                                                        "description", "依赖的todoId列表（DAG模式下可选）",
+                                                        "items", Map.of("type", "string")
+                                                )
                                         )
                                 )
                         )
@@ -262,10 +256,6 @@ public final class StructuredPlanningSupport {
 
     private static boolean isText(JsonNode node) {
         return node != null && node.isTextual() && !node.asText("").isBlank();
-    }
-
-    private static String upper(String text) {
-        return text == null ? "" : text.trim().toUpperCase();
     }
 
     private static String safeMessage(Throwable e) {

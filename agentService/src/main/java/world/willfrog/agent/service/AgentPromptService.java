@@ -1,6 +1,7 @@
 package world.willfrog.agent.service;
 
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 
@@ -12,6 +13,7 @@ import java.util.Map;
 
 @Component
 @RequiredArgsConstructor
+@Slf4j
 public class AgentPromptService {
 
     private static final DateTimeFormatter CN_DATE_FORMATTER = DateTimeFormatter.ofPattern("yyyy年MM月dd日");
@@ -200,6 +202,80 @@ public class AgentPromptService {
         return composeSystemPrompt(firstNonBlank(currentPrompts().getOrchestratorSummarySystemPrompt(), ""));
     }
 
+    /**
+     * DAG ReAct 执行阶段的 System Prompt。
+     * 用于 ReactTodoExecutor 构建 DAG 节点执行时的 System Message。
+     *
+     * 加载优先级：
+     * 1. agent.llm.prompts.dagReactSystemPrompt（直接配置内容）
+     * 2. agent.llm.prompts.dagReactSystemPromptFile（配置文件路径）
+     * 3. 代码中的默认 Prompt
+     */
+    public String dagReactSystemPrompt() {
+        // 1. 优先使用直接配置的内容
+        String directPrompt = currentPrompts().getDagReactSystemPrompt();
+        if (!directPrompt.isBlank()) {
+            return directPrompt;
+        }
+
+        // 2. 尝试从配置的文件路径加载
+        String filePath = currentPrompts().getDagReactSystemPromptFile();
+        if (!filePath.isBlank()) {
+            String fileContent = loadPromptFromConfiguredPath(filePath);
+            if (!fileContent.isBlank()) {
+                return fileContent;
+            }
+        }
+
+        // 3. 使用默认 Prompt
+        return defaultDagReactSystemPrompt();
+    }
+
+    /**
+     * 从配置的文件路径加载 Prompt 内容。
+     * 支持绝对路径或相对于工作目录的路径。
+     */
+    private String loadPromptFromConfiguredPath(String filePath) {
+        try {
+            java.nio.file.Path path = java.nio.file.Path.of(filePath);
+            if (java.nio.file.Files.exists(path)) {
+                return java.nio.file.Files.readString(path, java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load prompt from configured path: {}, error: {}", filePath, e.getMessage());
+        }
+        return "";
+    }
+
+    /**
+     * 默认的 DAG ReAct System Prompt（当配置文件不存在时使用）。
+     */
+    private String defaultDagReactSystemPrompt() {
+        return """
+            你是金融数据分析助手，负责执行DAG中的单个任务节点。
+
+            ## 可用工具及参数规范（必须严格使用指定的参数名）
+            - searchIndex: {"keyword": "<搜索关键词>"}
+            - searchStock: {"keyword": "<搜索关键词>"}
+            - searchFund: {"keyword": "<搜索关键词>"}
+            - getIndexDaily: {"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getStockDaily: {"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getFundDaily: {"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
+            - getIndexInfo: {"ts_code": "<指数代码>"}
+            - getStockInfo: {"ts_code": "<股票代码>"}
+            - executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
+
+            ## 重要警告
+            1. 必须严格使用上述指定的参数名，否则工具调用会失败
+            2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id
+            3. 代码必须遍历 /sandbox/input/*/ 读取所有挂载的数据集
+
+            ## 输出格式
+            调用工具: {"tool": "<工具名>", "params": {"<参数名>": "<参数值>"}}
+            直接回答: {"answer": "<你的回答>"}
+            """;
+    }
+
     // ─────────────────────────────────────────────────────────────
     // ReAct 统一 System Prompt + Stage Instruction（#28）
     // ─────────────────────────────────────────────────────────────
@@ -244,15 +320,28 @@ public class AgentPromptService {
     }
 
     /**
-     * 规划结构化转换阶段指令 —— 引导 LLM 将自然语言分析转为结构化 JSON。
+     * 规划结构化转换阶段指令 —— 引导 LLM 将自然语言分析转为简化的 Todo JSON。
+     * 
+     * <p>ReAct 模式下，Todo 只包含简短描述，具体工具调用由执行阶段的 LLM 自主决策。</p>
      */
     public String planningStructuredStageInstruction() {
         return "[Stage: PLANNING_STRUCTURED]\n"
-                + "请将上述分析转化为严格的 JSON 格式输出，只输出 JSON，不要包含其他文字。\n"
-                + "格式: {\"analysis\":\"你的分析摘要\",\"items\":["
-                + "{\"id\":\"todo_1\",\"sequence\":1,\"type\":\"TOOL_CALL\","
-                + "\"toolName\":\"...\",\"params\":{...},"
-                + "\"reasoning\":\"...\",\"executionMode\":\"AUTO\"}]}";
+                + "请将上述分析转化为简化的 Todo List JSON，只输出 JSON，不要包含其他文字。\n"
+                + "\n"
+                + "格式示例：\n"
+                + "{\"analysis\":\"分析摘要\",\"items\":["
+                + "{\"id\":\"todo_1\",\"sequence\":1,\"description\":\"查询贵州茅台的股票代码\","
+                + "\"dependsOn\":[]},"
+                + "{\"id\":\"todo_2\",\"sequence\":2,\"description\":\"获取茅台2025年的日线数据\","
+                + "\"dependsOn\":[\"todo_1\"]},"
+                + "{\"id\":\"todo_3\",\"sequence\":3,\"description\":\"分析数据并回答用户关于涨跌幅的问题\","
+                + "\"dependsOn\":[\"todo_2\"]}]}\n"
+                + "\n"
+                + "注意：\n"
+                + "1. 每个 Todo 只需要 description 字段（1-3句话描述任务）\n"
+                + "2. 不要包含 toolName、params 等具体执行细节\n"
+                + "3. DAG 模式下可选 dependsOn 指定依赖关系（默认空数组）\n"
+                + "4. Todo 的具体执行将由 ReAct Agent 在执行时自主决策";
     }
 
     /**
@@ -276,6 +365,35 @@ public class AgentPromptService {
                 ""
         );
         return "[Stage: FINAL_ANSWER]\n" + specific;
+    }
+
+    /**
+     * Plan Judge 阶段指令 —— 注入到 User Message，引导 LLM 做出失败判断决策。
+     *
+     * <p>在 ReAct 累积模式下，Judge 不再使用独立的 System Prompt，
+     * 而是通过此阶段指令注入到对话上下文中，共享同一个 System Prompt 前缀。</p>
+     */
+    public String planJudgeStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getPlanJudgeRuntimeSystemPromptTemplate(),
+                currentPrompts().getPlanJudgeSystemPromptTemplate(),
+                ""
+        );
+        return "[Stage: PLAN_JUDGE]\n" + specific;
+    }
+
+    /**
+     * Patch Planner 阶段指令 —— 注入到 User Message，引导 LLM 生成计划补丁。
+     *
+     * <p>在 ReAct 累积模式下，Patch Planner 不再使用独立的 System Prompt，
+     * 而是通过此阶段指令注入到对话上下文中，共享同一个 System Prompt 前缀。</p>
+     */
+    public String patchPlannerStageInstruction() {
+        String specific = firstNonBlank(
+                currentPrompts().getParallelPatchPlannerSystemPromptTemplate(),
+                ""
+        );
+        return "[Stage: PATCH_PLAN]\n" + specific;
     }
 
     /**
@@ -328,6 +446,7 @@ public class AgentPromptService {
         merged.setParallelFinalSystemPrompt(firstNonBlank(local.getParallelFinalSystemPrompt(), base.getParallelFinalSystemPrompt()));
         merged.setParallelPatchPlannerSystemPromptTemplate(firstNonBlank(local.getParallelPatchPlannerSystemPromptTemplate(), base.getParallelPatchPlannerSystemPromptTemplate()));
         merged.setPlanJudgeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeSystemPromptTemplate(), base.getPlanJudgeSystemPromptTemplate()));
+        merged.setPlanJudgeRuntimeSystemPromptTemplate(firstNonBlank(local.getPlanJudgeRuntimeSystemPromptTemplate(), base.getPlanJudgeRuntimeSystemPromptTemplate()));
         merged.setSemanticJudgeSystemPromptTemplate(firstNonBlank(local.getSemanticJudgeSystemPromptTemplate(), base.getSemanticJudgeSystemPromptTemplate()));
         merged.setSubAgentPlannerSystemPromptTemplate(firstNonBlank(local.getSubAgentPlannerSystemPromptTemplate(), base.getSubAgentPlannerSystemPromptTemplate()));
         merged.setSubAgentSummarySystemPrompt(firstNonBlank(local.getSubAgentSummarySystemPrompt(), base.getSubAgentSummarySystemPrompt()));
@@ -337,6 +456,8 @@ public class AgentPromptService {
         merged.setOrchestratorSummarySystemPrompt(firstNonBlank(local.getOrchestratorSummarySystemPrompt(), base.getOrchestratorSummarySystemPrompt()));
         merged.setPythonRefineRequirements(selectList(local.getPythonRefineRequirements(), base.getPythonRefineRequirements()));
         merged.setDatasetFieldSpecs(selectList(local.getDatasetFieldSpecs(), base.getDatasetFieldSpecs()));
+        merged.setDagReactSystemPrompt(firstNonBlank(local.getDagReactSystemPrompt(), base.getDagReactSystemPrompt()));
+        merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
         return merged;
     }
 
