@@ -7,10 +7,10 @@ public record AgentRunStatusResponse(
         String currentTool,
         String lastEventType,
         String lastEventAt,
-        String lastEventPayloadJson,
-        String planJson,
-        String progressJson,
-        String observabilityJson,
+        Object lastEventPayload,
+        Object plan,
+        Object progress,
+        Object observability,
         Integer totalCreditsConsumed
 ) {
 }

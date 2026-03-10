@@ -12,6 +12,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
@@ -110,10 +111,24 @@ public class ReactTodoExecutor {
                         .build();
             }
             
+            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
+            if (llmTraceId != null && decision.getToolName() != null) {
+                String excerpt = llmOutput != null && llmOutput.length() > 200 
+                        ? llmOutput.substring(0, 200) : llmOutput;
+                AgentContext.setDecisionContext(
+                        llmTraceId,
+                        phase != null ? phase : "dag_execution",
+                        excerpt
+                );
+            }
+            
             // 执行工具
             TodoExecutionRecord record = executeTool(decision, context, runId, phase);
             record.setLlmTraceId(llmTraceId);
             record.setRetryCount(retryCount);
+            
+            // 工具执行完后清除，避免污染后续重试
+            AgentContext.clearDecisionContext();
             
             // 如果失败且未达到最大重试次数，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES) {

@@ -3,6 +3,7 @@ package world.willfrog.agent.workflow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
 
@@ -271,18 +272,26 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                         // 依赖成功，执行当前节点
                         log.info("Executing DAG node {}: {}", item.getId(), item.getDescription());
                         
+                        // 设置 AgentContext 的 Todo 上下文，让 LlmTrace/ToolTrace 能关联到此节点
+                        AgentContext.setTodoContext(item.getId(), item.getSequence());
+                        
                         // 从全局上下文构建当前节点的执行上下文
                         ReactTodoExecutor.TodoExecutionContext todoContext = 
                                 buildTodoContext(item, sharedContext, request);
                         
-                        // 执行节点（带完整观测）
-                        record = reactTodoExecutor.executeWithObservability(
-                                item.getDescription(),
-                                todoContext,
-                                request.getModel(),
-                                runId,
-                                nodePhase
-                        );
+                        try {
+                            // 执行节点（带完整观测）
+                            record = reactTodoExecutor.executeWithObservability(
+                                    item.getDescription(),
+                                    todoContext,
+                                    request.getModel(),
+                                    runId,
+                                    nodePhase
+                            );
+                        } finally {
+                            // 清理 Todo 上下文，避免跨节点污染
+                            AgentContext.clearTodoContext();
+                        }
                         
                         // 补充节点执行时间信息
                         record.setStartedAt(Instant.ofEpochMilli(nodeExecuteStart));
