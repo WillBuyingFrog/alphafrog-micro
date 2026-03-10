@@ -588,7 +588,6 @@ public class DomesticIndexStoreUtils {
                     sqlSession.commit();
                 }
             }
-            sqlSession.commit();
         } catch (Exception e) {
             log.error("Error occurred while inserting SwIndustryDaily data", e);
             return -2;

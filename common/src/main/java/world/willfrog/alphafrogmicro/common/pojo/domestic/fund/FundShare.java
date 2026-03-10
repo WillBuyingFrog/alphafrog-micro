@@ -25,6 +25,6 @@ public class FundShare {
     @Column(name = "trade_date", nullable = false)
     Long tradeDate;
 
-    @Column(name = "fd_share", nullable = false)
+    @Column(name = "fd_share")
     Double fdShare;
 }
