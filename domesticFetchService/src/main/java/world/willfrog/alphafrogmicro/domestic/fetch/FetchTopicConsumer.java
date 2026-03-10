@@ -246,6 +246,162 @@ public class FetchTopicConsumer {
                         result = -1;
                     }
                     break;
+
+                // ==================== 新增指数接口 ====================
+
+                case "index_daily_basic":
+                    if (taskSubType == 1) {
+                        // 按指数代码+日期范围爬取
+                        String tsCode = taskParams.getString("ts_code");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndexDailyBasicFetchByTsCodeRequest request =
+                                DomesticIndexDailyBasicFetchByTsCodeRequest.newBuilder()
+                                        .setTsCode(tsCode).setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchIndexDailyBasicByTsCode(request).getFetchedItemsCount();
+                    } else if (taskSubType == 2) {
+                        // 按交易日期爬取当日全部
+                        String tradeDate = taskParams.getString("trade_date");
+                        DomesticIndexDailyBasicFetchByTradeDateRequest request =
+                                DomesticIndexDailyBasicFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDate)
+                                        .build();
+                        result = domesticIndexFetchService.fetchIndexDailyBasicByTradeDate(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "sw_industry_classify":
+                    if (taskSubType == 1) {
+                        String level = taskParams.getString("level");
+                        String src = taskParams.getString("src");
+                        DomesticSwIndustryClassifyFetchRequest request =
+                                DomesticSwIndustryClassifyFetchRequest.newBuilder()
+                                        .setLevel(level != null ? level : "")
+                                        .setSrc(src != null ? src : "SW2021")
+                                        .build();
+                        result = domesticIndexFetchService.fetchSwIndustryClassify(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "sw_industry_member":
+                    if (taskSubType == 1) {
+                        String l1Code = taskParams.getString("l1_code");
+                        String isNew = taskParams.getString("is_new");
+                        DomesticSwIndustryMemberFetchByL1CodeRequest request =
+                                DomesticSwIndustryMemberFetchByL1CodeRequest.newBuilder()
+                                        .setL1Code(l1Code)
+                                        .setIsNew(isNew != null ? isNew : "Y")
+                                        .build();
+                        result = domesticIndexFetchService.fetchSwIndustryMemberByL1Code(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "sw_industry_daily":
+                    if (taskSubType == 1) {
+                        // 按交易日期爬取当日全部行业指数
+                        String tradeDate = taskParams.getString("trade_date");
+                        DomesticSwIndustryDailyFetchByTradeDateRequest request =
+                                DomesticSwIndustryDailyFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDate)
+                                        .build();
+                        result = domesticIndexFetchService.fetchSwIndustryDailyByTradeDate(request).getFetchedItemsCount();
+                    } else if (taskSubType == 2) {
+                        // 按指数代码+日期范围爬取
+                        String tsCode = taskParams.getString("ts_code");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        DomesticSwIndustryDailyFetchByTsCodeRequest request =
+                                DomesticSwIndustryDailyFetchByTsCodeRequest.newBuilder()
+                                        .setTsCode(tsCode).setStartDate(startDate).setEndDate(endDate)
+                                        .build();
+                        result = domesticIndexFetchService.fetchSwIndustryDailyByTsCode(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "ci_index_member":
+                    if (taskSubType == 1) {
+                        String tsCode = taskParams.getString("ts_code");
+                        String isNew = taskParams.getString("is_new");
+                        DomesticCiIndexMemberFetchRequest request =
+                                DomesticCiIndexMemberFetchRequest.newBuilder()
+                                        .setTsCode(tsCode != null ? tsCode : "")
+                                        .setIsNew(isNew != null ? isNew : "Y")
+                                        .build();
+                        result = domesticIndexFetchService.fetchCiIndexMember(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                // ==================== 新增基金接口 ====================
+
+                case "fund_company":
+                    if (taskSubType == 1) {
+                        DomesticFundCompanyFetchRequest request =
+                                DomesticFundCompanyFetchRequest.newBuilder().build();
+                        result = domesticFundFetchService.fetchFundCompany(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "fund_manager":
+                    if (taskSubType == 1) {
+                        String tsCode = taskParams.getString("ts_code");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticFundManagerFetchByTsCodeRequest request =
+                                DomesticFundManagerFetchByTsCodeRequest.newBuilder()
+                                        .setTsCode(tsCode).setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticFundFetchService.fetchFundManagerByTsCode(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "fund_share":
+                    if (taskSubType == 1) {
+                        String tradeDate = taskParams.getString("trade_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticFundShareFetchByTradeDateRequest request =
+                                DomesticFundShareFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDate).setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticFundFetchService.fetchFundShareByTradeDate(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "etf_share_size":
+                    if (taskSubType == 1) {
+                        String tradeDate = taskParams.getString("trade_date");
+                        String exchange = taskParams.getString("exchange");
+                        DomesticEtfShareSizeFetchByTradeDateRequest.Builder builder =
+                                DomesticEtfShareSizeFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDate);
+                        if (exchange != null && !exchange.isBlank()) {
+                            builder.setExchange(exchange);
+                        }
+                        result = domesticFundFetchService.fetchEtfShareSizeByTradeDate(builder.build()).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
                 default:
                     result = -2;
                     break;

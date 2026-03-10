@@ -318,4 +318,295 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
     }
 
 
+    // ==================== 新增：大盘指数每日估值指标 ====================
+
+    @Override
+    public DomesticIndexDailyBasicFetchByTsCodeResponse fetchIndexDailyBasicByTsCode(
+            DomesticIndexDailyBasicFetchByTsCodeRequest request) {
+
+        String tsCode = request.getTsCode();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "index_dailybasic");
+        queryParams.put("ts_code", tsCode);
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("fields", "ts_code,trade_date,total_mv,float_mv,total_share,float_share," +
+                "free_share,turnover_rate,turnover_rate_f,pe,pe_ttm,pb");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticIndexDailyBasicFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeIndexDailyBasicByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticIndexDailyBasicFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticIndexDailyBasicFetchByTsCodeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    @Override
+    public DomesticIndexDailyBasicFetchByTradeDateResponse fetchIndexDailyBasicByTradeDate(
+            DomesticIndexDailyBasicFetchByTradeDateRequest request) {
+
+        String tradeDate = request.getTradeDate();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "index_dailybasic");
+        queryParams.put("trade_date", tradeDate);
+        params.put("fields", "ts_code,trade_date,total_mv,float_mv,total_share,float_share," +
+                "free_share,turnover_rate,turnover_rate_f,pe,pe_ttm,pb");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticIndexDailyBasicFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeIndexDailyBasicByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticIndexDailyBasicFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticIndexDailyBasicFetchByTradeDateResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：申万行业分类 ====================
+
+    @Override
+    public DomesticSwIndustryClassifyFetchResponse fetchSwIndustryClassify(
+            DomesticSwIndustryClassifyFetchRequest request) {
+
+        String level = request.getLevel();
+        String src = request.getSrc();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "index_classify");
+        if (level != null && !level.isBlank()) {
+            queryParams.put("level", level);
+        }
+        if (src != null && !src.isBlank()) {
+            queryParams.put("src", src);
+        }
+        params.put("fields", "index_code,industry_name,parent_code,level,industry_code,is_pub,src");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticSwIndustryClassifyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeSwIndustryClassifyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticSwIndustryClassifyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticSwIndustryClassifyFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：申万行业成分 ====================
+
+    @Override
+    public DomesticSwIndustryMemberFetchByL1CodeResponse fetchSwIndustryMemberByL1Code(
+            DomesticSwIndustryMemberFetchByL1CodeRequest request) {
+
+        String l1Code = request.getL1Code();
+        String isNew = request.getIsNew();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "index_member_all");
+        queryParams.put("l1_code", l1Code);
+        if (isNew != null && !isNew.isBlank()) {
+            queryParams.put("is_new", isNew);
+        }
+        params.put("fields", "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticSwIndustryMemberFetchByL1CodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeSwIndustryMemberByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticSwIndustryMemberFetchByL1CodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticSwIndustryMemberFetchByL1CodeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：申万行业指数日线行情 ====================
+
+    @Override
+    public DomesticSwIndustryDailyFetchByTradeDateResponse fetchSwIndustryDailyByTradeDate(
+            DomesticSwIndustryDailyFetchByTradeDateRequest request) {
+
+        String tradeDate = request.getTradeDate();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "sw_daily");
+        queryParams.put("trade_date", tradeDate);
+        params.put("fields", "ts_code,trade_date,name,open,low,high,close,change,pct_change,vol,amount,pe,pb,float_mv,total_mv");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticSwIndustryDailyFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeSwIndustryDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticSwIndustryDailyFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticSwIndustryDailyFetchByTradeDateResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    @Override
+    public DomesticSwIndustryDailyFetchByTsCodeResponse fetchSwIndustryDailyByTsCode(
+            DomesticSwIndustryDailyFetchByTsCodeRequest request) {
+
+        String tsCode = request.getTsCode();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "sw_daily");
+        queryParams.put("ts_code", tsCode);
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        params.put("fields", "ts_code,trade_date,name,open,low,high,close,change,pct_change,vol,amount,pe,pb,float_mv,total_mv");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticSwIndustryDailyFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeSwIndustryDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticSwIndustryDailyFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticSwIndustryDailyFetchByTsCodeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：中信行业成分 ====================
+
+    @Override
+    public DomesticCiIndexMemberFetchResponse fetchCiIndexMember(
+            DomesticCiIndexMemberFetchRequest request) {
+
+        String tsCode = request.getTsCode();
+        String isNew = request.getIsNew();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "ci_index_member");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (isNew != null && !isNew.isBlank()) {
+            queryParams.put("is_new", isNew);
+        }
+        params.put("fields", "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticCiIndexMemberFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeCiIndexMemberByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticCiIndexMemberFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticCiIndexMemberFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
 }

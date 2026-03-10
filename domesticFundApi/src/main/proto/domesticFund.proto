@@ -211,8 +211,69 @@ service DomesticFundService {
 
 }
 
+/**
+  基金管理人爬取
+ */
+
+message DomesticFundCompanyFetchRequest {
+}
+
+message DomesticFundCompanyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金经理爬取
+ */
+
+message DomesticFundManagerFetchByTsCodeRequest {
+  string tsCode = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticFundManagerFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金份额爬取
+ */
+
+message DomesticFundShareFetchByTradeDateRequest {
+  string tradeDate = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticFundShareFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF份额规模爬取
+ */
+
+message DomesticEtfShareSizeFetchByTradeDateRequest {
+  string tradeDate = 1;
+  optional string exchange = 2;
+}
+
+message DomesticEtfShareSizeFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
+  rpc fetchFundCompany(DomesticFundCompanyFetchRequest) returns (DomesticFundCompanyFetchResponse);
+  rpc fetchFundManagerByTsCode(DomesticFundManagerFetchByTsCodeRequest) returns (DomesticFundManagerFetchByTsCodeResponse);
+  rpc fetchFundShareByTradeDate(DomesticFundShareFetchByTradeDateRequest) returns (DomesticFundShareFetchByTradeDateResponse);
+  rpc fetchEtfShareSizeByTradeDate(DomesticEtfShareSizeFetchByTradeDateRequest) returns (DomesticEtfShareSizeFetchByTradeDateResponse);
 }

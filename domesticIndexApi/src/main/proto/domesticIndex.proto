@@ -271,12 +271,114 @@ service DomesticIndexService{
 
 }
 
+/**
+  大盘指数每日估值指标爬取
+ */
+
+// 按指数代码和日期范围爬取大盘指数每日估值指标
+message DomesticIndexDailyBasicFetchByTsCodeRequest {
+  string tsCode = 1;
+  string startDate = 2;
+  string endDate = 3;
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticIndexDailyBasicFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 按交易日期爬取大盘指数每日估值指标
+message DomesticIndexDailyBasicFetchByTradeDateRequest {
+  string tradeDate = 1;
+}
+
+message DomesticIndexDailyBasicFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  申万行业分类爬取
+ */
+
+message DomesticSwIndustryClassifyFetchRequest {
+  string level = 1;
+  string src = 2;
+}
+
+message DomesticSwIndustryClassifyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  申万行业成分爬取
+ */
+
+message DomesticSwIndustryMemberFetchByL1CodeRequest {
+  string l1Code = 1;
+  string isNew = 2;
+}
+
+message DomesticSwIndustryMemberFetchByL1CodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  申万行业指数日线行情爬取
+ */
+
+message DomesticSwIndustryDailyFetchByTradeDateRequest {
+  string tradeDate = 1;
+}
+
+message DomesticSwIndustryDailyFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+message DomesticSwIndustryDailyFetchByTsCodeRequest {
+  string tsCode = 1;
+  string startDate = 2;
+  string endDate = 3;
+}
+
+message DomesticSwIndustryDailyFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  中信行业成分爬取
+ */
+
+message DomesticCiIndexMemberFetchRequest {
+  string tsCode = 1;
+  string isNew = 2;
+}
+
+message DomesticCiIndexMemberFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
 service DomesticIndexFetchService {
   rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
   rpc fetchDomesticIndexDailyByDateRange(DomesticIndexDailyFetchByDateRangeRequest) returns (DomesticIndexDailyFetchByDateRangeResponse);
   rpc fetchDomesticIndexDailyByTradeDate(DomesticIndexDailyFetchByTradeDateRequest) returns (DomesticIndexDailyFetchByTradeDateResponse);
   rpc fetchDomesticIndexDailyAllByDateRange(DomesticindexDailyFetchAllByDateRangeRequest) returns (DomesticIndexDailyFetchAllByDateRangeResponse);
   rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);
+  rpc fetchIndexDailyBasicByTsCode(DomesticIndexDailyBasicFetchByTsCodeRequest) returns (DomesticIndexDailyBasicFetchByTsCodeResponse);
+  rpc fetchIndexDailyBasicByTradeDate(DomesticIndexDailyBasicFetchByTradeDateRequest) returns (DomesticIndexDailyBasicFetchByTradeDateResponse);
+  rpc fetchSwIndustryClassify(DomesticSwIndustryClassifyFetchRequest) returns (DomesticSwIndustryClassifyFetchResponse);
+  rpc fetchSwIndustryMemberByL1Code(DomesticSwIndustryMemberFetchByL1CodeRequest) returns (DomesticSwIndustryMemberFetchByL1CodeResponse);
+  rpc fetchSwIndustryDailyByTradeDate(DomesticSwIndustryDailyFetchByTradeDateRequest) returns (DomesticSwIndustryDailyFetchByTradeDateResponse);
+  rpc fetchSwIndustryDailyByTsCode(DomesticSwIndustryDailyFetchByTsCodeRequest) returns (DomesticSwIndustryDailyFetchByTsCodeResponse);
+  rpc fetchCiIndexMember(DomesticCiIndexMemberFetchRequest) returns (DomesticCiIndexMemberFetchResponse);
 }
 
 service DomesticTradeCalendarFetchService {
