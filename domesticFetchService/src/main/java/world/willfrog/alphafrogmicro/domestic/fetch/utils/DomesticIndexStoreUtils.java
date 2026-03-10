@@ -6,12 +6,8 @@ import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.springframework.stereotype.Component;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexQuoteDao;
-import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexWeightDao;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexDaily;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexInfo;
-import world.willfrog.alphafrogmicro.common.pojo.domestic.index.IndexWeight;
+import world.willfrog.alphafrogmicro.common.dao.domestic.index.*;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.index.*;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 
 import java.math.BigDecimal;
@@ -282,6 +278,399 @@ public class DomesticIndexStoreUtils {
         return indexWeightList.size();
     }
 
+
+    public int storeIndexDailyBasicByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<IndexDailyBasic> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                IndexDailyBasic pojo = new IndexDailyBasic();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "trade_date":
+                            String tradeDateStr = item.getString(j);
+                            if (tradeDateStr != null) {
+                                pojo.setTradeDate(DateConvertUtils.convertDateStrToLong(tradeDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "total_mv":
+                            BigDecimal totalMv = item.getBigDecimal(j);
+                            if (totalMv != null) pojo.setTotalMv(totalMv.doubleValue());
+                            break;
+                        case "float_mv":
+                            BigDecimal floatMv = item.getBigDecimal(j);
+                            if (floatMv != null) pojo.setFloatMv(floatMv.doubleValue());
+                            break;
+                        case "total_share":
+                            BigDecimal totalShare = item.getBigDecimal(j);
+                            if (totalShare != null) pojo.setTotalShare(totalShare.doubleValue());
+                            break;
+                        case "float_share":
+                            BigDecimal floatShare = item.getBigDecimal(j);
+                            if (floatShare != null) pojo.setFloatShare(floatShare.doubleValue());
+                            break;
+                        case "free_share":
+                            BigDecimal freeShare = item.getBigDecimal(j);
+                            if (freeShare != null) pojo.setFreeShare(freeShare.doubleValue());
+                            break;
+                        case "turnover_rate":
+                            BigDecimal turnoverRate = item.getBigDecimal(j);
+                            if (turnoverRate != null) pojo.setTurnoverRate(turnoverRate.doubleValue());
+                            break;
+                        case "turnover_rate_f":
+                            BigDecimal turnoverRateF = item.getBigDecimal(j);
+                            if (turnoverRateF != null) pojo.setTurnoverRateF(turnoverRateF.doubleValue());
+                            break;
+                        case "pe":
+                            BigDecimal pe = item.getBigDecimal(j);
+                            if (pe != null) pojo.setPe(pe.doubleValue());
+                            break;
+                        case "pe_ttm":
+                            BigDecimal peTtm = item.getBigDecimal(j);
+                            if (peTtm != null) pojo.setPeTtm(peTtm.doubleValue());
+                            break;
+                        case "pb":
+                            BigDecimal pb = item.getBigDecimal(j);
+                            if (pb != null) pojo.setPb(pb.doubleValue());
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to IndexDailyBasic", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            IndexDailyBasicDao dao = sqlSession.getMapper(IndexDailyBasicDao.class);
+            for (IndexDailyBasic item : list) {
+                dao.insertIndexDailyBasic(item);
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting IndexDailyBasic data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+
+    public int storeSwIndustryClassifyByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<SwIndustryClassify> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                SwIndustryClassify pojo = new SwIndustryClassify();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "index_code":
+                            pojo.setIndexCode(item.getString(j));
+                            break;
+                        case "industry_name":
+                            pojo.setIndustryName(item.getString(j));
+                            break;
+                        case "parent_code":
+                            pojo.setParentCode(item.getString(j));
+                            break;
+                        case "level":
+                            pojo.setLevel(item.getString(j));
+                            break;
+                        case "industry_code":
+                            pojo.setIndustryCode(item.getString(j));
+                            break;
+                        case "is_pub":
+                            pojo.setIsPub(item.getString(j));
+                            break;
+                        case "src":
+                            pojo.setSrc(item.getString(j));
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to SwIndustryClassify", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            SwIndustryClassifyDao dao = sqlSession.getMapper(SwIndustryClassifyDao.class);
+            for (SwIndustryClassify item : list) {
+                dao.insertSwIndustryClassify(item);
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting SwIndustryClassify data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+
+    public int storeSwIndustryMemberByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<SwIndustryMember> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                SwIndustryMember pojo = new SwIndustryMember();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "l1_code":
+                            pojo.setL1Code(item.getString(j));
+                            break;
+                        case "l1_name":
+                            pojo.setL1Name(item.getString(j));
+                            break;
+                        case "l2_code":
+                            pojo.setL2Code(item.getString(j));
+                            break;
+                        case "l2_name":
+                            pojo.setL2Name(item.getString(j));
+                            break;
+                        case "l3_code":
+                            pojo.setL3Code(item.getString(j));
+                            break;
+                        case "l3_name":
+                            pojo.setL3Name(item.getString(j));
+                            break;
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "name":
+                            pojo.setName(item.getString(j));
+                            break;
+                        case "in_date":
+                            String inDateStr = item.getString(j);
+                            if (inDateStr != null) {
+                                pojo.setInDate(DateConvertUtils.convertDateStrToLong(inDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "out_date":
+                            String outDateStr = item.getString(j);
+                            if (outDateStr != null) {
+                                pojo.setOutDate(DateConvertUtils.convertDateStrToLong(outDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "is_new":
+                            pojo.setIsNew(item.getString(j));
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to SwIndustryMember", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            SwIndustryMemberDao dao = sqlSession.getMapper(SwIndustryMemberDao.class);
+            for (SwIndustryMember item : list) {
+                dao.insertSwIndustryMember(item);
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting SwIndustryMember data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+
+    public int storeSwIndustryDailyByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<SwIndustryDaily> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                SwIndustryDaily pojo = new SwIndustryDaily();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "trade_date":
+                            String tradeDateStr = item.getString(j);
+                            if (tradeDateStr != null) {
+                                pojo.setTradeDate(DateConvertUtils.convertDateStrToLong(tradeDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "name":
+                            pojo.setName(item.getString(j));
+                            break;
+                        case "open":
+                            BigDecimal open = item.getBigDecimal(j);
+                            if (open != null) pojo.setOpen(open.doubleValue());
+                            break;
+                        case "low":
+                            BigDecimal low = item.getBigDecimal(j);
+                            if (low != null) pojo.setLow(low.doubleValue());
+                            break;
+                        case "high":
+                            BigDecimal high = item.getBigDecimal(j);
+                            if (high != null) pojo.setHigh(high.doubleValue());
+                            break;
+                        case "close":
+                            BigDecimal close = item.getBigDecimal(j);
+                            if (close != null) pojo.setClose(close.doubleValue());
+                            break;
+                        case "change":
+                            BigDecimal changeVal = item.getBigDecimal(j);
+                            if (changeVal != null) pojo.setChangeVal(changeVal.doubleValue());
+                            break;
+                        case "pct_change":
+                            BigDecimal pctChange = item.getBigDecimal(j);
+                            if (pctChange != null) pojo.setPctChange(pctChange.doubleValue());
+                            break;
+                        case "vol":
+                            BigDecimal vol = item.getBigDecimal(j);
+                            if (vol != null) pojo.setVol(vol.doubleValue());
+                            break;
+                        case "amount":
+                            BigDecimal amount = item.getBigDecimal(j);
+                            if (amount != null) pojo.setAmount(amount.doubleValue());
+                            break;
+                        case "pe":
+                            BigDecimal pe = item.getBigDecimal(j);
+                            if (pe != null) pojo.setPe(pe.doubleValue());
+                            break;
+                        case "pb":
+                            BigDecimal pb = item.getBigDecimal(j);
+                            if (pb != null) pojo.setPb(pb.doubleValue());
+                            break;
+                        case "float_mv":
+                            BigDecimal floatMv = item.getBigDecimal(j);
+                            if (floatMv != null) pojo.setFloatMv(floatMv.doubleValue());
+                            break;
+                        case "total_mv":
+                            BigDecimal totalMv = item.getBigDecimal(j);
+                            if (totalMv != null) pojo.setTotalMv(totalMv.doubleValue());
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to SwIndustryDaily", e);
+            return -1;
+        }
+
+        int totalAffected = 0;
+        int batchSize = 50;
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH, false)) {
+            SwIndustryDailyDao dao = sqlSession.getMapper(SwIndustryDailyDao.class);
+            for (SwIndustryDaily daily : list) {
+                totalAffected++;
+                dao.insertSwIndustryDaily(daily);
+                if (totalAffected % batchSize == 0 || totalAffected == list.size()) {
+                    sqlSession.commit();
+                }
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting SwIndustryDaily data", e);
+            return -2;
+        }
+
+        return totalAffected;
+    }
+
+
+    public int storeCiIndexMemberByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<CiIndexMember> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                CiIndexMember pojo = new CiIndexMember();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "l1_code":
+                            pojo.setL1Code(item.getString(j));
+                            break;
+                        case "l1_name":
+                            pojo.setL1Name(item.getString(j));
+                            break;
+                        case "l2_code":
+                            pojo.setL2Code(item.getString(j));
+                            break;
+                        case "l2_name":
+                            pojo.setL2Name(item.getString(j));
+                            break;
+                        case "l3_code":
+                            pojo.setL3Code(item.getString(j));
+                            break;
+                        case "l3_name":
+                            pojo.setL3Name(item.getString(j));
+                            break;
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "name":
+                            pojo.setName(item.getString(j));
+                            break;
+                        case "in_date":
+                            String inDateStr = item.getString(j);
+                            if (inDateStr != null) {
+                                pojo.setInDate(DateConvertUtils.convertDateStrToLong(inDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "out_date":
+                            String outDateStr = item.getString(j);
+                            if (outDateStr != null) {
+                                pojo.setOutDate(DateConvertUtils.convertDateStrToLong(outDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "is_new":
+                            pojo.setIsNew(item.getString(j));
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to CiIndexMember", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            CiIndexMemberDao dao = sqlSession.getMapper(CiIndexMemberDao.class);
+            for (CiIndexMember item : list) {
+                dao.insertCiIndexMember(item);
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting CiIndexMember data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
 
 
 }
