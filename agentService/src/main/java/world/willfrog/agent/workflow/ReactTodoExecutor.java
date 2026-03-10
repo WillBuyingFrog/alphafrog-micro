@@ -122,13 +122,16 @@ public class ReactTodoExecutor {
                 );
             }
             
-            // 执行工具
-            TodoExecutionRecord record = executeTool(decision, context, runId, phase);
+            TodoExecutionRecord record;
+            try {
+                // 执行工具
+                record = executeTool(decision, context, runId, phase);
+            } finally {
+                // 工具执行完后清除，避免污染后续重试或未来实现抛异常时发生串扰
+                AgentContext.clearDecisionContext();
+            }
             record.setLlmTraceId(llmTraceId);
             record.setRetryCount(retryCount);
-            
-            // 工具执行完后清除，避免污染后续重试
-            AgentContext.clearDecisionContext();
             
             // 如果失败且未达到最大重试次数，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES) {
