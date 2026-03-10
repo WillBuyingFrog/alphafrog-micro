@@ -1,40 +1,43 @@
 package world.willfrog.alphafrogmicro.frontend.model.agent;
 
 import com.fasterxml.jackson.annotation.JsonInclude;
+import lombok.Builder;
+import lombok.Data;
 
 import java.util.Map;
 
+@Data
+@Builder
 @JsonInclude(JsonInclude.Include.NON_NULL)
-public record TraceDetailResponse(
-        String type,
-        String traceId,
-        String phase,
-        String todoId,
-        Integer todoSequence,
-        String time,
-        Long durationMs,
+public class TraceDetailResponse {
+    private String type;
+    private String traceId;
+    private String phase;
+    private String todoId;
+    private Integer todoSequence;
+    private String time;
+    private Long durationMs;
 
-        // LLM specific
-        String model,
-        String endpoint,
-        Long inputTokens,
-        Long outputTokens,
-        Integer cachedTokens,
-        Double actualCost,
-        Object inputMessages,
-        String outputText,
-        String reasoningText,
-        Boolean hasError,
-        String error,
+    // LLM specific
+    private String model;
+    private String endpoint;
+    private Long inputTokens;
+    private Long outputTokens;
+    private Integer cachedTokens;
+    private Double actualCost;
+    private Object inputMessages;
+    private String outputText;
+    private String reasoningText;
+    private Boolean hasError;
+    private String error;
 
-        // Tool specific
-        String toolName,
-        Map<String, Object> params,
-        String output,
-        Boolean success,
-        Boolean cacheHit,
-        String cacheKey,
-        String decisionLlmTraceId,
-        String decisionExcerpt
-) {
+    // Tool specific
+    private String toolName;
+    private Map<String, Object> params;
+    private String output;
+    private Boolean success;
+    private Boolean cacheHit;
+    private String cacheKey;
+    private String decisionLlmTraceId;
+    private String decisionExcerpt;
 }

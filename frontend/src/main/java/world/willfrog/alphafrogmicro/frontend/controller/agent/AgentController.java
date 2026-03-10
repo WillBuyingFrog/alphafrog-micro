@@ -581,27 +581,26 @@ public class AgentController {
             if (llmTracesObj instanceof List<?> llmTraces) {
                 for (Object item : llmTraces) {
                     if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
-                        return ResponseWrapper.success(new TraceDetailResponse(
-                                "llm",
-                                strVal(m.get("traceId")),
-                                strVal(m.get("phase")),
-                                emptyToNull(strVal(m.get("todoId"))),
-                                m.get("todoSequence") instanceof Number n ? n.intValue() : null,
-                                strVal(m.get("time")),
-                                longVal(m.get("durationMs")),
-                                strVal(m.get("model")),
-                                strVal(m.get("endpoint")),
-                                nullableLong(m.get("inputTokens")),
-                                nullableLong(m.get("outputTokens")),
-                                m.get("cachedTokens") instanceof Number n ? n.intValue() : null,
-                                m.get("actualCost") instanceof Number n ? n.doubleValue() : null,
-                                m.get("inputMessages"),
-                                strVal(m.get("outputText")),
-                                strVal(m.get("reasoningText")),
-                                boolVal(m.get("hasError")),
-                                emptyToNull(strVal(m.get("error"))),
-                                null, null, null, null, null, null, null, null
-                        ));
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("llm")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .model(strVal(m.get("model")))
+                                .endpoint(strVal(m.get("endpoint")))
+                                .inputTokens(nullableLong(m.get("inputTokens")))
+                                .outputTokens(nullableLong(m.get("outputTokens")))
+                                .cachedTokens(m.get("cachedTokens") instanceof Number n ? n.intValue() : null)
+                                .actualCost(m.get("actualCost") instanceof Number n ? n.doubleValue() : null)
+                                .inputMessages(m.get("inputMessages"))
+                                .outputText(strVal(m.get("outputText")))
+                                .reasoningText(strVal(m.get("reasoningText")))
+                                .hasError(boolVal(m.get("hasError")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .build());
                     }
                 }
             }
@@ -611,26 +610,24 @@ public class AgentController {
             if (toolTracesObj instanceof List<?> toolTraces) {
                 for (Object item : toolTraces) {
                     if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
-                        return ResponseWrapper.success(new TraceDetailResponse(
-                                "tool",
-                                strVal(m.get("traceId")),
-                                strVal(m.get("phase")),
-                                emptyToNull(strVal(m.get("todoId"))),
-                                m.get("todoSequence") instanceof Number n ? n.intValue() : null,
-                                strVal(m.get("time")),
-                                longVal(m.get("durationMs")),
-                                null, null, null, null, null, null, null, null, null,
-                                null,
-                                emptyToNull(strVal(m.get("error"))),
-                                strVal(m.get("toolName")),
-                                m.get("params") instanceof Map ? (Map<String, Object>) m.get("params") : null,
-                                strVal(m.get("output")),
-                                boolVal(m.get("success")),
-                                boolVal(m.get("cacheHit")),
-                                emptyToNull(strVal(m.get("cacheKey"))),
-                                emptyToNull(strVal(m.get("decisionLlmTraceId"))),
-                                emptyToNull(strVal(m.get("decisionExcerpt")))
-                        ));
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("tool")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .toolName(strVal(m.get("toolName")))
+                                .params(m.get("params") instanceof Map ? (Map<String, Object>) m.get("params") : null)
+                                .output(strVal(m.get("output")))
+                                .success(boolVal(m.get("success")))
+                                .cacheHit(boolVal(m.get("cacheHit")))
+                                .cacheKey(emptyToNull(strVal(m.get("cacheKey"))))
+                                .decisionLlmTraceId(emptyToNull(strVal(m.get("decisionLlmTraceId"))))
+                                .decisionExcerpt(emptyToNull(strVal(m.get("decisionExcerpt"))))
+                                .build());
                     }
                 }
             }
