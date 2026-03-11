@@ -62,6 +62,7 @@ class DagWorkflowExecutorTest {
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);
         lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月11日。");
+        lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]\n");
         lenient().when(model.chat(anyList())).thenReturn(ChatResponse.builder()
                 .aiMessage(new AiMessage("{\"answer\":\"最终回答\"}"))
                 .build());

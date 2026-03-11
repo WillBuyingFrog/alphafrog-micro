@@ -400,20 +400,18 @@ public class ReactTodoExecutor {
     private List<ChatMessage> buildMessages(String description, TodoExecutionContext context) {
         List<ChatMessage> messages = new ArrayList<>();
         
-        // System Prompt - 从配置文件加载，包含完整的工具参数规范
-        String baseSystemPrompt = promptService.dagReactSystemPrompt();
+        // System Prompt - 必须完全静态，以最大化 KV 前缀缓存命中率。
+        // 动态内容（用户目标、可用工具等）统一放到第一条 UserMessage，不放 SystemMessage。
+        messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
         
-        // 动态添加用户目标和可用工具列表
-        StringBuilder system = new StringBuilder(baseSystemPrompt);
-        system.append("\n\n## 当前上下文\n\n");
-        system.append("用户目标：").append(context.getUserGoal()).append("\n\n");
-        
-        // 添加可用的具体工具列表
+        // 第一条 UserMessage：动态上下文前缀 + 用户目标 + 可用工具（每次 run 会变化的内容）
+        StringBuilder dynamicCtx = new StringBuilder();
+        dynamicCtx.append(promptService.dynamicContextPrefix()).append("\n\n");
+        dynamicCtx.append("用户目标：").append(context.getUserGoal()).append("\n\n");
         if (!context.getAvailableTools().isEmpty()) {
-            system.append("当前可用工具：").append(String.join(", ", context.getAvailableTools())).append("\n");
+            dynamicCtx.append("当前可用工具：").append(String.join(", ", context.getAvailableTools())).append("\n");
         }
-        
-        messages.add(new SystemMessage(system.toString()));
+        messages.add(new UserMessage(dynamicCtx.toString()));
         
         // 历史完成的 Todo
         for (CompletedTodoInfo todo : context.getCompletedTodos()) {
@@ -426,7 +424,6 @@ public class ReactTodoExecutor {
         
         // 当前任务
         StringBuilder userMsg = new StringBuilder();
-        userMsg.append(promptService.dynamicContextPrefix()).append("\n\n");
         userMsg.append("当前任务: ").append(description).append("\n\n");
         
         if (!context.getDatasetRefs().isEmpty()) {

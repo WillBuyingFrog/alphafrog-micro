@@ -65,6 +65,7 @@ class LinearWorkflowExecutorTest {
 
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
+        lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]\n");
 
         // 默认 LLM 响应（用于 generateFinalAnswer）
         @SuppressWarnings("unchecked")

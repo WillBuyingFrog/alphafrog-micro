@@ -154,6 +154,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
 
             StringBuilder context = new StringBuilder();
+            context.append(promptService.finalAnswerStageInstruction()).append("\n\n");
             context.append(promptService.dynamicContextPrefix()).append("\n\n");
             context.append("用户问题：").append(userGoal).append("\n\n");
             context.append("已完成的任务：\n");

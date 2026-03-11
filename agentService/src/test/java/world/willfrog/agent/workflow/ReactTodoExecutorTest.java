@@ -21,6 +21,7 @@ import java.util.Set;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertInstanceOf;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -33,6 +34,8 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+
+import org.mockito.ArgumentCaptor;
 
 @ExtendWith(MockitoExtension.class)
 class ReactTodoExecutorTest {
@@ -213,6 +216,39 @@ class ReactTodoExecutorTest {
         assertNull(AgentContext.getDecisionTraceId());
         assertNull(AgentContext.getDecisionStage());
         assertNull(AgentContext.getDecisionExcerpt());
+    }
+
+    @Test
+    void buildMessages_systemPromptShouldBeStaticWithNoDynamicContent() {
+        // Verify that the System Message is exactly dagReactSystemPrompt() with no dynamic content,
+        // so KV prefix cache can be maximized across different runs/users.
+        // context() sets userGoal = "分析指数"; "查询沪深300" is the task description (different field).
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"done\"}"))
+                        .build());
+
+        executor.executeWithObservability("查询沪深300", context(), model, "run-kv-test", "test");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
+                ArgumentCaptor.forClass(List.class);
+        verify(model).chat(captor.capture());
+        List<dev.langchain4j.data.message.ChatMessage> msgs = captor.getValue();
+
+        // First message must be SystemMessage with exactly the static system prompt (no dynamic content)
+        assertInstanceOf(dev.langchain4j.data.message.SystemMessage.class, msgs.get(0));
+        String sysText = ((dev.langchain4j.data.message.SystemMessage) msgs.get(0)).text();
+        String expectedSystemPrompt = promptService.dagReactSystemPrompt(); // "system prompt" from mock
+        assertFalse(sysText.contains("分析指数"), "SystemMessage must not contain userGoal");
+        assertFalse(sysText.contains("searchIndex"), "SystemMessage must not contain tool list");
+        assertEquals(expectedSystemPrompt, sysText, "SystemMessage must equal static dagReactSystemPrompt()");
+
+        // Second message must be UserMessage containing the dynamic context (userGoal from context())
+        assertInstanceOf(dev.langchain4j.data.message.UserMessage.class, msgs.get(1));
+        String userText = ((dev.langchain4j.data.message.UserMessage) msgs.get(1)).singleText();
+        // "分析指数" is the userGoal set in context(), not the task description "查询沪深300"
+        assertTrue(userText.contains("分析指数"), "First UserMessage must contain userGoal");
     }
 
     private ReactTodoExecutor.TodoExecutionContext context() {

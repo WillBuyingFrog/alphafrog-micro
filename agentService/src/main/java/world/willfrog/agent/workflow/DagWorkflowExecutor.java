@@ -453,6 +453,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
 
             StringBuilder contextText = new StringBuilder();
+            contextText.append(promptService.finalAnswerStageInstruction()).append("\n\n");
             contextText.append(promptService.dynamicContextPrefix()).append("\n\n");
             contextText.append("用户问题：").append(context.getUserGoal()).append("\n\n");
             contextText.append("已完成的任务：\n");
