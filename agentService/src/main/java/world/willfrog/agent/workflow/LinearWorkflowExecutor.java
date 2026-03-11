@@ -11,8 +11,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,6 +22,7 @@ import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -37,6 +40,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final PlanJudge planJudge;
     private final PatchPlanner patchPlanner;
     private final PlanPatcher planPatcher;
+    private final AgentRunStateStore stateStore;
 
     @Value("${agent.flow.workflow.max-tool-calls:20}")
     private int defaultMaxToolCalls;
@@ -136,6 +140,16 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
             if (!request.isEnablePlanPatch()) {
                 return buildFailureResult(completedTodos, nvl(record.getSummary()));
+            }
+
+            // 若 run 已被取消或置为失败，跳过 plan patch，避免无效重试消耗 LLM 资源
+            Optional<String> runStatus = stateStore.loadRunStatus(runId);
+            if (runStatus.isPresent() &&
+                    (runStatus.get().equals(AgentRunStatus.CANCELED.name()) ||
+                     runStatus.get().equals(AgentRunStatus.FAILED.name()))) {
+                log.info("Run {} has been {}, skipping plan patch", runId, runStatus.get());
+                return buildFailureResult(completedTodos,
+                        "run_" + runStatus.get().toLowerCase() + ":" + nvl(record.getSummary()));
             }
 
             JudgeDecision decision = planJudge.judge(

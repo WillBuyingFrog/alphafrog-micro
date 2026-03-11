@@ -17,9 +17,11 @@ import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
@@ -50,6 +52,8 @@ class LinearWorkflowExecutorTest {
     @Mock
     private PlanPatcher planPatcher;
     @Mock
+    private AgentRunStateStore stateStore;
+    @Mock
     private ChatModel model;
 
     private LinearWorkflowExecutor executor;
@@ -62,8 +66,10 @@ class LinearWorkflowExecutorTest {
                 reactTodoExecutor,
                 planJudge,
                 patchPlanner,
-                planPatcher
+                planPatcher,
+                stateStore
         );
+        lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
         ReflectionTestUtils.setField(executor, "maxRetriesPerTodoAfterJudge", 2);
         ReflectionTestUtils.setField(executor, "maxPatchesPerRun", 2);

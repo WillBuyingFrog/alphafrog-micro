@@ -19,6 +19,7 @@ import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -60,6 +61,8 @@ class DagWorkflowExecutorTest {
     @Mock
     private PlanPatcher planPatcher;
     @Mock
+    private AgentRunStateStore stateStore;
+    @Mock
     private AgentLlmLocalConfigLoader localConfigLoader;
     @Mock
     private AgentLlmProperties llmProperties;
@@ -79,10 +82,12 @@ class DagWorkflowExecutorTest {
                 planJudge,
                 patchPlanner,
                 planPatcher,
+                stateStore,
                 localConfigLoader,
                 llmProperties,
                 new ObjectMapper()
         );
+        lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultDagThreadPoolSize", 4);
         ReflectionTestUtils.setField(executor, "dagPlanPatchEnabled", true);
         ReflectionTestUtils.setField(executor, "maxRetriesPerNode", 2);

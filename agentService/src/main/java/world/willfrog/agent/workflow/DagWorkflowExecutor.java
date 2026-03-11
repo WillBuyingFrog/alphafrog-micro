@@ -12,10 +12,12 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -53,6 +55,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     private final PlanJudge planJudge;
     private final PatchPlanner patchPlanner;
     private final PlanPatcher planPatcher;
+    private final AgentRunStateStore stateStore;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
     private final ObjectMapper objectMapper;
@@ -114,6 +117,21 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 return WorkflowExecutionResult.builder()
                         .success(false)
                         .failureReason(outcome.failureReason())
+                        .toolCallsUsed(outcome.totalToolCallsUsed())
+                        .build();
+            }
+
+            // 若 run 已被取消或置为失败，跳过 plan patch，避免无效重试消耗 LLM 资源
+            Optional<String> runStatus = stateStore.loadRunStatus(runId);
+            if (runStatus.isPresent() &&
+                    (runStatus.get().equals(AgentRunStatus.CANCELED.name()) ||
+                     runStatus.get().equals(AgentRunStatus.FAILED.name()))) {
+                log.info("Run {} has been {}, skipping DAG plan patch", runId, runStatus.get());
+                String reason = "run_" + runStatus.get().toLowerCase() + ":" + nvl(outcome.failureReason());
+                recordDagCompletion(runId, userId, false, startedAt, reason, outcome.totalToolCallsUsed());
+                return WorkflowExecutionResult.builder()
+                        .success(false)
+                        .failureReason(reason)
                         .toolCallsUsed(outcome.totalToolCallsUsed())
                         .build();
             }
