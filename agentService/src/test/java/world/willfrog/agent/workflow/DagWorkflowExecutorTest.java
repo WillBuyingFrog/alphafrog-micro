@@ -19,6 +19,7 @@ import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -243,7 +244,7 @@ class DagWorkflowExecutorTest {
         WorkflowExecutionResult result = executor.execute(request("run-tool-calls", plan));
 
         assertTrue(result.isSuccess());
-        assertTrue(result.getToolCallsUsed() == 4);
+        assertEquals(4, result.getToolCallsUsed());
     }
 
     @Test

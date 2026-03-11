@@ -471,7 +471,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             messages.add(new UserMessage(contextText.toString()));
 
             ChatResponse response = request.getModel().chat(messages);
-            return response.aiMessage() != null ? response.aiMessage().text() : "";
+            var aiMessage = response.aiMessage();
+            return aiMessage != null ? aiMessage.text() : "";
         } catch (Exception e) {
             log.error("Failed to generate DAG final answer", e);
             List<CompletedTodoInfo> completed = context.getCompletedTodos();
