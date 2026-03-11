@@ -52,7 +52,7 @@ public class ExecutionModeSelector {
      *   <li>Plan 中存在 parallelizable 并行化标注</li>
      * </ul>
      * 不再使用"独立任务数 ≥ 3"的启发式规则，因为该阈值过于激进。
-     * DAG 模式需要显式 API 参数才触发。</p>
+     * 没有显式依赖/并行化标注的 Plan 将默认使用 LINEAR 模式。</p>
      */
     PlanExecutionMode autoSelect(TodoPlan plan) {
         List<TodoItem> items = plan.getItems();

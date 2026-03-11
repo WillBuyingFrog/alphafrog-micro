@@ -50,6 +50,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private int defaultMaxToolCalls;
 
     private static final String PHASE_LINEAR_EXECUTION = "linear_execution";
+    private static final int OUTPUT_PREVIEW_MAX_LENGTH = 500;
 
     @Override
     public WorkflowExecutionResult execute(WorkflowRequest request) {
@@ -159,8 +160,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             for (CompletedTodoInfo todo : completedTodos) {
                 context.append(String.format("- %s: %s\n", todo.getDescription(), todo.getSummary()));
                 if (todo.getOutput() != null && !todo.getOutput().isEmpty()) {
-                    String outputPreview = todo.getOutput().length() > 500 
-                            ? todo.getOutput().substring(0, 500) + "..." 
+                    String outputPreview = todo.getOutput().length() > OUTPUT_PREVIEW_MAX_LENGTH 
+                            ? todo.getOutput().substring(0, OUTPUT_PREVIEW_MAX_LENGTH) + "..." 
                             : todo.getOutput();
                     context.append("  输出: ").append(outputPreview).append("\n");
                 }

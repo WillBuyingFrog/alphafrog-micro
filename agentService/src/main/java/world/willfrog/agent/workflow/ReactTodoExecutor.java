@@ -28,6 +28,9 @@ import java.util.*;
  * <p>每个 Todo 内部运行一个多轮 ReAct 循环：
  * LLM 决策 → 工具调用 → 结果注入上下文 → 再次 LLM 决策 → ...
  * 直到 LLM 输出 {"answer":"..."} 表示本 Todo 完成，或达到最大调用次数。</p>
+ *
+ * <p>外层还有重试机制（MAX_RETRIES = 2）：如果整个 ReAct 循环失败，
+ * 会构建带错误提示的新上下文并重新执行整个循环。</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -189,7 +192,7 @@ public class ReactTodoExecutor {
             
             // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
             if (llmTraceId != null) {
-                String excerpt = llmOutput.length() > 200 
+                String excerpt = llmOutput != null && llmOutput.length() > 200 
                         ? llmOutput.substring(0, 200) : llmOutput;
                 AgentContext.setDecisionContext(
                         llmTraceId,
