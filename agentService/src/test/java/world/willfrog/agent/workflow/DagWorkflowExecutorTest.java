@@ -1,6 +1,8 @@
 package world.willfrog.agent.workflow;
 
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -9,6 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.service.AgentPromptService;
 
 import java.time.Duration;
 import java.util.ArrayList;
@@ -19,6 +22,7 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -38,6 +42,9 @@ class DagWorkflowExecutorTest {
     private AgentObservabilityService observabilityService;
 
     @Mock
+    private AgentPromptService promptService;
+
+    @Mock
     private ChatModel model;
 
     private DagWorkflowExecutor executor;
@@ -47,10 +54,16 @@ class DagWorkflowExecutorTest {
         executor = new DagWorkflowExecutor(
                 eventService,
                 reactTodoExecutor,
-                observabilityService
+                observabilityService,
+                promptService
         );
 
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);
+        lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
+        lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月11日。");
+        lenient().when(model.chat(anyList())).thenReturn(ChatResponse.builder()
+                .aiMessage(new AiMessage("{\"answer\":\"最终回答\"}"))
+                .build());
         lenient().when(reactTodoExecutor.executeWithObservability(
                 anyString(), any(), any(), anyString(), anyString()
         )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
@@ -59,6 +72,7 @@ class DagWorkflowExecutorTest {
                 .summary("ok")
                 .toolName("mockTool")
                 .toolDurationMs(1L)
+                .toolCallsUsed(1)
                 .build());
     }
 
@@ -98,6 +112,7 @@ class DagWorkflowExecutorTest {
         WorkflowExecutionResult result = executor.execute(request("run-parallel", plan));
 
         assertTrue(result.isSuccess());
+        assertTrue(result.getToolCallsUsed() > 0);
     }
 
     @Test
@@ -178,6 +193,57 @@ class DagWorkflowExecutorTest {
         executor.execute(request("run-events", plan));
 
         verify(eventService).append(eq("run-events"), eq("u1"), eq("DAG_EXECUTION_STARTED"), any(Map.class));
+    }
+
+    @Test
+    void execute_shouldUseLlmToGenerateFinalAnswerFromAllCompletedNodes() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder()
+                .id("todo_1").sequence(1).description("查询贵州茅台的股票代码")
+                .build());
+        items.add(TodoItem.builder()
+                .id("todo_2").sequence(2).description("分析贵州茅台走势")
+                .dependsOn(List.of("todo_1"))
+                .build());
+
+        when(model.chat(anyList())).thenReturn(ChatResponse.builder()
+                .aiMessage(new AiMessage("{\"answer\":\"汇总后的最终回答\"}"))
+                .build());
+
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+        WorkflowExecutionResult result = executor.execute(request("run-final-answer", plan));
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.getFinalAnswer().contains("汇总后的最终回答"));
+        verify(model).chat(anyList());
+    }
+
+    @Test
+    void execute_shouldAggregateToolCallsAcrossDagNodes() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder()
+                .id("todo_1").sequence(1).description("任务1")
+                .build());
+        items.add(TodoItem.builder()
+                .id("todo_2").sequence(2).description("任务2")
+                .build());
+
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true}")
+                .summary("ok")
+                .toolName("mockTool")
+                .toolDurationMs(1L)
+                .toolCallsUsed(2)
+                .build());
+
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+        WorkflowExecutionResult result = executor.execute(request("run-tool-calls", plan));
+
+        assertTrue(result.isSuccess());
+        assertTrue(result.getToolCallsUsed() == 4);
     }
 
     @Test

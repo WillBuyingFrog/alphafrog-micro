@@ -1,11 +1,16 @@
 package world.willfrog.agent.workflow;
 
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.SystemMessage;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.service.AgentPromptService;
 
 import java.time.Instant;
 import java.util.*;
@@ -34,8 +39,10 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     private final AgentEventService eventService;
     private final ReactTodoExecutor reactTodoExecutor;
     private final AgentObservabilityService observabilityService;
+    private final AgentPromptService promptService;
 
     private static final int THREAD_POOL_SIZE = 4;
+    private static final int OUTPUT_PREVIEW_MAX_LENGTH = 500;
     private final ExecutorService executor = Executors.newFixedThreadPool(THREAD_POOL_SIZE);
     
     // DAG 执行阶段标识
@@ -139,6 +146,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     .success(false)
                     .finalAnswer("")
                     .failureReason(failureReason)
+                    .toolCallsUsed(dagMetrics.totalToolCallsUsed.get())
                     .build();
         }
 
@@ -148,6 +156,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         return WorkflowExecutionResult.builder()
                 .success(true)
                 .finalAnswer(finalAnswer)
+                .toolCallsUsed(dagMetrics.totalToolCallsUsed.get())
                 .build();
     }
     
@@ -174,6 +183,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         completionPayload.put("total_edges", metrics.totalEdges);
         completionPayload.put("graph_depth", metrics.graphDepth);
         completionPayload.put("max_parallelism", metrics.maxParallelism);
+        completionPayload.put("total_tool_calls_used", metrics.totalToolCallsUsed.get());
         if (failureReason != null) {
             completionPayload.put("failure_reason", failureReason);
         }
@@ -312,6 +322,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                         // 补充节点执行时间信息
                         record.setStartedAt(Instant.ofEpochMilli(nodeExecuteStart));
                         record.setCompletedAt(Instant.now());
+                        dagMetrics.totalToolCallsUsed.addAndGet(record.getToolCallsUsed());
                         
                         results.put(item.getId(), record);
                         nodeSuccessStatus.put(item.getId(), record.isSuccess());
@@ -437,13 +448,39 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     }
 
     private String generateFinalAnswer(SharedExecutionContext context, WorkflowRequest request) {
-        // 使用最后一个成功节点的输出或调用 LLM 生成
-        // 简化版本：直接返回最后一个节点的输出
-        List<CompletedTodoInfo> completed = context.getCompletedTodos();
-        if (completed.isEmpty()) {
-            return "无执行结果";
+        try {
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
+
+            StringBuilder contextText = new StringBuilder();
+            contextText.append(promptService.dynamicContextPrefix()).append("\n\n");
+            contextText.append("用户问题：").append(context.getUserGoal()).append("\n\n");
+            contextText.append("已完成的任务：\n");
+            for (CompletedTodoInfo todo : context.getCompletedTodos()) {
+                contextText.append(String.format("- %s: %s\n", todo.getDescription(), todo.getSummary()));
+                if (todo.getOutput() != null && !todo.getOutput().isEmpty()) {
+                    String outputPreview = todo.getOutput().length() > OUTPUT_PREVIEW_MAX_LENGTH
+                            ? todo.getOutput().substring(0, OUTPUT_PREVIEW_MAX_LENGTH) + "..."
+                            : todo.getOutput();
+                    contextText.append("  输出: ").append(outputPreview).append("\n");
+                }
+            }
+            contextText.append("\n请根据以上所有任务结果，生成对用户问题的最终回答。");
+            contextText.append("\n输出格式: {\"answer\":\"<你的最终回答>\"}");
+
+            messages.add(new UserMessage(contextText.toString()));
+
+            ChatResponse response = request.getModel().chat(messages);
+            return response.aiMessage() != null ? response.aiMessage().text() : "";
+        } catch (Exception e) {
+            log.error("Failed to generate DAG final answer", e);
+            List<CompletedTodoInfo> completed = context.getCompletedTodos();
+            if (completed.isEmpty()) {
+                return "无执行结果";
+            }
+            String fallback = completed.get(completed.size() - 1).getOutput();
+            return fallback != null ? fallback : "无法生成回答: " + e.getMessage();
         }
-        return completed.get(completed.size() - 1).getOutput();
     }
 
     /**
@@ -489,6 +526,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         final AtomicInteger skippedNodes = new AtomicInteger(0);
         final AtomicInteger maxActualParallelism = new AtomicInteger(0);
         final AtomicLong totalWaitTimeMs = new AtomicLong(0);
+        final AtomicInteger totalToolCallsUsed = new AtomicInteger(0);
         
         DagMetrics(int totalNodes, int totalEdges, int maxParallelism, int graphDepth) {
             this.totalNodes = totalNodes;
