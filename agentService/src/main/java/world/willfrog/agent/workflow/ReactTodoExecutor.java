@@ -12,6 +12,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -23,6 +24,10 @@ import java.util.*;
 
 /**
  * ReAct 模式的单个 Todo 执行器。
+ *
+ * <p>每个 Todo 内部运行一个多轮 ReAct 循环：
+ * LLM 决策 → 工具调用 → 结果注入上下文 → 再次 LLM 决策 → ...
+ * 直到 LLM 输出 {"answer":"..."} 表示本 Todo 完成，或达到最大调用次数。</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -33,6 +38,9 @@ public class ReactTodoExecutor {
     private final ToolRouter toolRouter;
     private final ObjectMapper objectMapper;
     private final AgentObservabilityService observabilityService;
+
+    @Value("${agent.flow.react.max-calls-per-todo:10}")
+    private int maxCallsPerTodo;
 
     public TodoExecutionRecord execute(String description, TodoExecutionContext context, ChatModel model) {
         return executeWithObservability(description, context, model, null, null);
@@ -58,6 +66,7 @@ public class ReactTodoExecutor {
     
     /**
      * 执行 Todo 带重试机制。
+     * 重试的粒度是"整个 Todo 的 ReAct 循环"。
      * 
      * @param retryCount 当前重试次数
      */
@@ -68,71 +77,9 @@ public class ReactTodoExecutor {
                                                   String phase,
                                                   int retryCount) {
         final int MAX_RETRIES = 2;
-        long llmStartTime = System.currentTimeMillis();
-        String llmTraceId = null;
         
         try {
-            // 构建 ReAct 消息（重试时添加错误上下文）
-            List<ChatMessage> messages = buildMessagesWithRetryContext(
-                    description, context, retryCount
-            );
-            
-            // 调用 LLM 决策
-            ChatResponse response = model.chat(messages);
-            String llmOutput = response.aiMessage() != null ? response.aiMessage().text() : "";
-            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
-            
-            // 记录 LLM 调用
-            if (runId != null && !runId.isBlank()) {
-                TokenUsage tokenUsage = response.tokenUsage();
-                llmTraceId = observabilityService.recordLlmCall(
-                        runId,
-                        phase != null ? phase : "dag_execution",
-                        tokenUsage,
-                        llmDurationMs,
-                        null,
-                        null,
-                        null,
-                        buildRequestSnapshot(messages, description),
-                        llmOutput
-                );
-            }
-            
-            // 解析决策
-            LlmDecision decision = parseDecision(llmOutput);
-            
-            if (decision.getToolName() == null) {
-                // 直接回答
-                return TodoExecutionRecord.builder()
-                        .success(true)
-                        .output(decision.getAnswer())
-                        .summary("Completed without tool")
-                        .llmTraceId(llmTraceId)
-                        .retryCount(retryCount)
-                        .build();
-            }
-            
-            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
-            if (llmTraceId != null && decision.getToolName() != null) {
-                String excerpt = llmOutput != null && llmOutput.length() > 200 
-                        ? llmOutput.substring(0, 200) : llmOutput;
-                AgentContext.setDecisionContext(
-                        llmTraceId,
-                        phase != null ? phase : "dag_execution",
-                        excerpt
-                );
-            }
-            
-            TodoExecutionRecord record;
-            try {
-                // 执行工具
-                record = executeTool(decision, context, runId, phase);
-            } finally {
-                // 工具执行完后清除，避免污染后续重试或未来实现抛异常时发生串扰
-                AgentContext.clearDecisionContext();
-            }
-            record.setLlmTraceId(llmTraceId);
-            record.setRetryCount(retryCount);
+            TodoExecutionRecord record = executeReActLoop(description, context, model, runId, phase, retryCount);
             
             // 如果失败且未达到最大重试次数，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES) {
@@ -150,22 +97,6 @@ public class ReactTodoExecutor {
             
         } catch (Exception e) {
             log.error("Failed to execute todo: {}", description, e);
-            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
-            
-            // 记录失败的 LLM 调用
-            if (runId != null && !runId.isBlank()) {
-                observabilityService.recordLlmCall(
-                        runId,
-                        phase != null ? phase : "dag_execution",
-                        null,
-                        llmDurationMs,
-                        null,
-                        null,
-                        e.getMessage(),
-                        null,
-                        null
-                );
-            }
             
             // 异常时也尝试重试
             if (retryCount < MAX_RETRIES) {
@@ -178,10 +109,135 @@ public class ReactTodoExecutor {
                     .success(false)
                     .output("")
                     .summary("Error after " + (MAX_RETRIES + 1) + " attempts: " + e.getMessage())
-                    .llmTraceId(llmTraceId)
                     .retryCount(retryCount)
                     .build();
         }
+    }
+
+    /**
+     * 多轮 ReAct 循环：在单个 Todo 内持续调用 LLM 和工具，直到 LLM 输出 answer 或达到上限。
+     *
+     * <p>上下文链条示例：
+     * <pre>
+     * [System: dagReactSystemPrompt + 上下文]
+     * [User: 当前任务描述]
+     * ^[CoT: LLM 决定调用工具 A]         ← Round 1
+     * [User: 工具 A 的结果]
+     * ^[CoT: LLM 分析结果，决定调用工具 B] ← Round 2
+     * [User: 工具 B 的结果]
+     * ^[CoT: 任务完成，输出 answer]        ← Round 3
+     * </pre>
+     */
+    private TodoExecutionRecord executeReActLoop(String description,
+                                                  TodoExecutionContext context,
+                                                  ChatModel model,
+                                                  String runId,
+                                                  String phase,
+                                                  int retryCount) {
+        // 构建初始 ReAct 消息（包含重试上下文）
+        List<ChatMessage> messages = buildMessagesWithRetryContext(description, context, retryCount);
+        
+        int callCount = 0;
+        int toolCallsUsed = 0;
+        String lastLlmTraceId = null;
+        String lastOutput = "";
+
+        while (callCount < maxCallsPerTodo) {
+            long llmStartTime = System.currentTimeMillis();
+            String llmTraceId = null;
+            
+            // 调用 LLM 决策
+            ChatResponse response = model.chat(messages);
+            String llmOutput = response.aiMessage() != null ? response.aiMessage().text() : "";
+            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
+            
+            // 将 CoT（Thought）加入上下文
+            messages.add(AiMessage.from(llmOutput));
+            
+            // 记录 LLM 调用（每次单独记录）
+            if (runId != null && !runId.isBlank()) {
+                TokenUsage tokenUsage = response.tokenUsage();
+                llmTraceId = observabilityService.recordLlmCall(
+                        runId,
+                        phase != null ? phase : "dag_execution",
+                        tokenUsage,
+                        llmDurationMs,
+                        null,
+                        null,
+                        null,
+                        buildRequestSnapshot(messages, description),
+                        llmOutput
+                );
+            }
+            lastLlmTraceId = llmTraceId;
+            callCount++;
+            
+            // 解析决策
+            LlmDecision decision = parseDecision(llmOutput);
+            
+            if (decision.getToolName() == null) {
+                // LLM 输出 {"answer":"..."} 表示本 Todo 完成
+                return TodoExecutionRecord.builder()
+                        .success(true)
+                        .output(decision.getAnswer())
+                        .summary("Completed in " + callCount + " round(s), " + toolCallsUsed + " tool call(s)")
+                        .llmTraceId(lastLlmTraceId)
+                        .retryCount(retryCount)
+                        .toolCallsUsed(toolCallsUsed)
+                        .build();
+            }
+            
+            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
+            if (llmTraceId != null) {
+                String excerpt = llmOutput.length() > 200 
+                        ? llmOutput.substring(0, 200) : llmOutput;
+                AgentContext.setDecisionContext(
+                        llmTraceId,
+                        phase != null ? phase : "dag_execution",
+                        excerpt
+                );
+            }
+            
+            // 执行工具
+            String toolResult;
+            boolean toolSuccess;
+            try {
+                TodoExecutionRecord toolRecord = executeTool(decision, context, runId, phase);
+                toolResult = toolRecord.getOutput();
+                toolSuccess = toolRecord.isSuccess();
+                toolCallsUsed++;
+            } finally {
+                AgentContext.clearDecisionContext();
+            }
+            
+            lastOutput = toolResult;
+            
+            // 从工具结果中提取 dataset_id，更新 context 的 datasetRefs
+            extractAndRegisterDatasetRef(toolResult, context);
+            
+            // 将工具结果（Observation）注入上下文，供下一轮 LLM 使用
+            String observation = toolSuccess 
+                    ? "[工具结果]\n" + toolResult
+                    : "[工具调用失败]\n" + toolResult;
+            messages.add(new UserMessage(observation));
+            
+            // 如果工具失败，继续循环让 LLM 决定下一步（重试或换方案）
+            if (!toolSuccess) {
+                log.warn("Tool {} failed in ReAct round {}, LLM will decide next step", 
+                        decision.getToolName(), callCount);
+            }
+        }
+        
+        // 达到最大调用次数限制
+        log.warn("ReAct loop reached max calls ({}) for todo: {}", maxCallsPerTodo, description);
+        return TodoExecutionRecord.builder()
+                .success(false)
+                .output(lastOutput)
+                .summary("Reached max call limit (" + maxCallsPerTodo + "), " + toolCallsUsed + " tool call(s)")
+                .llmTraceId(lastLlmTraceId)
+                .retryCount(retryCount)
+                .toolCallsUsed(toolCallsUsed)
+                .build();
     }
     
     /**
@@ -265,6 +321,27 @@ public class ReactTodoExecutor {
                 .build();
     }
     
+    /**
+     * 从工具结果中提取 dataset_id 并注册到上下文。
+     */
+    private void extractAndRegisterDatasetRef(String toolResult, TodoExecutionContext context) {
+        try {
+            Map<String, Object> result = objectMapper.readValue(toolResult, Map.class);
+            if (result.containsKey("data")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) result.get("data");
+                if (data != null && data.containsKey("dataset_id")) {
+                    String datasetId = data.get("dataset_id").toString();
+                    String path = "/sandbox/input/" + datasetId;
+                    context.getDatasetRefs().put(datasetId, path);
+                    log.info("Registered dataset ref: {} -> {}", datasetId, path);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("No dataset_id found in tool result");
+        }
+    }
+
     /**
      * 从工具输出中提取错误提示。
      */
@@ -533,6 +610,10 @@ public class ReactTodoExecutor {
         private Long toolDurationMs;
         private Instant startedAt;
         private Instant completedAt;
+        
+        // ReAct 循环统计
+        @Builder.Default
+        private int toolCallsUsed = 0;
         
         // 重试相关
         @Builder.Default

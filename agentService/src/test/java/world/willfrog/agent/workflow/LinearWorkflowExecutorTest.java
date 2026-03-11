@@ -29,7 +29,7 @@ import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -45,6 +45,8 @@ class LinearWorkflowExecutorTest {
     @Mock
     private AgentObservabilityService observabilityService;
     @Mock
+    private ReactTodoExecutor reactTodoExecutor;
+    @Mock
     private ChatModel model;
 
     private LinearWorkflowExecutor executor;
@@ -56,37 +58,48 @@ class LinearWorkflowExecutorTest {
                 promptService,
                 toolRouter,
                 observabilityService,
-                new ObjectMapper()
+                new ObjectMapper(),
+                reactTodoExecutor
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
 
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
+        lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
 
+        // 默认 LLM 响应（用于 generateFinalAnswer）
         @SuppressWarnings("unchecked")
-        ChatResponse response = mockResponse("done");
+        ChatResponse response = mockResponse("最终回答");
         lenient().when(model.chat(any(List.class))).thenReturn(response);
     }
 
     @Test
-    void execute_shouldCompleteWhenToolCallSucceeds() {
-        when(eventService.isRunnable("run-1", "u1")).thenReturn(true);
-        when(toolRouter.invoke(eq("searchStock"), anyMap())).thenReturn(
-                "{\"ok\":true,\"data\":{\"result\":\"success\"}}"
-        );
+    void execute_shouldCompleteWhenTodoSucceeds() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true,\"data\":{\"result\":\"success\"}}")
+                .summary("Completed in 2 round(s), 1 tool call(s)")
+                .toolCallsUsed(1)
+                .build());
 
         WorkflowExecutionResult result = executor.execute(request("run-1", planWithTools(1)));
 
         assertTrue(result.isSuccess());
         verify(eventService).append(eq("run-1"), eq("u1"), eq("TODO_STARTED"), anyMap());
-        verify(eventService).append(eq("run-1"), eq("u1"), eq("TOOL_CALLED"), anyMap());
+        verify(eventService).append(eq("run-1"), eq("u1"), eq("TODO_COMPLETED"), anyMap());
     }
 
     @Test
     void execute_shouldHandleMultipleTodos() {
-        when(eventService.isRunnable("run-multi", "u1")).thenReturn(true);
-        when(toolRouter.invoke(eq("searchStock"), anyMap())).thenReturn(
-                "{\"ok\":true,\"data\":{\"dataset_id\":\"ds_123\"}}"
-        );
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true,\"data\":{\"dataset_id\":\"ds_123\"}}")
+                .summary("Completed in 1 round(s), 1 tool call(s)")
+                .toolCallsUsed(1)
+                .build());
 
         WorkflowExecutionResult result = executor.execute(request("run-multi", planWithTools(2)));
 
@@ -94,18 +107,24 @@ class LinearWorkflowExecutorTest {
         ArgumentCaptor<Map<String, Object>> captor = ArgumentCaptor.forClass(Map.class);
         verify(eventService).append(eq("run-multi"), eq("u1"), eq("REACT_LINEAR_EXECUTION_STARTED"), captor.capture());
         assertTrue(captor.getValue().containsKey("items_count"));
+        // Verify both todos were started
+        verify(eventService, times(2)).append(anyString(), anyString(), eq("TODO_STARTED"), anyMap());
     }
 
     @Test
     void execute_shouldRespectToolCallLimit() {
-        when(eventService.isRunnable("run-limit", "u1")).thenReturn(true);
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 1);
 
-        when(toolRouter.invoke(eq("searchStock"), anyMap())).thenReturn(
-                "{\"ok\":true,\"data\":{\"result\":\"success\"}}"
-        );
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true}")
+                .summary("ok")
+                .toolCallsUsed(1)
+                .build());
 
-        // First todo succeeds, second hits limit
+        // First todo succeeds (uses 1 tool call), second hits limit
         WorkflowExecutionResult result = executor.execute(request("run-limit", planWithTools(2)));
 
         // Should fail because tool call limit is reached on second todo
@@ -113,37 +132,62 @@ class LinearWorkflowExecutorTest {
     }
 
     @Test
-    void execute_shouldHandleToolCallFailure() {
-        when(eventService.isRunnable("run-fail", "u1")).thenReturn(true);
-        when(toolRouter.invoke(eq("searchStock"), anyMap())).thenReturn(
-                "{\"ok\":false,\"error\":{\"message\":\"Tool failed\"}}"
-        );
+    void execute_shouldHandleTodoFailure() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(false)
+                .output("")
+                .summary("Tool call failed after retries")
+                .toolCallsUsed(1)
+                .build());
 
         WorkflowExecutionResult result = executor.execute(request("run-fail", planWithTools(1)));
 
         assertFalse(result.isSuccess());
+        verify(eventService).append(eq("run-fail"), eq("u1"), eq("TODO_FAILED"), anyMap());
     }
 
     @Test
-    void execute_shouldWorkWithExecutePython() {
-        when(eventService.isRunnable("run-python", "u1")).thenReturn(true);
-        when(toolRouter.invoke(eq("executePython"), anyMap())).thenReturn(
-                "{\"ok\":true,\"data\":{\"stdout\":\"Hello World\",\"dataset_id\":\"py_ds_1\"}}"
-        );
+    void execute_shouldDelegateToReactTodoExecutor() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true}")
+                .summary("Completed in 3 round(s), 2 tool call(s)")
+                .toolCallsUsed(2)
+                .build());
 
-        WorkflowExecutionResult result = executor.execute(request("run-python", planExecutePython("todo_1")));
+        WorkflowExecutionResult result = executor.execute(request("run-delegate", planWithTools(1)));
 
         assertTrue(result.isSuccess());
+        // Verify ReactTodoExecutor was called
+        verify(reactTodoExecutor).executeWithObservability(
+                eq("查询股票数据 1"),
+                any(ReactTodoExecutor.TodoExecutionContext.class),
+                eq(model),
+                eq("run-delegate"),
+                eq("linear_execution")
+        );
     }
 
     @Test
-    void execute_shouldSkipWhenRunNotRunnable() {
-        when(eventService.isRunnable("run-not-runnable", "u1")).thenReturn(false);
+    void execute_shouldTrackTotalToolCalls() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true}")
+                .summary("ok")
+                .toolCallsUsed(3)
+                .build());
 
-        WorkflowExecutionResult result = executor.execute(request("run-not-runnable", planWithTools(1)));
+        WorkflowExecutionResult result = executor.execute(request("run-track", planWithTools(2)));
 
-        // When not runnable, the workflow should still attempt to run but will check at each step
-        // The actual behavior depends on implementation - may complete or fail
+        assertTrue(result.isSuccess());
+        // Each todo uses 3 tool calls, total should be 6
+        assertTrue(result.getToolCallsUsed() == 6);
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {
@@ -177,18 +221,6 @@ class LinearWorkflowExecutorTest {
                     .status(TodoStatus.PENDING)
                     .build());
         }
-        return plan;
-    }
-
-    private TodoPlan planExecutePython(String todoId) {
-        TodoPlan plan = new TodoPlan();
-        plan.getItems().add(TodoItem.builder()
-                .id(todoId)
-                .sequence(1)
-                .description("执行Python数据分析")
-                .dependsOn(List.of())
-                .status(TodoStatus.PENDING)
-                .build());
         return plan;
     }
 

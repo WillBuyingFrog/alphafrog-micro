@@ -45,6 +45,14 @@ public class ExecutionModeSelector {
 
     /**
      * 自动选择策略：根据 Plan 特征决定使用 LINEAR 或 DAG。
+     * 
+     * <p>DAG 仅在以下条件下触发：
+     * <ul>
+     *   <li>Plan 中存在显式的 dependsOn 依赖关系标注</li>
+     *   <li>Plan 中存在 parallelizable 并行化标注</li>
+     * </ul>
+     * 不再使用"独立任务数 ≥ 3"的启发式规则，因为该阈值过于激进。
+     * DAG 模式需要显式 API 参数才触发。</p>
      */
     PlanExecutionMode autoSelect(TodoPlan plan) {
         List<TodoItem> items = plan.getItems();
@@ -62,17 +70,7 @@ public class ExecutionModeSelector {
             return PlanExecutionMode.DAG;
         }
 
-        // 计算独立任务数（无依赖的任务）
-        long independentCount = items.stream()
-                .filter(item -> item.getDependsOn() == null || item.getDependsOn().isEmpty())
-                .count();
-
-        if (independentCount >= 3) {
-            log.debug("Plan has {} independent tasks (>=3), selecting DAG mode", independentCount);
-            return PlanExecutionMode.DAG;
-        }
-
-        // 默认保守策略
+        // 默认保守策略：使用 LINEAR
         return PlanExecutionMode.LINEAR;
     }
 

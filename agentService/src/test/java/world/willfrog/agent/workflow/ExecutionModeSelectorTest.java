@@ -68,7 +68,9 @@ class ExecutionModeSelectorTest {
     }
 
     @Test
-    void select_autoWithThreeOrMoreIndependentTasksReturnsDag() {
+    void select_autoWithThreeOrMoreIndependentTasksReturnsLinear() {
+        // After refactoring: independent tasks without explicit dependencies
+        // no longer automatically trigger DAG mode. DAG requires explicit API parameter.
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder().id("todo_1").build());
         items.add(TodoItem.builder().id("todo_2").build());
@@ -78,7 +80,7 @@ class ExecutionModeSelectorTest {
                 .executionMode(PlanExecutionMode.AUTO)
                 .items(items)
                 .build();
-        assertEquals(PlanExecutionMode.DAG, selector.select(plan));
+        assertEquals(PlanExecutionMode.LINEAR, selector.select(plan));
     }
 
     @Test
