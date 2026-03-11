@@ -1,10 +1,6 @@
 package world.willfrog.agent.workflow;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
-import dev.langchain4j.model.chat.response.ChatResponse;
-import dev.langchain4j.model.chat.response.ChatResponseMetadata;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,17 +10,18 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
 
+import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 
-import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTimeoutPreemptively;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
-import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -34,12 +31,19 @@ class DagWorkflowExecutorTest {
     @Mock
     private AgentEventService eventService;
 
+    @Mock
+    private ReactTodoExecutor reactTodoExecutor;
+
+    @Mock
+    private AgentObservabilityService observabilityService;
+
+    @Mock
+    private ChatModel model;
+
     private DagWorkflowExecutor executor;
 
     @BeforeEach
     void setUp() {
-        ReactTodoExecutor reactTodoExecutor = mock(ReactTodoExecutor.class);
-        AgentObservabilityService observabilityService = mock(AgentObservabilityService.class);
         executor = new DagWorkflowExecutor(
                 eventService,
                 reactTodoExecutor,
@@ -47,6 +51,15 @@ class DagWorkflowExecutorTest {
         );
 
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);
+        lenient().when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("{\"ok\":true}")
+                .summary("ok")
+                .toolName("mockTool")
+                .toolDurationMs(1L)
+                .build());
     }
 
     @Test
@@ -118,8 +131,7 @@ class DagWorkflowExecutorTest {
         TodoPlan plan = TodoPlan.builder().items(items).build();
         WorkflowExecutionResult result = executor.execute(request("run-fail-skip", plan));
 
-        // Result depends on actual ReactTodoExecutor behavior
-        // This test verifies the DAG structure is built correctly
+        assertTrue(result.isSuccess());
     }
 
     @Test
@@ -178,7 +190,28 @@ class DagWorkflowExecutorTest {
         TodoPlan plan = TodoPlan.builder().items(items).build();
         WorkflowExecutionResult result = executor.execute(request("run-state-fail", plan));
 
-        // Result depends on ReactTodoExecutor behavior
+        assertTrue(result.isSuccess());
+    }
+
+    @Test
+    void execute_whenNodeThrowsThrowable_shouldFailFastWithoutHanging() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder()
+                .id("todo_1").sequence(1).description("触发 fatal throwable")
+                .build());
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenThrow(new AssertionError("fatal"));
+
+        WorkflowExecutionResult result = assertTimeoutPreemptively(
+                Duration.ofSeconds(3),
+                () -> executor.execute(request("run-fatal-throwable", plan))
+        );
+
+        assertFalse(result.isSuccess());
+        assertTrue(result.getFailureReason() != null && result.getFailureReason().contains("DAG execution failed"));
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {
@@ -190,6 +223,8 @@ class DagWorkflowExecutorTest {
                 .userId("u1")
                 .userGoal("test goal")
                 .plan(plan)
+                .model(model)
+                .toolSpecifications(List.of())
                 .build();
     }
 }

@@ -1,6 +1,7 @@
 package world.willfrog.agent.workflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
@@ -12,6 +13,7 @@ import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
@@ -110,8 +112,25 @@ public class ReactTodoExecutor {
                         .build();
             }
             
-            // 执行工具
-            TodoExecutionRecord record = executeTool(decision, context, runId, phase);
+            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
+            if (llmTraceId != null && decision.getToolName() != null) {
+                String excerpt = llmOutput != null && llmOutput.length() > 200 
+                        ? llmOutput.substring(0, 200) : llmOutput;
+                AgentContext.setDecisionContext(
+                        llmTraceId,
+                        phase != null ? phase : "dag_execution",
+                        excerpt
+                );
+            }
+            
+            TodoExecutionRecord record;
+            try {
+                // 执行工具
+                record = executeTool(decision, context, runId, phase);
+            } finally {
+                // 工具执行完后清除，避免污染后续重试或未来实现抛异常时发生串扰
+                AgentContext.clearDecisionContext();
+            }
             record.setLlmTraceId(llmTraceId);
             record.setRetryCount(retryCount);
             
@@ -273,6 +292,28 @@ public class ReactTodoExecutor {
         snapshot.put("stage", "dag_node_decision");
         snapshot.put("description", description);
         snapshot.put("messageCount", messages.size());
+        
+        // 序列化完整的 messages 数组（包含 role 和 content）
+        List<Map<String, String>> messageList = new ArrayList<>();
+        for (ChatMessage msg : messages) {
+            Map<String, String> msgMap = new HashMap<>();
+            if (msg instanceof SystemMessage) {
+                msgMap.put("role", "system");
+                msgMap.put("content", ((SystemMessage) msg).text());
+            } else if (msg instanceof UserMessage) {
+                msgMap.put("role", "user");
+                msgMap.put("content", ((UserMessage) msg).singleText());
+            } else if (msg instanceof AiMessage) {
+                msgMap.put("role", "assistant");
+                msgMap.put("content", ((AiMessage) msg).text());
+            } else {
+                msgMap.put("role", "unknown");
+                msgMap.put("content", msg.toString());
+            }
+            messageList.add(msgMap);
+        }
+        snapshot.put("messages", messageList);
+        
         return snapshot;
     }
 

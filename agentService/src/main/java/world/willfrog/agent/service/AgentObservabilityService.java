@@ -55,6 +55,9 @@ public class AgentObservabilityService {
     @Value("${agent.observability.llm-trace.reasoning-max-chars:20000}")
     private int llmTraceReasoningMaxChars;
 
+    @Value("${agent.observability.tool-trace.max-output-chars:100000}")
+    private int toolTraceMaxOutputChars;
+
     public void initializeRun(String runId, String endpointName, String modelName) {
         initializeRun(runId, endpointName, modelName, false);
     }
@@ -846,6 +849,10 @@ public class AgentObservabilityService {
         return llmTraceReasoningMaxChars <= 0 ? 20000 : llmTraceReasoningMaxChars;
     }
 
+    private int toolTraceOutputLimit() {
+        return toolTraceMaxOutputChars <= 0 ? 100000 : toolTraceMaxOutputChars;
+    }
+
     private int llmTraceCallLimit() {
         return llmTraceMaxCalls <= 0 ? 100 : llmTraceMaxCalls;
     }
@@ -891,6 +898,10 @@ public class AgentObservabilityService {
         trace.setError(trim(errorMessage, 1000));
         trace.setRequest(requestSnapshot);
         trace.setResponsePreview(responsePreview);
+        trace.setInputMessages(requestSnapshot);
+        trace.setOutputText(responsePreview);
+        trace.setTodoId(nvl(AgentContext.getTodoId()));
+        trace.setTodoSequence(AgentContext.getTodoSequence());
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
@@ -1020,6 +1031,22 @@ public class AgentObservabilityService {
         trace.setRequest(null);
         trace.setResponsePreview(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
         
+        // 设置新的 inputMessages / outputText 字段
+        if (httpRequest != null && httpRequest.getBody() != null && !httpRequest.getBody().isBlank()) {
+            try {
+                Map<String, Object> body = objectMapper.readValue(httpRequest.getBody(), new TypeReference<Map<String, Object>>() {});
+                trace.setInputMessages(sanitizeRequestSnapshot(body));
+            } catch (Exception e) {
+                // 解析失败时，将 body 原文作为 inputMessages 的一部分
+                Map<String, Object> fallback = new LinkedHashMap<>();
+                fallback.put("raw", preview(httpRequest.getBody(), llmTraceTextLimit()));
+                trace.setInputMessages(fallback);
+            }
+        }
+        trace.setOutputText(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
+        trace.setTodoId(nvl(AgentContext.getTodoId()));
+        trace.setTodoSequence(AgentContext.getTodoSequence());
+        
         traces.add(trace);
         
         int limit = llmTraceCallLimit();
@@ -1069,7 +1096,7 @@ public class AgentObservabilityService {
         trace.setCacheSource(nvl(cacheSource));
         trace.setCacheTtlRemainingMs(cacheTtlRemainingMs);
         trace.setEstimatedSavedDurationMs(Math.max(0L, estimatedSavedDurationMs));
-        trace.setOutputPreview(preview(output, llmTraceTextLimit()));
+        trace.setOutput(preview(output, toolTraceOutputLimit()));
         trace.setError(trim(errorMessage, 1000));
         trace.setDecisionLlmTraceId(nvl(AgentContext.getDecisionTraceId()));
         trace.setDecisionStage(nvl(AgentContext.getDecisionStage()));
@@ -1353,6 +1380,20 @@ public class AgentObservabilityService {
         private Object reasoningDetails;
         private boolean reasoningTruncated;
         
+        // ========== 关联的 Todo/DAG 节点 ==========
+        
+        /** 关联的 Todo 任务 ID（DAG 模式下为节点 ID） */
+        private String todoId;
+        /** Todo 序号 */
+        private Integer todoSequence;
+        
+        // ========== LLM 输入输出 ==========
+        
+        /** LLM 调用时的完整 messages 快照 */
+        private Map<String, Object> inputMessages;
+        /** LLM 响应文本（截断预览） */
+        private String outputText;
+        
         // ========== Token 统计 ==========
         
         /** 输入 Token 数 */
@@ -1399,14 +1440,14 @@ public class AgentObservabilityService {
         // ========== 向后兼容的字段 ==========
         
         /**
-         * @deprecated 使用 {@link #httpRequest} 替代
+         * @deprecated 使用 {@link #inputMessages} 替代
          * 保留用于向后兼容，内容为 LangChain4j 转换后的请求快照
          */
         @Deprecated
         private Map<String, Object> request;
         
         /**
-         * @deprecated 使用 {@link #httpResponse} 替代
+         * @deprecated 使用 {@link #outputText} 替代
          * 保留用于向后兼容，仅包含响应文本预览
          */
         @Deprecated
@@ -1434,11 +1475,29 @@ public class AgentObservabilityService {
         private String cacheSource;
         private long cacheTtlRemainingMs;
         private long estimatedSavedDurationMs;
-        private String outputPreview;
+        /** 工具输出（长度受配置 agent.observability.tool-trace.max-output-chars 控制） */
+        private String output;
         private String error;
         private String decisionLlmTraceId;
         private String decisionStage;
         private String decisionExcerpt;
+
+        /**
+         * @deprecated 使用 {@link #output} 替代
+         * 保留用于向后兼容（JSON 反序列化）
+         */
+        @Deprecated
+        public void setOutputPreview(String value) {
+            this.output = value;
+        }
+
+        /**
+         * @deprecated 使用 {@link #getOutput()} 替代
+         */
+        @Deprecated
+        public String getOutputPreview() {
+            return this.output;
+        }
     }
     
     /**

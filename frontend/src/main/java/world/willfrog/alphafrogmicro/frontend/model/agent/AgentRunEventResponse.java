@@ -5,7 +5,7 @@ public record AgentRunEventResponse(
         String runId,
         int seq,
         String eventType,
-        String payloadJson,
+        Object payload,
         String createdAt
 ) {
 }

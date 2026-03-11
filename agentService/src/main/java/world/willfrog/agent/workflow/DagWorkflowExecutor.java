@@ -3,6 +3,7 @@ package world.willfrog.agent.workflow;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
 
@@ -59,6 +60,20 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
         // 构建执行图
         ExecutionGraph graph = buildExecutionGraph(items);
+        if (graph.hasCycle()) {
+            String reason = "dag_circular_dependency";
+            log.warn("Detected circular dependency in DAG plan: runId={}", runId);
+            eventService.append(runId, userId, "DAG_EXECUTION_COMPLETED", Map.of(
+                    "success", false,
+                    "failure_reason", reason,
+                    "total_nodes", items.size()
+            ));
+            return WorkflowExecutionResult.builder()
+                    .success(false)
+                    .finalAnswer("")
+                    .failureReason(reason)
+                    .build();
+        }
         
         // 记录 DAG 特有指标
         DagMetrics dagMetrics = new DagMetrics(
@@ -214,6 +229,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             Future<?> future = executor.submit(() -> {
                 long nodeWaitStart = System.currentTimeMillis();
                 String nodePhase = PHASE_DAG_EXECUTION + "_" + item.getId();
+                boolean parallelismIncremented = false;
                 
                 try {
                     // 等待依赖完成
@@ -230,6 +246,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     
                     // 更新并行度指标
                     int current = currentParallelism.incrementAndGet();
+                    parallelismIncremented = true;
                     dagMetrics.maxActualParallelism.updateAndGet(max -> Math.max(max, current));
                     
                     // 检查依赖是否成功
@@ -271,18 +288,26 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                         // 依赖成功，执行当前节点
                         log.info("Executing DAG node {}: {}", item.getId(), item.getDescription());
                         
+                        // 设置 AgentContext 的 Todo 上下文，让 LlmTrace/ToolTrace 能关联到此节点
+                        AgentContext.setTodoContext(item.getId(), item.getSequence());
+                        
                         // 从全局上下文构建当前节点的执行上下文
                         ReactTodoExecutor.TodoExecutionContext todoContext = 
                                 buildTodoContext(item, sharedContext, request);
                         
-                        // 执行节点（带完整观测）
-                        record = reactTodoExecutor.executeWithObservability(
-                                item.getDescription(),
-                                todoContext,
-                                request.getModel(),
-                                runId,
-                                nodePhase
-                        );
+                        try {
+                            // 执行节点（带完整观测）
+                            record = reactTodoExecutor.executeWithObservability(
+                                    item.getDescription(),
+                                    todoContext,
+                                    request.getModel(),
+                                    runId,
+                                    nodePhase
+                            );
+                        } finally {
+                            // 清理 Todo 上下文，避免跨节点污染
+                            AgentContext.clearTodoContext();
+                        }
                         
                         // 补充节点执行时间信息
                         record.setStartedAt(Instant.ofEpochMilli(nodeExecuteStart));
@@ -320,7 +345,9 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     }
                     
                     // 更新并行度
-                    currentParallelism.decrementAndGet();
+                    if (parallelismIncremented) {
+                        currentParallelism.decrementAndGet();
+                    }
                     
                     // 通知后续节点
                     for (String nextId : graph.getDependents(item.getId())) {
@@ -332,19 +359,21 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                         allDone.complete(null);
                     }
                     
-                } catch (Exception e) {
-                    log.error("Failed to execute node {}", item.getId(), e);
+                } catch (Throwable t) {
+                    log.error("Failed to execute node {}", item.getId(), t);
                     dagMetrics.failedNodes.incrementAndGet();
-                    currentParallelism.decrementAndGet();
+                    if (parallelismIncremented) {
+                        currentParallelism.decrementAndGet();
+                    }
                     
                     results.put(item.getId(), ReactTodoExecutor.TodoExecutionRecord.builder()
                             .success(false)
-                            .summary("Execution error: " + e.getMessage())
+                            .summary("Execution error: " + t.getMessage())
                             .startedAt(Instant.ofEpochMilli(nodeWaitStart))
                             .completedAt(Instant.now())
                             .build());
                     nodeSuccessStatus.put(item.getId(), false);
-                    allDone.completeExceptionally(e);
+                    allDone.completeExceptionally(t);
                 }
             });
             
@@ -432,6 +461,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             dependents.putIfAbsent(item.getId(), new HashSet<>());
             
             for (String depId : item.getDependsOn()) {
+                dependencies.putIfAbsent(depId, new HashSet<>());
+                dependents.putIfAbsent(depId, new HashSet<>());
                 if (itemMap.containsKey(depId)) {
                     dependencies.get(item.getId()).add(depId);
                     dependents.get(depId).add(item.getId());
@@ -568,6 +599,34 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 }
             }
             return edges;
+        }
+
+        public boolean hasCycle() {
+            Set<String> visiting = new HashSet<>();
+            Set<String> visited = new HashSet<>();
+            for (String nodeId : itemMap.keySet()) {
+                if (hasCycleFrom(nodeId, visiting, visited)) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        private boolean hasCycleFrom(String nodeId, Set<String> visiting, Set<String> visited) {
+            if (visited.contains(nodeId)) {
+                return false;
+            }
+            if (!visiting.add(nodeId)) {
+                return true;
+            }
+            for (String depId : dependencies.getOrDefault(nodeId, Set.of())) {
+                if (itemMap.containsKey(depId) && hasCycleFrom(depId, visiting, visited)) {
+                    return true;
+                }
+            }
+            visiting.remove(nodeId);
+            visited.add(nodeId);
+            return false;
         }
     }
 
