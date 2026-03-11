@@ -13,6 +13,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Duration;
@@ -48,13 +49,15 @@ class ReactTodoExecutorTest {
     @Mock
     private AgentObservabilityService observabilityService;
     @Mock
+    private AgentRunStateStore stateStore;
+    @Mock
     private ChatModel model;
 
     private ReactTodoExecutor executor;
 
     @BeforeEach
     void setUp() {
-        executor = new ReactTodoExecutor(promptService, toolRouter, new ObjectMapper(), observabilityService);
+        executor = new ReactTodoExecutor(promptService, toolRouter, new ObjectMapper(), observabilityService, stateStore);
         ReflectionTestUtils.setField(executor, "maxCallsPerTodo", 10);
         AgentContext.clear();
 
