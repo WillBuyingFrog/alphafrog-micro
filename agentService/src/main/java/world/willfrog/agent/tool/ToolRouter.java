@@ -108,7 +108,9 @@ public class ToolRouter {
                 "getIndexInfo",
                 "getIndexDaily",
                 "searchIndex",
-                "executePython"
+                "executePython",
+                "spawnSubAgent",
+                "waitForSubAgent"
         );
     }
 

@@ -252,7 +252,7 @@ public class AgentPromptService {
      */
     private String defaultDagReactSystemPrompt() {
         return """
-            你是金融数据分析助手，负责执行DAG中的单个任务节点。
+            你是金融数据分析助手，负责执行分析任务节点。
 
             ## 可用工具及参数规范（必须严格使用指定的参数名）
             - searchIndex: {"keyword": "<搜索关键词>"}
@@ -264,6 +264,19 @@ public class AgentPromptService {
             - getIndexInfo: {"ts_code": "<指数代码>"}
             - getStockInfo: {"ts_code": "<股票代码>"}
             - executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
+
+            ## Sub-Agent 工具（用于并行化复杂子任务，最多启动 3 个子代理）
+            - spawnSubAgent: {"goal": "<子代理目标描述>", "context": "<可选补充上下文>"}
+              → 在后台线程启动子代理执行目标，立即返回 sub_agent_id。主线程可继续处理其他工作。
+            - waitForSubAgent: {"sub_agent_id": "<由 spawnSubAgent 返回的 ID>"}
+              → 等待指定子代理完成并返回结果。在需要子代理结果时才调用。
+
+            ## Sub-Agent 使用模式
+            当某个子任务复杂且可以并行化时，例如需要分别处理多个独立数据源：
+              思路："这个子任务很复杂，让我启动一个 sub-agent 来并行处理。"
+              → 调用 spawnSubAgent(goal=<子任务描述>)
+              → 主线程继续处理其他可以同步完成的部分
+              → 所有工作就绪后调用 waitForSubAgent 汇总结果
 
             ## 重要警告
             1. 必须严格使用上述指定的参数名，否则工具调用会失败

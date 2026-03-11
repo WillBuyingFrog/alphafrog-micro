@@ -8,19 +8,28 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
+import jakarta.annotation.PreDestroy;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.graph.SubAgentRunner;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 
 /**
  * ReAct 模式的单个 Todo 执行器。
@@ -31,6 +40,9 @@ import java.util.*;
  *
  * <p>外层还有重试机制（MAX_RETRIES = 2）：如果整个 ReAct 循环失败，
  * 会构建带错误提示的新上下文并重新执行整个循环。</p>
+ *
+ * <p>Sub-Agent 机制（#36 §4.3）：LLM 可调用 spawnSubAgent 在后台启动子代理，
+ * 主线程继续运行其他工具，待所有子任务完成后通过 waitForSubAgent 汇总结果。</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -42,8 +54,42 @@ public class ReactTodoExecutor {
     private final ObjectMapper objectMapper;
     private final AgentObservabilityService observabilityService;
 
+    /**
+     * SubAgentRunner — 可选注入，避免在没有完整 Spring 上下文的单元测试中出错。
+     * 若为 null，则 spawnSubAgent 调用返回不可用提示而非抛异常。
+     */
+    @Autowired(required = false)
+    @Setter
+    private SubAgentRunner subAgentRunner;
+
+    /** Sub-Agent 后台执行线程池（守护线程，随 JVM 退出自动关闭）。 */
+    private final ExecutorService subAgentExecutor = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "sub-agent-worker");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** 单个 Sub-Agent 等待超时（秒）。 */
+    @Value("${agent.flow.react.sub-agent-timeout-seconds:120}")
+    private int subAgentTimeoutSeconds;
+
     @Value("${agent.flow.react.max-calls-per-todo:10}")
     private int maxCallsPerTodo;
+
+    @PreDestroy
+    public void shutdown() {
+        log.info("Shutting down sub-agent executor...");
+        subAgentExecutor.shutdown();
+        try {
+            if (!subAgentExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                subAgentExecutor.shutdownNow();
+                log.warn("Sub-agent executor did not terminate within 30s, forced shutdown");
+            }
+        } catch (InterruptedException e) {
+            subAgentExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     public TodoExecutionRecord execute(String description, TodoExecutionContext context, ChatModel model) {
         return executeWithObservability(description, context, model, null, null);
@@ -130,6 +176,10 @@ public class ReactTodoExecutor {
      * [User: 工具 B 的结果]
      * ^[CoT: 任务完成，输出 answer]        ← Round 3
      * </pre>
+     *
+     * <p>Sub-Agent 模式（#36 §4.3）：若 LLM 决定调用 spawnSubAgent，则在后台线程中启动
+     * SubAgentRunner；主线程继续处理其他 ReAct 轮次。调用 waitForSubAgent 时主线程阻塞
+     * 直到对应 Sub-Agent 完成并返回结果。</p>
      */
     private TodoExecutionRecord executeReActLoop(String description,
                                                   TodoExecutionContext context,
@@ -144,6 +194,9 @@ public class ReactTodoExecutor {
         int toolCallsUsed = 0;
         String lastLlmTraceId = null;
         String lastOutput = "";
+
+        // Sub-Agent 追踪：Map<sub_agent_id, Future<SubAgentResult>>
+        Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents = new HashMap<>();
 
         while (callCount < maxCallsPerTodo) {
             long llmStartTime = System.currentTimeMillis();
@@ -201,14 +254,24 @@ public class ReactTodoExecutor {
                 );
             }
             
-            // 执行工具
+            // 执行工具（拦截 Sub-Agent 特殊工具后再路由到 ToolRouter）
             String toolResult;
             boolean toolSuccess;
             try {
-                TodoExecutionRecord toolRecord = executeTool(decision, context, runId, phase);
-                toolResult = toolRecord.getOutput();
-                toolSuccess = toolRecord.isSuccess();
-                toolCallsUsed++;
+                if ("spawnSubAgent".equals(decision.getToolName())) {
+                    toolResult = handleSpawnSubAgent(decision.getParams(), context, runId, model, pendingSubAgents);
+                    toolSuccess = !toolResult.contains("\"ok\":false");
+                    toolCallsUsed++;
+                } else if ("waitForSubAgent".equals(decision.getToolName())) {
+                    toolResult = handleWaitForSubAgent(decision.getParams(), pendingSubAgents);
+                    toolSuccess = !toolResult.contains("\"ok\":false");
+                    toolCallsUsed++;
+                } else {
+                    TodoExecutionRecord toolRecord = executeTool(decision, context, runId, phase);
+                    toolResult = toolRecord.getOutput();
+                    toolSuccess = toolRecord.isSuccess();
+                    toolCallsUsed++;
+                }
             } finally {
                 AgentContext.clearDecisionContext();
             }
@@ -342,6 +405,111 @@ public class ReactTodoExecutor {
             }
         } catch (Exception e) {
             log.debug("No dataset_id found in tool result");
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Sub-Agent 处理（#36 §4.3）
+    // ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 处理 spawnSubAgent 调用：在后台线程启动 SubAgentRunner，立即返回 sub_agent_id。
+     * 主 ReAct 循环可继续处理其他工具调用，不会阻塞。
+     *
+     * <p>参数（来自 LLM decision.params）：
+     * <ul>
+     *   <li>goal（必填）：子代理目标描述</li>
+     *   <li>context（可选）：补充上下文信息</li>
+     * </ul>
+     */
+    private String handleSpawnSubAgent(Map<String, Object> params,
+                                       TodoExecutionContext context,
+                                       String runId,
+                                       ChatModel model,
+                                       Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents) {
+        if (subAgentRunner == null) {
+            log.warn("spawnSubAgent called but SubAgentRunner is not available");
+            return "{\"ok\":false,\"error\":\"sub_agent_not_available\"}";
+        }
+        String goal = params != null ? String.valueOf(params.getOrDefault("goal", "")) : "";
+        if (goal.isBlank()) {
+            return "{\"ok\":false,\"error\":\"goal parameter is required for spawnSubAgent\"}";
+        }
+        String subCtx = params != null ? String.valueOf(params.getOrDefault("context", "")) : "";
+        String subAgentId = "sa_" + pendingSubAgents.size();
+
+        // Sub-Agent 只能使用业务工具，不能递归启动 Sub-Agent
+        Set<String> subAgentTools = new HashSet<>(context.getAvailableTools());
+        subAgentTools.remove("spawnSubAgent");
+        subAgentTools.remove("waitForSubAgent");
+
+        SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
+                .runId(runId != null ? runId : "")
+                .taskId(subAgentId)
+                .goal(goal)
+                .context(subCtx.isBlank() ? null : subCtx)
+                .toolWhitelist(subAgentTools)
+                .maxSteps(10)
+                .endpointName("")
+                .endpointBaseUrl("")
+                .modelName("")
+                .build();
+
+        Future<SubAgentRunner.SubAgentResult> future = subAgentExecutor.submit(
+                () -> subAgentRunner.run(req, model));
+        pendingSubAgents.put(subAgentId, future);
+
+        log.info("Sub-agent spawned: id={}, goal={}", subAgentId, goal);
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "ok", true,
+                    "sub_agent_id", subAgentId,
+                    "status", "spawned",
+                    "goal", goal
+            ));
+        } catch (Exception e) {
+            return "{\"ok\":true,\"sub_agent_id\":\"" + subAgentId + "\",\"status\":\"spawned\"}";
+        }
+    }
+
+    /**
+     * 处理 waitForSubAgent 调用：阻塞等待指定 Sub-Agent 完成，返回其执行结果。
+     *
+     * <p>参数（来自 LLM decision.params）：
+     * <ul>
+     *   <li>sub_agent_id（必填）：由 spawnSubAgent 返回的 ID</li>
+     * </ul>
+     */
+    private String handleWaitForSubAgent(Map<String, Object> params,
+                                          Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents) {
+        String subAgentId = params != null ? String.valueOf(params.getOrDefault("sub_agent_id", "")) : "";
+        if (subAgentId.isBlank()) {
+            return "{\"ok\":false,\"error\":\"sub_agent_id parameter is required for waitForSubAgent\"}";
+        }
+        Future<SubAgentRunner.SubAgentResult> future = pendingSubAgents.get(subAgentId);
+        if (future == null) {
+            return "{\"ok\":false,\"error\":\"unknown sub_agent_id: " + subAgentId + "\"}";
+        }
+        try {
+            SubAgentRunner.SubAgentResult result = future.get(subAgentTimeoutSeconds, TimeUnit.SECONDS);
+            log.info("Sub-agent completed: id={}, success={}", subAgentId, result.isSuccess());
+            Map<String, Object> response = new HashMap<>();
+            response.put("ok", result.isSuccess());
+            response.put("sub_agent_id", subAgentId);
+            response.put("answer", result.getAnswer() != null ? result.getAnswer() : "");
+            if (!result.isSuccess() && result.getError() != null) {
+                response.put("error", result.getError());
+            }
+            return objectMapper.writeValueAsString(response);
+        } catch (TimeoutException e) {
+            log.warn("Sub-agent {} timed out after {}s", subAgentId, subAgentTimeoutSeconds);
+            return "{\"ok\":false,\"error\":\"sub_agent_timeout\",\"sub_agent_id\":\"" + subAgentId + "\"}";
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            return "{\"ok\":false,\"error\":\"interrupted\",\"sub_agent_id\":\"" + subAgentId + "\"}";
+        } catch (Exception e) {
+            log.error("Failed to get sub-agent result: {}", subAgentId, e);
+            return "{\"ok\":false,\"error\":\"" + e.getMessage() + "\",\"sub_agent_id\":\"" + subAgentId + "\"}";
         }
     }
 

@@ -259,4 +259,154 @@ class ReactTodoExecutorTest {
                 .datasetRefs(new java.util.HashMap<>())
                 .build();
     }
+
+    // ─────────────────────────────────────────────────────────────────────
+    // Sub-Agent Tests (#36 §4.3)
+    // ─────────────────────────────────────────────────────────────────────
+
+    @Test
+    void spawnAndWaitForSubAgent_shouldRunSubAgentAndReturnResult() {
+        // Inject a mock SubAgentRunner
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+        ReflectionTestUtils.setField(executor, "subAgentTimeoutSeconds", 10);
+
+        world.willfrog.agent.graph.SubAgentRunner.SubAgentResult subAgentResult =
+                world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
+                        .success(true)
+                        .answer("创新药指数A的月初定投收益率为8.5%")
+                        .build();
+        when(mockSubAgentRunner.run(any(), eq(model))).thenReturn(subAgentResult);
+
+        // LLM sequence: spawn sub-agent → wait for it → return answer
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"计算创新药指数A的月初定投收益\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_0\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"定投收益分析完成\"}"))
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "分析创新药指数定投收益",
+                context(),
+                model,
+                "run-sub-agent",
+                "test"
+        );
+
+        assertTrue(record.isSuccess());
+        // LLM's final answer is whatever the third model.chat() call returned
+        assertEquals("定投收益分析完成", record.getOutput());
+        // Sub-agent was invoked exactly once with the correct goal
+        assertEquals(2, record.getToolCallsUsed()); // spawnSubAgent + waitForSubAgent
+        verify(mockSubAgentRunner).run(any(), eq(model));
+    }
+
+    @Test
+    void spawnSubAgent_withoutSubAgentRunner_shouldReturnNotAvailable() {
+        // executor has no SubAgentRunner set (null by default)
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"某子任务\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"跳过子代理，直接完成\"}"))
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "测试无 SubAgentRunner 场景",
+                context(),
+                model,
+                "run-no-runner",
+                "test"
+        );
+
+        // Should still complete (LLM sees "not_available" and adapts)
+        assertTrue(record.isSuccess());
+    }
+
+    @Test
+    void spawnSubAgent_shouldExcludeSubAgentToolsFromSubAgentWhitelist() {
+        // Verify sub-agents can't recursively spawn sub-agents
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+        ReflectionTestUtils.setField(executor, "subAgentTimeoutSeconds", 10);
+
+        when(mockSubAgentRunner.run(any(), eq(model))).thenReturn(
+                world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
+                        .success(true).answer("done").build());
+
+        // Context has spawnSubAgent in availableTools
+        ReactTodoExecutor.TodoExecutionContext ctx = ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("复杂任务")
+                .availableTools(new java.util.HashSet<>(Set.of("searchIndex", "spawnSubAgent", "waitForSubAgent")))
+                .completedTodos(List.of())
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_0\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"完成\"}"))
+                        .build());
+
+        executor.executeWithObservability("测试子代理白名单", ctx, model, "run-whitelist", "test");
+
+        // Verify subAgentRunner was called with whitelist NOT containing spawnSubAgent or waitForSubAgent
+        org.mockito.ArgumentCaptor<world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest> reqCaptor =
+                org.mockito.ArgumentCaptor.forClass(world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest.class);
+        verify(mockSubAgentRunner).run(reqCaptor.capture(), eq(model));
+        Set<String> subAgentWhitelist = reqCaptor.getValue().getToolWhitelist();
+        assertFalse(subAgentWhitelist.contains("spawnSubAgent"),
+                "Sub-agent must not have spawnSubAgent in its whitelist");
+        assertFalse(subAgentWhitelist.contains("waitForSubAgent"),
+                "Sub-agent must not have waitForSubAgent in its whitelist");
+        assertTrue(subAgentWhitelist.contains("searchIndex"),
+                "Sub-agent should have business tools in whitelist");
+    }
+
+    @Test
+    void waitForSubAgent_withUnknownId_shouldReturnError() {
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+
+        // LLM tries to wait for an ID that was never spawned
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(
+                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_99\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"处理了未知错误\"}"))
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "未知子代理ID测试",
+                context(),
+                model,
+                "run-unknown-id",
+                "test"
+        );
+
+        // LLM should see the error and still complete
+        assertTrue(record.isSuccess());
+        verify(mockSubAgentRunner, org.mockito.Mockito.never()).run(any(), any());
+    }
 }
