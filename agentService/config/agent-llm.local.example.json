@@ -142,12 +142,19 @@
     },
     "parallel": {
       "maxParallelSearchQueries": 3,
-      "maxParallelDailyQueries": 2
+      "maxParallelDailyQueries": 2,
+      "dagThreadPoolSize": 4
     },
     "subAgent": {
       "enabled": true,
       "complexityThreshold": "MEDIUM",
       "maxSteps": 6,
+      "maxCount": 3,
+      "endpointName": "openrouter",
+      "modelName": "openai/gpt-5.2",
+      "lowComplexityModelName": "moonshotai/kimi-k2.5",
+      "mediumComplexityModelName": "openai/gpt-5.2",
+      "highComplexityModelName": "qwen/qwen3-max-thinking",
       "structuredOutput": {
         "enabled": true,
         "maxAttempts": 3,
@@ -193,6 +200,7 @@
         "summaryProviderOrder": [
           "fireworks"
         ],
+        "minMessagesForCompression": 4,
         "summaryMaxChars": 1200,
         "summaryTemperature": 0.2,
         "minMessagesForSummary": 6,
@@ -227,6 +235,7 @@
     "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
     "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
     "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
-    "dagReactSystemPromptFile": "agentService/config/prompts/todo/dag_react_system.txt"
+    "dagReactSystemPromptFile": "agentService/config/prompts/todo/dag_react_system.txt",
+    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt"
   }
 }

@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 @Component
 @RequiredArgsConstructor
@@ -232,6 +233,20 @@ public class AgentPromptService {
     }
 
     /**
+     * DAG 模式引导提示（用于规划阶段）。
+     * 优先级：
+     * 1) dagModeGuidancePrompt
+     * 2) dagModeGuidancePromptFile（已由 local config loader 解析为文本）
+     */
+    public String dagModeGuidancePrompt() {
+        return firstNonBlank(
+                currentPrompts().getDagModeGuidancePrompt(),
+                currentPrompts().getDagModeGuidancePromptFile(),
+                ""
+        );
+    }
+
+    /**
      * 从配置的文件路径加载 Prompt 内容。
      * 支持绝对路径或相对于工作目录的路径。
      */
@@ -248,45 +263,86 @@ public class AgentPromptService {
     }
 
     /**
+     * 返回配置的最大并行子代理数量，默认 3。
+     * 从 agent.llm.runtime.subAgent.maxCount 读取，在 agent-llm.local.json 中设置。
+     */
+    public int maxSubAgentCount() {
+        try {
+            AgentLlmProperties.SubAgent subAgent = currentSubAgentConfig();
+            if (subAgent != null && subAgent.getMaxCount() != null && subAgent.getMaxCount() > 0) {
+                return subAgent.getMaxCount();
+            }
+        } catch (Exception e) {
+            log.warn("Failed to read maxSubAgentCount from config, using default 3: {}", e.getMessage());
+        }
+        return 3;
+    }
+
+    /**
+     * Sub-Agent 端点选择（为空表示沿用主代理模型）。
+     */
+    public String subAgentEndpointName() {
+        AgentLlmProperties.SubAgent cfg = currentSubAgentConfig();
+        return cfg == null ? "" : firstNonBlank(cfg.getEndpointName(), "");
+    }
+
+    /**
+     * 根据目标复杂度选择 Sub-Agent 模型名称（仅负责选择与透传，不直接创建模型实例）。
+     */
+    public String selectSubAgentModelName(String goal, String context) {
+        AgentLlmProperties.SubAgent cfg = currentSubAgentConfig();
+        if (cfg == null) {
+            return "";
+        }
+        String low = firstNonBlank(cfg.getLowComplexityModelName(), "");
+        String medium = firstNonBlank(cfg.getMediumComplexityModelName(), "");
+        String high = firstNonBlank(cfg.getHighComplexityModelName(), "");
+        String fallback = firstNonBlank(cfg.getModelName(), "");
+
+        Complexity complexity = estimateComplexity(goal, context);
+        return switch (complexity) {
+            case HIGH -> firstNonBlank(high, medium, low, fallback);
+            case MEDIUM -> firstNonBlank(medium, high, low, fallback);
+            case LOW -> firstNonBlank(low, medium, high, fallback);
+        };
+    }
+
+    /**
      * 默认的 DAG ReAct System Prompt（当配置文件不存在时使用）。
+     * Sub-Agent 最大并行数从配置读取（agent.llm.runtime.subAgent.maxCount），不硬编码。
      */
     private String defaultDagReactSystemPrompt() {
-        return """
-            你是金融数据分析助手，负责执行分析任务节点。
-
-            ## 可用工具及参数规范（必须严格使用指定的参数名）
-            - searchIndex: {"keyword": "<搜索关键词>"}
-            - searchStock: {"keyword": "<搜索关键词>"}
-            - searchFund: {"keyword": "<搜索关键词>"}
-            - getIndexDaily: {"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getStockDaily: {"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getFundDaily: {"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getIndexInfo: {"ts_code": "<指数代码>"}
-            - getStockInfo: {"ts_code": "<股票代码>"}
-            - executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
-
-            ## Sub-Agent 工具（用于并行化复杂子任务，最多启动 3 个子代理）
-            - spawnSubAgent: {"goal": "<子代理目标描述>", "context": "<可选补充上下文>"}
-              → 在后台线程启动子代理执行目标，立即返回 sub_agent_id。主线程可继续处理其他工作。
-            - waitForSubAgent: {"sub_agent_id": "<由 spawnSubAgent 返回的 ID>"}
-              → 等待指定子代理完成并返回结果。在需要子代理结果时才调用。
-
-            ## Sub-Agent 使用模式
-            当某个子任务复杂且可以并行化时，例如需要分别处理多个独立数据源：
-              思路："这个子任务很复杂，让我启动一个 sub-agent 来并行处理。"
-              → 调用 spawnSubAgent(goal=<子任务描述>)
-              → 主线程继续处理其他可以同步完成的部分
-              → 所有工作就绪后调用 waitForSubAgent 汇总结果
-
-            ## 重要警告
-            1. 必须严格使用上述指定的参数名，否则工具调用会失败
-            2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id
-            3. 代码必须遍历 /sandbox/input/*/ 读取所有挂载的数据集
-
-            ## 输出格式
-            调用工具: {"tool": "<工具名>", "params": {"<参数名>": "<参数值>"}}
-            直接回答: {"answer": "<你的回答>"}
-            """;
+        int maxSubAgents = maxSubAgentCount();
+        return "你是金融数据分析助手，负责执行分析任务节点。\n\n"
+            + "## 可用工具及参数规范（必须严格使用指定的参数名）\n"
+            + "- searchIndex: {\"keyword\": \"<搜索关键词>\"}\n"
+            + "- searchStock: {\"keyword\": \"<搜索关键词>\"}\n"
+            + "- searchFund: {\"keyword\": \"<搜索关键词>\"}\n"
+            + "- getIndexDaily: {\"ts_code\": \"<指数代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
+            + "- getStockDaily: {\"ts_code\": \"<股票代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
+            + "- getFundDaily: {\"ts_code\": \"<基金代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
+            + "- getIndexInfo: {\"ts_code\": \"<指数代码>\"}\n"
+            + "- getStockInfo: {\"ts_code\": \"<股票代码>\"}\n"
+            + "- executePython: {\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID列表，逗号分隔>\"}\n\n"
+            + "## Sub-Agent 工具（用于并行化复杂子任务，最多启动 " + maxSubAgents + " 个子代理）\n"
+            + "- spawnSubAgent: {\"goal\": \"<子代理目标描述>\", \"context\": \"<可选补充上下文>\"}\n"
+            + "  → 在后台线程启动子代理执行目标，立即返回 sub_agent_id。主线程可继续处理其他工作。\n"
+            + "- waitForSubAgent: {\"sub_agent_ids\": \"<ID列表，逗号分隔，如 sa_0,sa_1；单个ID也可直接传>\"}\n"
+            + "  → 可选地同时等待一个或多个子代理完成，由你的判断决定何时汇总。返回每个子代理的执行结果。\n\n"
+            + "## Sub-Agent 使用模式\n"
+            + "当某个子任务复杂且可以并行化时，例如需要分别处理多个独立数据源：\n"
+            + "  思路：\"这个子任务很复杂，让我启动一个 sub-agent 来并行处理。\"\n"
+            + "  → 调用 spawnSubAgent(goal=<子任务描述>)，不阻塞主线程\n"
+            + "  → 主线程继续处理其他可以同步完成的部分\n"
+            + "  → 根据需要，可选地调用 waitForSubAgent 同时等待一个或多个已启动的子代理\n"
+            + "  → 汇总所有结果，输出最终回答\n\n"
+            + "## 重要警告\n"
+            + "1. 必须严格使用上述指定的参数名，否则工具调用会失败\n"
+            + "2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id\n"
+            + "3. 代码必须遍历 /sandbox/input/*/ 读取所有挂载的数据集\n\n"
+            + "## 输出格式\n"
+            + "调用工具: {\"tool\": \"<工具名>\", \"params\": {\"<参数名>\": \"<参数值>\"}}\n"
+            + "直接回答: {\"answer\": \"<你的回答>\"}\n";
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -471,7 +527,70 @@ public class AgentPromptService {
         merged.setDatasetFieldSpecs(selectList(local.getDatasetFieldSpecs(), base.getDatasetFieldSpecs()));
         merged.setDagReactSystemPrompt(firstNonBlank(local.getDagReactSystemPrompt(), base.getDagReactSystemPrompt()));
         merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
+        merged.setDagModeGuidancePrompt(firstNonBlank(local.getDagModeGuidancePrompt(), base.getDagModeGuidancePrompt()));
+        merged.setDagModeGuidancePromptFile(firstNonBlank(local.getDagModeGuidancePromptFile(), base.getDagModeGuidancePromptFile()));
         return merged;
+    }
+
+    private AgentLlmProperties.SubAgent currentSubAgentConfig() {
+        AgentLlmProperties.SubAgent base = properties.getRuntime() == null
+                ? null
+                : properties.getRuntime().getSubAgent();
+        AgentLlmProperties.SubAgent local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .orElse(null);
+        if (local == null) {
+            return base;
+        }
+        AgentLlmProperties.SubAgent merged = new AgentLlmProperties.SubAgent();
+        merged.setEnabled(firstNonNull(local.getEnabled(), base == null ? null : base.getEnabled()));
+        merged.setComplexityThreshold(firstNonBlank(local.getComplexityThreshold(), base == null ? null : base.getComplexityThreshold()));
+        merged.setMaxSteps(firstNonNull(local.getMaxSteps(), base == null ? null : base.getMaxSteps()));
+        merged.setMaxCount(firstNonNull(local.getMaxCount(), base == null ? null : base.getMaxCount()));
+        merged.setEndpointName(firstNonBlank(local.getEndpointName(), base == null ? null : base.getEndpointName()));
+        merged.setModelName(firstNonBlank(local.getModelName(), base == null ? null : base.getModelName()));
+        merged.setLowComplexityModelName(firstNonBlank(local.getLowComplexityModelName(), base == null ? null : base.getLowComplexityModelName()));
+        merged.setMediumComplexityModelName(firstNonBlank(local.getMediumComplexityModelName(), base == null ? null : base.getMediumComplexityModelName()));
+        merged.setHighComplexityModelName(firstNonBlank(local.getHighComplexityModelName(), base == null ? null : base.getHighComplexityModelName()));
+        return merged;
+    }
+
+    private Complexity estimateComplexity(String goal, String context) {
+        String text = (safe(goal) + "\n" + safe(context)).toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (text.length() > 180) {
+            score++;
+        }
+        if (text.length() > 360) {
+            score++;
+        }
+        if (text.contains("并行") || text.contains("parallel") || text.contains("多个") || text.contains("multi")) {
+            score++;
+        }
+        if (text.contains("组合") || text.contains("回测") || text.contains("夏普") || text.contains("最大回撤")) {
+            score++;
+        }
+        if (text.contains("并且") || text.contains("同时") || text.contains("另外") || text.contains("此外")) {
+            score++;
+        }
+        if (score >= 4) {
+            return Complexity.HIGH;
+        }
+        if (score >= 2) {
+            return Complexity.MEDIUM;
+        }
+        return Complexity.LOW;
+    }
+
+    private <T> T firstNonNull(T first, T second) {
+        return first != null ? first : second;
+    }
+
+    private enum Complexity {
+        LOW,
+        MEDIUM,
+        HIGH
     }
 
     private String render(String template, Map<String, String> vars) {

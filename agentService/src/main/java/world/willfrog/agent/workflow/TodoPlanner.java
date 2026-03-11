@@ -18,8 +18,6 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
@@ -48,7 +46,6 @@ public class TodoPlanner {
 
     private final AgentPromptService promptService;
     private final AgentEventService eventService;
-    private final AgentRunMapper runMapper;
     private final AgentRunStateStore stateStore;
     private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
     private final AgentObservabilityService observabilityService;
@@ -99,7 +96,6 @@ public class TodoPlanner {
             todoPlan.setExecutionMode(mode);
 
             String planJson = safeWrite(todoPlan);
-            runMapper.updatePlan(runId, userId, AgentRunStatus.EXECUTING, planJson);
             stateStore.recordPlan(runId, planJson, true);
             if (override) {
                 stateStore.clearPlanOverride(runId);
@@ -143,6 +139,9 @@ public class TodoPlanner {
         String structuredStage = promptService.planningStructuredStageInstruction();
         String dynamicPrefix = promptService.dynamicContextPrefix();
         String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+        String dagModeGuidance = shouldInjectDagGuidance(request.getExecutionMode())
+                ? nvl(promptService.dagModeGuidancePrompt())
+                : "";
 
         for (int attempt = 1; attempt <= maxAttempts; attempt++) {
             observabilityService.incrementPlanningAttempts(runId, false);
@@ -160,6 +159,9 @@ public class TodoPlanner {
                         + "历史对话压缩内容：\n" + dialogueContext
                         + "\n\n当前轮次用户需求：" + request.getUserGoal()
                         + "\n\n请参考历史对话，以当前轮次用户需求为重点，先分析规划思路。";
+            }
+            if (!dagModeGuidance.isBlank()) {
+                analysisContent = analysisContent + "\n\n[DAG 模式选择指引]\n" + dagModeGuidance;
             }
             ctx.addUserMessage(analysisContent);
 
@@ -315,6 +317,8 @@ public class TodoPlanner {
                     .sequence(seq)
                     .description(nvl(raw.getDescription()))
                     .dependsOn(raw.getDependsOn() == null ? List.of() : raw.getDependsOn())
+                    .groupKey(nvl(raw.getGroupKey()))
+                    .parallelizable(raw.isParallelizable())
                     .status(TodoStatus.PENDING)
                     .createdAt(Instant.now())
                     .build();
@@ -365,6 +369,8 @@ public class TodoPlanner {
                         .sequence(node.path("sequence").asInt(seq))
                         .description(nvl(node.path("description").asText("")))
                         .dependsOn(dependsOn)
+                        .groupKey(nvl(node.path("groupKey").asText("")))
+                        .parallelizable(node.path("parallelizable").asBoolean(false))
                         .status(TodoStatus.PENDING)
                         .createdAt(Instant.now())
                         .build();
@@ -529,6 +535,13 @@ public class TodoPlanner {
 
     private int clamp(int value, int min, int max) {
         return Math.max(min, Math.min(max, value));
+    }
+
+    private boolean shouldInjectDagGuidance(PlanExecutionMode mode) {
+        if (mode == null) {
+            return true;
+        }
+        return mode == PlanExecutionMode.AUTO || mode == PlanExecutionMode.DAG;
     }
 
     private String safeWrite(Object value) {

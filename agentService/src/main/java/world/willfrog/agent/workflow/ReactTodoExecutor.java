@@ -25,11 +25,13 @@ import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * ReAct 模式的单个 Todo 执行器。
@@ -197,6 +199,7 @@ public class ReactTodoExecutor {
 
         // Sub-Agent 追踪：Map<sub_agent_id, Future<SubAgentResult>>
         Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents = new HashMap<>();
+        AtomicInteger subAgentIdCounter = new AtomicInteger(0);
 
         while (callCount < maxCallsPerTodo) {
             long llmStartTime = System.currentTimeMillis();
@@ -259,7 +262,14 @@ public class ReactTodoExecutor {
             boolean toolSuccess;
             try {
                 if ("spawnSubAgent".equals(decision.getToolName())) {
-                    toolResult = handleSpawnSubAgent(decision.getParams(), context, runId, model, pendingSubAgents);
+                    toolResult = handleSpawnSubAgent(
+                            decision.getParams(),
+                            context,
+                            runId,
+                            model,
+                            pendingSubAgents,
+                            subAgentIdCounter
+                    );
                     toolSuccess = !toolResult.contains("\"ok\":false");
                     toolCallsUsed++;
                 } else if ("waitForSubAgent".equals(decision.getToolName())) {
@@ -426,22 +436,31 @@ public class ReactTodoExecutor {
                                        TodoExecutionContext context,
                                        String runId,
                                        ChatModel model,
-                                       Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents) {
+                                       Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents,
+                                       AtomicInteger subAgentIdCounter) {
         if (subAgentRunner == null) {
             log.warn("spawnSubAgent called but SubAgentRunner is not available");
             return "{\"ok\":false,\"error\":\"sub_agent_not_available\"}";
+        }
+        // 检查并发上限
+        int maxCount = promptService.maxSubAgentCount();
+        if (pendingSubAgents.size() >= maxCount) {
+            log.warn("spawnSubAgent rejected: reached max concurrent sub-agents ({})", maxCount);
+            return "{\"ok\":false,\"error\":\"max_sub_agents_exceeded\",\"max\":" + maxCount + "}";
         }
         String goal = params != null ? String.valueOf(params.getOrDefault("goal", "")) : "";
         if (goal.isBlank()) {
             return "{\"ok\":false,\"error\":\"goal parameter is required for spawnSubAgent\"}";
         }
         String subCtx = params != null ? String.valueOf(params.getOrDefault("context", "")) : "";
-        String subAgentId = "sa_" + pendingSubAgents.size();
+        String subAgentId = "sa_" + subAgentIdCounter.getAndIncrement();
 
         // Sub-Agent 只能使用业务工具，不能递归启动 Sub-Agent
         Set<String> subAgentTools = new HashSet<>(context.getAvailableTools());
         subAgentTools.remove("spawnSubAgent");
         subAgentTools.remove("waitForSubAgent");
+        String subAgentEndpoint = promptService.subAgentEndpointName();
+        String subAgentModel = promptService.selectSubAgentModelName(goal, subCtx);
 
         SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
                 .runId(runId != null ? runId : "")
@@ -450,9 +469,9 @@ public class ReactTodoExecutor {
                 .context(subCtx.isBlank() ? null : subCtx)
                 .toolWhitelist(subAgentTools)
                 .maxSteps(10)
-                .endpointName("")
+                .endpointName(subAgentEndpoint)
                 .endpointBaseUrl("")
-                .modelName("")
+                .modelName(subAgentModel)
                 .build();
 
         Future<SubAgentRunner.SubAgentResult> future = subAgentExecutor.submit(
@@ -473,43 +492,125 @@ public class ReactTodoExecutor {
     }
 
     /**
-     * 处理 waitForSubAgent 调用：阻塞等待指定 Sub-Agent 完成，返回其执行结果。
+     * 处理 waitForSubAgent 调用：阻塞等待一个或多个 Sub-Agent 完成，返回聚合结果。
      *
-     * <p>参数（来自 LLM decision.params）：
+     * <p>支持两种参数格式（可选地同时等待多个）：
      * <ul>
-     *   <li>sub_agent_id（必填）：由 spawnSubAgent 返回的 ID</li>
+     *   <li>{@code sub_agent_ids}（优先）：逗号分隔的 ID 列表，如 "sa_0,sa_1"</li>
+     *   <li>{@code sub_agent_id}（向后兼容）：单个 ID</li>
      * </ul>
+     * LLM 可通过思维能力判断何时等待，支持同时汇总多个子代理的结果。
      */
     private String handleWaitForSubAgent(Map<String, Object> params,
                                           Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents) {
-        String subAgentId = params != null ? String.valueOf(params.getOrDefault("sub_agent_id", "")) : "";
-        if (subAgentId.isBlank()) {
-            return "{\"ok\":false,\"error\":\"sub_agent_id parameter is required for waitForSubAgent\"}";
+        // 解析 ID 列表：优先 sub_agent_ids（多个），fallback sub_agent_id（单个）
+        List<String> ids = new ArrayList<>();
+        Object idsParam = params != null ? params.get("sub_agent_ids") : null;
+        if (idsParam != null) {
+            if (idsParam instanceof List) {
+                ((List<?>) idsParam).forEach(id -> {
+                    String s = id != null ? id.toString().trim() : "";
+                    if (!s.isEmpty()) ids.add(s);
+                });
+            } else {
+                for (String part : idsParam.toString().split(",")) {
+                    String s = part.trim();
+                    if (!s.isEmpty()) ids.add(s);
+                }
+            }
         }
-        Future<SubAgentRunner.SubAgentResult> future = pendingSubAgents.get(subAgentId);
-        if (future == null) {
-            return "{\"ok\":false,\"error\":\"unknown sub_agent_id: " + subAgentId + "\"}";
+        if (ids.isEmpty()) {
+            String singleId = params != null ? String.valueOf(params.getOrDefault("sub_agent_id", "")) : "";
+            if (!singleId.isBlank()) ids.add(singleId.trim());
+        }
+        if (ids.isEmpty()) {
+            return "{\"ok\":false,\"error\":\"sub_agent_id or sub_agent_ids parameter is required for waitForSubAgent\"}";
+        }
+
+        // 并发等待每个 sub-agent 完成，最后按输入顺序聚合结果
+        Map<String, Object> agentResults = new LinkedHashMap<>();
+        Map<String, CompletableFuture<Map<String, Object>>> waitFutures = new LinkedHashMap<>();
+        boolean interrupted = false;
+
+        for (String id : ids) {
+            Future<SubAgentRunner.SubAgentResult> future = pendingSubAgents.get(id);
+            if (future == null) {
+                agentResults.put(id, Map.of("ok", false, "error", "unknown sub_agent_id: " + id));
+                continue;
+            }
+            CompletableFuture<Map<String, Object>> waitFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    SubAgentRunner.SubAgentResult result = future.get(subAgentTimeoutSeconds, TimeUnit.SECONDS);
+                    log.info("Sub-agent completed: id={}, success={}", id, result.isSuccess());
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("ok", result.isSuccess());
+                    r.put("answer", result.getAnswer() != null ? result.getAnswer() : "");
+                    if (!result.isSuccess() && result.getError() != null) {
+                        r.put("error", result.getError());
+                    }
+                    return r;
+                } catch (TimeoutException e) {
+                    log.warn("Sub-agent {} timed out after {}s", id, subAgentTimeoutSeconds);
+                    return Map.of("ok", false, "error", "sub_agent_timeout");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return Map.of("ok", false, "error", "interrupted");
+                } catch (Exception e) {
+                    log.error("Failed to get sub-agent result: {}", id, e);
+                    return Map.of("ok", false, "error", e.getMessage() != null ? e.getMessage() : "unknown");
+                }
+            }, subAgentExecutor);
+            waitFutures.put(id, waitFuture);
+        }
+
+        boolean allSuccess = true;
+        for (String id : ids) {
+            if (agentResults.containsKey(id)) {
+                Object existing = agentResults.get(id);
+                if (existing instanceof Map<?, ?> map && !Boolean.TRUE.equals(map.get("ok"))) {
+                    allSuccess = false;
+                }
+                continue;
+            }
+            CompletableFuture<Map<String, Object>> waitFuture = waitFutures.get(id);
+            if (waitFuture == null) {
+                agentResults.put(id, Map.of("ok", false, "error", "unknown sub_agent_id: " + id));
+                allSuccess = false;
+                continue;
+            }
+            try {
+                Map<String, Object> resultMap = waitFuture.join();
+                agentResults.put(id, resultMap);
+                if (!Boolean.TRUE.equals(resultMap.get("ok"))) {
+                    allSuccess = false;
+                }
+                if ("interrupted".equals(resultMap.get("error"))) {
+                    interrupted = true;
+                    break;
+                }
+            } catch (Exception e) {
+                agentResults.put(id, Map.of("ok", false, "error", e.getMessage() != null ? e.getMessage() : "unknown"));
+                allSuccess = false;
+            }
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("ok", allSuccess);
+        response.put("results", agentResults);
+        // 向后兼容：单 ID 时在顶层也输出 sub_agent_id + answer
+        if (ids.size() == 1 && !interrupted) {
+            String singleId = ids.get(0);
+            response.put("sub_agent_id", singleId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> sr = (Map<String, Object>) agentResults.get(singleId);
+            if (sr != null) {
+                response.put("answer", sr.getOrDefault("answer", ""));
+            }
         }
         try {
-            SubAgentRunner.SubAgentResult result = future.get(subAgentTimeoutSeconds, TimeUnit.SECONDS);
-            log.info("Sub-agent completed: id={}, success={}", subAgentId, result.isSuccess());
-            Map<String, Object> response = new HashMap<>();
-            response.put("ok", result.isSuccess());
-            response.put("sub_agent_id", subAgentId);
-            response.put("answer", result.getAnswer() != null ? result.getAnswer() : "");
-            if (!result.isSuccess() && result.getError() != null) {
-                response.put("error", result.getError());
-            }
             return objectMapper.writeValueAsString(response);
-        } catch (TimeoutException e) {
-            log.warn("Sub-agent {} timed out after {}s", subAgentId, subAgentTimeoutSeconds);
-            return "{\"ok\":false,\"error\":\"sub_agent_timeout\",\"sub_agent_id\":\"" + subAgentId + "\"}";
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return "{\"ok\":false,\"error\":\"interrupted\",\"sub_agent_id\":\"" + subAgentId + "\"}";
         } catch (Exception e) {
-            log.error("Failed to get sub-agent result: {}", subAgentId, e);
-            return "{\"ok\":false,\"error\":\"" + e.getMessage() + "\",\"sub_agent_id\":\"" + subAgentId + "\"}";
+            return "{\"ok\":" + allSuccess + ",\"results\":{}}";
         }
     }
 

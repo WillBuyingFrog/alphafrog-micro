@@ -15,6 +15,7 @@ import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.tool.ToolRouter;
 
+import java.time.Duration;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -59,6 +60,9 @@ class ReactTodoExecutorTest {
 
         lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("dynamic prefix");
+        lenient().when(promptService.maxSubAgentCount()).thenReturn(3);
+        lenient().when(promptService.subAgentEndpointName()).thenReturn("openrouter");
+        lenient().when(promptService.selectSubAgentModelName(anyString(), anyString())).thenReturn("openai/gpt-5.2");
         lenient().when(observabilityService.recordLlmCall(
                 anyString(), anyString(), any(), anyLong(),
                 any(), any(), any(), anyMap(), anyString()
@@ -408,5 +412,122 @@ class ReactTodoExecutorTest {
         // LLM should see the error and still complete
         assertTrue(record.isSuccess());
         verify(mockSubAgentRunner, org.mockito.Mockito.never()).run(any(), any());
+    }
+
+    @Test
+    void spawnSubAgent_shouldRespectMaxCountLimit() {
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+        when(promptService.maxSubAgentCount()).thenReturn(1);
+
+        when(mockSubAgentRunner.run(any(), eq(model))).thenAnswer(invocation -> {
+            Thread.sleep(50);
+            return world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
+                    .success(true).answer("ok").build();
+        });
+
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务1\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务2\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"done\"}"))
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "测试并发上限",
+                context(),
+                model,
+                "run-max-count",
+                "test"
+        );
+
+        assertTrue(record.isSuccess());
+        verify(mockSubAgentRunner, times(1)).run(any(), eq(model));
+    }
+
+    @Test
+    void spawnSubAgent_twiceShouldUseMonotonicIds() {
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+        when(mockSubAgentRunner.run(any(), eq(model))).thenReturn(
+                world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
+                        .success(true).answer("ok").build());
+
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务A\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务B\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"done\"}"))
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "测试子代理ID递增",
+                context(),
+                model,
+                "run-id-increment",
+                "test"
+        );
+
+        assertTrue(record.isSuccess());
+        org.mockito.ArgumentCaptor<world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest> reqCaptor =
+                org.mockito.ArgumentCaptor.forClass(world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest.class);
+        verify(mockSubAgentRunner, times(2)).run(reqCaptor.capture(), eq(model));
+        List<world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest> requests = reqCaptor.getAllValues();
+        assertEquals("sa_0", requests.get(0).getTaskId());
+        assertEquals("sa_1", requests.get(1).getTaskId());
+    }
+
+    @Test
+    void waitForSubAgent_multipleIdsShouldWaitConcurrently() {
+        world.willfrog.agent.graph.SubAgentRunner mockSubAgentRunner =
+                org.mockito.Mockito.mock(world.willfrog.agent.graph.SubAgentRunner.class);
+        executor.setSubAgentRunner(mockSubAgentRunner);
+        ReflectionTestUtils.setField(executor, "subAgentTimeoutSeconds", 5);
+
+        when(mockSubAgentRunner.run(any(), eq(model))).thenAnswer(invocation -> {
+            world.willfrog.agent.graph.SubAgentRunner.SubAgentRequest req = invocation.getArgument(0);
+            Thread.sleep(300);
+            return world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
+                    .success(true)
+                    .answer("answer-" + req.getTaskId())
+                    .build();
+        });
+
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务1\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务2\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_ids\":\"sa_0,sa_1\"}}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("{\"answer\":\"all done\"}"))
+                        .build());
+
+        long startedAt = System.nanoTime();
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "测试并发等待",
+                context(),
+                model,
+                "run-concurrent-wait",
+                "test"
+        );
+        Duration elapsed = Duration.ofNanos(System.nanoTime() - startedAt);
+
+        assertTrue(record.isSuccess());
+        assertTrue(elapsed.toMillis() < 550, "waitForSubAgent 应并发等待多个子代理");
     }
 }

@@ -1,8 +1,9 @@
 package world.willfrog.agent.workflow;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.ChatMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.chat.response.ChatResponseMetadata;
@@ -15,13 +16,12 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
-import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.tool.ToolRouter;
 
 import java.util.List;
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
@@ -31,6 +31,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 @ExtendWith(MockitoExtension.class)
@@ -41,11 +42,13 @@ class LinearWorkflowExecutorTest {
     @Mock
     private AgentPromptService promptService;
     @Mock
-    private ToolRouter toolRouter;
-    @Mock
-    private AgentObservabilityService observabilityService;
-    @Mock
     private ReactTodoExecutor reactTodoExecutor;
+    @Mock
+    private PlanJudge planJudge;
+    @Mock
+    private PatchPlanner patchPlanner;
+    @Mock
+    private PlanPatcher planPatcher;
     @Mock
     private ChatModel model;
 
@@ -56,12 +59,14 @@ class LinearWorkflowExecutorTest {
         executor = new LinearWorkflowExecutor(
                 eventService,
                 promptService,
-                toolRouter,
-                observabilityService,
-                new ObjectMapper(),
-                reactTodoExecutor
+                reactTodoExecutor,
+                planJudge,
+                patchPlanner,
+                planPatcher
         );
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
+        ReflectionTestUtils.setField(executor, "maxRetriesPerTodoAfterJudge", 2);
+        ReflectionTestUtils.setField(executor, "maxPatchesPerRun", 2);
 
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
@@ -147,6 +152,46 @@ class LinearWorkflowExecutorTest {
 
         assertFalse(result.isSuccess());
         verify(eventService).append(eq("run-fail"), eq("u1"), eq("TODO_FAILED"), anyMap());
+        verifyNoInteractions(planJudge, patchPlanner, planPatcher);
+    }
+
+    @Test
+    void execute_planPatchEnabled_shouldApplyPatchAndContinue() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(false)
+                        .output("")
+                        .summary("first failed")
+                        .toolCallsUsed(1)
+                        .build(),
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .output("{\"ok\":true}")
+                        .summary("patched success")
+                        .toolCallsUsed(1)
+                        .build()
+        );
+        when(planJudge.judge(any(), any(), anyMap(), anyString(), any()))
+                .thenReturn(JudgeDecision.PATCH_PLAN);
+        when(patchPlanner.generatePatch(any(), any(), anyMap(), anyString(), any()))
+                .thenReturn(PlanPatch.builder()
+                        .patchType(PatchType.REPLACE)
+                        .targetTodoId("todo_1")
+                        .patchData(Map.of("newDescription", "修正后的任务描述"))
+                        .reason("fix")
+                        .build());
+        when(planPatcher.applyPatch(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        WorkflowRequest request = request("run-patch", planWithTools(1));
+        request.setEnablePlanPatch(true);
+        WorkflowExecutionResult result = executor.execute(request);
+
+        assertTrue(result.isSuccess());
+        verify(planJudge).judge(any(), any(), anyMap(), anyString(), any());
+        verify(patchPlanner).generatePatch(any(), any(), anyMap(), anyString(), any());
+        verify(planPatcher).applyPatch(any(), any());
     }
 
     @Test
@@ -189,6 +234,35 @@ class LinearWorkflowExecutorTest {
         assertTrue(result.isSuccess());
         // Each todo uses 3 tool calls, total should be 6
         assertTrue(result.getToolCallsUsed() == 6);
+    }
+
+    @Test
+    void execute_finalAnswerShouldContainFullOutputWithoutTruncation() {
+        String longOutput = "LONG_OUTPUT_" + "x".repeat(1200);
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output(longOutput)
+                .summary("ok")
+                .toolCallsUsed(1)
+                .build());
+
+        WorkflowExecutionResult result = executor.execute(request("run-full-output", planWithTools(1)));
+
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> messageCaptor = ArgumentCaptor.forClass(List.class);
+        verify(model).chat(messageCaptor.capture());
+        List<ChatMessage> messages = messageCaptor.getValue();
+        String finalUserMessage = messages.stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::singleText)
+                .reduce((first, second) -> second)
+                .orElse("");
+        assertTrue(finalUserMessage.contains(longOutput));
+        assertEquals(1, result.getToolCallsUsed());
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {

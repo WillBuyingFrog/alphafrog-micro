@@ -1,15 +1,22 @@
 package world.willfrog.agent.workflow;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.AiMessage;
+import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.test.util.ReflectionTestUtils;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 
@@ -17,6 +24,8 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -44,6 +53,16 @@ class DagWorkflowExecutorTest {
 
     @Mock
     private AgentPromptService promptService;
+    @Mock
+    private PlanJudge planJudge;
+    @Mock
+    private PatchPlanner patchPlanner;
+    @Mock
+    private PlanPatcher planPatcher;
+    @Mock
+    private AgentLlmLocalConfigLoader localConfigLoader;
+    @Mock
+    private AgentLlmProperties llmProperties;
 
     @Mock
     private ChatModel model;
@@ -56,10 +75,21 @@ class DagWorkflowExecutorTest {
                 eventService,
                 reactTodoExecutor,
                 observabilityService,
-                promptService
+                promptService,
+                planJudge,
+                patchPlanner,
+                planPatcher,
+                localConfigLoader,
+                llmProperties,
+                new ObjectMapper()
         );
+        ReflectionTestUtils.setField(executor, "defaultDagThreadPoolSize", 4);
+        ReflectionTestUtils.setField(executor, "dagPlanPatchEnabled", true);
+        ReflectionTestUtils.setField(executor, "maxRetriesPerNode", 2);
+        ReflectionTestUtils.setField(executor, "maxPatchRounds", 4);
 
         lenient().when(eventService.isRunnable(any(), any())).thenReturn(true);
+        lenient().when(localConfigLoader.current()).thenReturn(java.util.Optional.empty());
         lenient().when(promptService.dagReactSystemPrompt()).thenReturn("system prompt");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月11日。");
         lenient().when(promptService.finalAnswerStageInstruction()).thenReturn("[Stage: FINAL_ANSWER]\n");
@@ -76,6 +106,8 @@ class DagWorkflowExecutorTest {
                 .toolDurationMs(1L)
                 .toolCallsUsed(1)
                 .build());
+        lenient().when(planJudge.judge(any(), any(), any(), anyString(), any()))
+                .thenReturn(JudgeDecision.FAIL);
     }
 
     @Test
@@ -280,6 +312,152 @@ class DagWorkflowExecutorTest {
 
         assertFalse(result.isSuccess());
         assertTrue(result.getFailureReason() != null && result.getFailureReason().contains("DAG execution failed"));
+    }
+
+    @Test
+    void execute_patchPlanReplace_shouldRetryAndSucceed() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").sequence(1).description("初始任务").build());
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+
+        when(reactTodoExecutor.executeWithObservability(anyString(), any(), any(), anyString(), anyString()))
+                .thenReturn(
+                        ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(false)
+                                .summary("first failed")
+                                .output("")
+                                .toolCallsUsed(1)
+                                .build(),
+                        ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(true)
+                                .summary("ok")
+                                .output("{\"ok\":true}")
+                                .toolCallsUsed(1)
+                                .build()
+                );
+        when(planJudge.judge(any(), any(), any(), anyString(), any()))
+                .thenReturn(JudgeDecision.PATCH_PLAN);
+        when(patchPlanner.generatePatch(any(), any(), any(), anyString(), any()))
+                .thenReturn(PlanPatch.builder()
+                        .patchType(PatchType.REPLACE)
+                        .targetTodoId("todo_1")
+                        .patchData(Map.of("newDescription", "修正任务"))
+                        .reason("fix")
+                        .build());
+        when(planPatcher.applyPatch(any(), any())).thenAnswer(invocation -> invocation.getArgument(0));
+
+        WorkflowExecutionResult result = executor.execute(request("run-patch", plan));
+        assertTrue(result.isSuccess());
+    }
+
+    @Test
+    void execute_fallbackToLinear_shouldExecuteRemainingNodesSequentially() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").sequence(1).description("先失败").build());
+        items.add(TodoItem.builder().id("todo_2").sequence(2).description("后续节点").dependsOn(List.of("todo_1")).build());
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+
+        when(reactTodoExecutor.executeWithObservability(anyString(), any(), any(), anyString(), anyString()))
+                .thenReturn(
+                        ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(false)
+                                .summary("dag failed")
+                                .output("")
+                                .toolCallsUsed(1)
+                                .build(),
+                        ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(true)
+                                .summary("fallback todo_1 ok")
+                                .output("{\"ok\":true}")
+                                .toolCallsUsed(1)
+                                .build(),
+                        ReactTodoExecutor.TodoExecutionRecord.builder()
+                                .success(true)
+                                .summary("fallback todo_2 ok")
+                                .output("{\"ok\":true}")
+                                .toolCallsUsed(1)
+                                .build()
+                );
+        when(planJudge.judge(any(), any(), any(), anyString(), any()))
+                .thenReturn(JudgeDecision.FALLBACK_TO_LINEAR);
+
+        WorkflowExecutionResult result = executor.execute(request("run-fallback", plan));
+
+        assertTrue(result.isSuccess());
+        assertEquals(3, result.getToolCallsUsed());
+    }
+
+    @Test
+    void execute_shouldRespectDagThreadPoolSizeFromLocalConfig() {
+        AgentLlmProperties local = new AgentLlmProperties();
+        AgentLlmProperties.Runtime runtime = new AgentLlmProperties.Runtime();
+        AgentLlmProperties.Parallel parallel = new AgentLlmProperties.Parallel();
+        parallel.setDagThreadPoolSize(1);
+        runtime.setParallel(parallel);
+        local.setRuntime(runtime);
+        when(localConfigLoader.current()).thenReturn(Optional.of(local));
+
+        AtomicInteger active = new AtomicInteger(0);
+        AtomicInteger maxActive = new AtomicInteger(0);
+        when(reactTodoExecutor.executeWithObservability(anyString(), any(), any(), anyString(), anyString()))
+                .thenAnswer(invocation -> {
+                    int now = active.incrementAndGet();
+                    maxActive.updateAndGet(old -> Math.max(old, now));
+                    try {
+                        Thread.sleep(80);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                    } finally {
+                        active.decrementAndGet();
+                    }
+                    return ReactTodoExecutor.TodoExecutionRecord.builder()
+                            .success(true)
+                            .output("{\"ok\":true}")
+                            .summary("ok")
+                            .toolCallsUsed(1)
+                            .build();
+                });
+
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").sequence(1).description("并行任务1").build());
+        items.add(TodoItem.builder().id("todo_2").sequence(2).description("并行任务2").build());
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-thread-pool", plan));
+
+        assertTrue(result.isSuccess());
+        assertEquals(1, maxActive.get());
+    }
+
+    @Test
+    void execute_finalAnswerShouldContainFullOutputWithoutTruncation() {
+        String longOutput = "DAG_LONG_OUTPUT_" + "y".repeat(1200);
+        when(reactTodoExecutor.executeWithObservability(anyString(), any(), any(), anyString(), anyString()))
+                .thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .summary("ok")
+                        .output(longOutput)
+                        .toolCallsUsed(1)
+                        .build());
+
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").sequence(1).description("单节点").build());
+        TodoPlan plan = TodoPlan.builder().items(items).build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-full-output", plan));
+
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> messageCaptor = ArgumentCaptor.forClass(List.class);
+        verify(model).chat(messageCaptor.capture());
+        List<ChatMessage> messages = messageCaptor.getValue();
+        String finalUserMessage = messages.stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::singleText)
+                .reduce((first, second) -> second)
+                .orElse("");
+        assertTrue(finalUserMessage.contains(longOutput));
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {

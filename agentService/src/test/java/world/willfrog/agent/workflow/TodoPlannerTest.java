@@ -14,8 +14,6 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
@@ -48,8 +46,6 @@ class TodoPlannerTest {
     @Mock
     private AgentEventService eventService;
     @Mock
-    private AgentRunMapper runMapper;
-    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
@@ -71,7 +67,6 @@ class TodoPlannerTest {
         planner = new TodoPlanner(
                 promptService,
                 eventService,
-                runMapper,
                 stateStore,
                 llmRequestSnapshotBuilder,
                 observabilityService,
@@ -141,7 +136,7 @@ class TodoPlannerTest {
         assertEquals("搜索平安相关的股票信息", plan.getItems().get(0).getDescription());
         // 验证 analysis 使用了自然语言分析的结果
         assertEquals("经过分析，用户需要搜索平安相关的股票信息。", plan.getAnalysis());
-        verify(runMapper).updatePlan(eq("run-1"), eq("u1"), eq(AgentRunStatus.EXECUTING), anyString());
+        verify(stateStore).recordPlan(eq("run-1"), anyString(), eq(true));
         verify(eventService).append(eq("run-1"), eq("u1"), eq("TODO_LIST_CREATED"), anyMap());
     }
 

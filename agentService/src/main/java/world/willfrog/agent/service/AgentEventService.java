@@ -287,6 +287,13 @@ public class AgentEventService {
         }
         return mode == null || mode.isBlank() ? "AUTO" : mode;
     }
+
+    /**
+     * 从 ext JSON 中提取是否启用 Plan Patch（默认 false）。
+     */
+    public boolean extractEnablePlanPatch(String extJson) {
+        return extractBooleanFromExt(extJson, "enable_plan_patch", "enablePlanPatch", "enable_plan_patch");
+    }
     
     /**
      * 从 contextJson 中提取执行模式。

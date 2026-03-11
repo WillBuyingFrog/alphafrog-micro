@@ -163,6 +163,7 @@ public class AgentRunExecutor {
             } catch (Exception e) {
                 executionMode = PlanExecutionMode.AUTO;
             }
+            boolean enablePlanPatch = eventService.extractEnablePlanPatch(run.getExt());
             log.info("Run {} execution mode: {}", runId, executionMode);
 
             var todoPlan = todoPlanner.plan(TodoPlanner.PlanRequest.builder()
@@ -189,6 +190,7 @@ public class AgentRunExecutor {
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
                     .modelName(modelName)
+                    .enablePlanPatch(enablePlanPatch)
                     .build());
 
             if (result.isPaused()) {
