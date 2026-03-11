@@ -19,12 +19,15 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.graph.SubAgentRunner;
+import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.Optional;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -77,6 +80,8 @@ public class ReactTodoExecutor {
 
     @Value("${agent.flow.react.max-calls-per-todo:10}")
     private int maxCallsPerTodo;
+
+    private final AgentRunStateStore stateStore;
 
     @PreDestroy
     public void shutdown() {
@@ -202,6 +207,24 @@ public class ReactTodoExecutor {
         AtomicInteger subAgentIdCounter = new AtomicInteger(0);
 
         while (callCount < maxCallsPerTodo) {
+            // 检查是否被取消
+            if (runId != null && !runId.isBlank()) {
+                Optional<String> currentStatus = stateStore.loadRunStatus(runId);
+                if (currentStatus.isPresent() && 
+                    (currentStatus.get().equals(AgentRunStatus.CANCELED.name()) || 
+                     currentStatus.get().equals(AgentRunStatus.FAILED.name()))) {
+                    log.info("Run {} has been canceled or failed, stopping ReAct loop", runId);
+                    return TodoExecutionRecord.builder()
+                            .success(false)
+                            .output(lastOutput)
+                            .summary("Run was " + currentStatus.get() + " during execution")
+                            .llmTraceId(lastLlmTraceId)
+                            .retryCount(retryCount)
+                            .toolCallsUsed(toolCallsUsed)
+                            .build();
+                }
+            }
+
             long llmStartTime = System.currentTimeMillis();
             String llmTraceId = null;
             
