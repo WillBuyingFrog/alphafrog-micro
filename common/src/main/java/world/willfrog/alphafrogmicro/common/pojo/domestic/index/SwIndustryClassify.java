@@ -39,4 +39,7 @@ public class SwIndustryClassify {
 
     @Column(name = "src")
     String src;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

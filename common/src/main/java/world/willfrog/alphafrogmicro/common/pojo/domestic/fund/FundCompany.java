@@ -72,4 +72,7 @@ public class FundCompany {
 
     @Column(name = "credit_code")
     String creditCode;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

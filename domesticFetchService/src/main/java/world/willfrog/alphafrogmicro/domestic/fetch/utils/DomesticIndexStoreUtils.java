@@ -1,6 +1,7 @@
 package world.willfrog.alphafrogmicro.domestic.fetch.utils;
 
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
@@ -286,6 +287,7 @@ public class DomesticIndexStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 IndexDailyBasic pojo = new IndexDailyBasic();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -339,8 +341,12 @@ public class DomesticIndexStoreUtils {
                             if (pb != null) pojo.setPb(pb.doubleValue());
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -371,6 +377,7 @@ public class DomesticIndexStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 SwIndustryClassify pojo = new SwIndustryClassify();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -396,8 +403,12 @@ public class DomesticIndexStoreUtils {
                             pojo.setSrc(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -428,6 +439,7 @@ public class DomesticIndexStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 SwIndustryMember pojo = new SwIndustryMember();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -471,8 +483,12 @@ public class DomesticIndexStoreUtils {
                             pojo.setIsNew(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -503,6 +519,7 @@ public class DomesticIndexStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 SwIndustryDaily pojo = new SwIndustryDaily();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -567,8 +584,12 @@ public class DomesticIndexStoreUtils {
                             if (totalMv != null) pojo.setTotalMv(totalMv.doubleValue());
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -604,6 +625,7 @@ public class DomesticIndexStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 CiIndexMember pojo = new CiIndexMember();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -647,8 +669,12 @@ public class DomesticIndexStoreUtils {
                             pojo.setIsNew(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }

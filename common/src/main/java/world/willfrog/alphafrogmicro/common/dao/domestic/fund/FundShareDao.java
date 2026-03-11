@@ -8,8 +8,8 @@ import java.util.List;
 @Mapper
 public interface FundShareDao {
 
-    @Insert("INSERT INTO alphafrog_fund_share (ts_code, trade_date, fd_share) " +
-            "VALUES (#{tsCode}, #{tradeDate}, #{fdShare}) " +
+    @Insert("INSERT INTO alphafrog_fund_share (ts_code, trade_date, fd_share, extended) " +
+            "VALUES (#{tsCode}, #{tradeDate}, #{fdShare}, #{extended}) " +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertFundShare(FundShare fundShare);
 
@@ -19,7 +19,8 @@ public interface FundShareDao {
             @Result(property = "id", column = "id"),
             @Result(property = "tsCode", column = "ts_code"),
             @Result(property = "tradeDate", column = "trade_date"),
-            @Result(property = "fdShare", column = "fd_share")
+            @Result(property = "fdShare", column = "fd_share"),
+            @Result(property = "extended", column = "extended")
     })
     List<FundShare> getByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                             @Param("startDate") long startDate,

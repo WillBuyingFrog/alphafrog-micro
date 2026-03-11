@@ -51,4 +51,7 @@ public class CiIndexMember {
 
     @Column(name = "is_new")
     String isNew;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

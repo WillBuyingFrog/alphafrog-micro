@@ -9,9 +9,9 @@ import java.util.List;
 public interface SwIndustryClassifyDao {
 
     @Insert("INSERT INTO alphafrog_index_sw_classify (index_code, industry_name, parent_code, level, " +
-            "industry_code, is_pub, src) " +
+            "industry_code, is_pub, src, extended) " +
             "VALUES (#{indexCode}, #{industryName}, #{parentCode}, #{level}, " +
-            "#{industryCode}, #{isPub}, #{src}) " +
+            "#{industryCode}, #{isPub}, #{src}, #{extended}) " +
             "ON CONFLICT (index_code, src) DO NOTHING")
     int insertSwIndustryClassify(SwIndustryClassify classify);
 
@@ -24,7 +24,8 @@ public interface SwIndustryClassifyDao {
             @Result(property = "level", column = "level"),
             @Result(property = "industryCode", column = "industry_code"),
             @Result(property = "isPub", column = "is_pub"),
-            @Result(property = "src", column = "src")
+            @Result(property = "src", column = "src"),
+            @Result(property = "extended", column = "extended")
     })
     List<SwIndustryClassify> getBySrc(@Param("src") String src);
 
@@ -37,7 +38,8 @@ public interface SwIndustryClassifyDao {
             @Result(property = "level", column = "level"),
             @Result(property = "industryCode", column = "industry_code"),
             @Result(property = "isPub", column = "is_pub"),
-            @Result(property = "src", column = "src")
+            @Result(property = "src", column = "src"),
+            @Result(property = "extended", column = "extended")
     })
     List<SwIndustryClassify> getByLevelAndSrc(@Param("level") String level, @Param("src") String src);
 

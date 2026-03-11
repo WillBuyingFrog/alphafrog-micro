@@ -10,10 +10,10 @@ public interface FundCompanyDao {
 
     @Insert("INSERT INTO alphafrog_fund_company (name, shortname, short_enname, province, city, address, " +
             "phone, office, website, chairman, manager, reg_capital, setup_date, end_date, employees, " +
-            "main_business, org_code, credit_code) " +
+            "main_business, org_code, credit_code, extended) " +
             "VALUES (#{name}, #{shortname}, #{shortEnname}, #{province}, #{city}, #{address}, " +
             "#{phone}, #{office}, #{website}, #{chairman}, #{manager}, #{regCapital}, #{setupDate}, #{endDate}, " +
-            "#{employees}, #{mainBusiness}, #{orgCode}, #{creditCode}) " +
+            "#{employees}, #{mainBusiness}, #{orgCode}, #{creditCode}, #{extended}) " +
             "ON CONFLICT (credit_code) DO NOTHING")
     int insertFundCompany(FundCompany fundCompany);
 
@@ -37,7 +37,8 @@ public interface FundCompanyDao {
             @Result(property = "employees", column = "employees"),
             @Result(property = "mainBusiness", column = "main_business"),
             @Result(property = "orgCode", column = "org_code"),
-            @Result(property = "creditCode", column = "credit_code")
+            @Result(property = "creditCode", column = "credit_code"),
+            @Result(property = "extended", column = "extended")
     })
     List<FundCompany> getAll();
 

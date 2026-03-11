@@ -27,4 +27,7 @@ public class FundShare {
 
     @Column(name = "fd_share")
     Double fdShare;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

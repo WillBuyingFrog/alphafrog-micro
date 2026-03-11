@@ -9,9 +9,9 @@ import java.util.List;
 public interface IndexDailyBasicDao {
 
     @Insert("INSERT INTO alphafrog_index_daily_basic (ts_code, trade_date, total_mv, float_mv, total_share, " +
-            "float_share, free_share, turnover_rate, turnover_rate_f, pe, pe_ttm, pb) " +
+            "float_share, free_share, turnover_rate, turnover_rate_f, pe, pe_ttm, pb, extended) " +
             "VALUES (#{tsCode}, #{tradeDate}, #{totalMv}, #{floatMv}, #{totalShare}, " +
-            "#{floatShare}, #{freeShare}, #{turnoverRate}, #{turnoverRateF}, #{pe}, #{peTtm}, #{pb}) " +
+            "#{floatShare}, #{freeShare}, #{turnoverRate}, #{turnoverRateF}, #{pe}, #{peTtm}, #{pb}, #{extended}) " +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertIndexDailyBasic(IndexDailyBasic indexDailyBasic);
 
@@ -30,7 +30,8 @@ public interface IndexDailyBasicDao {
             @Result(property = "turnoverRateF", column = "turnover_rate_f"),
             @Result(property = "pe", column = "pe"),
             @Result(property = "peTtm", column = "pe_ttm"),
-            @Result(property = "pb", column = "pb")
+            @Result(property = "pb", column = "pb"),
+            @Result(property = "extended", column = "extended")
     })
     List<IndexDailyBasic> getByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                    @Param("startDate") long startDate,

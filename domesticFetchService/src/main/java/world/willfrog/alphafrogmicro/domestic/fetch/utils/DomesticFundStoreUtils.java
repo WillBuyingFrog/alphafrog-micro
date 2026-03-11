@@ -1,6 +1,7 @@
 package world.willfrog.alphafrogmicro.domestic.fetch.utils;
 
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
@@ -227,6 +228,7 @@ public class DomesticFundStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 FundCompany pojo = new FundCompany();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -293,8 +295,12 @@ public class DomesticFundStoreUtils {
                             pojo.setCreditCode(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -325,6 +331,7 @@ public class DomesticFundStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 FundManager pojo = new FundManager();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -368,8 +375,12 @@ public class DomesticFundStoreUtils {
                             pojo.setResume(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -407,6 +418,7 @@ public class DomesticFundStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 FundShare pojo = new FundShare();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -424,8 +436,12 @@ public class DomesticFundStoreUtils {
                             if (fdShare != null) pojo.setFdShare(fdShare.doubleValue());
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }
@@ -463,6 +479,7 @@ public class DomesticFundStoreUtils {
             for (int i = 0; i < data.size(); i++) {
                 JSONArray item = data.getJSONArray(i);
                 EtfShareSize pojo = new EtfShareSize();
+                JSONObject ext = new JSONObject();
                 for (int j = 0; j < fields.size(); j++) {
                     String field = fields.getString(j);
                     switch (field) {
@@ -498,8 +515,12 @@ public class DomesticFundStoreUtils {
                             pojo.setExchange(item.getString(j));
                             break;
                         default:
+                            ext.put(field, item.get(j));
                             break;
                     }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
                 }
                 list.add(pojo);
             }

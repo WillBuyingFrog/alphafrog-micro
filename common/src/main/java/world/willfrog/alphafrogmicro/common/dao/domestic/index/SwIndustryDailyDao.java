@@ -9,9 +9,9 @@ import java.util.List;
 public interface SwIndustryDailyDao {
 
     @Insert("INSERT INTO alphafrog_index_sw_daily (ts_code, trade_date, name, open, low, high, close, " +
-            "change_val, pct_change, vol, amount, pe, pb, float_mv, total_mv) " +
+            "change_val, pct_change, vol, amount, pe, pb, float_mv, total_mv, extended) " +
             "VALUES (#{tsCode}, #{tradeDate}, #{name}, #{open}, #{low}, #{high}, #{close}, " +
-            "#{changeVal}, #{pctChange}, #{vol}, #{amount}, #{pe}, #{pb}, #{floatMv}, #{totalMv}) " +
+            "#{changeVal}, #{pctChange}, #{vol}, #{amount}, #{pe}, #{pb}, #{floatMv}, #{totalMv}, #{extended}) " +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertSwIndustryDaily(SwIndustryDaily daily);
 
@@ -33,7 +33,8 @@ public interface SwIndustryDailyDao {
             @Result(property = "pe", column = "pe"),
             @Result(property = "pb", column = "pb"),
             @Result(property = "floatMv", column = "float_mv"),
-            @Result(property = "totalMv", column = "total_mv")
+            @Result(property = "totalMv", column = "total_mv"),
+            @Result(property = "extended", column = "extended")
     })
     List<SwIndustryDaily> getByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                    @Param("startDate") long startDate,

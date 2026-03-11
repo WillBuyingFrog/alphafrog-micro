@@ -9,7 +9,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @NoArgsConstructor
-@Table(name = "alphafrog_etf_share_size",
+@Table(name = "alphafrog_fund_etf_share_size",
         uniqueConstraints = {
                 @UniqueConstraint(columnNames = {"ts_code", "trade_date"})
         })
@@ -42,4 +42,7 @@ public class EtfShareSize {
 
     @Column(name = "exchange")
     String exchange;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

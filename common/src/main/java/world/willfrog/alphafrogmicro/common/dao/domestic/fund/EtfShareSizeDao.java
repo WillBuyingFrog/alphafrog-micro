@@ -8,14 +8,14 @@ import java.util.List;
 @Mapper
 public interface EtfShareSizeDao {
 
-    @Insert("INSERT INTO alphafrog_etf_share_size (trade_date, ts_code, etf_name, total_share, total_size, " +
-            "nav, close, exchange) " +
+    @Insert("INSERT INTO alphafrog_fund_etf_share_size (trade_date, ts_code, etf_name, total_share, total_size, " +
+            "nav, close, exchange, extended) " +
             "VALUES (#{tradeDate}, #{tsCode}, #{etfName}, #{totalShare}, #{totalSize}, " +
-            "#{nav}, #{close}, #{exchange}) " +
+            "#{nav}, #{close}, #{exchange}, #{extended}) " +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertEtfShareSize(EtfShareSize etfShareSize);
 
-    @Select("SELECT * FROM alphafrog_etf_share_size WHERE ts_code = #{tsCode} " +
+    @Select("SELECT * FROM alphafrog_fund_etf_share_size WHERE ts_code = #{tsCode} " +
             "AND trade_date BETWEEN #{startDate} AND #{endDate}")
     @Results({
             @Result(property = "id", column = "id"),
@@ -26,19 +26,20 @@ public interface EtfShareSizeDao {
             @Result(property = "totalSize", column = "total_size"),
             @Result(property = "nav", column = "nav"),
             @Result(property = "close", column = "close"),
-            @Result(property = "exchange", column = "exchange")
+            @Result(property = "exchange", column = "exchange"),
+            @Result(property = "extended", column = "extended")
     })
     List<EtfShareSize> getByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                                 @Param("startDate") long startDate,
                                                 @Param("endDate") long endDate);
 
-    @Delete("DELETE FROM alphafrog_etf_share_size WHERE ts_code = #{tsCode}")
+    @Delete("DELETE FROM alphafrog_fund_etf_share_size WHERE ts_code = #{tsCode}")
     int deleteByTsCode(@Param("tsCode") String tsCode);
 
-    @Delete("DELETE FROM alphafrog_etf_share_size WHERE trade_date BETWEEN #{startDate} AND #{endDate}")
+    @Delete("DELETE FROM alphafrog_fund_etf_share_size WHERE trade_date BETWEEN #{startDate} AND #{endDate}")
     int deleteByDateRange(@Param("startDate") long startDate, @Param("endDate") long endDate);
 
-    @Delete("DELETE FROM alphafrog_etf_share_size WHERE ts_code = #{tsCode} " +
+    @Delete("DELETE FROM alphafrog_fund_etf_share_size WHERE ts_code = #{tsCode} " +
             "AND trade_date BETWEEN #{startDate} AND #{endDate}")
     int deleteByTsCodeAndDateRange(@Param("tsCode") String tsCode,
                                    @Param("startDate") long startDate,

@@ -48,4 +48,7 @@ public class FundManager {
 
     @Column(name = "resume", columnDefinition = "TEXT")
     String resume;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

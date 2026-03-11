@@ -9,9 +9,9 @@ import java.util.List;
 public interface FundManagerDao {
 
     @Insert("INSERT INTO alphafrog_fund_manager (ts_code, ann_date, name, gender, birth_year, edu, " +
-            "nationality, begin_date, end_date, resume) " +
+            "nationality, begin_date, end_date, resume, extended) " +
             "VALUES (#{tsCode}, #{annDate}, #{name}, #{gender}, #{birthYear}, #{edu}, " +
-            "#{nationality}, #{beginDate}, #{endDate}, #{resume}) " +
+            "#{nationality}, #{beginDate}, #{endDate}, #{resume}, #{extended}) " +
             "ON CONFLICT (ts_code, name, begin_date) DO NOTHING")
     int insertFundManager(FundManager fundManager);
 
@@ -27,7 +27,8 @@ public interface FundManagerDao {
             @Result(property = "nationality", column = "nationality"),
             @Result(property = "beginDate", column = "begin_date"),
             @Result(property = "endDate", column = "end_date"),
-            @Result(property = "resume", column = "resume")
+            @Result(property = "resume", column = "resume"),
+            @Result(property = "extended", column = "extended")
     })
     List<FundManager> getByTsCode(@Param("tsCode") String tsCode);
 

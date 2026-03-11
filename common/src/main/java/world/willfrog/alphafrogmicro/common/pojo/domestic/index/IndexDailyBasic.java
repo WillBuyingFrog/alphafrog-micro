@@ -54,4 +54,7 @@ public class IndexDailyBasic {
 
     @Column(name = "pb")
     Double pb;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }

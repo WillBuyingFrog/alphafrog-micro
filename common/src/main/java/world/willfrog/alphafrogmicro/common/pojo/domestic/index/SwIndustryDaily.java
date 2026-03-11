@@ -63,4 +63,7 @@ public class SwIndustryDaily {
 
     @Column(name = "total_mv")
     Double totalMv;
+
+    @Column(name = "extended", columnDefinition = "JSONB")
+    String extended;
 }
