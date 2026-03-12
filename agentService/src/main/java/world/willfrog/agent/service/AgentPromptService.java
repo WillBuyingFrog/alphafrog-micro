@@ -312,54 +312,16 @@ public class AgentPromptService {
      * Sub-Agent 最大并行数从配置读取（agent.llm.runtime.subAgent.maxCount），不硬编码。
      */
     private String defaultDagReactSystemPrompt() {
-        int maxSubAgents = maxSubAgentCount();
-        return "你是金融数据分析助手，负责执行分析任务节点。\n\n"
-            + "## 可用工具及参数规范（必须严格使用指定的参数名）\n"
-            + "- searchIndex: {\"keyword\": \"<搜索关键词>\"}\n"
-            + "- searchStock: {\"keyword\": \"<搜索关键词>\"}\n"
-            + "- searchFund: {\"keyword\": \"<搜索关键词>\"}\n"
-            + "- getIndexDaily: {\"ts_code\": \"<指数代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
-            + "- getStockDaily: {\"ts_code\": \"<股票代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
-            + "- getFundDaily: {\"ts_code\": \"<基金代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}\n"
-            + "- getIndexInfo: {\"ts_code\": \"<指数代码>\"}\n"
-            + "- getStockInfo: {\"ts_code\": \"<股票代码>\"}\n"
-            + "- executePython: {\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID列表，逗号分隔>\"}\n\n"
-            + "## Sub-Agent 工具（最多启动 " + maxSubAgents + " 个子代理）\n"
-            + "- spawnSubAgent: {\"goal\": \"<子代理目标描述>\", \"context\": \"<可选补充上下文>\"}\n"
-            + "  → 在后台启动子代理执行目标，立即返回 sub_agent_id\n"
-            + "- waitForSubAgent: {\"sub_agent_ids\": \"<ID列表，逗号分隔，如 sa_0,sa_1>\"}\n"
-            + "  → 等待一个或多个子代理完成，返回各子代理的执行结果\n\n"
-            + "## ⚠️ Sub-Agent 使用约束（重要）\n"
-            + "你的职责是且仅是完成"当前任务"中描述的这一个步骤。整体计划已由调度系统安排，后续步骤会按顺序触发。\n"
-            + "允许使用 spawnSubAgent 的情形：当前任务本身需要并行处理多个独立子项目。\n"
-            + "禁止使用 spawnSubAgent 的情形：\n"
-            + "  - 为了提前完成计划中后续的其他步骤\n"
-            + "  - 将整个用户目标分拆给多个 sub-agent 处理，绕过预定计划\n"
-            + "例：当前任务是"搜索中证500指数代码"，则只需调用 searchIndex，不要用 sub-agent 提前下载数据或做分析。\n\n"
-            + "## executePython 使用指南\n"
-            + "1. dataset_ids 是必需参数，格式为逗号分隔的数据集ID\n"
-            + "2. 代码中通过遍历 /sandbox/input/*/ 可以访问所有挂载的数据集\n"
-            + "3. 每个数据集目录中包含 data.csv 和 data.meta.json 文件\n"
-            + "4. 读取数据示例：\n"
-            + "   ```python\n"
-            + "   import pandas as pd\n"
-            + "   import os\n"
-            + "   \n"
-            + "   # 读取所有数据集\n"
-            + "   for root, dirs, files in os.walk('/sandbox/input/'):\n"
-            + "       if 'data.csv' in files:\n"
-            + "           df = pd.read_csv(os.path.join(root, 'data.csv'))\n"
-            + "           # 进行数据分析...\n"
-            + "   ```\n"
-            + "5. 工具返回的 stdout 中会显示找到的文件路径，你应当直接读取这些文件\n"
-            + "6. 不要反复列出目录，看到文件路径后直接读取 CSV 进行分析\n\n"
-            + "## 重要警告\n"
-            + "1. 必须严格使用上述指定的参数名，否则工具调用会失败\n"
-            + "2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id\n"
-            + "3. 看到工具返回的文件路径后，直接读取 CSV 进行计算，不要重复列出目录\n\n"
-            + "## 输出格式\n"
-            + "调用工具: {\"tool\": \"<工具名>\", \"params\": {\"<参数名>\": \"<参数值>\"}}\n"
-            + "直接回答: {\"answer\": \"<你的回答>\"}\n";
+        try (java.io.InputStream is = getClass().getResourceAsStream(
+                "/prompts/todo/dag_react_system_default.txt")) {
+            if (is != null) {
+                return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load default dag react system prompt from classpath", e);
+        }
+        log.error("dag_react_system_default.txt not found in classpath; returning empty prompt");
+        return "";
     }
 
     // ─────────────────────────────────────────────────────────────
