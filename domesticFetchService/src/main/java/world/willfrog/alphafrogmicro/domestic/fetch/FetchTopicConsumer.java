@@ -402,6 +402,170 @@ public class FetchTopicConsumer {
                         result = -1;
                     }
                     break;
+
+                // ==================== 新增股票接口 ====================
+
+                case "stock_income":
+                    if (taskSubType == 1) {
+                        String period = taskParams.getString("period");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockIncomeFetchByPeriodRequest request =
+                                DomesticStockIncomeFetchByPeriodRequest.newBuilder()
+                                        .setPeriod(period)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockIncomeByPeriod(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_balancesheet":
+                    if (taskSubType == 1) {
+                        String period = taskParams.getString("period");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockBalancesheetFetchByPeriodRequest request =
+                                DomesticStockBalancesheetFetchByPeriodRequest.newBuilder()
+                                        .setPeriod(period)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockBalancesheetByPeriod(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_cashflow":
+                    if (taskSubType == 1) {
+                        String period = taskParams.getString("period");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockCashflowFetchByPeriodRequest request =
+                                DomesticStockCashflowFetchByPeriodRequest.newBuilder()
+                                        .setPeriod(period)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockCashflowByPeriod(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_forecast":
+                    if (taskSubType == 1) {
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockForecastFetchByDateRangeRequest request =
+                                DomesticStockForecastFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate)
+                                        .setEndDate(endDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockForecastByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_express":
+                    if (taskSubType == 1) {
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockExpressFetchByDateRangeRequest request =
+                                DomesticStockExpressFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate)
+                                        .setEndDate(endDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockExpressByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_report_rc":
+                    if (taskSubType == 1) {
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockReportRcFetchByDateRangeRequest request =
+                                DomesticStockReportRcFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate)
+                                        .setEndDate(endDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockReportRcByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_moneyflow":
+                    if (taskSubType == 1) {
+                        String tradeDate = taskParams.getString("trade_date");
+                        DomesticStockMoneyflowFetchByTradeDateRequest request =
+                                DomesticStockMoneyflowFetchByTradeDateRequest.newBuilder()
+                                        .setTradeDate(tradeDate)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockMoneyflowByTradeDate(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_top10_holders":
+                    if (taskSubType == 1) {
+                        String tsCode = taskParams.getString("ts_code");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockTop10HoldersFetchByTsCodeRequest request =
+                                DomesticStockTop10HoldersFetchByTsCodeRequest.newBuilder()
+                                        .setTsCode(tsCode)
+                                        .setStartDate(startDate != null ? startDate : "")
+                                        .setEndDate(endDate != null ? endDate : "")
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockTop10HoldersByTsCode(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "stock_share_float":
+                    if (taskSubType == 1) {
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockShareFloatFetchByDateRangeRequest request =
+                                DomesticStockShareFloatFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate)
+                                        .setEndDate(endDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockShareFloatByDateRange(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
                 default:
                     result = -2;
                     break;

@@ -180,4 +180,363 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
 
         return affectedRows;
     }
+
+    // ==================== PR #35 新增：股票财务数据爬取方法 ====================
+
+    // 4.2 利润表爬取
+    @Override
+    public DomesticStockIncomeFetchByPeriodResponse fetchStockIncomeByPeriod(
+            DomesticStockIncomeFetchByPeriodRequest request) {
+        
+        String period = request.getPeriod();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "income_vip");
+        queryParams.put("period", period);
+        queryParams.put("report_type", "1");  // 合并报表
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockIncomeFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockIncomeByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockIncomeFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockIncomeFetchByPeriodResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.3 资产负债表爬取
+    @Override
+    public DomesticStockBalancesheetFetchByPeriodResponse fetchStockBalancesheetByPeriod(
+            DomesticStockBalancesheetFetchByPeriodRequest request) {
+        
+        String period = request.getPeriod();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "balancesheet_vip");
+        queryParams.put("period", period);
+        queryParams.put("report_type", "1");  // 合并报表
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockBalancesheetFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockBalancesheetByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockBalancesheetFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockBalancesheetFetchByPeriodResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.4 现金流量表爬取
+    @Override
+    public DomesticStockCashflowFetchByPeriodResponse fetchStockCashflowByPeriod(
+            DomesticStockCashflowFetchByPeriodRequest request) {
+        
+        String period = request.getPeriod();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "cashflow_vip");
+        queryParams.put("period", period);
+        queryParams.put("report_type", "1");  // 合并报表
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockCashflowFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockCashflowByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockCashflowFetchByPeriodResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockCashflowFetchByPeriodResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.5 业绩预告爬取
+    @Override
+    public DomesticStockForecastFetchByDateRangeResponse fetchStockForecastByDateRange(
+            DomesticStockForecastFetchByDateRangeRequest request) {
+        
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "forecast_vip");
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockForecastFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockForecastByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockForecastFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockForecastFetchByDateRangeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.6 业绩快报爬取
+    @Override
+    public DomesticStockExpressFetchByDateRangeResponse fetchStockExpressByDateRange(
+            DomesticStockExpressFetchByDateRangeRequest request) {
+        
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "express_vip");
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockExpressFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockExpressByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockExpressFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockExpressFetchByDateRangeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.7 卖方盈利预测爬取
+    @Override
+    public DomesticStockReportRcFetchByDateRangeResponse fetchStockReportRcByDateRange(
+            DomesticStockReportRcFetchByDateRangeRequest request) {
+        
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "report_rc");
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("limit", limit > 0 ? limit : 3000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockReportRcFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockReportRcByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockReportRcFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockReportRcFetchByDateRangeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.8 个股资金流向爬取
+    @Override
+    public DomesticStockMoneyflowFetchByTradeDateResponse fetchStockMoneyflowByTradeDate(
+            DomesticStockMoneyflowFetchByTradeDateRequest request) {
+        
+        String tradeDate = request.getTradeDate();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "moneyflow");
+        queryParams.put("trade_date", tradeDate);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockMoneyflowFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockMoneyflowByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockMoneyflowFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockMoneyflowFetchByTradeDateResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.9 前十大股东爬取
+    @Override
+    public DomesticStockTop10HoldersFetchByTsCodeResponse fetchStockTop10HoldersByTsCode(
+            DomesticStockTop10HoldersFetchByTsCodeRequest request) {
+        
+        String tsCode = request.getTsCode();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "top10_holders");
+        queryParams.put("ts_code", tsCode);
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("limit", limit > 0 ? limit : 100);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockTop10HoldersFetchByTsCodeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockTop10HoldersByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockTop10HoldersFetchByTsCodeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockTop10HoldersFetchByTsCodeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
+
+    // 4.10 限售股解禁爬取
+    @Override
+    public DomesticStockShareFloatFetchByDateRangeResponse fetchStockShareFloatByDateRange(
+            DomesticStockShareFloatFetchByDateRangeRequest request) {
+        
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "share_float");
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("limit", limit > 0 ? limit : 6000);
+        queryParams.put("offset", offset);
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockShareFloatFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockShareFloatByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockShareFloatFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                    .setFetchedItemsCount(result).build();
+        }
+        return DomesticStockShareFloatFetchByDateRangeResponse.newBuilder().setStatus("success")
+                .setFetchedItemsCount(result).build();
+    }
 }
