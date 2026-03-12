@@ -234,7 +234,7 @@ BEGIN
 END;
 $$ language 'plpgsql';
 
--- 为所有新表添加更新时间触发器
+-- 为所有新表添加更新时间触发器（兼容PostgreSQL 9.6+）
 DO $$
 DECLARE
     table_name text;
@@ -249,12 +249,25 @@ DECLARE
         'alphafrog_fund_manager',
         'alphafrog_fund_share'
     ];
+    trigger_exists boolean;
 BEGIN
     FOREACH table_name IN ARRAY table_list
     LOOP
-        EXECUTE format('CREATE TRIGGER IF NOT EXISTS trg_%s_updated_at 
-                       BEFORE UPDATE ON %s 
-                       FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
-                       table_name, table_name);
+        -- 检查表和触发器是否已存在（使用 to_regclass 避免表不存在时报错）
+        IF to_regclass(table_name) IS NOT NULL THEN
+            SELECT EXISTS(
+                SELECT 1 FROM pg_trigger 
+                WHERE tgname = 'trg_' || table_name || '_updated_at'
+                AND tgrelid = to_regclass(table_name)
+            ) INTO trigger_exists;
+            
+            -- 如果不存在则创建
+            IF NOT trigger_exists THEN
+                EXECUTE format('CREATE TRIGGER trg_%s_updated_at 
+                               BEFORE UPDATE ON %s 
+                               FOR EACH ROW EXECUTE FUNCTION update_updated_at_column()',
+                               table_name, table_name);
+            END IF;
+        END IF;
     END LOOP;
 END $$;
