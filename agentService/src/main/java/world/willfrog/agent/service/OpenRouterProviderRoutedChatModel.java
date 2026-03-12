@@ -152,16 +152,21 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     request,
                     new TypeReference<Map<String, Object>>() {}
             );
-            // OpenRouter 特有：添加 providerOrder 与结构化输出参数。
+            // OpenRouter 特有：添加 providerOrder 与结构化输出参数（仅 OpenRouter 端点）
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
-            Map<String, Object> provider = new LinkedHashMap<>();
-            provider.put("order", providerOrder == null ? List.of() : providerOrder);
-            if (structuredOutputSpec != null) {
+            if (isOpenRouterEndpoint(baseUrl)) {
+                Map<String, Object> provider = new LinkedHashMap<>();
+                provider.put("order", providerOrder == null ? List.of() : providerOrder);
+                if (structuredOutputSpec != null) {
+                    requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
+                    provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
+                    provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+                }
+                requestJsonMap.put("provider", provider);
+            } else if (structuredOutputSpec != null) {
+                // 非 OpenRouter 端点也需要添加结构化输出参数
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
-                provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
             }
-            requestJsonMap.put("provider", provider);
 
             requestJson = objectMapper.writeValueAsString(requestJsonMap);
             if (log.isDebugEnabled()) {

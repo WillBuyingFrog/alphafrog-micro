@@ -54,6 +54,12 @@ class PlanJudgeTest {
     }
 
     @Test
+    void parseDecision_rawTextWithFallbackToLinear() {
+        String text = "FALLBACK_TO_LINEAR";
+        assertEquals(JudgeDecision.FALLBACK_TO_LINEAR, planJudge.parseDecision(text));
+    }
+
+    @Test
     void parseDecision_rawTextWithContinue() {
         String text = "CONTINUE";
         assertEquals(JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS, planJudge.parseDecision(text));

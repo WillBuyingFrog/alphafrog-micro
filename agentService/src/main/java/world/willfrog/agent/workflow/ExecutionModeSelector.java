@@ -5,7 +5,10 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
 import java.util.List;
+import java.util.Set;
 import java.util.Map;
+import java.util.HashMap;
+import java.util.HashSet;
 
 /**
  * 执行模式选择器。
@@ -45,34 +48,75 @@ public class ExecutionModeSelector {
 
     /**
      * 自动选择策略：根据 Plan 特征决定使用 LINEAR 或 DAG。
+     * 
+     * <p>DAG 仅在以下条件下触发：
+     * <ul>
+     *   <li>Plan 中存在显式的 dependsOn 依赖关系标注</li>
+     *   <li>Plan 中存在 parallelizable 并行化标注</li>
+     * </ul>
+     * 不再使用"独立任务数 ≥ 3"的启发式规则，因为该阈值过于激进。
+     * 没有显式依赖/并行化标注的 Plan 将默认使用 LINEAR 模式。</p>
      */
     PlanExecutionMode autoSelect(TodoPlan plan) {
         List<TodoItem> items = plan.getItems();
 
-        // 检查是否存在依赖关系标注
-        boolean hasDependencies = items.stream()
-                .anyMatch(item -> item.getDependsOn() != null && !item.getDependsOn().isEmpty());
-
         // 检查是否有可并行化标注
         boolean hasParallelizable = items.stream()
                 .anyMatch(TodoItem::isParallelizable);
-
-        if (hasDependencies || hasParallelizable) {
-            log.debug("Plan has dependency/parallel annotations, selecting DAG mode");
+        if (hasParallelizable) {
+            log.debug("Plan has parallelizable annotation, selecting DAG mode");
             return PlanExecutionMode.DAG;
         }
 
-        // 计算独立任务数（无依赖的任务）
-        long independentCount = items.stream()
-                .filter(item -> item.getDependsOn() == null || item.getDependsOn().isEmpty())
-                .count();
+        // 依赖结构判断：仅分支/汇聚（或多起点）触发 DAG，单链回退 LINEAR
+        Set<String> knownIds = new HashSet<>();
+        for (TodoItem item : items) {
+            if (item != null && item.getId() != null && !item.getId().isBlank()) {
+                knownIds.add(item.getId());
+            }
+        }
 
-        if (independentCount >= 3) {
-            log.debug("Plan has {} independent tasks (>=3), selecting DAG mode", independentCount);
+        Map<String, Integer> inDegree = new HashMap<>();
+        Map<String, Integer> outDegree = new HashMap<>();
+        for (String id : knownIds) {
+            inDegree.put(id, 0);
+            outDegree.put(id, 0);
+        }
+
+        boolean hasDependencyEdge = false;
+        for (TodoItem item : items) {
+            if (item == null || item.getId() == null || item.getId().isBlank()) {
+                continue;
+            }
+            List<String> deps = item.getDependsOn();
+            if (deps == null || deps.isEmpty()) {
+                continue;
+            }
+            for (String depId : deps) {
+                if (depId == null || depId.isBlank() || !knownIds.contains(depId)) {
+                    continue;
+                }
+                hasDependencyEdge = true;
+                inDegree.put(item.getId(), inDegree.getOrDefault(item.getId(), 0) + 1);
+                outDegree.put(depId, outDegree.getOrDefault(depId, 0) + 1);
+            }
+        }
+
+        if (!hasDependencyEdge) {
+            return PlanExecutionMode.LINEAR;
+        }
+
+        boolean hasBranch = outDegree.values().stream().anyMatch(v -> v > 1);
+        boolean hasMerge = inDegree.values().stream().anyMatch(v -> v > 1);
+        long rootCount = inDegree.values().stream().filter(v -> v == 0).count();
+
+        if (hasBranch || hasMerge || rootCount > 1) {
+            log.debug("Plan has DAG structure (branch={}, merge={}, roots={}), selecting DAG mode",
+                    hasBranch, hasMerge, rootCount);
             return PlanExecutionMode.DAG;
         }
 
-        // 默认保守策略
+        // 其余视为单链依赖，回退 LINEAR
         return PlanExecutionMode.LINEAR;
     }
 

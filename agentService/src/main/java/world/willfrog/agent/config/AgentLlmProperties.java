@@ -292,28 +292,10 @@ public class AgentLlmProperties {
     }
 
     public static class Planning {
-        private Integer candidatePlanCount;
-        private Integer maxLocalReplans;
         private Integer maxTodos;
-        private Integer autoSplitThreshold;
-        private Double complexityPenaltyLambda;
+        /** 客户端可请求的 maxTodos 上限，超过则拒绝执行。null 表示不限制。 */
+        private Integer maxTodosClientCap;
         private StructuredOutput structuredOutput = new StructuredOutput();
-
-        public Integer getCandidatePlanCount() {
-            return candidatePlanCount;
-        }
-
-        public void setCandidatePlanCount(Integer candidatePlanCount) {
-            this.candidatePlanCount = candidatePlanCount;
-        }
-
-        public Integer getMaxLocalReplans() {
-            return maxLocalReplans;
-        }
-
-        public void setMaxLocalReplans(Integer maxLocalReplans) {
-            this.maxLocalReplans = maxLocalReplans;
-        }
 
         public Integer getMaxTodos() {
             return maxTodos;
@@ -323,20 +305,12 @@ public class AgentLlmProperties {
             this.maxTodos = maxTodos;
         }
 
-        public Integer getAutoSplitThreshold() {
-            return autoSplitThreshold;
+        public Integer getMaxTodosClientCap() {
+            return maxTodosClientCap;
         }
 
-        public void setAutoSplitThreshold(Integer autoSplitThreshold) {
-            this.autoSplitThreshold = autoSplitThreshold;
-        }
-
-        public Double getComplexityPenaltyLambda() {
-            return complexityPenaltyLambda;
-        }
-
-        public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
-            this.complexityPenaltyLambda = complexityPenaltyLambda;
+        public void setMaxTodosClientCap(Integer maxTodosClientCap) {
+            this.maxTodosClientCap = maxTodosClientCap;
         }
 
         public StructuredOutput getStructuredOutput() {
@@ -480,6 +454,7 @@ public class AgentLlmProperties {
     public static class Parallel {
         private Integer maxParallelSearchQueries;
         private Integer maxParallelDailyQueries;
+        private Integer dagThreadPoolSize;
 
         public Integer getMaxParallelSearchQueries() {
             return maxParallelSearchQueries;
@@ -496,12 +471,27 @@ public class AgentLlmProperties {
         public void setMaxParallelDailyQueries(Integer maxParallelDailyQueries) {
             this.maxParallelDailyQueries = maxParallelDailyQueries;
         }
+
+        public Integer getDagThreadPoolSize() {
+            return dagThreadPoolSize;
+        }
+
+        public void setDagThreadPoolSize(Integer dagThreadPoolSize) {
+            this.dagThreadPoolSize = dagThreadPoolSize;
+        }
     }
 
     public static class SubAgent {
         private Boolean enabled;
         private String complexityThreshold;
         private Integer maxSteps;
+        /** 单个 Todo 内最多并行启动的子代理数量。*/
+        private Integer maxCount;
+        private String endpointName;
+        private String modelName;
+        private String lowComplexityModelName;
+        private String mediumComplexityModelName;
+        private String highComplexityModelName;
         private StructuredOutput structuredOutput = new StructuredOutput();
         private Placeholder placeholder = new Placeholder();
 
@@ -527,6 +517,54 @@ public class AgentLlmProperties {
 
         public void setMaxSteps(Integer maxSteps) {
             this.maxSteps = maxSteps;
+        }
+
+        public Integer getMaxCount() {
+            return maxCount;
+        }
+
+        public void setMaxCount(Integer maxCount) {
+            this.maxCount = maxCount;
+        }
+
+        public String getEndpointName() {
+            return endpointName;
+        }
+
+        public void setEndpointName(String endpointName) {
+            this.endpointName = endpointName;
+        }
+
+        public String getModelName() {
+            return modelName;
+        }
+
+        public void setModelName(String modelName) {
+            this.modelName = modelName;
+        }
+
+        public String getLowComplexityModelName() {
+            return lowComplexityModelName;
+        }
+
+        public void setLowComplexityModelName(String lowComplexityModelName) {
+            this.lowComplexityModelName = lowComplexityModelName;
+        }
+
+        public String getMediumComplexityModelName() {
+            return mediumComplexityModelName;
+        }
+
+        public void setMediumComplexityModelName(String mediumComplexityModelName) {
+            this.mediumComplexityModelName = mediumComplexityModelName;
+        }
+
+        public String getHighComplexityModelName() {
+            return highComplexityModelName;
+        }
+
+        public void setHighComplexityModelName(String highComplexityModelName) {
+            this.highComplexityModelName = highComplexityModelName;
         }
 
         public StructuredOutput getStructuredOutput() {
@@ -734,6 +772,7 @@ public class AgentLlmProperties {
         private List<String> summaryProviderOrder = new ArrayList<>();
         private Integer summaryMaxChars;
         private Double summaryTemperature;
+        private Integer minMessagesForCompression;
         private Integer minMessagesForSummary;
         private Integer summaryMaxMessages;
 
@@ -791,6 +830,14 @@ public class AgentLlmProperties {
 
         public void setSummaryTemperature(Double summaryTemperature) {
             this.summaryTemperature = summaryTemperature;
+        }
+
+        public Integer getMinMessagesForCompression() {
+            return minMessagesForCompression;
+        }
+
+        public void setMinMessagesForCompression(Integer minMessagesForCompression) {
+            this.minMessagesForCompression = minMessagesForCompression;
         }
 
         public Integer getMinMessagesForSummary() {
@@ -878,6 +925,8 @@ public class AgentLlmProperties {
         private String orchestratorSummarySystemPrompt;
         private String dagReactSystemPrompt;
         private String dagReactSystemPromptFile;
+        private String dagModeGuidancePrompt;
+        private String dagModeGuidancePromptFile;
 
         public String getAgentRunSystemPrompt() {
             return agentRunSystemPrompt;
@@ -1053,6 +1102,22 @@ public class AgentLlmProperties {
 
         public void setDagReactSystemPromptFile(String dagReactSystemPromptFile) {
             this.dagReactSystemPromptFile = dagReactSystemPromptFile;
+        }
+
+        public String getDagModeGuidancePrompt() {
+            return dagModeGuidancePrompt;
+        }
+
+        public void setDagModeGuidancePrompt(String dagModeGuidancePrompt) {
+            this.dagModeGuidancePrompt = dagModeGuidancePrompt;
+        }
+
+        public String getDagModeGuidancePromptFile() {
+            return dagModeGuidancePromptFile;
+        }
+
+        public void setDagModeGuidancePromptFile(String dagModeGuidancePromptFile) {
+            this.dagModeGuidancePromptFile = dagModeGuidancePromptFile;
         }
     }
 

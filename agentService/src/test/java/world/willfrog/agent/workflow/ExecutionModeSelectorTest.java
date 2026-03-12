@@ -42,10 +42,38 @@ class ExecutionModeSelectorTest {
     }
 
     @Test
-    void select_autoWithDependenciesReturnsDag() {
+    void select_autoWithSingleChainDependenciesReturnsLinear() {
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder().id("todo_1").build());
         items.add(TodoItem.builder().id("todo_2").dependsOn(List.of("todo_1")).build());
+
+        TodoPlan plan = TodoPlan.builder()
+                .executionMode(PlanExecutionMode.AUTO)
+                .items(items)
+                .build();
+        assertEquals(PlanExecutionMode.LINEAR, selector.select(plan));
+    }
+
+    @Test
+    void select_autoWithBranchingDependenciesReturnsDag() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").build());
+        items.add(TodoItem.builder().id("todo_2").dependsOn(List.of("todo_1")).build());
+        items.add(TodoItem.builder().id("todo_3").dependsOn(List.of("todo_1")).build());
+
+        TodoPlan plan = TodoPlan.builder()
+                .executionMode(PlanExecutionMode.AUTO)
+                .items(items)
+                .build();
+        assertEquals(PlanExecutionMode.DAG, selector.select(plan));
+    }
+
+    @Test
+    void select_autoWithMergeDependenciesReturnsDag() {
+        List<TodoItem> items = new ArrayList<>();
+        items.add(TodoItem.builder().id("todo_1").build());
+        items.add(TodoItem.builder().id("todo_2").build());
+        items.add(TodoItem.builder().id("todo_3").dependsOn(List.of("todo_1", "todo_2")).build());
 
         TodoPlan plan = TodoPlan.builder()
                 .executionMode(PlanExecutionMode.AUTO)
@@ -68,7 +96,9 @@ class ExecutionModeSelectorTest {
     }
 
     @Test
-    void select_autoWithThreeOrMoreIndependentTasksReturnsDag() {
+    void select_autoWithThreeOrMoreIndependentTasksReturnsLinear() {
+        // After refactoring: independent tasks without explicit dependencies
+        // no longer automatically trigger DAG mode. DAG requires explicit API parameter.
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder().id("todo_1").build());
         items.add(TodoItem.builder().id("todo_2").build());
@@ -78,7 +108,7 @@ class ExecutionModeSelectorTest {
                 .executionMode(PlanExecutionMode.AUTO)
                 .items(items)
                 .build();
-        assertEquals(PlanExecutionMode.DAG, selector.select(plan));
+        assertEquals(PlanExecutionMode.LINEAR, selector.select(plan));
     }
 
     @Test
@@ -101,7 +131,7 @@ class ExecutionModeSelectorTest {
         items.add(TodoItem.builder().id("todo_2").dependsOn(List.of("todo_1")).build());
 
         TodoPlan plan = TodoPlan.builder().items(items).build();
-        assertEquals(PlanExecutionMode.DAG, selector.select(plan));
+        assertEquals(PlanExecutionMode.LINEAR, selector.select(plan));
     }
 
     @Test

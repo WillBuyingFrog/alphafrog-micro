@@ -77,6 +77,14 @@ public final class StructuredPlanningSupport {
             if (dependsOnNode != null && !dependsOnNode.isArray()) {
                 return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_depends_on@" + index);
             }
+            JsonNode groupKeyNode = itemNode.get("groupKey");
+            if (groupKeyNode != null && !groupKeyNode.isTextual()) {
+                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_group_key@" + index);
+            }
+            JsonNode parallelizableNode = itemNode.get("parallelizable");
+            if (parallelizableNode != null && !parallelizableNode.isBoolean()) {
+                return ValidationResult.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "todo_item_invalid_parallelizable@" + index);
+            }
             index++;
         }
         return ValidationResult.ok();
@@ -202,6 +210,14 @@ public final class StructuredPlanningSupport {
                                                         "type", "array",
                                                         "description", "依赖的todoId列表（DAG模式下可选）",
                                                         "items", Map.of("type", "string")
+                                                ),
+                                                "groupKey", Map.of(
+                                                        "type", "string",
+                                                        "description", "可选：并行分组键"
+                                                ),
+                                                "parallelizable", Map.of(
+                                                        "type", "boolean",
+                                                        "description", "可选：该节点是否可并行"
                                                 )
                                         )
                                 )

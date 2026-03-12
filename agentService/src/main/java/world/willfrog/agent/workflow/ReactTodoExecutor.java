@@ -8,21 +8,46 @@ import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import dev.langchain4j.model.output.TokenUsage;
+import jakarta.annotation.PreDestroy;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.graph.SubAgentRunner;
+import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.service.AgentRunStateStore;
 import world.willfrog.agent.tool.ToolRouter;
 
 import java.time.Instant;
 import java.util.*;
+import java.util.Optional;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * ReAct 模式的单个 Todo 执行器。
+ *
+ * <p>每个 Todo 内部运行一个多轮 ReAct 循环：
+ * LLM 决策 → 工具调用 → 结果注入上下文 → 再次 LLM 决策 → ...
+ * 直到 LLM 输出 {"answer":"..."} 表示本 Todo 完成，或达到最大调用次数。</p>
+ *
+ * <p>外层还有重试机制（MAX_RETRIES = 2）：如果整个 ReAct 循环失败，
+ * 会构建带错误提示的新上下文并重新执行整个循环。</p>
+ *
+ * <p>Sub-Agent 机制（#36 §4.3）：LLM 可调用 spawnSubAgent 在后台启动子代理，
+ * 主线程继续运行其他工具，待所有子任务完成后通过 waitForSubAgent 汇总结果。</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -33,6 +58,45 @@ public class ReactTodoExecutor {
     private final ToolRouter toolRouter;
     private final ObjectMapper objectMapper;
     private final AgentObservabilityService observabilityService;
+
+    /**
+     * SubAgentRunner — 可选注入，避免在没有完整 Spring 上下文的单元测试中出错。
+     * 若为 null，则 spawnSubAgent 调用返回不可用提示而非抛异常。
+     */
+    @Autowired(required = false)
+    @Setter
+    private SubAgentRunner subAgentRunner;
+
+    /** Sub-Agent 后台执行线程池（守护线程，随 JVM 退出自动关闭）。 */
+    private final ExecutorService subAgentExecutor = Executors.newCachedThreadPool(r -> {
+        Thread t = new Thread(r, "sub-agent-worker");
+        t.setDaemon(true);
+        return t;
+    });
+
+    /** 单个 Sub-Agent 等待超时（秒）。 */
+    @Value("${agent.flow.react.sub-agent-timeout-seconds:120}")
+    private int subAgentTimeoutSeconds;
+
+    @Value("${agent.flow.react.max-calls-per-todo:10}")
+    private int maxCallsPerTodo;
+
+    private final AgentRunStateStore stateStore;
+
+    @PreDestroy
+    public void shutdown() {
+        log.info("Shutting down sub-agent executor...");
+        subAgentExecutor.shutdown();
+        try {
+            if (!subAgentExecutor.awaitTermination(30, TimeUnit.SECONDS)) {
+                subAgentExecutor.shutdownNow();
+                log.warn("Sub-agent executor did not terminate within 30s, forced shutdown");
+            }
+        } catch (InterruptedException e) {
+            subAgentExecutor.shutdownNow();
+            Thread.currentThread().interrupt();
+        }
+    }
 
     public TodoExecutionRecord execute(String description, TodoExecutionContext context, ChatModel model) {
         return executeWithObservability(description, context, model, null, null);
@@ -58,6 +122,7 @@ public class ReactTodoExecutor {
     
     /**
      * 执行 Todo 带重试机制。
+     * 重试的粒度是"整个 Todo 的 ReAct 循环"。
      * 
      * @param retryCount 当前重试次数
      */
@@ -68,71 +133,9 @@ public class ReactTodoExecutor {
                                                   String phase,
                                                   int retryCount) {
         final int MAX_RETRIES = 2;
-        long llmStartTime = System.currentTimeMillis();
-        String llmTraceId = null;
         
         try {
-            // 构建 ReAct 消息（重试时添加错误上下文）
-            List<ChatMessage> messages = buildMessagesWithRetryContext(
-                    description, context, retryCount
-            );
-            
-            // 调用 LLM 决策
-            ChatResponse response = model.chat(messages);
-            String llmOutput = response.aiMessage() != null ? response.aiMessage().text() : "";
-            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
-            
-            // 记录 LLM 调用
-            if (runId != null && !runId.isBlank()) {
-                TokenUsage tokenUsage = response.tokenUsage();
-                llmTraceId = observabilityService.recordLlmCall(
-                        runId,
-                        phase != null ? phase : "dag_execution",
-                        tokenUsage,
-                        llmDurationMs,
-                        null,
-                        null,
-                        null,
-                        buildRequestSnapshot(messages, description),
-                        llmOutput
-                );
-            }
-            
-            // 解析决策
-            LlmDecision decision = parseDecision(llmOutput);
-            
-            if (decision.getToolName() == null) {
-                // 直接回答
-                return TodoExecutionRecord.builder()
-                        .success(true)
-                        .output(decision.getAnswer())
-                        .summary("Completed without tool")
-                        .llmTraceId(llmTraceId)
-                        .retryCount(retryCount)
-                        .build();
-            }
-            
-            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
-            if (llmTraceId != null && decision.getToolName() != null) {
-                String excerpt = llmOutput != null && llmOutput.length() > 200 
-                        ? llmOutput.substring(0, 200) : llmOutput;
-                AgentContext.setDecisionContext(
-                        llmTraceId,
-                        phase != null ? phase : "dag_execution",
-                        excerpt
-                );
-            }
-            
-            TodoExecutionRecord record;
-            try {
-                // 执行工具
-                record = executeTool(decision, context, runId, phase);
-            } finally {
-                // 工具执行完后清除，避免污染后续重试或未来实现抛异常时发生串扰
-                AgentContext.clearDecisionContext();
-            }
-            record.setLlmTraceId(llmTraceId);
-            record.setRetryCount(retryCount);
+            TodoExecutionRecord record = executeReActLoop(description, context, model, runId, phase, retryCount);
             
             // 如果失败且未达到最大重试次数，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES) {
@@ -150,22 +153,6 @@ public class ReactTodoExecutor {
             
         } catch (Exception e) {
             log.error("Failed to execute todo: {}", description, e);
-            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
-            
-            // 记录失败的 LLM 调用
-            if (runId != null && !runId.isBlank()) {
-                observabilityService.recordLlmCall(
-                        runId,
-                        phase != null ? phase : "dag_execution",
-                        null,
-                        llmDurationMs,
-                        null,
-                        null,
-                        e.getMessage(),
-                        null,
-                        null
-                );
-            }
             
             // 异常时也尝试重试
             if (retryCount < MAX_RETRIES) {
@@ -178,10 +165,178 @@ public class ReactTodoExecutor {
                     .success(false)
                     .output("")
                     .summary("Error after " + (MAX_RETRIES + 1) + " attempts: " + e.getMessage())
-                    .llmTraceId(llmTraceId)
                     .retryCount(retryCount)
                     .build();
         }
+    }
+
+    /**
+     * 多轮 ReAct 循环：在单个 Todo 内持续调用 LLM 和工具，直到 LLM 输出 answer 或达到上限。
+     *
+     * <p>上下文链条示例：
+     * <pre>
+     * [System: dagReactSystemPrompt + 上下文]
+     * [User: 当前任务描述]
+     * ^[CoT: LLM 决定调用工具 A]         ← Round 1
+     * [User: 工具 A 的结果]
+     * ^[CoT: LLM 分析结果，决定调用工具 B] ← Round 2
+     * [User: 工具 B 的结果]
+     * ^[CoT: 任务完成，输出 answer]        ← Round 3
+     * </pre>
+     *
+     * <p>Sub-Agent 模式（#36 §4.3）：若 LLM 决定调用 spawnSubAgent，则在后台线程中启动
+     * SubAgentRunner；主线程继续处理其他 ReAct 轮次。调用 waitForSubAgent 时主线程阻塞
+     * 直到对应 Sub-Agent 完成并返回结果。</p>
+     */
+    private TodoExecutionRecord executeReActLoop(String description,
+                                                  TodoExecutionContext context,
+                                                  ChatModel model,
+                                                  String runId,
+                                                  String phase,
+                                                  int retryCount) {
+        // 构建初始 ReAct 消息（包含重试上下文）
+        List<ChatMessage> messages = buildMessagesWithRetryContext(description, context, retryCount);
+        
+        int callCount = 0;
+        int toolCallsUsed = 0;
+        String lastLlmTraceId = null;
+        String lastOutput = "";
+
+        // Sub-Agent 追踪：Map<sub_agent_id, Future<SubAgentResult>>
+        Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents = new HashMap<>();
+        AtomicInteger subAgentIdCounter = new AtomicInteger(0);
+
+        while (callCount < maxCallsPerTodo) {
+            // 检查是否被取消
+            if (runId != null && !runId.isBlank()) {
+                Optional<String> currentStatus = stateStore.loadRunStatus(runId);
+                if (currentStatus.isPresent() && 
+                    (currentStatus.get().equals(AgentRunStatus.CANCELED.name()) || 
+                     currentStatus.get().equals(AgentRunStatus.FAILED.name()))) {
+                    log.info("Run {} has been canceled or failed, stopping ReAct loop", runId);
+                    return TodoExecutionRecord.builder()
+                            .success(false)
+                            .output(lastOutput)
+                            .summary("Run was " + currentStatus.get() + " during execution")
+                            .llmTraceId(lastLlmTraceId)
+                            .retryCount(retryCount)
+                            .toolCallsUsed(toolCallsUsed)
+                            .build();
+                }
+            }
+
+            long llmStartTime = System.currentTimeMillis();
+            String llmTraceId = null;
+            
+            // 调用 LLM 决策
+            ChatResponse response = model.chat(messages);
+            String llmOutput = response.aiMessage() != null ? response.aiMessage().text() : "";
+            long llmDurationMs = System.currentTimeMillis() - llmStartTime;
+            
+            // 将 CoT（Thought）加入上下文
+            messages.add(AiMessage.from(llmOutput));
+            
+            // 记录 LLM 调用（每次单独记录）
+            if (runId != null && !runId.isBlank()) {
+                TokenUsage tokenUsage = response.tokenUsage();
+                llmTraceId = observabilityService.recordLlmCall(
+                        runId,
+                        phase != null ? phase : "dag_execution",
+                        tokenUsage,
+                        llmDurationMs,
+                        null,
+                        null,
+                        null,
+                        buildRequestSnapshot(messages, description),
+                        llmOutput
+                );
+            }
+            lastLlmTraceId = llmTraceId;
+            callCount++;
+            
+            // 解析决策
+            LlmDecision decision = parseDecision(llmOutput);
+            
+            if (decision.getToolName() == null) {
+                // LLM 输出 {"answer":"..."} 表示本 Todo 完成
+                return TodoExecutionRecord.builder()
+                        .success(true)
+                        .output(decision.getAnswer())
+                        .summary("Completed in " + callCount + " round(s), " + toolCallsUsed + " tool call(s)")
+                        .llmTraceId(lastLlmTraceId)
+                        .retryCount(retryCount)
+                        .toolCallsUsed(toolCallsUsed)
+                        .build();
+            }
+            
+            // 设置 DecisionContext，让 ToolTrace 能关联到此 LLM 决策
+            if (llmTraceId != null) {
+                String excerpt = llmOutput != null && llmOutput.length() > 200 
+                        ? llmOutput.substring(0, 200) : llmOutput;
+                AgentContext.setDecisionContext(
+                        llmTraceId,
+                        phase != null ? phase : "dag_execution",
+                        excerpt
+                );
+            }
+            
+            // 执行工具（拦截 Sub-Agent 特殊工具后再路由到 ToolRouter）
+            String toolResult;
+            boolean toolSuccess;
+            try {
+                if ("spawnSubAgent".equals(decision.getToolName())) {
+                    toolResult = handleSpawnSubAgent(
+                            decision.getParams(),
+                            context,
+                            runId,
+                            model,
+                            pendingSubAgents,
+                            subAgentIdCounter
+                    );
+                    toolSuccess = !toolResult.contains("\"ok\":false");
+                    toolCallsUsed++;
+                } else if ("waitForSubAgent".equals(decision.getToolName())) {
+                    toolResult = handleWaitForSubAgent(decision.getParams(), pendingSubAgents);
+                    toolSuccess = !toolResult.contains("\"ok\":false");
+                    toolCallsUsed++;
+                } else {
+                    TodoExecutionRecord toolRecord = executeTool(decision, context, runId, phase);
+                    toolResult = toolRecord.getOutput();
+                    toolSuccess = toolRecord.isSuccess();
+                    toolCallsUsed++;
+                }
+            } finally {
+                AgentContext.clearDecisionContext();
+            }
+            
+            lastOutput = toolResult;
+            
+            // 从工具结果中提取 dataset_id，更新 context 的 datasetRefs
+            extractAndRegisterDatasetRef(toolResult, context);
+            
+            // 将工具结果（Observation）注入上下文，供下一轮 LLM 使用
+            String observation = toolSuccess 
+                    ? "[工具结果]\n" + toolResult
+                    : "[工具调用失败]\n" + toolResult;
+            messages.add(new UserMessage(observation));
+            
+            // 如果工具失败，继续循环让 LLM 决定下一步（重试或换方案）
+            if (!toolSuccess) {
+                log.warn("Tool {} failed in ReAct round {}, LLM will decide next step", 
+                        decision.getToolName(), callCount);
+            }
+        }
+        
+        // 达到最大调用次数限制
+        log.warn("ReAct loop reached max calls ({}) for todo: {}", maxCallsPerTodo, description);
+        return TodoExecutionRecord.builder()
+                .success(false)
+                .output(lastOutput)
+                .summary("Reached max call limit (" + maxCallsPerTodo + "), " + toolCallsUsed + " tool call(s)")
+                .llmTraceId(lastLlmTraceId)
+                .retryCount(retryCount)
+                .toolCallsUsed(toolCallsUsed)
+                .build();
     }
     
     /**
@@ -266,6 +421,223 @@ public class ReactTodoExecutor {
     }
     
     /**
+     * 从工具结果中提取 dataset_id 并注册到上下文。
+     */
+    private void extractAndRegisterDatasetRef(String toolResult, TodoExecutionContext context) {
+        try {
+            Map<String, Object> result = objectMapper.readValue(toolResult, Map.class);
+            if (result.containsKey("data")) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> data = (Map<String, Object>) result.get("data");
+                if (data != null && data.containsKey("dataset_id")) {
+                    String datasetId = data.get("dataset_id").toString();
+                    String path = "/sandbox/input/" + datasetId;
+                    context.getDatasetRefs().put(datasetId, path);
+                    log.info("Registered dataset ref: {} -> {}", datasetId, path);
+                }
+            }
+        } catch (Exception e) {
+            log.debug("No dataset_id found in tool result");
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────
+    // Sub-Agent 处理（#36 §4.3）
+    // ──────────────────────────────────────────────────────────────────
+
+    /**
+     * 处理 spawnSubAgent 调用：在后台线程启动 SubAgentRunner，立即返回 sub_agent_id。
+     * 主 ReAct 循环可继续处理其他工具调用，不会阻塞。
+     *
+     * <p>参数（来自 LLM decision.params）：
+     * <ul>
+     *   <li>goal（必填）：子代理目标描述</li>
+     *   <li>context（可选）：补充上下文信息</li>
+     * </ul>
+     */
+    private String handleSpawnSubAgent(Map<String, Object> params,
+                                       TodoExecutionContext context,
+                                       String runId,
+                                       ChatModel model,
+                                       Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents,
+                                       AtomicInteger subAgentIdCounter) {
+        if (subAgentRunner == null) {
+            log.warn("spawnSubAgent called but SubAgentRunner is not available");
+            return "{\"ok\":false,\"error\":\"sub_agent_not_available\"}";
+        }
+        // 检查并发上限
+        int maxCount = promptService.maxSubAgentCount();
+        if (pendingSubAgents.size() >= maxCount) {
+            log.warn("spawnSubAgent rejected: reached max concurrent sub-agents ({})", maxCount);
+            return "{\"ok\":false,\"error\":\"max_sub_agents_exceeded\",\"max\":" + maxCount + "}";
+        }
+        String goal = params != null ? String.valueOf(params.getOrDefault("goal", "")) : "";
+        if (goal.isBlank()) {
+            return "{\"ok\":false,\"error\":\"goal parameter is required for spawnSubAgent\"}";
+        }
+        String subCtx = params != null ? String.valueOf(params.getOrDefault("context", "")) : "";
+        String subAgentId = "sa_" + subAgentIdCounter.getAndIncrement();
+
+        // Sub-Agent 只能使用业务工具，不能递归启动 Sub-Agent
+        Set<String> subAgentTools = new HashSet<>(context.getAvailableTools());
+        subAgentTools.remove("spawnSubAgent");
+        subAgentTools.remove("waitForSubAgent");
+        String subAgentEndpoint = promptService.subAgentEndpointName();
+        String subAgentModel = promptService.selectSubAgentModelName(goal, subCtx);
+
+        SubAgentRunner.SubAgentRequest req = SubAgentRunner.SubAgentRequest.builder()
+                .runId(runId != null ? runId : "")
+                .taskId(subAgentId)
+                .goal(goal)
+                .context(subCtx.isBlank() ? null : subCtx)
+                .toolWhitelist(subAgentTools)
+                .maxSteps(10)
+                .endpointName(subAgentEndpoint)
+                .endpointBaseUrl("")
+                .modelName(subAgentModel)
+                .build();
+
+        Future<SubAgentRunner.SubAgentResult> future = subAgentExecutor.submit(
+                () -> subAgentRunner.run(req, model));
+        pendingSubAgents.put(subAgentId, future);
+
+        log.info("Sub-agent spawned: id={}, goal={}", subAgentId, goal);
+        try {
+            return objectMapper.writeValueAsString(Map.of(
+                    "ok", true,
+                    "sub_agent_id", subAgentId,
+                    "status", "spawned",
+                    "goal", goal
+            ));
+        } catch (Exception e) {
+            return "{\"ok\":true,\"sub_agent_id\":\"" + subAgentId + "\",\"status\":\"spawned\"}";
+        }
+    }
+
+    /**
+     * 处理 waitForSubAgent 调用：阻塞等待一个或多个 Sub-Agent 完成，返回聚合结果。
+     *
+     * <p>支持两种参数格式（可选地同时等待多个）：
+     * <ul>
+     *   <li>{@code sub_agent_ids}（优先）：逗号分隔的 ID 列表，如 "sa_0,sa_1"</li>
+     *   <li>{@code sub_agent_id}（向后兼容）：单个 ID</li>
+     * </ul>
+     * LLM 可通过思维能力判断何时等待，支持同时汇总多个子代理的结果。
+     */
+    private String handleWaitForSubAgent(Map<String, Object> params,
+                                          Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents) {
+        // 解析 ID 列表：优先 sub_agent_ids（多个），fallback sub_agent_id（单个）
+        List<String> ids = new ArrayList<>();
+        Object idsParam = params != null ? params.get("sub_agent_ids") : null;
+        if (idsParam != null) {
+            if (idsParam instanceof List) {
+                ((List<?>) idsParam).forEach(id -> {
+                    String s = id != null ? id.toString().trim() : "";
+                    if (!s.isEmpty()) ids.add(s);
+                });
+            } else {
+                for (String part : idsParam.toString().split(",")) {
+                    String s = part.trim();
+                    if (!s.isEmpty()) ids.add(s);
+                }
+            }
+        }
+        if (ids.isEmpty()) {
+            String singleId = params != null ? String.valueOf(params.getOrDefault("sub_agent_id", "")) : "";
+            if (!singleId.isBlank()) ids.add(singleId.trim());
+        }
+        if (ids.isEmpty()) {
+            return "{\"ok\":false,\"error\":\"sub_agent_id or sub_agent_ids parameter is required for waitForSubAgent\"}";
+        }
+
+        // 并发等待每个 sub-agent 完成，最后按输入顺序聚合结果
+        Map<String, Object> agentResults = new LinkedHashMap<>();
+        Map<String, CompletableFuture<Map<String, Object>>> waitFutures = new LinkedHashMap<>();
+        boolean interrupted = false;
+
+        for (String id : ids) {
+            Future<SubAgentRunner.SubAgentResult> future = pendingSubAgents.get(id);
+            if (future == null) {
+                agentResults.put(id, Map.of("ok", false, "error", "unknown sub_agent_id: " + id));
+                continue;
+            }
+            CompletableFuture<Map<String, Object>> waitFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    SubAgentRunner.SubAgentResult result = future.get(subAgentTimeoutSeconds, TimeUnit.SECONDS);
+                    log.info("Sub-agent completed: id={}, success={}", id, result.isSuccess());
+                    Map<String, Object> r = new LinkedHashMap<>();
+                    r.put("ok", result.isSuccess());
+                    r.put("answer", result.getAnswer() != null ? result.getAnswer() : "");
+                    if (!result.isSuccess() && result.getError() != null) {
+                        r.put("error", result.getError());
+                    }
+                    return r;
+                } catch (TimeoutException e) {
+                    log.warn("Sub-agent {} timed out after {}s", id, subAgentTimeoutSeconds);
+                    return Map.of("ok", false, "error", "sub_agent_timeout");
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    return Map.of("ok", false, "error", "interrupted");
+                } catch (Exception e) {
+                    log.error("Failed to get sub-agent result: {}", id, e);
+                    return Map.of("ok", false, "error", e.getMessage() != null ? e.getMessage() : "unknown");
+                }
+            }, subAgentExecutor);
+            waitFutures.put(id, waitFuture);
+        }
+
+        boolean allSuccess = true;
+        for (String id : ids) {
+            if (agentResults.containsKey(id)) {
+                Object existing = agentResults.get(id);
+                if (existing instanceof Map<?, ?> map && !Boolean.TRUE.equals(map.get("ok"))) {
+                    allSuccess = false;
+                }
+                continue;
+            }
+            CompletableFuture<Map<String, Object>> waitFuture = waitFutures.get(id);
+            if (waitFuture == null) {
+                agentResults.put(id, Map.of("ok", false, "error", "unknown sub_agent_id: " + id));
+                allSuccess = false;
+                continue;
+            }
+            try {
+                Map<String, Object> resultMap = waitFuture.join();
+                agentResults.put(id, resultMap);
+                if (!Boolean.TRUE.equals(resultMap.get("ok"))) {
+                    allSuccess = false;
+                }
+                if ("interrupted".equals(resultMap.get("error"))) {
+                    interrupted = true;
+                    break;
+                }
+            } catch (Exception e) {
+                agentResults.put(id, Map.of("ok", false, "error", e.getMessage() != null ? e.getMessage() : "unknown"));
+                allSuccess = false;
+            }
+        }
+
+        Map<String, Object> response = new LinkedHashMap<>();
+        response.put("ok", allSuccess);
+        response.put("results", agentResults);
+        // 向后兼容：单 ID 时在顶层也输出 sub_agent_id + answer
+        if (ids.size() == 1 && !interrupted) {
+            String singleId = ids.get(0);
+            response.put("sub_agent_id", singleId);
+            @SuppressWarnings("unchecked")
+            Map<String, Object> sr = (Map<String, Object>) agentResults.get(singleId);
+            if (sr != null) {
+                response.put("answer", sr.getOrDefault("answer", ""));
+            }
+        }
+        try {
+            return objectMapper.writeValueAsString(response);
+        } catch (Exception e) {
+            return "{\"ok\":" + allSuccess + ",\"results\":{}}";
+        }
+    }
+
+    /**
      * 从工具输出中提取错误提示。
      */
     private String extractErrorHint(String output) {
@@ -320,20 +692,18 @@ public class ReactTodoExecutor {
     private List<ChatMessage> buildMessages(String description, TodoExecutionContext context) {
         List<ChatMessage> messages = new ArrayList<>();
         
-        // System Prompt - 从配置文件加载，包含完整的工具参数规范
-        String baseSystemPrompt = promptService.dagReactSystemPrompt();
+        // System Prompt - 必须完全静态，以最大化 KV 前缀缓存命中率。
+        // 动态内容（用户目标、可用工具等）统一放到第一条 UserMessage，不放 SystemMessage。
+        messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
         
-        // 动态添加用户目标和可用工具列表
-        StringBuilder system = new StringBuilder(baseSystemPrompt);
-        system.append("\n\n## 当前上下文\n\n");
-        system.append("用户目标：").append(context.getUserGoal()).append("\n\n");
-        
-        // 添加可用的具体工具列表
+        // 第一条 UserMessage：动态上下文前缀 + 用户目标 + 可用工具（每次 run 会变化的内容）
+        StringBuilder dynamicCtx = new StringBuilder();
+        dynamicCtx.append(promptService.dynamicContextPrefix()).append("\n\n");
+        dynamicCtx.append("用户目标：").append(context.getUserGoal()).append("\n\n");
         if (!context.getAvailableTools().isEmpty()) {
-            system.append("当前可用工具：").append(String.join(", ", context.getAvailableTools())).append("\n");
+            dynamicCtx.append("当前可用工具：").append(String.join(", ", context.getAvailableTools())).append("\n");
         }
-        
-        messages.add(new SystemMessage(system.toString()));
+        messages.add(new UserMessage(dynamicCtx.toString()));
         
         // 历史完成的 Todo
         for (CompletedTodoInfo todo : context.getCompletedTodos()) {
@@ -346,7 +716,6 @@ public class ReactTodoExecutor {
         
         // 当前任务
         StringBuilder userMsg = new StringBuilder();
-        userMsg.append(promptService.dynamicContextPrefix()).append("\n\n");
         userMsg.append("当前任务: ").append(description).append("\n\n");
         
         if (!context.getDatasetRefs().isEmpty()) {
@@ -533,6 +902,10 @@ public class ReactTodoExecutor {
         private Long toolDurationMs;
         private Instant startedAt;
         private Instant completedAt;
+        
+        // ReAct 循环统计
+        @Builder.Default
+        private int toolCallsUsed = 0;
         
         // 重试相关
         @Builder.Default

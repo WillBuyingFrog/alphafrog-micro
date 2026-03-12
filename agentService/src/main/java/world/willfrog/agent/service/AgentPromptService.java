@@ -10,6 +10,7 @@ import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Locale;
 
 @Component
 @RequiredArgsConstructor
@@ -208,72 +209,91 @@ public class AgentPromptService {
      *
      * 加载优先级：
      * 1. agent.llm.prompts.dagReactSystemPrompt（直接配置内容）
-     * 2. agent.llm.prompts.dagReactSystemPromptFile（配置文件路径）
-     * 3. 代码中的默认 Prompt
+     * 2. agent.llm.prompts.dagReactSystemPromptFile（由 LocalConfigLoader 解析为文本，与其他 file: 字段机制一致）
+     * 3. classpath 默认 Prompt（dag_react_system_default.txt）
      */
     public String dagReactSystemPrompt() {
-        // 1. 优先使用直接配置的内容
-        String directPrompt = currentPrompts().getDagReactSystemPrompt();
-        if (!directPrompt.isBlank()) {
-            return directPrompt;
-        }
-
-        // 2. 尝试从配置的文件路径加载
-        String filePath = currentPrompts().getDagReactSystemPromptFile();
-        if (!filePath.isBlank()) {
-            String fileContent = loadPromptFromConfiguredPath(filePath);
-            if (!fileContent.isBlank()) {
-                return fileContent;
-            }
-        }
-
-        // 3. 使用默认 Prompt
-        return defaultDagReactSystemPrompt();
+        return firstNonBlank(
+                currentPrompts().getDagReactSystemPrompt(),
+                currentPrompts().getDagReactSystemPromptFile(),
+                defaultDagReactSystemPrompt()
+        );
     }
 
     /**
-     * 从配置的文件路径加载 Prompt 内容。
-     * 支持绝对路径或相对于工作目录的路径。
+     * DAG 模式引导提示（用于规划阶段）。
+     * 优先级：
+     * 1) dagModeGuidancePrompt
+     * 2) dagModeGuidancePromptFile（已由 local config loader 解析为文本）
      */
-    private String loadPromptFromConfiguredPath(String filePath) {
+    public String dagModeGuidancePrompt() {
+        return firstNonBlank(
+                currentPrompts().getDagModeGuidancePrompt(),
+                currentPrompts().getDagModeGuidancePromptFile(),
+                ""
+        );
+    }
+
+    /**
+     * 返回配置的最大并行子代理数量，默认 3。
+     * 从 agent.llm.runtime.subAgent.maxCount 读取，在 agent-llm.local.json 中设置。
+     */
+    public int maxSubAgentCount() {
         try {
-            java.nio.file.Path path = java.nio.file.Path.of(filePath);
-            if (java.nio.file.Files.exists(path)) {
-                return java.nio.file.Files.readString(path, java.nio.charset.StandardCharsets.UTF_8);
+            AgentLlmProperties.SubAgent subAgent = currentSubAgentConfig();
+            if (subAgent != null && subAgent.getMaxCount() != null && subAgent.getMaxCount() > 0) {
+                return subAgent.getMaxCount();
             }
         } catch (Exception e) {
-            log.warn("Failed to load prompt from configured path: {}, error: {}", filePath, e.getMessage());
+            log.warn("Failed to read maxSubAgentCount from config, using default 3: {}", e.getMessage());
         }
-        return "";
+        return 3;
+    }
+
+    /**
+     * Sub-Agent 端点选择（为空表示沿用主代理模型）。
+     */
+    public String subAgentEndpointName() {
+        AgentLlmProperties.SubAgent cfg = currentSubAgentConfig();
+        return cfg == null ? "" : firstNonBlank(cfg.getEndpointName(), "");
+    }
+
+    /**
+     * 根据目标复杂度选择 Sub-Agent 模型名称（仅负责选择与透传，不直接创建模型实例）。
+     */
+    public String selectSubAgentModelName(String goal, String context) {
+        AgentLlmProperties.SubAgent cfg = currentSubAgentConfig();
+        if (cfg == null) {
+            return "";
+        }
+        String low = firstNonBlank(cfg.getLowComplexityModelName(), "");
+        String medium = firstNonBlank(cfg.getMediumComplexityModelName(), "");
+        String high = firstNonBlank(cfg.getHighComplexityModelName(), "");
+        String fallback = firstNonBlank(cfg.getModelName(), "");
+
+        Complexity complexity = estimateComplexity(goal, context);
+        return switch (complexity) {
+            case HIGH -> firstNonBlank(high, medium, low, fallback);
+            case MEDIUM -> firstNonBlank(medium, high, low, fallback);
+            case LOW -> firstNonBlank(low, medium, high, fallback);
+        };
     }
 
     /**
      * 默认的 DAG ReAct System Prompt（当配置文件不存在时使用）。
+     * Sub-Agent 最大并行数从配置读取（agent.llm.runtime.subAgent.maxCount），不硬编码。
      */
     private String defaultDagReactSystemPrompt() {
-        return """
-            你是金融数据分析助手，负责执行DAG中的单个任务节点。
-
-            ## 可用工具及参数规范（必须严格使用指定的参数名）
-            - searchIndex: {"keyword": "<搜索关键词>"}
-            - searchStock: {"keyword": "<搜索关键词>"}
-            - searchFund: {"keyword": "<搜索关键词>"}
-            - getIndexDaily: {"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getStockDaily: {"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getFundDaily: {"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}
-            - getIndexInfo: {"ts_code": "<指数代码>"}
-            - getStockInfo: {"ts_code": "<股票代码>"}
-            - executePython: {"code": "<Python代码>", "dataset_ids": "<必需：数据集ID列表，逗号分隔>"}
-
-            ## 重要警告
-            1. 必须严格使用上述指定的参数名，否则工具调用会失败
-            2. executePython 的 dataset_ids 是必需参数，必须来自依赖任务的 data.dataset_id
-            3. 代码必须遍历 /sandbox/input/*/ 读取所有挂载的数据集
-
-            ## 输出格式
-            调用工具: {"tool": "<工具名>", "params": {"<参数名>": "<参数值>"}}
-            直接回答: {"answer": "<你的回答>"}
-            """;
+        try (java.io.InputStream is = getClass().getResourceAsStream(
+                "/prompts/todo/dag_react_system_default.txt")) {
+            if (is != null) {
+                return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load default dag react system prompt from classpath", e);
+        }
+        log.error("dag_react_system_default.txt not found in classpath; returning empty prompt");
+        return "";
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -306,7 +326,7 @@ public class AgentPromptService {
                 你是任务规划专家。请把用户目标拆解为 Todo List。
                 规则:
                 1) 只能使用工具: {{toolWhitelist}}
-                2) 总步骤数不超过 {{maxTodos}}
+                2) 步骤数必须尽可能少——只拆解真正必要的步骤，能合并则合并，绝不因为"上限允许"就多加步骤；步骤数硬性上限为 {{maxTodos}}，但目标是远少于上限
                 3) type 仅允许 TOOL_CALL/SUB_AGENT/THOUGHT
                 4) executionMode 仅允许 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT
                 """
@@ -458,7 +478,70 @@ public class AgentPromptService {
         merged.setDatasetFieldSpecs(selectList(local.getDatasetFieldSpecs(), base.getDatasetFieldSpecs()));
         merged.setDagReactSystemPrompt(firstNonBlank(local.getDagReactSystemPrompt(), base.getDagReactSystemPrompt()));
         merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
+        merged.setDagModeGuidancePrompt(firstNonBlank(local.getDagModeGuidancePrompt(), base.getDagModeGuidancePrompt()));
+        merged.setDagModeGuidancePromptFile(firstNonBlank(local.getDagModeGuidancePromptFile(), base.getDagModeGuidancePromptFile()));
         return merged;
+    }
+
+    private AgentLlmProperties.SubAgent currentSubAgentConfig() {
+        AgentLlmProperties.SubAgent base = properties.getRuntime() == null
+                ? null
+                : properties.getRuntime().getSubAgent();
+        AgentLlmProperties.SubAgent local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .orElse(null);
+        if (local == null) {
+            return base;
+        }
+        AgentLlmProperties.SubAgent merged = new AgentLlmProperties.SubAgent();
+        merged.setEnabled(firstNonNull(local.getEnabled(), base == null ? null : base.getEnabled()));
+        merged.setComplexityThreshold(firstNonBlank(local.getComplexityThreshold(), base == null ? null : base.getComplexityThreshold()));
+        merged.setMaxSteps(firstNonNull(local.getMaxSteps(), base == null ? null : base.getMaxSteps()));
+        merged.setMaxCount(firstNonNull(local.getMaxCount(), base == null ? null : base.getMaxCount()));
+        merged.setEndpointName(firstNonBlank(local.getEndpointName(), base == null ? null : base.getEndpointName()));
+        merged.setModelName(firstNonBlank(local.getModelName(), base == null ? null : base.getModelName()));
+        merged.setLowComplexityModelName(firstNonBlank(local.getLowComplexityModelName(), base == null ? null : base.getLowComplexityModelName()));
+        merged.setMediumComplexityModelName(firstNonBlank(local.getMediumComplexityModelName(), base == null ? null : base.getMediumComplexityModelName()));
+        merged.setHighComplexityModelName(firstNonBlank(local.getHighComplexityModelName(), base == null ? null : base.getHighComplexityModelName()));
+        return merged;
+    }
+
+    private Complexity estimateComplexity(String goal, String context) {
+        String text = (safe(goal) + "\n" + safe(context)).toLowerCase(Locale.ROOT);
+        int score = 0;
+        if (text.length() > 180) {
+            score++;
+        }
+        if (text.length() > 360) {
+            score++;
+        }
+        if (text.contains("并行") || text.contains("parallel") || text.contains("多个") || text.contains("multi")) {
+            score++;
+        }
+        if (text.contains("组合") || text.contains("回测") || text.contains("夏普") || text.contains("最大回撤")) {
+            score++;
+        }
+        if (text.contains("并且") || text.contains("同时") || text.contains("另外") || text.contains("此外")) {
+            score++;
+        }
+        if (score >= 4) {
+            return Complexity.HIGH;
+        }
+        if (score >= 2) {
+            return Complexity.MEDIUM;
+        }
+        return Complexity.LOW;
+    }
+
+    private <T> T firstNonNull(T first, T second) {
+        return first != null ? first : second;
+    }
+
+    private enum Complexity {
+        LOW,
+        MEDIUM,
+        HIGH
     }
 
     private String render(String template, Map<String, String> vars) {
