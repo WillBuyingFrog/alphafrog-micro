@@ -164,8 +164,10 @@ public class AgentLlmLocalConfigLoader {
         prompts.setPythonRefineOutputInstruction(resolvePromptText(prompts.getPythonRefineOutputInstruction(), baseDir, fileTimes));
         prompts.setOrchestratorPlanningSystemPrompt(resolvePromptText(prompts.getOrchestratorPlanningSystemPrompt(), baseDir, fileTimes));
         prompts.setOrchestratorSummarySystemPrompt(resolvePromptText(prompts.getOrchestratorSummarySystemPrompt(), baseDir, fileTimes));
+        prompts.setPlanJudgeRuntimeSystemPromptTemplate(resolvePromptText(prompts.getPlanJudgeRuntimeSystemPromptTemplate(), baseDir, fileTimes));
         prompts.setDagModeGuidancePrompt(resolvePromptText(prompts.getDagModeGuidancePrompt(), baseDir, fileTimes));
         prompts.setDagModeGuidancePromptFile(resolvePromptText(prompts.getDagModeGuidancePromptFile(), baseDir, fileTimes));
+        prompts.setDagReactSystemPromptFile(resolvePromptText(prompts.getDagReactSystemPromptFile(), baseDir, fileTimes));
 
         if (hasText(prompts.getPythonRefineRequirementsFile())) {
             List<String> requirements = readPromptLines(prompts.getPythonRefineRequirementsFile(), baseDir, fileTimes);

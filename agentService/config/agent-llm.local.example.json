@@ -235,7 +235,7 @@
     "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
     "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
     "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
-    "dagReactSystemPromptFile": "agentService/config/prompts/todo/dag_react_system.txt",
+    "dagReactSystemPromptFile": "file:prompts/todo/dag_react_system.txt",
     "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt"
   }
 }

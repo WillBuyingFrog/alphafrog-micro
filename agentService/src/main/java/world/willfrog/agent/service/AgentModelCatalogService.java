@@ -172,11 +172,11 @@ public class AgentModelCatalogService {
         if (!removedEndpoints.isEmpty()) {
             log.warn("Removed endpoints without baseUrl: {}", removedEndpoints);
         }
-        log.info("mergeEndpoints result: endpoints={}, modelCounts={}", 
-                merged.keySet(),
-                merged.entrySet().stream().collect(java.util.stream.Collectors.toMap(
-                    Map.Entry::getKey, 
-                    e -> e.getValue() != null && e.getValue().getModels() != null ? e.getValue().getModels().size() : 0)));
+        // log.info("mergeEndpoints result: endpoints={}, modelCounts={}", 
+        //         merged.keySet(),
+        //         merged.entrySet().stream().collect(java.util.stream.Collectors.toMap(
+        //             Map.Entry::getKey, 
+        //             e -> e.getValue() != null && e.getValue().getModels() != null ? e.getValue().getModels().size() : 0)));
         return merged;
     }
 

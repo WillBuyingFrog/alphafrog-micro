@@ -209,27 +209,15 @@ public class AgentPromptService {
      *
      * 加载优先级：
      * 1. agent.llm.prompts.dagReactSystemPrompt（直接配置内容）
-     * 2. agent.llm.prompts.dagReactSystemPromptFile（配置文件路径）
-     * 3. 代码中的默认 Prompt
+     * 2. agent.llm.prompts.dagReactSystemPromptFile（由 LocalConfigLoader 解析为文本，与其他 file: 字段机制一致）
+     * 3. classpath 默认 Prompt（dag_react_system_default.txt）
      */
     public String dagReactSystemPrompt() {
-        // 1. 优先使用直接配置的内容
-        String directPrompt = currentPrompts().getDagReactSystemPrompt();
-        if (!directPrompt.isBlank()) {
-            return directPrompt;
-        }
-
-        // 2. 尝试从配置的文件路径加载
-        String filePath = currentPrompts().getDagReactSystemPromptFile();
-        if (!filePath.isBlank()) {
-            String fileContent = loadPromptFromConfiguredPath(filePath);
-            if (!fileContent.isBlank()) {
-                return fileContent;
-            }
-        }
-
-        // 3. 使用默认 Prompt
-        return defaultDagReactSystemPrompt();
+        return firstNonBlank(
+                currentPrompts().getDagReactSystemPrompt(),
+                currentPrompts().getDagReactSystemPromptFile(),
+                defaultDagReactSystemPrompt()
+        );
     }
 
     /**
@@ -244,22 +232,6 @@ public class AgentPromptService {
                 currentPrompts().getDagModeGuidancePromptFile(),
                 ""
         );
-    }
-
-    /**
-     * 从配置的文件路径加载 Prompt 内容。
-     * 支持绝对路径或相对于工作目录的路径。
-     */
-    private String loadPromptFromConfiguredPath(String filePath) {
-        try {
-            java.nio.file.Path path = java.nio.file.Path.of(filePath);
-            if (java.nio.file.Files.exists(path)) {
-                return java.nio.file.Files.readString(path, java.nio.charset.StandardCharsets.UTF_8);
-            }
-        } catch (Exception e) {
-            log.warn("Failed to load prompt from configured path: {}, error: {}", filePath, e.getMessage());
-        }
-        return "";
     }
 
     /**
