@@ -96,12 +96,12 @@ import os
 for dataset_path in glob.glob('/sandbox/input/*'):
     dataset_id = os.path.basename(dataset_path)
     df = pd.read_csv(f'{dataset_path}/{dataset_id}.csv')
-    
+
     # 计算收益率
     start_price = df.iloc[0]['close']
     end_price = df.iloc[-1]['close']
     return_pct = (end_price - start_price) / start_price * 100
-    
+
     print(f"{dataset_id}: 收益率 {return_pct:.2f}%")
 ```
 

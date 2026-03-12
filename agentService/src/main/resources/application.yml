@@ -36,6 +36,8 @@ dubbo:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
   consumer:
     check: false
+  provider:
+    timeout: ${AF_DUBBO_PROVIDER_TIMEOUT_MS:10000}
 
 agent:
   run:

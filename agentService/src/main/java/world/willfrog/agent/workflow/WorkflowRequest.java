@@ -23,4 +23,6 @@ public class WorkflowRequest {
     private String endpointName;
     private String endpointBaseUrl;
     private String modelName;
+    @Builder.Default
+    private boolean enablePlanPatch = false;
 }

@@ -137,6 +137,9 @@ public class PlanJudge {
         if (upper.contains("PATCH_PLAN")) {
             return JudgeDecision.PATCH_PLAN;
         }
+        if (upper.contains("FALLBACK_TO_LINEAR")) {
+            return JudgeDecision.FALLBACK_TO_LINEAR;
+        }
         if (upper.contains("CONTINUE_WITH_RECOVERY_PARAMS")) {
             return JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS;
         }

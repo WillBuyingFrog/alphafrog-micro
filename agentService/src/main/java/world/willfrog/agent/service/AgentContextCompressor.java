@@ -126,6 +126,12 @@ public class AgentContextCompressor {
         }
 
         CompressionConfig config = resolveCompressionConfig();
+        if (history.size() < config.minMessagesForCompression()) {
+            return new ContextBuildResult(
+                    formatAsDialogue(history),
+                    new CompressionResult(history.size(), history.size(), "none", List.of())
+            );
+        }
         if (shouldUseSummary(config, history.size())) {
             String summary = summarizeHistory(history, config);
             if (!summary.isBlank()) {
@@ -436,6 +442,9 @@ public class AgentContextCompressor {
         double summaryTemperature = firstPositiveDouble(local == null ? null : local.getSummaryTemperature(),
                 base == null ? null : base.getSummaryTemperature(),
                 DEFAULT_SUMMARY_TEMPERATURE);
+        int minMessagesForCompression = firstPositive(local == null ? null : local.getMinMessagesForCompression(),
+                base == null ? null : base.getMinMessagesForCompression(),
+                1);
         List<String> summaryProviderOrder = resolveProviderOrder(
                 local == null ? null : local.getSummaryProviderOrder(),
                 base == null ? null : base.getSummaryProviderOrder()
@@ -455,6 +464,7 @@ public class AgentContextCompressor {
                 summaryProviderOrder,
                 summaryMaxChars,
                 summaryTemperature,
+                minMessagesForCompression,
                 minMessagesForSummary,
                 summaryMaxMessages
         );
@@ -533,6 +543,7 @@ public class AgentContextCompressor {
             List<String> summaryProviderOrder,
             int summaryMaxChars,
             double summaryTemperature,
+            int minMessagesForCompression,
             int minMessagesForSummary,
             int summaryMaxMessages
     ) {
