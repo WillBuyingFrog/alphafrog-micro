@@ -83,7 +83,7 @@ public class TodoPlanner {
                 todoPlan = generatePlan(request, toolWhitelist);
             }
 
-            todoPlan = normalize(todoPlan, resolveMaxTodos(), toolWhitelist);
+            todoPlan = normalize(todoPlan, resolveMaxTodos(request), toolWhitelist);
             if (todoPlan.getItems().isEmpty()) {
                 throw new IllegalStateException("todo_plan_empty");
             }
@@ -127,7 +127,7 @@ public class TodoPlanner {
         String runId = request.getRun().getId();
         boolean structuredEnabled = planningStructuredEnabled();
         int maxAttempts = resolvePlanningMaxAttempts();
-        int maxTodos = resolveMaxTodos();
+        int maxTodos = resolveMaxTodos(request);
         String lastCategory = "";
         String lastError = "";
         observabilityService.markPlanningStructured(runId, structuredEnabled);
@@ -408,7 +408,18 @@ public class TodoPlanner {
         }
     }
 
-    private int resolveMaxTodos() {
+    private int resolveMaxTodos(PlanRequest request) {
+        // 1. 客户端传入了 maxTodos：先做 cap 校验，超限则立即拒绝
+        if (request != null && request.getMaxTodos() != null && request.getMaxTodos() > 0) {
+            int requested = request.getMaxTodos();
+            int cap = resolveMaxTodosClientCap();
+            if (cap > 0 && requested > cap) {
+                throw new IllegalArgumentException(
+                        "max_todos_exceeds_server_cap:requested=" + requested + ",cap=" + cap);
+            }
+            return clamp(requested, 1, 50);
+        }
+        // 2. 本地配置文件（热加载）
         int local = localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
                 .map(AgentLlmProperties.Runtime::getPlanning)
@@ -417,6 +428,7 @@ public class TodoPlanner {
         if (local > 0) {
             return clamp(local, 1, 50);
         }
+        // 3. application.yml / 静态 bean
         int base = Optional.ofNullable(llmProperties.getRuntime())
                 .map(AgentLlmProperties.Runtime::getPlanning)
                 .map(AgentLlmProperties.Planning::getMaxTodos)
@@ -425,6 +437,21 @@ public class TodoPlanner {
             return clamp(base, 1, 50);
         }
         return clamp(defaultMaxTodos, 1, 50);
+    }
+
+    private int resolveMaxTodosClientCap() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getMaxTodosClientCap)
+                .orElse(0);
+        if (local > 0) {
+            return local;
+        }
+        return Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getMaxTodosClientCap)
+                .orElse(0);
     }
 
     private boolean planningStructuredEnabled() {
@@ -593,5 +620,7 @@ public class TodoPlanner {
         private String endpointBaseUrl;
         private String modelName;
         private PlanExecutionMode executionMode;
+        /** 客户端可选覆盖：本次 run 最多规划几个 todo（null 则使用服务端配置）。 */
+        private Integer maxTodos;
     }
 }

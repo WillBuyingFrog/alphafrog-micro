@@ -110,11 +110,8 @@
       "datasetTtlSeconds": 604800
     },
     "planning": {
-      "candidatePlanCount": 3,
-      "maxLocalReplans": 2,
       "maxTodos": 10,
-      "autoSplitThreshold": 3,
-      "complexityPenaltyLambda": 0.25,
+      "maxTodosClientCap": 10,
       "structuredOutput": {
         "enabled": true,
         "maxAttempts": 3,

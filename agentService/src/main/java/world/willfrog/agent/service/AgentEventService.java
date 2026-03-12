@@ -294,6 +294,25 @@ public class AgentEventService {
     public boolean extractEnablePlanPatch(String extJson) {
         return extractBooleanFromExt(extJson, "enable_plan_patch", "enablePlanPatch", "enable_plan_patch");
     }
+
+    /**
+     * 从 ext JSON 中提取每次 run 的 maxTodos 上限（可选，未传则返回 null，由服务端配置兜底）。
+     */
+    public Integer extractMaxTodos(String extJson) {
+        String raw = extractField(extJson, "max_todos");
+        if (raw == null || raw.isBlank()) {
+            raw = extractField(extJson, "maxTodos");
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int v = Integer.parseInt(raw.trim());
+            return v > 0 ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
     
     /**
      * 从 contextJson 中提取执行模式。

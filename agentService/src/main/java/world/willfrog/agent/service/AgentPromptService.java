@@ -326,7 +326,7 @@ public class AgentPromptService {
                 你是任务规划专家。请把用户目标拆解为 Todo List。
                 规则:
                 1) 只能使用工具: {{toolWhitelist}}
-                2) 总步骤数不超过 {{maxTodos}}
+                2) 步骤数必须尽可能少——只拆解真正必要的步骤，能合并则合并，绝不因为"上限允许"就多加步骤；步骤数硬性上限为 {{maxTodos}}，但目标是远少于上限
                 3) type 仅允许 TOOL_CALL/SUB_AGENT/THOUGHT
                 4) executionMode 仅允许 AUTO/FORCE_SIMPLE/FORCE_SUB_AGENT
                 """

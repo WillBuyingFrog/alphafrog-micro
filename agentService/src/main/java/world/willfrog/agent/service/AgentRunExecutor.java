@@ -164,7 +164,8 @@ public class AgentRunExecutor {
                 executionMode = PlanExecutionMode.AUTO;
             }
             boolean enablePlanPatch = eventService.extractEnablePlanPatch(run.getExt());
-            log.info("Run {} execution mode: {}", runId, executionMode);
+            Integer maxTodos = eventService.extractMaxTodos(run.getExt());
+            log.info("Run {} execution mode: {}, maxTodos override: {}", runId, executionMode, maxTodos);
 
             var todoPlan = todoPlanner.plan(TodoPlanner.PlanRequest.builder()
                     .run(run)
@@ -176,6 +177,7 @@ public class AgentRunExecutor {
                     .endpointBaseUrl(endpointBaseUrl)
                     .modelName(modelName)
                     .executionMode(executionMode)
+                    .maxTodos(maxTodos)
                     .build());
 
             // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）

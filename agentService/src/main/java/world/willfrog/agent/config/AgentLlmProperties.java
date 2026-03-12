@@ -292,28 +292,10 @@ public class AgentLlmProperties {
     }
 
     public static class Planning {
-        private Integer candidatePlanCount;
-        private Integer maxLocalReplans;
         private Integer maxTodos;
-        private Integer autoSplitThreshold;
-        private Double complexityPenaltyLambda;
+        /** 客户端可请求的 maxTodos 上限，超过则拒绝执行。null 表示不限制。 */
+        private Integer maxTodosClientCap;
         private StructuredOutput structuredOutput = new StructuredOutput();
-
-        public Integer getCandidatePlanCount() {
-            return candidatePlanCount;
-        }
-
-        public void setCandidatePlanCount(Integer candidatePlanCount) {
-            this.candidatePlanCount = candidatePlanCount;
-        }
-
-        public Integer getMaxLocalReplans() {
-            return maxLocalReplans;
-        }
-
-        public void setMaxLocalReplans(Integer maxLocalReplans) {
-            this.maxLocalReplans = maxLocalReplans;
-        }
 
         public Integer getMaxTodos() {
             return maxTodos;
@@ -323,20 +305,12 @@ public class AgentLlmProperties {
             this.maxTodos = maxTodos;
         }
 
-        public Integer getAutoSplitThreshold() {
-            return autoSplitThreshold;
+        public Integer getMaxTodosClientCap() {
+            return maxTodosClientCap;
         }
 
-        public void setAutoSplitThreshold(Integer autoSplitThreshold) {
-            this.autoSplitThreshold = autoSplitThreshold;
-        }
-
-        public Double getComplexityPenaltyLambda() {
-            return complexityPenaltyLambda;
-        }
-
-        public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
-            this.complexityPenaltyLambda = complexityPenaltyLambda;
+        public void setMaxTodosClientCap(Integer maxTodosClientCap) {
+            this.maxTodosClientCap = maxTodosClientCap;
         }
 
         public StructuredOutput getStructuredOutput() {
