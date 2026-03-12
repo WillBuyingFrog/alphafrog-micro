@@ -65,6 +65,26 @@ for dataset_path in glob.glob('/sandbox/input/*'):
 ❌ **错误**：`pd.read_csv(f'{dataset_path}/info.json')`
 ✅ **正确**：`pd.read_csv(f'{dataset_path}/{dataset_id}.csv')`
 
+#### 3.3.1 trade_date 解析（⚠️ 极易出错！）
+
+`trade_date` 列可能是以下两种格式之一，**必须先判断再解析**：
+- **8位字符串**（如 `"20250101"`）：使用 `pd.to_datetime(df['trade_date'], format='%Y%m%d')`
+- **13位毫秒时间戳**（如 `1735660800000`）：使用 `pd.to_datetime(df['trade_date'], unit='ms')`
+
+⚠️ **绝对不能用** `pd.to_datetime(df['trade_date'])` 不加 `unit`——pandas 默认把大整数当纳秒，会把 2025 年数据解析成 1970 年！
+
+**正确模板**：
+```python
+sample = str(df['trade_date'].iloc[0])
+if len(sample) == 13:
+    df['date'] = pd.to_datetime(df['trade_date'], unit='ms')
+elif len(sample) == 8:
+    df['date'] = pd.to_datetime(df['trade_date'], format='%Y%m%d')
+else:
+    df['date'] = pd.to_datetime(df['trade_date'])
+df = df.sort_values('date')
+```
+
 #### 3.4 完整代码示例
 
 **单数据集分析**：
