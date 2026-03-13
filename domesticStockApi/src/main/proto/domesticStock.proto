@@ -263,6 +263,10 @@ message DomesticStockReportRcFetchByDateRangeResponse {
 // 4.8 个股资金流向爬取
 message DomesticStockMoneyflowFetchByTradeDateRequest {
   string tradeDate = 1;  // 交易日期 YYYYMMDD
+  string startDate = 2;  // 开始日期（用于批量抓取）
+  string endDate = 3;    // 结束日期（用于批量抓取）
+  int32 offset = 4;      // 偏移量
+  int32 limit = 5;       // 限制数量
 }
 
 message DomesticStockMoneyflowFetchByTradeDateResponse {

@@ -426,12 +426,33 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
             DomesticStockMoneyflowFetchByTradeDateRequest request) {
         
         String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "moneyflow");
-        queryParams.put("trade_date", tradeDate);
+        
+        // 优先使用 trade_date，如果不存在则使用 start_date/end_date 组合
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        if (offset > 0) {
+            queryParams.put("offset", offset);
+        }
+        if (limit > 0) {
+            queryParams.put("limit", limit);
+        }
+        
         params.put("params", queryParams);
 
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);

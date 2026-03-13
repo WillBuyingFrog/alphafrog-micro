@@ -526,8 +526,10 @@ public class FetchTopicConsumer {
                     break;
 
                 case "fund_share":
-                    if (taskSubType == 1) {
+                    if (taskSubType == 1 || taskSubType == 3) {
                         // 基金份额，支持多种参数组合
+                        // taskSubType=1: 按单个日期或条件查询
+                        // taskSubType=3: 按日期范围批量查询（历史数据初始化）
                         String tsCode = taskParams.getString("ts_code");
                         String tradeDate = taskParams.getString("trade_date");
                         String startDate = taskParams.getString("start_date");
@@ -562,8 +564,10 @@ public class FetchTopicConsumer {
                     break;
 
                 case "etf_share_size":
-                    if (taskSubType == 1) {
+                    if (taskSubType == 1 || taskSubType == 3) {
                         // ETF份额规模，支持多种参数组合
+                        // taskSubType=1: 按单个日期或条件查询
+                        // taskSubType=3: 按日期范围批量查询（历史数据初始化）
                         String tsCode = taskParams.getString("ts_code");
                         String tradeDate = taskParams.getString("trade_date");
                         String startDate = taskParams.getString("start_date");
@@ -707,13 +711,31 @@ public class FetchTopicConsumer {
                     break;
 
                 case "stock_moneyflow":
-                    if (taskSubType == 1) {
+                    if (taskSubType == 1 || taskSubType == 3) {
+                        // 个股资金流向
+                        // taskSubType=1: 按单个日期查询
+                        // taskSubType=3: 按日期范围批量查询（历史数据初始化）
                         String tradeDate = taskParams.getString("trade_date");
-                        DomesticStockMoneyflowFetchByTradeDateRequest request =
-                                DomesticStockMoneyflowFetchByTradeDateRequest.newBuilder()
-                                        .setTradeDate(tradeDate)
-                                        .build();
-                        result = domesticStockFetchService.fetchStockMoneyflowByTradeDate(request).getFetchedItemsCount();
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        
+                        DomesticStockMoneyflowFetchByTradeDateRequest.Builder builder =
+                                DomesticStockMoneyflowFetchByTradeDateRequest.newBuilder();
+                        if (tradeDate != null && !tradeDate.isBlank()) {
+                            builder.setTradeDate(tradeDate);
+                        }
+                        if (startDate != null && !startDate.isBlank()) {
+                            builder.setStartDate(startDate);
+                        }
+                        if (endDate != null && !endDate.isBlank()) {
+                            builder.setEndDate(endDate);
+                        }
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
+                        
+                        result = domesticStockFetchService.fetchStockMoneyflowByTradeDate(builder.build()).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
