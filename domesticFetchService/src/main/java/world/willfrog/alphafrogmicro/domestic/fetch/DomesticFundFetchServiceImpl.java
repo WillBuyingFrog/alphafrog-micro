@@ -250,16 +250,32 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
             DomesticFundManagerFetchByTsCodeRequest request) {
 
         String tsCode = request.getTsCode();
+        String annDate = request.getAnnDate();
+        String name = request.getName();
         int offset = request.getOffset();
         int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_manager 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "fund_manager");
-        queryParams.put("ts_code", tsCode);
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (annDate != null && !annDate.isBlank()) {
+            queryParams.put("ann_date", annDate);
+        }
+        if (name != null && !name.isBlank()) {
+            queryParams.put("name", name);
+        }
         queryParams.put("offset", offset);
-        queryParams.put("limit", limit > 0 ? limit : 5000);
+        queryParams.put("limit", effectiveLimit);
         params.put("params", queryParams);
         params.put("fields", "ts_code,ann_date,name,gender,birth_year,edu,nationality,begin_date,end_date,resume");
 
@@ -290,17 +306,41 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
     public DomesticFundShareFetchByTradeDateResponse fetchFundShareByTradeDate(
             DomesticFundShareFetchByTradeDateRequest request) {
 
+        String tsCode = request.getTsCode();
         String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        String market = request.getMarket();
         int offset = request.getOffset();
         int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 2000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_share 使用默认页大小 2000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "fund_share");
-        queryParams.put("trade_date", tradeDate);
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
         queryParams.put("offset", offset);
-        queryParams.put("limit", limit > 0 ? limit : 2000);
+        queryParams.put("limit", effectiveLimit);
         params.put("params", queryParams);
         params.put("fields", "ts_code,trade_date,fd_share");
 
@@ -331,17 +371,41 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
     public DomesticEtfShareSizeFetchByTradeDateResponse fetchEtfShareSizeByTradeDate(
             DomesticEtfShareSizeFetchByTradeDateRequest request) {
 
+        String tsCode = request.getTsCode();
         String tradeDate = request.getTradeDate();
-        String exchange = request.hasExchange() ? request.getExchange() : null;
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        String exchange = request.getExchange();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，etf_share_size 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "etf_share_size");
-        queryParams.put("trade_date", tradeDate);
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
         if (exchange != null && !exchange.isBlank()) {
             queryParams.put("exchange", exchange);
         }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("params", queryParams);
         params.put("fields", "trade_date,ts_code,etf_name,total_share,total_size,nav,close,exchange");
 

@@ -372,12 +372,22 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             DomesticIndexDailyBasicFetchByTradeDateRequest request) {
 
         String tradeDate = request.getTradeDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 3000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，index_dailybasic 使用默认页大小 3000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "index_dailybasic");
         queryParams.put("trade_date", tradeDate);
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("fields", "ts_code,trade_date,total_mv,float_mv,total_share,float_share," +
                 "free_share,turnover_rate,turnover_rate_f,pe,pe_ttm,pb");
         params.put("params", queryParams);
@@ -419,8 +429,12 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         if (level != null && !level.isBlank()) {
             queryParams.put("level", level);
         }
+        // src 默认使用 SW2021，显式设置
         if (src != null && !src.isBlank()) {
             queryParams.put("src", src);
+        } else {
+            queryParams.put("src", "SW2021");
+            log.info("sw_industry_classify 使用默认 src=SW2021");
         }
         params.put("fields", "index_code,industry_name,parent_code,level,industry_code,is_pub,src");
         params.put("params", queryParams);
@@ -453,16 +467,41 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             DomesticSwIndustryMemberFetchByL1CodeRequest request) {
 
         String l1Code = request.getL1Code();
+        String l2Code = request.getL2Code();
+        String l3Code = request.getL3Code();
+        String tsCode = request.getTsCode();
         String isNew = request.getIsNew();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 2000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，sw_industry_member 使用默认页大小 2000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "index_member_all");
-        queryParams.put("l1_code", l1Code);
+        // 支持多种过滤条件组合
+        if (l1Code != null && !l1Code.isBlank()) {
+            queryParams.put("l1_code", l1Code);
+        }
+        if (l2Code != null && !l2Code.isBlank()) {
+            queryParams.put("l2_code", l2Code);
+        }
+        if (l3Code != null && !l3Code.isBlank()) {
+            queryParams.put("l3_code", l3Code);
+        }
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
         if (isNew != null && !isNew.isBlank()) {
             queryParams.put("is_new", isNew);
         }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("fields", "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new");
         params.put("params", queryParams);
 
@@ -494,12 +533,22 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             DomesticSwIndustryDailyFetchByTradeDateRequest request) {
 
         String tradeDate = request.getTradeDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 4000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，sw_industry_daily 使用默认页大小 4000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "sw_daily");
         queryParams.put("trade_date", tradeDate);
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("fields", "ts_code,trade_date,name,open,low,high,close,change,pct_change,vol,amount,pe,pb,float_mv,total_mv");
         params.put("params", queryParams);
 
@@ -530,6 +579,14 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         String tsCode = request.getTsCode();
         String startDate = request.getStartDate();
         String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 4000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，sw_industry_daily (by ts_code) 使用默认页大小 4000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -542,6 +599,8 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         if (endDate != null && !endDate.isBlank()) {
             queryParams.put("end_date", endDate);
         }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("fields", "ts_code,trade_date,name,open,low,high,close,change,pct_change,vol,amount,pe,pb,float_mv,total_mv");
         params.put("params", queryParams);
 
@@ -572,19 +631,42 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
     public DomesticCiIndexMemberFetchResponse fetchCiIndexMember(
             DomesticCiIndexMemberFetchRequest request) {
 
+        String l1Code = request.getL1Code();
+        String l2Code = request.getL2Code();
+        String l3Code = request.getL3Code();
         String tsCode = request.getTsCode();
         String isNew = request.getIsNew();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，ci_index_member 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
 
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "ci_index_member");
+        // 支持多种过滤条件组合
+        if (l1Code != null && !l1Code.isBlank()) {
+            queryParams.put("l1_code", l1Code);
+        }
+        if (l2Code != null && !l2Code.isBlank()) {
+            queryParams.put("l2_code", l2Code);
+        }
+        if (l3Code != null && !l3Code.isBlank()) {
+            queryParams.put("l3_code", l3Code);
+        }
         if (tsCode != null && !tsCode.isBlank()) {
             queryParams.put("ts_code", tsCode);
         }
         if (isNew != null && !isNew.isBlank()) {
             queryParams.put("is_new", isNew);
         }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
         params.put("fields", "l1_code,l1_name,l2_code,l2_name,l3_code,l3_name,ts_code,name,in_date,out_date,is_new");
         params.put("params", queryParams);
 
@@ -605,6 +687,66 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                     .setStatus("failure").setFetchedItemsCount(result).build();
         }
         return DomesticCiIndexMemberFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    // ==================== 新增：中信行业指数日线行情（ci_daily）====================
+
+    @Override
+    public DomesticCiIndustryDailyFetchResponse fetchCiIndustryDaily(
+            DomesticCiIndustryDailyFetchRequest request) {
+
+        String tsCode = request.getTsCode();
+        String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 4000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，ci_industry_daily 使用默认页大小 4000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "ci_daily");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("fields", "ts_code,trade_date,open,low,high,close,pre_close,change,pct_change,vol,amount");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticCiIndustryDailyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeCiIndustryDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticCiIndustryDailyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticCiIndustryDailyFetchResponse.newBuilder()
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 

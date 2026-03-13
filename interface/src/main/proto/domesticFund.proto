@@ -227,8 +227,10 @@ message DomesticFundCompanyFetchResponse {
 
 message DomesticFundManagerFetchByTsCodeRequest {
   string tsCode = 1;
-  int32 offset = 2;
-  int32 limit = 3;
+  string annDate = 2;
+  string name = 3;
+  int32 offset = 4;
+  int32 limit = 5;
 }
 
 message DomesticFundManagerFetchByTsCodeResponse {
@@ -241,9 +243,13 @@ message DomesticFundManagerFetchByTsCodeResponse {
  */
 
 message DomesticFundShareFetchByTradeDateRequest {
-  string tradeDate = 1;
-  int32 offset = 2;
-  int32 limit = 3;
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string market = 5;
+  int32 offset = 6;
+  int32 limit = 7;
 }
 
 message DomesticFundShareFetchByTradeDateResponse {
@@ -256,8 +262,13 @@ message DomesticFundShareFetchByTradeDateResponse {
  */
 
 message DomesticEtfShareSizeFetchByTradeDateRequest {
-  string tradeDate = 1;
-  optional string exchange = 2;
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string exchange = 5;
+  int32 offset = 6;
+  int32 limit = 7;
 }
 
 message DomesticEtfShareSizeFetchByTradeDateResponse {

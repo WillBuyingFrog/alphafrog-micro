@@ -264,11 +264,15 @@ public class FetchTopicConsumer {
                                         .build();
                         result = domesticIndexFetchService.fetchIndexDailyBasicByTsCode(request).getFetchedItemsCount();
                     } else if (taskSubType == 2) {
-                        // 按交易日期爬取当日全部
+                        // 按交易日期爬取当日全部，支持分页
                         String tradeDate = taskParams.getString("trade_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
                         DomesticIndexDailyBasicFetchByTradeDateRequest request =
                                 DomesticIndexDailyBasicFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchIndexDailyBasicByTradeDate(request).getFetchedItemsCount();
                     } else {
@@ -278,13 +282,19 @@ public class FetchTopicConsumer {
 
                 case "sw_industry_classify":
                     if (taskSubType == 1) {
+                        // 支持空 task_params 直接拉全量，默认使用 SW2021
                         String level = taskParams.getString("level");
                         String src = taskParams.getString("src");
-                        DomesticSwIndustryClassifyFetchRequest request =
-                                DomesticSwIndustryClassifyFetchRequest.newBuilder()
-                                        .setLevel(level != null ? level : "")
-                                        .setSrc(src != null ? src : "SW2021")
-                                        .build();
+                        DomesticSwIndustryClassifyFetchRequest.Builder builder =
+                                DomesticSwIndustryClassifyFetchRequest.newBuilder();
+                        if (level != null && !level.isBlank()) {
+                            builder.setLevel(level);
+                        }
+                        // src 默认使用 SW2021，但只在传入时设置，否则让 service 层处理默认值
+                        if (src != null && !src.isBlank()) {
+                            builder.setSrc(src);
+                        }
+                        DomesticSwIndustryClassifyFetchRequest request = builder.build();
                         result = domesticIndexFetchService.fetchSwIndustryClassify(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -293,13 +303,32 @@ public class FetchTopicConsumer {
 
                 case "sw_industry_member":
                     if (taskSubType == 1) {
+                        // 支持多种过滤条件组合，包括仅 offset/limit 的全量分页模式
                         String l1Code = taskParams.getString("l1_code");
+                        String l2Code = taskParams.getString("l2_code");
+                        String l3Code = taskParams.getString("l3_code");
+                        String tsCode = taskParams.getString("ts_code");
                         String isNew = taskParams.getString("is_new");
-                        DomesticSwIndustryMemberFetchByL1CodeRequest request =
-                                DomesticSwIndustryMemberFetchByL1CodeRequest.newBuilder()
-                                        .setL1Code(l1Code)
-                                        .setIsNew(isNew != null ? isNew : "Y")
-                                        .build();
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticSwIndustryMemberFetchByL1CodeRequest.Builder builder =
+                                DomesticSwIndustryMemberFetchByL1CodeRequest.newBuilder();
+                        if (l1Code != null && !l1Code.isBlank()) {
+                            builder.setL1Code(l1Code);
+                        }
+                        if (l2Code != null && !l2Code.isBlank()) {
+                            builder.setL2Code(l2Code);
+                        }
+                        if (l3Code != null && !l3Code.isBlank()) {
+                            builder.setL3Code(l3Code);
+                        }
+                        if (tsCode != null && !tsCode.isBlank()) {
+                            builder.setTsCode(tsCode);
+                        }
+                        builder.setIsNew(isNew != null && !isNew.isBlank() ? isNew : "Y");
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
+                        DomesticSwIndustryMemberFetchByL1CodeRequest request = builder.build();
                         result = domesticIndexFetchService.fetchSwIndustryMemberByL1Code(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -308,21 +337,28 @@ public class FetchTopicConsumer {
 
                 case "sw_industry_daily":
                     if (taskSubType == 1) {
-                        // 按交易日期爬取当日全部行业指数
+                        // 按交易日期爬取当日全部行业指数，支持分页
                         String tradeDate = taskParams.getString("trade_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
                         DomesticSwIndustryDailyFetchByTradeDateRequest request =
                                 DomesticSwIndustryDailyFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDate)
+                                        .setOffset(offset)
+                                        .setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchSwIndustryDailyByTradeDate(request).getFetchedItemsCount();
                     } else if (taskSubType == 2) {
-                        // 按指数代码+日期范围爬取
+                        // 按指数代码+日期范围爬取，支持分页
                         String tsCode = taskParams.getString("ts_code");
                         String startDate = taskParams.getString("start_date");
                         String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
                         DomesticSwIndustryDailyFetchByTsCodeRequest request =
                                 DomesticSwIndustryDailyFetchByTsCodeRequest.newBuilder()
                                         .setTsCode(tsCode).setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(offset).setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchSwIndustryDailyByTsCode(request).getFetchedItemsCount();
                     } else {
@@ -332,14 +368,67 @@ public class FetchTopicConsumer {
 
                 case "ci_index_member":
                     if (taskSubType == 1) {
+                        // 中信行业成分（不是中证指数），支持多种过滤条件
+                        String l1Code = taskParams.getString("l1_code");
+                        String l2Code = taskParams.getString("l2_code");
+                        String l3Code = taskParams.getString("l3_code");
                         String tsCode = taskParams.getString("ts_code");
                         String isNew = taskParams.getString("is_new");
-                        DomesticCiIndexMemberFetchRequest request =
-                                DomesticCiIndexMemberFetchRequest.newBuilder()
-                                        .setTsCode(tsCode != null ? tsCode : "")
-                                        .setIsNew(isNew != null ? isNew : "Y")
-                                        .build();
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticCiIndexMemberFetchRequest.Builder builder =
+                                DomesticCiIndexMemberFetchRequest.newBuilder();
+                        if (l1Code != null && !l1Code.isBlank()) {
+                            builder.setL1Code(l1Code);
+                        }
+                        if (l2Code != null && !l2Code.isBlank()) {
+                            builder.setL2Code(l2Code);
+                        }
+                        if (l3Code != null && !l3Code.isBlank()) {
+                            builder.setL3Code(l3Code);
+                        }
+                        if (tsCode != null && !tsCode.isBlank()) {
+                            builder.setTsCode(tsCode);
+                        }
+                        builder.setIsNew(isNew != null && !isNew.isBlank() ? isNew : "Y");
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
+                        DomesticCiIndexMemberFetchRequest request = builder.build();
                         result = domesticIndexFetchService.fetchCiIndexMember(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "ci_industry_daily":
+                    if (taskSubType == 1) {
+                        // 中信行业指数日线行情（ci_daily），按交易日期爬取
+                        String tradeDate = taskParams.getString("trade_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticCiIndustryDailyFetchRequest request =
+                                DomesticCiIndustryDailyFetchRequest.newBuilder()
+                                        .setTradeDate(tradeDate != null ? tradeDate : "")
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchCiIndustryDaily(request).getFetchedItemsCount();
+                    } else if (taskSubType == 2) {
+                        // 按指数代码+日期范围爬取
+                        String tsCode = taskParams.getString("ts_code");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticCiIndustryDailyFetchRequest request =
+                                DomesticCiIndustryDailyFetchRequest.newBuilder()
+                                        .setTsCode(tsCode != null ? tsCode : "")
+                                        .setStartDate(startDate != null ? startDate : "")
+                                        .setEndDate(endDate != null ? endDate : "")
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchCiIndustryDaily(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -359,13 +448,26 @@ public class FetchTopicConsumer {
 
                 case "fund_manager":
                     if (taskSubType == 1) {
+                        // 基金经理，支持多种过滤条件
                         String tsCode = taskParams.getString("ts_code");
+                        String annDate = taskParams.getString("ann_date");
+                        String name = taskParams.getString("name");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFundManagerFetchByTsCodeRequest request =
-                                DomesticFundManagerFetchByTsCodeRequest.newBuilder()
-                                        .setTsCode(tsCode).setOffset(offset).setLimit(limit)
-                                        .build();
+                        DomesticFundManagerFetchByTsCodeRequest.Builder builder =
+                                DomesticFundManagerFetchByTsCodeRequest.newBuilder();
+                        if (tsCode != null && !tsCode.isBlank()) {
+                            builder.setTsCode(tsCode);
+                        }
+                        if (annDate != null && !annDate.isBlank()) {
+                            builder.setAnnDate(annDate);
+                        }
+                        if (name != null && !name.isBlank()) {
+                            builder.setName(name);
+                        }
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
+                        DomesticFundManagerFetchByTsCodeRequest request = builder.build();
                         result = domesticFundFetchService.fetchFundManagerByTsCode(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -374,13 +476,34 @@ public class FetchTopicConsumer {
 
                 case "fund_share":
                     if (taskSubType == 1) {
+                        // 基金份额，支持多种参数组合
+                        String tsCode = taskParams.getString("ts_code");
                         String tradeDate = taskParams.getString("trade_date");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        String market = taskParams.getString("market");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
-                        DomesticFundShareFetchByTradeDateRequest request =
-                                DomesticFundShareFetchByTradeDateRequest.newBuilder()
-                                        .setTradeDate(tradeDate).setOffset(offset).setLimit(limit)
-                                        .build();
+                        DomesticFundShareFetchByTradeDateRequest.Builder builder =
+                                DomesticFundShareFetchByTradeDateRequest.newBuilder();
+                        if (tsCode != null && !tsCode.isBlank()) {
+                            builder.setTsCode(tsCode);
+                        }
+                        if (tradeDate != null && !tradeDate.isBlank()) {
+                            builder.setTradeDate(tradeDate);
+                        }
+                        if (startDate != null && !startDate.isBlank()) {
+                            builder.setStartDate(startDate);
+                        }
+                        if (endDate != null && !endDate.isBlank()) {
+                            builder.setEndDate(endDate);
+                        }
+                        if (market != null && !market.isBlank()) {
+                            builder.setMarket(market);
+                        }
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
+                        DomesticFundShareFetchByTradeDateRequest request = builder.build();
                         result = domesticFundFetchService.fetchFundShareByTradeDate(request).getFetchedItemsCount();
                     } else {
                         result = -1;
@@ -389,14 +512,33 @@ public class FetchTopicConsumer {
 
                 case "etf_share_size":
                     if (taskSubType == 1) {
+                        // ETF份额规模，支持多种参数组合
+                        String tsCode = taskParams.getString("ts_code");
                         String tradeDate = taskParams.getString("trade_date");
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
                         String exchange = taskParams.getString("exchange");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
                         DomesticEtfShareSizeFetchByTradeDateRequest.Builder builder =
-                                DomesticEtfShareSizeFetchByTradeDateRequest.newBuilder()
-                                        .setTradeDate(tradeDate);
+                                DomesticEtfShareSizeFetchByTradeDateRequest.newBuilder();
+                        if (tsCode != null && !tsCode.isBlank()) {
+                            builder.setTsCode(tsCode);
+                        }
+                        if (tradeDate != null && !tradeDate.isBlank()) {
+                            builder.setTradeDate(tradeDate);
+                        }
+                        if (startDate != null && !startDate.isBlank()) {
+                            builder.setStartDate(startDate);
+                        }
+                        if (endDate != null && !endDate.isBlank()) {
+                            builder.setEndDate(endDate);
+                        }
                         if (exchange != null && !exchange.isBlank()) {
                             builder.setExchange(exchange);
                         }
+                        builder.setOffset(offset);
+                        builder.setLimit(limit);
                         result = domesticFundFetchService.fetchEtfShareSizeByTradeDate(builder.build()).getFetchedItemsCount();
                     } else {
                         result = -1;
