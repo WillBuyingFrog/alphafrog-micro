@@ -9,6 +9,8 @@ import org.apache.ibatis.session.SqlSessionFactory;
 import org.springframework.stereotype.Component;
 import world.willfrog.alphafrogmicro.common.dao.domestic.index.*;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.index.*;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.index.CiIndustryDaily;
+import world.willfrog.alphafrogmicro.common.dao.domestic.index.CiIndustryDailyDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 
 import java.math.BigDecimal;
@@ -697,5 +699,98 @@ public class DomesticIndexStoreUtils {
         return list.size();
     }
 
+
+    public int storeCiIndustryDailyByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<CiIndustryDaily> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                CiIndustryDaily pojo = new CiIndustryDaily();
+                JSONObject ext = new JSONObject();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "trade_date":
+                            String tradeDateStr = item.getString(j);
+                            if (tradeDateStr != null) {
+                                pojo.setTradeDate(DateConvertUtils.convertDateStrToLong(tradeDateStr, "yyyyMMdd"));
+                            }
+                            break;
+                        case "name":
+                            pojo.setName(item.getString(j));
+                            break;
+                        case "open":
+                            BigDecimal open = item.getBigDecimal(j);
+                            if (open != null) pojo.setOpen(open.doubleValue());
+                            break;
+                        case "low":
+                            BigDecimal low = item.getBigDecimal(j);
+                            if (low != null) pojo.setLow(low.doubleValue());
+                            break;
+                        case "high":
+                            BigDecimal high = item.getBigDecimal(j);
+                            if (high != null) pojo.setHigh(high.doubleValue());
+                            break;
+                        case "close":
+                            BigDecimal close = item.getBigDecimal(j);
+                            if (close != null) pojo.setClose(close.doubleValue());
+                            break;
+                        case "pre_close":
+                            BigDecimal preClose = item.getBigDecimal(j);
+                            if (preClose != null) pojo.setPreClose(preClose.doubleValue());
+                            break;
+                        case "change":
+                            BigDecimal changeVal = item.getBigDecimal(j);
+                            if (changeVal != null) pojo.setChangeVal(changeVal.doubleValue());
+                            break;
+                        case "pct_change":
+                            BigDecimal pctChange = item.getBigDecimal(j);
+                            if (pctChange != null) pojo.setPctChange(pctChange.doubleValue());
+                            break;
+                        case "vol":
+                            BigDecimal vol = item.getBigDecimal(j);
+                            if (vol != null) pojo.setVol(vol.doubleValue());
+                            break;
+                        case "amount":
+                            BigDecimal amount = item.getBigDecimal(j);
+                            if (amount != null) pojo.setAmount(amount.doubleValue());
+                            break;
+                        default:
+                            ext.put(field, item.get(j));
+                            break;
+                    }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to CiIndustryDaily", e);
+            return -1;
+        }
+
+        int totalAffected = 0;
+        int batchSize = 50;
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH, false)) {
+            CiIndustryDailyDao dao = sqlSession.getMapper(CiIndustryDailyDao.class);
+            for (CiIndustryDaily daily : list) {
+                totalAffected++;
+                dao.insertCiIndustryDaily(daily);
+                if (totalAffected % batchSize == 0 || totalAffected == list.size()) {
+                    sqlSession.commit();
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while inserting CiIndustryDaily data", e);
+            return -2;
+        }
+
+        return totalAffected;
+    }
 
 }
