@@ -4,39 +4,67 @@ set -euo pipefail
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$ROOT_DIR"
 
-usage() {
-  cat <<'EOF'
-Usage:
-  ./deploy_latest.sh                  # rebuild all services
-  ./deploy_latest.sh serviceA serviceB
-  ./deploy_latest.sh --services serviceA,serviceB
+# 基础设施服务（不常重建）
+INFRA_SERVICES=(
+  redis
+  rabbitmq
+  nacos
+  meilisearch
+)
 
-Services:
-  domestic-stock-service
-  domestic-index-service
-  domestic-fund-service
-  domestic-fetch-service
-  admin-service
-  portfolio-service
-  agent-service
-  external-info-service
-  frontend
-EOF
-}
-
-ALL_SERVICES=(
-  domestic-stock-service
-  domestic-index-service
-  domestic-fund-service
-  domestic-fetch-service
-  admin-service
-  portfolio-service
-  agent-service
-  external-info-service
+# Python沙箱服务（独立于Java服务）
+PYTHON_SERVICES=(
   python-sandbox-service
+)
+
+# 业务服务（经常重建）
+BUSINESS_SERVICES=(
+  domestic-stock-service
+  domestic-index-service
+  domestic-fund-service
+  domestic-fetch-service
+  admin-service
+  portfolio-service
+  agent-service
+  external-info-service
   python-sandbox-gateway-service
   frontend
 )
+
+# 所有服务
+ALL_SERVICES=(
+  "${BUSINESS_SERVICES[@]}"
+)
+
+usage() {
+  cat <<'EOF'
+Usage:
+  ./deploy_latest.sh                  # rebuild all business services
+  ./deploy_latest.sh serviceA serviceB
+  ./deploy_latest.sh --services serviceA,serviceB
+  ./deploy_latest.sh --with-infra     # rebuild with infrastructure services
+  ./deploy_latest.sh --all            # rebuild all including python services
+
+Services:
+  # Business Services
+  domestic-stock-service
+  domestic-index-service
+  domestic-fund-service
+  domestic-fetch-service
+  admin-service
+  portfolio-service
+  agent-service
+  external-info-service
+  python-sandbox-gateway-service
+  frontend
+
+  # Infrastructure (use --with-infra to include)
+  redis, rabbitmq, nacos, meilisearch
+
+  # Python Services (use --all to include)
+  python-sandbox-service
+EOF
+}
 
 declare -A SERVICE_BUILD=(
   [domestic-stock-service]="domesticStockService/docker_build.sh"
@@ -65,12 +93,24 @@ declare -A SERVICE_MODULE=(
   [frontend]="frontend"
 )
 
+# 参数解析
 RAW_SERVICES=()
+WITH_INFRA=false
+WITH_ALL=false
+
 while [[ $# -gt 0 ]]; do
   case "$1" in
     -h|--help)
       usage
       exit 0
+      ;;
+    --with-infra)
+      WITH_INFRA=true
+      shift
+      ;;
+    --all)
+      WITH_ALL=true
+      shift
       ;;
     -s|--services)
       shift
@@ -82,6 +122,11 @@ while [[ $# -gt 0 ]]; do
       RAW_SERVICES+=("$1")
       shift
       ;;
+    -*)
+      echo "Unknown option: $1" >&2
+      usage
+      exit 1
+      ;;
     *)
       RAW_SERVICES+=("$1")
       shift
@@ -89,6 +134,7 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# 解析服务列表
 SERVICES=()
 if [[ ${#RAW_SERVICES[@]} -gt 0 ]]; then
   for item in "${RAW_SERVICES[@]}"; do
@@ -102,10 +148,17 @@ if [[ ${#RAW_SERVICES[@]} -gt 0 ]]; then
   done
 fi
 
+# 确定要构建的服务列表
 SELECTED=()
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
-  SELECTED=("${ALL_SERVICES[@]}")
+  # 未指定服务，使用默认列表
+  if [[ "$WITH_ALL" == true ]]; then
+    SELECTED=("${PYTHON_SERVICES[@]}" "${BUSINESS_SERVICES[@]}")
+  else
+    SELECTED=("${BUSINESS_SERVICES[@]}")
+  fi
 else
+  # 指定了具体服务
   declare -A seen=()
   for svc in "${SERVICES[@]}"; do
     if [[ -z "${SERVICE_BUILD[$svc]:-}" ]]; then
@@ -115,14 +168,26 @@ else
     fi
     seen["$svc"]=1
   done
+  
+  # 按 ALL_SERVICES 顺序输出
   for svc in "${ALL_SERVICES[@]}"; do
+    if [[ -n "${seen[$svc]:-}" ]]; then
+      SELECTED+=("$svc")
+    fi
+  done
+  # 检查是否包含基础设施服务
+  for svc in "${INFRA_SERVICES[@]}" "${PYTHON_SERVICES[@]}"; do
     if [[ -n "${seen[$svc]:-}" ]]; then
       SELECTED+=("$svc")
     fi
   done
 fi
 
+echo "=== Selected services to rebuild: ${SELECTED[*]} ==="
+
+# Maven 编译
 if [[ ${#SERVICES[@]} -eq 0 ]]; then
+  echo "=== Building all Java modules ==="
   mvn -DskipTests compile install
 else
   MODULES=()
@@ -133,15 +198,22 @@ else
     fi
   done
   if [[ ${#MODULES[@]} -gt 0 ]]; then
+    echo "=== Building modules: ${MODULES[*]} ==="
     MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
     mvn -DskipTests -pl "$MODULE_LIST" -am compile install
   fi
 fi
 
+# Docker 构建镜像
+echo "=== Building Docker images ==="
 for svc in "${SELECTED[@]}"; do
-  bash "${SERVICE_BUILD[$svc]}"
+  if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
+    echo "Building: $svc"
+    bash "${SERVICE_BUILD[$svc]}"
+  fi
 done
 
+# 检查 Docker Compose 命令
 if command -v docker >/dev/null 2>&1; then
   if docker compose version >/dev/null 2>&1; then
     DOCKER_COMPOSE="docker compose"
@@ -153,5 +225,33 @@ else
   exit 1
 fi
 
-$DOCKER_COMPOSE up -d --no-deps --force-recreate \
-  "${SELECTED[@]}"
+# 步骤1: 启动基础设施服务（不重建，只确保运行）
+# 如果使用了 --with-infra 或指定了基础设施服务，则重建它们
+if [[ "$WITH_INFRA" == true ]] || [[ "$WITH_ALL" == true ]]; then
+  echo "=== Starting infrastructure services (with recreate) ==="
+  $DOCKER_COMPOSE up -d --force-recreate "${INFRA_SERVICES[@]}"
+else
+  echo "=== Ensuring infrastructure services are running ==="
+  $DOCKER_COMPOSE up -d --no-recreate "${INFRA_SERVICES[@]}" 2>/dev/null || true
+fi
+
+# 步骤2: 启动选定的业务服务（重建）
+# 先过滤出需要重建的业务服务（排除基础设施）
+BUSINESS_TO_RECREATE=()
+for svc in "${SELECTED[@]}"; do
+  # 检查是否是业务服务（有build脚本且在BUSINESS_SERVICES或PYTHON_SERVICES中）
+  if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
+    BUSINESS_TO_RECREATE+=("$svc")
+  fi
+done
+
+if [[ ${#BUSINESS_TO_RECREATE[@]} -gt 0 ]]; then
+  echo "=== Recreating business services: ${BUSINESS_TO_RECREATE[*]} ==="
+  # 去掉 --no-deps，让 docker compose 自动处理依赖关系
+  $DOCKER_COMPOSE up -d --force-recreate "${BUSINESS_TO_RECREATE[@]}"
+fi
+
+echo "=== Deployment completed ==="
+
+# 显示状态
+$DOCKER_COMPOSE ps --format "table {{.Name}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || true
