@@ -599,8 +599,33 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
                     .setStatus("failure").setFetchedItemsCount(-1).build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        // 检查 TuShare 返回的错误码
+        Integer code = response.getInteger("code");
+        String msg = response.getString("msg");
+        if (code != null && code != 0) {
+            log.error("TuShare API 返回错误: code={}, msg={}, 请求参数: start_date={}, end_date={}, offset={}, limit={}", 
+                    code, msg, startDate, endDate, offset, effectiveLimit);
+            return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-4).build();
+        }
+
+        JSONObject responseData = response.getJSONObject("data");
+        if (responseData == null) {
+            log.error("TuShare API 返回的 data 为空，请求参数: start_date={}, end_date={}, offset={}, limit={}", 
+                    startDate, endDate, offset, effectiveLimit);
+            return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-2).build();
+        }
+
+        JSONArray data = responseData.getJSONArray("items");
+        JSONArray fields = responseData.getJSONArray("fields");
+        
+        if (data == null || fields == null) {
+            log.error("TuShare API 返回的 items 或 fields 为空，请求参数: start_date={}, end_date={}, offset={}, limit={}", 
+                    startDate, endDate, offset, effectiveLimit);
+            return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-3).build();
+        }
 
         int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
 
