@@ -412,6 +412,57 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    @Override
+    public DomesticIndexDailyBasicFetchAllByDateRangeResponse fetchIndexDailyBasicAllByDateRange(
+            DomesticIndexDailyBasicFetchAllByDateRangeRequest request) {
+
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值
+        int effectiveLimit = limit > 0 ? limit : 3000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，index_dailybasic (all by date range) 使用默认页大小 3000");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "index_dailybasic");
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("fields", "ts_code,trade_date,total_mv,float_mv,total_share,float_share," +
+                "free_share,turnover_rate,turnover_rate_f,pe,pe_ttm,pb");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticIndexDailyBasicFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeIndexDailyBasicByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticIndexDailyBasicFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticIndexDailyBasicFetchAllByDateRangeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
 
     // ==================== 新增：申万行业分类 ====================
 
@@ -624,6 +675,56 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    @Override
+    public DomesticSwIndustryDailyFetchAllByDateRangeResponse fetchSwIndustryDailyAllByDateRange(
+            DomesticSwIndustryDailyFetchAllByDateRangeRequest request) {
+
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值
+        int effectiveLimit = limit > 0 ? limit : 4000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，sw_industry_daily (all by date range) 使用默认页大小 4000");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "sw_daily");
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("fields", "ts_code,trade_date,name,open,low,high,close,change,pct_change,vol,amount,pe,pb,float_mv,total_mv");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticSwIndustryDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeSwIndustryDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticSwIndustryDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticSwIndustryDailyFetchAllByDateRangeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
 
     // ==================== 新增：中信行业成分 ====================
 
@@ -747,6 +848,56 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                     .setStatus("failure").setFetchedItemsCount(result).build();
         }
         return DomesticCiIndustryDailyFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    @Override
+    public DomesticCiIndustryDailyFetchAllByDateRangeResponse fetchCiIndustryDailyAllByDateRange(
+            DomesticCiIndustryDailyFetchAllByDateRangeRequest request) {
+
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值
+        int effectiveLimit = limit > 0 ? limit : 4000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，ci_industry_daily (all by date range) 使用默认页大小 4000");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "ci_daily");
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("fields", "ts_code,trade_date,open,low,high,close,pre_close,change,pct_change,vol,amount");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticCiIndustryDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticIndexStoreUtils.storeCiIndustryDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticCiIndustryDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticCiIndustryDailyFetchAllByDateRangeResponse.newBuilder()
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 

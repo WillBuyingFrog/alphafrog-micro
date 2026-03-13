@@ -179,6 +179,18 @@ message DomesticStockDailyFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 按照日期范围爬取全部股票日线（批量历史数据初始化）
+message DomesticStockDailyFetchAllByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticStockDailyFetchAllByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
 
 
 service DomesticStockService {
@@ -194,4 +206,6 @@ service DomesticStockService {
 service DomesticStockFetchService {
   rpc fetchStockInfoByMarket(DomesticStockInfoFetchByMarketRequest) returns (DomesticStockInfoFetchByMarketResponse);
   rpc fetchStockDailyByTradeDate(DomesticStockDailyFetchByTradeDateRequest) returns (DomesticStockDailyFetchByTradeDateResponse);
+  // 批量拉取全部股票日线（历史数据初始化）
+  rpc fetchStockDailyAllByDateRange(DomesticStockDailyFetchAllByDateRangeRequest) returns (DomesticStockDailyFetchAllByDateRangeResponse);
 }

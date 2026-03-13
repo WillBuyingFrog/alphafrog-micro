@@ -539,4 +539,55 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
         return DomesticStockShareFloatFetchByDateRangeResponse.newBuilder().setStatus("success")
                 .setFetchedItemsCount(result).build();
     }
+
+    // ==================== 批量拉取全部股票日线（历史数据初始化） ====================
+    @Override
+    public DomesticStockDailyFetchAllByDateRangeResponse fetchStockDailyAllByDateRange(
+            DomesticStockDailyFetchAllByDateRangeRequest request) {
+        
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值
+        int effectiveLimit = limit > 0 ? limit : 6000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，stock_daily (all by date range) 使用默认页大小 6000");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "daily");
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("fields", "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticStockDailyFetchAllByDateRangeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
 }

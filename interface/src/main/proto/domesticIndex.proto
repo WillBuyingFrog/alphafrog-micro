@@ -299,6 +299,19 @@ message DomesticIndexDailyBasicFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 按日期范围爬取全部大盘指数估值指标（批量历史数据初始化）
+message DomesticIndexDailyBasicFetchAllByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticIndexDailyBasicFetchAllByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
 /**
   申万行业分类爬取
  */
@@ -360,6 +373,19 @@ message DomesticSwIndustryDailyFetchByTsCodeResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 按日期范围爬取全部申万行业日线（批量历史数据初始化）
+message DomesticSwIndustryDailyFetchAllByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticSwIndustryDailyFetchAllByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
 /**
   中信行业成分爬取（注意：不是中证指数，是中信行业分类）
  */
@@ -398,6 +424,19 @@ message DomesticCiIndustryDailyFetchResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 按日期范围爬取全部中信行业日线（批量历史数据初始化）
+message DomesticCiIndustryDailyFetchAllByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticCiIndustryDailyFetchAllByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
 
 service DomesticIndexFetchService {
   rpc fetchDomesticIndexInfoByMarket(DomesticIndexInfoFetchByMarketRequest) returns (DomesticIndexInfoFetchByMarketResponse);
@@ -407,12 +446,18 @@ service DomesticIndexFetchService {
   rpc fetchDomesticIndexWeightByDateRange(DomesticIndexWeightFetchByDateRangeRequest) returns (DomesticIndexWeightFetchByDateRangeResponse);
   rpc fetchIndexDailyBasicByTsCode(DomesticIndexDailyBasicFetchByTsCodeRequest) returns (DomesticIndexDailyBasicFetchByTsCodeResponse);
   rpc fetchIndexDailyBasicByTradeDate(DomesticIndexDailyBasicFetchByTradeDateRequest) returns (DomesticIndexDailyBasicFetchByTradeDateResponse);
+  // 批量拉取全部指数估值（历史数据初始化）
+  rpc fetchIndexDailyBasicAllByDateRange(DomesticIndexDailyBasicFetchAllByDateRangeRequest) returns (DomesticIndexDailyBasicFetchAllByDateRangeResponse);
   rpc fetchSwIndustryClassify(DomesticSwIndustryClassifyFetchRequest) returns (DomesticSwIndustryClassifyFetchResponse);
   rpc fetchSwIndustryMemberByL1Code(DomesticSwIndustryMemberFetchByL1CodeRequest) returns (DomesticSwIndustryMemberFetchByL1CodeResponse);
   rpc fetchSwIndustryDailyByTradeDate(DomesticSwIndustryDailyFetchByTradeDateRequest) returns (DomesticSwIndustryDailyFetchByTradeDateResponse);
   rpc fetchSwIndustryDailyByTsCode(DomesticSwIndustryDailyFetchByTsCodeRequest) returns (DomesticSwIndustryDailyFetchByTsCodeResponse);
+  // 批量拉取全部申万行业日线（历史数据初始化）
+  rpc fetchSwIndustryDailyAllByDateRange(DomesticSwIndustryDailyFetchAllByDateRangeRequest) returns (DomesticSwIndustryDailyFetchAllByDateRangeResponse);
   rpc fetchCiIndexMember(DomesticCiIndexMemberFetchRequest) returns (DomesticCiIndexMemberFetchResponse);
   rpc fetchCiIndustryDaily(DomesticCiIndustryDailyFetchRequest) returns (DomesticCiIndustryDailyFetchResponse);
+  // 批量拉取全部中信行业日线（历史数据初始化）
+  rpc fetchCiIndustryDailyAllByDateRange(DomesticCiIndustryDailyFetchAllByDateRangeRequest) returns (DomesticCiIndustryDailyFetchAllByDateRangeResponse);
 }
 
 service DomesticTradeCalendarFetchService {

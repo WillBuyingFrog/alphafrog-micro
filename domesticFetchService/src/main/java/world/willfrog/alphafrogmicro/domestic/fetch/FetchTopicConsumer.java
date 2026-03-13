@@ -206,6 +206,7 @@ public class FetchTopicConsumer {
                     break;
                 case "stock_daily":
                     if (taskSubType == 1) {
+                        // 按交易日期爬取全部股票日线
                         long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
                         int offset = taskParams.getIntValue("offset");
                         int limit = taskParams.getIntValue("limit");
@@ -213,6 +214,18 @@ public class FetchTopicConsumer {
                                 DomesticStockDailyFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDateTimestamp).setOffset(offset).setLimit(limit).build();
                         result = domesticStockFetchService.fetchStockDailyByTradeDate(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        // 按日期范围批量爬取全部（历史数据初始化）
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticStockDailyFetchAllByDateRangeRequest request =
+                                DomesticStockDailyFetchAllByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticStockFetchService.fetchStockDailyAllByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -275,6 +288,18 @@ public class FetchTopicConsumer {
                                         .setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchIndexDailyBasicByTradeDate(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        // 按日期范围批量爬取全部（历史数据初始化）
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticIndexDailyBasicFetchAllByDateRangeRequest request =
+                                DomesticIndexDailyBasicFetchAllByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchIndexDailyBasicAllByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -361,6 +386,18 @@ public class FetchTopicConsumer {
                                         .setOffset(offset).setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchSwIndustryDailyByTsCode(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        // 按日期范围批量爬取全部（历史数据初始化）
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticSwIndustryDailyFetchAllByDateRangeRequest request =
+                                DomesticSwIndustryDailyFetchAllByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(offset).setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchSwIndustryDailyAllByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
@@ -429,6 +466,20 @@ public class FetchTopicConsumer {
                                         .setLimit(limit)
                                         .build();
                         result = domesticIndexFetchService.fetchCiIndustryDaily(request).getFetchedItemsCount();
+                    } else if (taskSubType == 3) {
+                        // 按日期范围批量爬取全部（历史数据初始化）
+                        String startDate = taskParams.getString("start_date");
+                        String endDate = taskParams.getString("end_date");
+                        int offset = taskParams.getIntValue("offset");
+                        int limit = taskParams.getIntValue("limit");
+                        DomesticCiIndustryDailyFetchAllByDateRangeRequest request =
+                                DomesticCiIndustryDailyFetchAllByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate != null ? startDate : "")
+                                        .setEndDate(endDate != null ? endDate : "")
+                                        .setOffset(offset)
+                                        .setLimit(limit)
+                                        .build();
+                        result = domesticIndexFetchService.fetchCiIndustryDailyAllByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
