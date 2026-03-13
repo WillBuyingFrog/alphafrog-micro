@@ -271,14 +271,14 @@ public class DomesticFundStoreUtils {
                             break;
                         case "setup_date":
                             String setupDateStr = item.getString(j);
-                            if (setupDateStr != null) {
-                                pojo.setSetupDate(DateConvertUtils.convertDateStrToLong(setupDateStr, "yyyyMMdd"));
+                            if (setupDateStr != null && !setupDateStr.trim().isEmpty()) {
+                                pojo.setSetupDate(DateConvertUtils.convertFlexibleDateStrToLong(setupDateStr));
                             }
                             break;
                         case "end_date":
                             String endDateStr = item.getString(j);
-                            if (endDateStr != null) {
-                                pojo.setEndDate(DateConvertUtils.convertDateStrToLong(endDateStr, "yyyyMMdd"));
+                            if (endDateStr != null && !endDateStr.trim().isEmpty()) {
+                                pojo.setEndDate(DateConvertUtils.convertFlexibleDateStrToLong(endDateStr));
                             }
                             break;
                         case "employees":

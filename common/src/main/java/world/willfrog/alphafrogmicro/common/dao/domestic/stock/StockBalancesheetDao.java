@@ -17,7 +17,7 @@ public interface StockBalancesheetDao {
             "#{compType}, #{endType}, #{moneyCap}, #{accountsReceiv}, #{inventories}, #{totalCurAssets}, " +
             "#{fixAssets}, #{goodwill}, #{intanAssets}, #{rAndD}, #{totalNca}, #{totalAssets}, " +
             "#{stBorr}, #{acctPayable}, #{totalCurLiab}, #{ltBorr}, #{bondPayable}, #{totalNcl}, #{totalLiab}, " +
-            "#{totalHldrEqyExcMinInt}, #{totalHldrEqyIncMinInt}, #{minorityInt}, #{updateFlag}, #{extended}) " +
+            "#{totalHldrEqyExcMinInt}, #{totalHldrEqyIncMinInt}, #{minorityInt}, #{updateFlag}, #{extended}::jsonb) " +
             "ON CONFLICT (ts_code, end_date, report_type) DO NOTHING")
     int insertStockBalancesheet(StockBalancesheet stockBalancesheet);
 

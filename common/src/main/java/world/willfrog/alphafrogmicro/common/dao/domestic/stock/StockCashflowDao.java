@@ -13,7 +13,7 @@ public interface StockCashflowDao {
             "n_cash_flows_fnc_act, free_cashflow, c_cash_equ_end_period, n_incr_cash_cash_equ, update_flag, extended) " +
             "VALUES (#{tsCode}, #{annDate}, #{fAnnDate}, #{endDate}, #{compType}, " +
             "#{reportType}, #{endType}, #{cFrSaleSg}, #{nCashflowAct}, #{nCashflowInvAct}, " +
-            "#{nCashFlowsFncAct}, #{freeCashflow}, #{cCashEquEndPeriod}, #{nIncrCashCashEqu}, #{updateFlag}, #{extended}) " +
+            "#{nCashFlowsFncAct}, #{freeCashflow}, #{cCashEquEndPeriod}, #{nIncrCashCashEqu}, #{updateFlag}, #{extended}::jsonb) " +
             "ON CONFLICT (ts_code, end_date, report_type) DO NOTHING")
     int insertStockCashflow(StockCashflow stockCashflow);
 

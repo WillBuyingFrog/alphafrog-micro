@@ -15,7 +15,7 @@ public interface StockIncomeDao {
             "VALUES (#{tsCode}, #{annDate}, #{fAnnDate}, #{endDate}, #{reportType}, " +
             "#{compType}, #{endType}, #{basicEps}, #{dilutedEps}, #{totalRevenue}, #{revenue}, #{totalCogs}, " +
             "#{operateProfit}, #{totalProfit}, #{nIncome}, #{nIncomeAttrP}, #{ebit}, #{ebitda}, #{rdExp}, " +
-            "#{updateFlag}, #{extended}) " +
+            "#{updateFlag}, #{extended}::jsonb) " +
             "ON CONFLICT (ts_code, end_date, report_type) DO NOTHING")
     int insertStockIncome(StockIncome stockIncome);
 

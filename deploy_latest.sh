@@ -225,7 +225,7 @@ else
   exit 1
 fi
 
-# 步骤1: 启动基础设施服务（不重建，只确保运行）
+# 步骤1: 启动基础设施服务
 # 如果使用了 --with-infra 或指定了基础设施服务，则重建它们
 if [[ "$WITH_INFRA" == true ]] || [[ "$WITH_ALL" == true ]]; then
   echo "=== Starting infrastructure services (with recreate) ==="
@@ -247,8 +247,9 @@ done
 
 if [[ ${#BUSINESS_TO_RECREATE[@]} -gt 0 ]]; then
   echo "=== Recreating business services: ${BUSINESS_TO_RECREATE[*]} ==="
-  # 去掉 --no-deps，让 docker compose 自动处理依赖关系
-  $DOCKER_COMPOSE up -d --force-recreate "${BUSINESS_TO_RECREATE[@]}"
+  # 使用 --no-deps 避免连锁重建依赖服务
+  # 因为步骤1已经确保了基础设施在运行
+  $DOCKER_COMPOSE up -d --force-recreate --no-deps "${BUSINESS_TO_RECREATE[@]}"
 fi
 
 echo "=== Deployment completed ==="
