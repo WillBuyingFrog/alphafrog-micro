@@ -1,0 +1,9 @@
+# AlphaFrog 数据库迁移工具配置文件
+# 复制此文件为 migrate_config.yml 并填写实际的数据库连接信息
+
+database:
+  host: localhost
+  port: 5432
+  name: alphafrog
+  user: postgres
+  password: your_password_here

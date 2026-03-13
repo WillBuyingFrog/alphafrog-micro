@@ -40,9 +40,12 @@ dubbo:
     name: domestic-fetch-service
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848?username=${NACOS_USER:nacos}&password=${NACOS_PASSWORD:nacos}
+    simplified: true  # 简化注册信息，避免metadata超过1024字符限制
   protocol:
     port: 20882
     name: tri
+  provider:
+    simplify: true    # 简化provider元数据
   consumer:
     check: false
 
