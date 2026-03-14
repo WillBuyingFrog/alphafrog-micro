@@ -145,19 +145,20 @@ services:
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       # Memory Optimization (Compressed)
+      # domestic-stock-service 集成较重（Dubbo+MeiliSearch+Redis），Metaspace 需要更多空间
       JAVA_OPTS: >-
         -XX:+UseSerialGC
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50055:50055"
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:

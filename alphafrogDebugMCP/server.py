@@ -107,7 +107,10 @@ async def _run_ssh(
     timeout_seconds: Optional[int] = None,
     max_bytes: Optional[int] = None,
 ) -> dict:
-    cmd = _ssh_base_args(host) + remote_args
+    # SSH joins multi-arg remote commands with spaces without re-quoting,
+    # so args with spaces/special chars break. Use shlex.join to produce a
+    # single properly-quoted shell command string for the remote shell.
+    cmd = _ssh_base_args(host) + [shlex.join(remote_args)]
     start = time.monotonic()
     proc = await asyncio.create_subprocess_exec(
         *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
@@ -152,15 +155,15 @@ async def remote_docker_ps(host: Optional[str] = None) -> dict:
         dict with: ok, exit_code, duration_ms, items (list of dicts with name/image/status/ports), count.
     """
     resolved = _resolve_host(host)
-    # 只取 4 个核心字段，避免 Labels 等字段导致 token 爆炸
-    format_arg = "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"
+    # 不用 table 前缀：table 模式输出对齐空格而非 tab，无法可靠分割。
+    # 直接用模板输出真实 tab 分隔符，每行即一条记录（无 header 行）。
+    format_arg = "{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"
     result = await _run_ssh(resolved, _docker_cmd() + ["ps", "--format", format_arg])
 
     items = []
     if result["stdout"]:
         lines = result["stdout"].splitlines()
-        # 第一行是 table header，跳过
-        for line in lines[1:]:
+        for line in lines:
             if not line.strip():
                 continue
             parts = line.split("\t")
