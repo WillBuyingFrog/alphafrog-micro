@@ -475,8 +475,10 @@ services:
         limits:
           memory: 768M
     networks:
-      - alphafrog-network
-      - shared-infra          # 加入共享网络，可直接用容器名 shared-qdrant 访问
+      alphafrog-network:
+        priority: 1000        # 高优先级 → 先连接 → eth0 → Dubbo 注册使用此 IP
+      shared-infra:
+        priority: 1           # 低优先级 → eth1，仅用于访问 shared-qdrant 容器
 
   python-sandbox-service:
     image: alphafrog-python-sandbox:latest
