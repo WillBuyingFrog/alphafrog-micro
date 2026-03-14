@@ -484,18 +484,24 @@ services:
       - -c
       - |
           echo "[alphafrog] ========== Network Debug =========="
-          echo "[alphafrog] All IPs: $$(hostname -I)"
-          echo "[alphafrog] Network interfaces:"
-          cat /proc/net/fib_trie 2>/dev/null | head -20 || echo "fib_trie not available"
+          echo "[alphafrog] Reading IPs from /proc/net/fib_trie:"
+          cat /proc/net/fib_trie 2>/dev/null | grep -E "^[[:space:]]*\|--" | grep -v "127\." | head -10
           
-          # 获取非 172.20.x.x 的 IP（alphafrog-network）
-          DUBBO_IP=$$(hostname -I | tr ' ' '\n' | grep -v '^172\.20\.' | grep '^172\.' | head -1)
+          # 从 /proc/net/fib_trie 提取非 172.20.x.x 的 IP（alphafrog-network）
+          # 格式: |-- 172.18.0.8 /32 host LOCAL
+          DUBBO_IP=$$(cat /proc/net/fib_trie 2>/dev/null | grep -E "^[[:space:]]*\|--[[:space:]]*172\.[0-9]+\.[0-9]+\.[0-9]+" | grep -v "172\.20\." | grep "/32 host LOCAL" | head -1 | awk '{print $$2}')
+          
           echo "[alphafrog] Selected DUBBO_IP: $$DUBBO_IP"
           
           if [ -z "$$DUBBO_IP" ]; then
+              echo "[alphafrog] Trying alternative method..."
+              # 备选方案：尝试 ip 命令
+              DUBBO_IP=$$(ip -4 addr show 2>/dev/null | grep inet | grep -v "127.0.0.1" | grep -v "172.20." | awk '{print $$2}' | cut -d/ -f1 | head -1)
+          fi
+          
+          if [ -z "$$DUBBO_IP" ]; then
               echo "[alphafrog] ERROR: Could not detect alphafrog-network IP!"
-              echo "[alphafrog] Falling back to hostname -I"
-              DUBBO_IP=$$(hostname -I | awk '{print $$1}')
+              exit 1
           fi
           
           echo "[alphafrog] Final DUBBO_PROTOCOL_HOST: $$DUBBO_IP"
