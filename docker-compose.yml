@@ -478,31 +478,7 @@ services:
     # external-info-service 连接两个网络：
     #   eth0 = shared-infra (外部网络，Docker 会先连接 external 网络)
     #   eth1 = alphafrog-network (项目内部网络，Dubbo 应该注册到这个网络的 IP)
-    # 使用 wrapper 脚本动态获取 IP 并通过 -D 参数传递给 Dubbo
-    command:
-      - /bin/sh
-      - -c
-      - |
-          echo "[alphafrog] ========== Network Debug =========="
-          
-          # 从 /proc/net/fib_trie 提取 /32 host LOCAL 的 IP（这是容器实际 IP）
-          # 格式可能是: |-- 172.18.0.8 /32 host LOCAL
-          DUBBO_IP=$$(cat /proc/net/fib_trie 2>/dev/null | grep "/32 host LOCAL" | grep "172\." | grep -v "172\.20\." | grep -v "127\." | awk '{print $$2}' | head -1)
-          
-          echo "[alphafrog] Selected DUBBO_IP: $$DUBBO_IP"
-          
-          if [ -z "$$DUBBO_IP" ]; then
-              echo "[alphafrog] ERROR: Could not detect alphafrog-network IP!"
-              cat /proc/net/fib_trie | head -30
-              exit 1
-          fi
-          
-          echo "[alphafrog] Final DUBBO_PROTOCOL_HOST: $$DUBBO_IP"
-          echo "[alphafrog] ========== Starting Java =========="
-          
-          # 设置环境变量并启动 Java
-          export DUBBO_PROTOCOL_HOST="$$DUBBO_IP"
-          exec java -Ddubbo.protocols.tri.host="$$DUBBO_IP" -jar /app/app.jar
+    # IP 获取逻辑已移至 Dockerfile 的 entrypoint.sh
     networks:
       - alphafrog-network
       - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名
