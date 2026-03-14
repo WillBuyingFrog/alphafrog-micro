@@ -67,6 +67,12 @@ external-info:
     prompts:
       market-news-query-template: ${AF_EXTERNAL_INFO_SEARCH_PROMPTS_MARKET_NEWS_QUERY_TEMPLATE:}
 
+alphafrog:
+  rag:
+    fetch:
+      config-file: ${AF_RAG_FETCH_CONFIG_FILE:}
+      config-refresh-interval-ms: ${AF_RAG_FETCH_CONFIG_REFRESH_INTERVAL_MS:10000}
+
 logging:
   level:
     world.willfrog.externalinfo: ${LOGGING_LEVEL_EXTERNAL_INFO:INFO}
