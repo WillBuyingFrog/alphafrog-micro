@@ -77,14 +77,10 @@ public class ResearchReportFetchJob {
         // 按月分段
         LocalDate segStart = start;
         while (!segStart.isAfter(end)) {
-            LocalDate segEnd = segStart.withDayOfMonth(
-                    Math.min(segStart.lengthOfMonth(), segStart.getDayOfMonth() + 30));
+            // 每段到当月末或 end，取较早者
+            LocalDate segEnd = segStart.withDayOfMonth(segStart.lengthOfMonth());
             if (segEnd.isAfter(end)) {
                 segEnd = end;
-            }
-            // 确保 segEnd 不超过当月最后一天
-            if (segEnd.getMonthValue() != segStart.getMonthValue()) {
-                segEnd = segStart.withDayOfMonth(segStart.lengthOfMonth());
             }
 
             try {
