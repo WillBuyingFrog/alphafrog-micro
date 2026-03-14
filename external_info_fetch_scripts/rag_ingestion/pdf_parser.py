@@ -79,21 +79,23 @@ def _parse_aliyun(pdf_bytes: bytes, cfg: Config) -> str:
     api_config.endpoint = cfg.aliyun_doc_parser_endpoint
     client = DocMindClient(api_config)
 
-    tmp_fd, tmp_path = tempfile.mkstemp(suffix=".pdf")
+    tmp_path = ""
     try:
-        with os.fdopen(tmp_fd, "wb") as f:
+        with tempfile.NamedTemporaryFile(suffix=".pdf", delete=False) as f:
             f.write(pdf_bytes)
+            tmp_path = f.name
 
         # 1. 提交任务
-        request = docmind_models.SubmitDocParserJobAdvanceRequest(
-            file_url_object=open(tmp_path, "rb"),
-            file_name="doc.pdf",
-            file_name_extension="pdf",
-            llm_enhancement=True,
-            enhancement_mode="VLM",
-        )
-        runtime = util_models.RuntimeOptions()
-        resp = client.submit_doc_parser_job_advance(request, runtime)
+        with open(tmp_path, "rb") as file_obj:
+            request = docmind_models.SubmitDocParserJobAdvanceRequest(
+                file_url_object=file_obj,
+                file_name="doc.pdf",
+                file_name_extension="pdf",
+                llm_enhancement=True,
+                enhancement_mode="VLM",
+            )
+            runtime = util_models.RuntimeOptions()
+            resp = client.submit_doc_parser_job_advance(request, runtime)
         task_id = resp.body.data.id
 
         # 2. 轮询等待完成
@@ -139,4 +141,5 @@ def _parse_aliyun(pdf_bytes: bytes, cfg: Config) -> str:
 
         return "\n\n".join(parts)
     finally:
-        os.unlink(tmp_path)
+        if tmp_path and os.path.exists(tmp_path):
+            os.unlink(tmp_path)

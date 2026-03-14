@@ -17,7 +17,6 @@ RAG Ingestion 主入口脚本。
   python run.py --doc-type all --limit 50
 """
 import argparse
-import sys
 
 from dotenv import load_dotenv
 from tqdm import tqdm
@@ -29,6 +28,19 @@ from oss_uploader import build_oss_client, upload_markdown
 from chunker import chunk_text
 from embedder import get_embeddings
 from ingest_client import ingest_vectors
+
+
+def parse_pdf_content(pdf_url: str, cfg) -> str:
+    """下载并解析 PDF，失败时输出更明确的阶段信息。"""
+    try:
+        pdf_bytes = download_pdf(pdf_url)
+    except Exception as err:
+        raise RuntimeError(f"failed to download PDF: {err}") from err
+
+    try:
+        return pdf_bytes_to_markdown(pdf_bytes, cfg)
+    except Exception as err:
+        raise RuntimeError(f"failed to parse PDF: {err}") from err
 
 
 def process_announcements(db: DbClient, cfg, oss_client, limit: int):
@@ -50,8 +62,7 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
             if not pdf_url:
                 print(f"  [skip] id={record_id} no PDF url")
                 continue
-            pdf_bytes = download_pdf(pdf_url)
-            markdown_text = pdf_bytes_to_markdown(pdf_bytes, cfg)
+            markdown_text = parse_pdf_content(pdf_url, cfg)
             if not markdown_text.strip():
                 print(f"  [skip] id={record_id} empty markdown")
                 continue
@@ -113,16 +124,17 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
         try:
             # 研报有摘要文本，优先使用摘要；如果有 PDF url 也尝试解析全文
             markdown_text = ""
+            used_abstract_fallback = False
             if pdf_url:
                 try:
-                    pdf_bytes = download_pdf(pdf_url)
-                    markdown_text = pdf_bytes_to_markdown(pdf_bytes, cfg)
+                    markdown_text = parse_pdf_content(pdf_url, cfg)
                 except Exception as pdf_err:
                     print(f"  [warn] id={record_id} PDF parse failed: {pdf_err}")
 
             # 如果全文解析失败，退回到摘要
             if not markdown_text.strip() and abstr:
                 markdown_text = abstr
+                used_abstract_fallback = True
 
             if not markdown_text.strip():
                 print(f"  [skip] id={record_id} no content")
@@ -132,6 +144,7 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
             oss_url = upload_markdown(
                 oss_client, cfg, "research", ts_code or "", trade_date,
                 title, markdown_text,
+                file_extension=".txt" if used_abstract_fallback else ".md",
             )
 
             # c. 更新 DB oss_url
