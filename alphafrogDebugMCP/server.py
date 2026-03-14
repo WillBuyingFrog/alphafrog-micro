@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 import asyncio
-import json
+import asyncpg
 import os
 import re
 import shlex
@@ -143,32 +143,45 @@ async def _run_ssh(
 
 @mcp.tool()
 async def remote_docker_ps(host: Optional[str] = None) -> dict:
-    """List docker containers on the remote host.
+    """List running docker containers on the remote host (compact output).
 
     Args:
         host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
 
     Returns:
-        dict with:
-        - ok/exit_code/timed_out/duration_ms/command/stdout/stderr
-        - items: parsed docker ps rows (list of dicts, when available)
+        dict with: ok, exit_code, duration_ms, items (list of dicts with name/image/status/ports), count.
     """
     resolved = _resolve_host(host)
-    # Quote format to avoid remote shell brace expansion via ssh command string.
-    format_arg = "'{{json .}}'"
+    # 只取 4 个核心字段，避免 Labels 等字段导致 token 爆炸
+    format_arg = "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"
     result = await _run_ssh(resolved, _docker_cmd() + ["ps", "--format", format_arg])
+
     items = []
     if result["stdout"]:
-        for line in result["stdout"].splitlines():
-            line = line.strip()
-            if not line:
+        lines = result["stdout"].splitlines()
+        # 第一行是 table header，跳过
+        for line in lines[1:]:
+            if not line.strip():
                 continue
-            try:
-                items.append(json.loads(line))
-            except json.JSONDecodeError:
-                continue
-    result["items"] = items
-    return result
+            parts = line.split("\t")
+            if len(parts) >= 4:
+                items.append({
+                    "name": parts[0].strip(),
+                    "image": parts[1].strip(),
+                    "status": parts[2].strip(),
+                    "ports": parts[3].strip(),
+                })
+            elif len(parts) >= 1:
+                items.append({"name": parts[0].strip(), "image": "", "status": "", "ports": ""})
+
+    # 不返回原始 stdout（已经解析为 items，stdout 是冗余的）
+    return {
+        "ok": result["ok"],
+        "exit_code": result["exit_code"],
+        "duration_ms": result["duration_ms"],
+        "items": items,
+        "count": len(items),
+    }
 
 
 @mcp.tool()
@@ -279,6 +292,79 @@ async def remote_docker_follow(
     if grep:
         result["stdout"] = _filter_output(result["stdout"], grep)
     return result
+
+
+_ALLOWED_TABLE_PREFIX = "alphafrog_"
+_DANGEROUS_KEYWORDS = re.compile(
+    r'\b(INSERT|UPDATE|DELETE|DROP|CREATE|ALTER|TRUNCATE|GRANT|REVOKE|EXEC|EXECUTE|COPY|VACUUM|MERGE)\b',
+    re.IGNORECASE,
+)
+_TABLE_REF_RE = re.compile(r'\b(?:FROM|JOIN)\s+([a-zA-Z_][a-zA-Z0-9_]*)', re.IGNORECASE)
+_LIMIT_RE = re.compile(r'\bLIMIT\s+\d+\b', re.IGNORECASE)
+_MAX_ROWS = 100
+
+
+def _validate_sql(sql: str) -> Optional[str]:
+    """返回 None 表示通过，返回字符串为拒绝原因。"""
+    stripped = sql.strip()
+    if not stripped.upper().startswith("SELECT"):
+        return "Only SELECT statements are allowed"
+    if _DANGEROUS_KEYWORDS.search(stripped):
+        return "Dangerous keyword detected"
+    tables = _TABLE_REF_RE.findall(stripped)
+    for t in tables:
+        if not t.lower().startswith(_ALLOWED_TABLE_PREFIX):
+            return f"Table '{t}' is not allowed (must start with 'alphafrog_')"
+    return None
+
+
+@mcp.tool()
+async def remote_pg_query(
+    env: str,
+    sql: str,
+) -> dict:
+    """Execute a read-only SELECT query against the alphafrog PostgreSQL database.
+
+    Args:
+        env: Target environment. Must be "test" or "prod".
+        sql: A SELECT statement. Only alphafrog_* tables are allowed. Max 100 rows returned.
+
+    Returns:
+        dict with: ok, columns, rows (list of lists), row_count, truncated.
+    """
+    if env not in ("test", "prod"):
+        return {"ok": False, "error": "env must be 'test' or 'prod'"}
+
+    rejection = _validate_sql(sql)
+    if rejection:
+        return {"ok": False, "error": rejection}
+
+    dsn_key = f"ALPHAFROG_PG_{env.upper()}_DSN"
+    dsn = os.getenv(dsn_key)
+    if not dsn:
+        return {"ok": False, "error": f"Environment variable {dsn_key} is not set"}
+
+    # 强制替换或追加 LIMIT，防止内层查询拉取大量行
+    safe_sql = _LIMIT_RE.sub("", sql.rstrip().rstrip(";")).rstrip()
+    safe_sql = f"{safe_sql} LIMIT {_MAX_ROWS}"
+
+    try:
+        conn = await asyncpg.connect(dsn)
+        try:
+            records = await conn.fetch(safe_sql)
+            columns = list(records[0].keys()) if records else []
+            rows = [list(r.values()) for r in records]
+            return {
+                "ok": True,
+                "columns": columns,
+                "rows": rows,
+                "row_count": len(rows),
+                "truncated": len(rows) >= _MAX_ROWS,
+            }
+        finally:
+            await conn.close()
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
 
 
 if __name__ == "__main__":
