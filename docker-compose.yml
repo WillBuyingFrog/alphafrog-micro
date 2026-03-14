@@ -478,20 +478,20 @@ services:
     # external-info-service 连接两个网络：
     #   eth0 = shared-infra (外部网络，Docker 会先连接 external 网络)
     #   eth1 = alphafrog-network (项目内部网络，Dubbo 应该注册到这个网络的 IP)
-    # 使用 entrypoint 脚本动态获取 IP 并设置 DUBBO_PROTOCOL_HOST 环境变量
-    entrypoint: ["/bin/sh", "-c"]
+    # 使用 wrapper 脚本动态获取 IP 并通过 -D 参数传递给 Dubbo
     command:
+      - /bin/sh
+      - -c
       - |
           echo "[alphafrog] Detecting network interfaces..."
           hostname -I
-          ip addr show 2>/dev/null || echo "ip command not available"
           
           # 获取非 172.20.x.x 的 IP（alphafrog-network）
           DUBBO_IP=$$(hostname -I | tr ' ' '\n' | grep -v '^172\.20\.' | grep '^172\.' | head -1)
           echo "[alphafrog] Detected DUBBO_PROTOCOL_HOST: $$DUBBO_IP"
           
-          export DUBBO_PROTOCOL_HOST="$$DUBBO_IP"
-          exec java -jar /app/app.jar
+          # 使用 -D 参数直接设置系统属性（优先级最高）
+          exec java -Ddubbo.protocols.tri.host="$$DUBBO_IP" -jar /app/app.jar
     networks:
       - alphafrog-network
       - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名

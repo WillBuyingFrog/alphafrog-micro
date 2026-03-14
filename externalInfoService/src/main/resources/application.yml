@@ -8,10 +8,11 @@ spring:
 dubbo:
   application:
     name: external-info-service
-  protocol:
-    name: tri
-    port: 50061
-    host: ${DUBBO_PROTOCOL_HOST:}
+  protocols:
+    tri:
+      name: tri
+      port: 50061
+      host: ${DUBBO_PROTOCOL_HOST:}
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
 
