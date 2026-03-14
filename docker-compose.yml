@@ -466,6 +466,7 @@ services:
       AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
       AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+      DUBBO_PROTOCOL_HOST: ${DUBBO_PROTOCOL_HOST:-}
     volumes:
       - ./externalInfoService/config:/app/config:ro
     ports:
@@ -477,20 +478,20 @@ services:
     # external-info-service 连接两个网络：
     #   eth0 = shared-infra (外部网络，Docker 会先连接 external 网络)
     #   eth1 = alphafrog-network (项目内部网络，Dubbo 应该注册到这个网络的 IP)
-    # 使用 DUBBO_IP_TO_BIND 环境变量显式指定 Dubbo 绑定的 IP 地址
+    # 使用 entrypoint 脚本动态获取 IP 并设置 DUBBO_PROTOCOL_HOST 环境变量
+    entrypoint: ["/bin/sh", "-c"]
     command:
-      - sh
-      - -c
       - |
-          # 动态获取 alphafrog-network 网络的 IP（排除 shared-infra 的 172.20.x.x 网段）
-          DUBBO_IP=$$(ip -4 addr show 2>/dev/null | grep inet | grep -v '127.0.0.1' | grep -v '172\.20\.' | awk '{print $$2}' | cut -d/ -f1 | head -1)
-          if [ -z "$$DUBBO_IP" ]; then
-            DUBBO_IP=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.20\.' | grep '^172\.' | head -1)
-          fi
-          echo "[alphafrog] DUBBO_IP_TO_BIND = $$DUBBO_IP"
-          export DUBBO_IP_TO_BIND="$$DUBBO_IP"
-          export DUBBO_IP_TO_REGISTRY="$$DUBBO_IP"
-          exec java -jar app.jar
+          echo "[alphafrog] Detecting network interfaces..."
+          hostname -I
+          ip addr show 2>/dev/null || echo "ip command not available"
+          
+          # 获取非 172.20.x.x 的 IP（alphafrog-network）
+          DUBBO_IP=$$(hostname -I | tr ' ' '\n' | grep -v '^172\.20\.' | grep '^172\.' | head -1)
+          echo "[alphafrog] Detected DUBBO_PROTOCOL_HOST: $$DUBBO_IP"
+          
+          export DUBBO_PROTOCOL_HOST="$$DUBBO_IP"
+          exec java -jar /app/app.jar
     networks:
       - alphafrog-network
       - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名
