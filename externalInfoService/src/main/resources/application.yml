@@ -81,4 +81,5 @@ alphafrog:
       base-url: ${AF_EMBEDDING_BASE_URL:https://api.openai.com/v1}
       api-key: ${AF_EMBEDDING_API_KEY:}
       model: ${AF_EMBEDDING_MODEL:text-embedding-3-small}
+      # 必须与 P7-03 ingestion 脚本使用的维度一致；默认使用压缩后的 1024 维
       dimensions: ${AF_EMBEDDING_DIMENSIONS:1024}
