@@ -8,4 +8,9 @@ if [ -z "$DUBBO_IP" ]; then
 fi
 
 echo "[alphafrog] Detected DUBBO_IP: $DUBBO_IP"
-exec java -Ddubbo.protocols.tri.host="$DUBBO_IP" -jar /app/app.jar
+
+# Triple 协议需要使用 TRI_DUBBO_IP_TO_BIND 环境变量
+export TRI_DUBBO_IP_TO_BIND="$DUBBO_IP"
+export TRI_DUBBO_IP_TO_REGISTRY="$DUBBO_IP"
+
+exec java -jar /app/app.jar
