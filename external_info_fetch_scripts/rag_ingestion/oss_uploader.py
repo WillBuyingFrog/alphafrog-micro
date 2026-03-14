@@ -28,7 +28,7 @@ def upload_markdown(
     file_extension: str = ".md",
 ) -> str:
     """上传 Markdown 或纯文本到 OSS，返回公网 URL。"""
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff\-]", "_", title)[:60]
+    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]", "_", title)[:60]
     key = (
         f"{cfg.oss_path_prefix}/{doc_type}/"
         f"{ts_code or 'no_code'}/{date}_{safe_title}{file_extension}"
