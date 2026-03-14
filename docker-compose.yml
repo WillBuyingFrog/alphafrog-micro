@@ -474,11 +474,23 @@ services:
       resources:
         limits:
           memory: 768M
+    # external-info-service 连接两个网络：
+    #   eth0 = shared-infra (172.20.x.x) — Docker 外部网络固定先连，Dubbo 默认选 eth0
+    #   eth1 = alphafrog-network (172.18.x.x) — 项目内部网络，其他服务在此网络
+    # command 在启动时探测 172.18.x.x 的 IP 并显式传给 Dubbo，避免注册到错误地址。
+    command:
+      - sh
+      - -c
+      - |
+          DUBBO_IP=$$(ip -4 addr show 2>/dev/null | awk '/inet 172\.18\./{split($$2,a,"/"); print a[1]; exit}')
+          if [ -z "$$DUBBO_IP" ]; then
+            DUBBO_IP=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep '^172\.18\.' | head -1)
+          fi
+          echo "[alphafrog] dubbo.protocol.host = $$DUBBO_IP"
+          exec java -Ddubbo.protocol.host="$$DUBBO_IP" -jar app.jar
     networks:
-      alphafrog-network:
-        priority: 1000        # 高优先级 → 先连接 → eth0 → Dubbo 注册使用此 IP
-      shared-infra:
-        priority: 1           # 低优先级 → eth1，仅用于访问 shared-qdrant 容器
+      - alphafrog-network
+      - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名
 
   python-sandbox-service:
     image: alphafrog-python-sandbox:latest
