@@ -14,8 +14,17 @@ import world.willfrog.alphafrogmicro.common.component.MeiliSearchIndexManager;
 import world.willfrog.alphafrogmicro.common.component.MeiliSearchDataSyncService;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockQuoteDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockIncomeDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockBalancesheetDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockCashflowDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockExpressDao;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockDaily;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockInfo;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockIncome;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockBalancesheet;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockCashflow;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.stock.StockExpress;
+import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockServiceTriple.*;
 
@@ -40,6 +49,10 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
+    private final StockIncomeDao stockIncomeDao;
+    private final StockBalancesheetDao stockBalancesheetDao;
+    private final StockCashflowDao stockCashflowDao;
+    private final StockExpressDao stockExpressDao;
     private final Environment environment;
     private volatile Client meiliClient;
     private volatile String meiliClientHost;
@@ -51,9 +64,17 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
     public DomesticStockServiceImpl(StockInfoDao stockInfoDao,
                                     StockQuoteDao stockQuoteDao,
+                                    StockIncomeDao stockIncomeDao,
+                                    StockBalancesheetDao stockBalancesheetDao,
+                                    StockCashflowDao stockCashflowDao,
+                                    StockExpressDao stockExpressDao,
                                     Environment environment) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
+        this.stockIncomeDao = stockIncomeDao;
+        this.stockBalancesheetDao = stockBalancesheetDao;
+        this.stockCashflowDao = stockCashflowDao;
+        this.stockExpressDao = stockExpressDao;
         this.environment = environment;
     }
 
@@ -489,4 +510,129 @@ public class DomesticStockServiceImpl extends DomesticStockServiceImplBase {
 
         return responseBuilder.build();
     }
+
+    @Override
+    public DomesticStockIncomeQueryResponse queryStockIncome(DomesticStockFinancialQueryRequest request) {
+        String tsCode = request.getTsCode();
+        long startDate = DateConvertUtils.convertDateStrToLong(request.getStartPeriod(), "yyyyMMdd");
+        long endDate = DateConvertUtils.convertDateStrToLong(request.getEndPeriod(), "yyyyMMdd");
+
+        List<StockIncome> rows = stockIncomeDao.getByTsCodeAndEndDateRange(tsCode, startDate, endDate);
+
+        List<StockIncomeItem> items = rows.stream().map(r -> {
+            String endDateStr = DateConvertUtils.convertTimestampToString(r.getEndDate(), "yyyyMMdd");
+            return StockIncomeItem.newBuilder()
+                    .setTsCode(nvl(r.getTsCode()))
+                    .setEndDate(nvl(endDateStr))
+                    .setReportType(nvl(r.getReportType()))
+                    .setTotalRevenue(orZero(r.getTotalRevenue()))
+                    .setRevenue(orZero(r.getRevenue()))
+                    .setNIncome(orZero(r.getNIncome()))
+                    .setNIncomeAttrP(orZero(r.getNIncomeAttrP()))
+                    .setBasicEps(orZero(r.getBasicEps()))
+                    .setEbit(orZero(r.getEbit()))
+                    .setEbitda(orZero(r.getEbitda()))
+                    .setRdExp(orZero(r.getRdExp()))
+                    .build();
+        }).toList();
+
+        return DomesticStockIncomeQueryResponse.newBuilder()
+                .addAllItems(items)
+                .build();
+    }
+
+    @Override
+    public DomesticStockBalancesheetQueryResponse queryStockBalancesheet(DomesticStockFinancialQueryRequest request) {
+        String tsCode = request.getTsCode();
+        long startDate = DateConvertUtils.convertDateStrToLong(request.getStartPeriod(), "yyyyMMdd");
+        long endDate = DateConvertUtils.convertDateStrToLong(request.getEndPeriod(), "yyyyMMdd");
+
+        List<StockBalancesheet> rows = stockBalancesheetDao.getByTsCodeAndEndDateRange(tsCode, startDate, endDate);
+
+        List<StockBalancesheetItem> items = rows.stream().map(r -> {
+            String endDateStr = DateConvertUtils.convertTimestampToString(r.getEndDate(), "yyyyMMdd");
+            return StockBalancesheetItem.newBuilder()
+                    .setTsCode(nvl(r.getTsCode()))
+                    .setEndDate(nvl(endDateStr))
+                    .setReportType(nvl(r.getReportType()))
+                    .setTotalAssets(orZero(r.getTotalAssets()))
+                    .setTotalLiab(orZero(r.getTotalLiab()))
+                    .setTotalCurAssets(orZero(r.getTotalCurAssets()))
+                    .setTotalCurLiab(orZero(r.getTotalCurLiab()))
+                    .setTotalHldrEqyExcMinInt(orZero(r.getTotalHldrEqyExcMinInt()))
+                    .setMoneyCap(orZero(r.getMoneyCap()))
+                    .setInventories(orZero(r.getInventories()))
+                    .setLtBorr(orZero(r.getLtBorr()))
+                    .setStBorr(orZero(r.getStBorr()))
+                    .build();
+        }).toList();
+
+        return DomesticStockBalancesheetQueryResponse.newBuilder()
+                .addAllItems(items)
+                .build();
+    }
+
+    @Override
+    public DomesticStockCashflowQueryResponse queryStockCashflow(DomesticStockFinancialQueryRequest request) {
+        String tsCode = request.getTsCode();
+        long startDate = DateConvertUtils.convertDateStrToLong(request.getStartPeriod(), "yyyyMMdd");
+        long endDate = DateConvertUtils.convertDateStrToLong(request.getEndPeriod(), "yyyyMMdd");
+
+        List<StockCashflow> rows = stockCashflowDao.getByTsCodeAndEndDateRange(tsCode, startDate, endDate);
+
+        List<StockCashflowItem> items = rows.stream().map(r -> {
+            String endDateStr = DateConvertUtils.convertTimestampToString(r.getEndDate(), "yyyyMMdd");
+            return StockCashflowItem.newBuilder()
+                    .setTsCode(nvl(r.getTsCode()))
+                    .setEndDate(nvl(endDateStr))
+                    .setReportType(nvl(r.getReportType()))
+                    .setNCashflowAct(orZero(r.getNCashflowAct()))
+                    .setNCashflowInvAct(orZero(r.getNCashflowInvAct()))
+                    .setNCashFlowsFncAct(orZero(r.getNCashFlowsFncAct()))
+                    .setFreeCashflow(orZero(r.getFreeCashflow()))
+                    .setCFrSaleSg(orZero(r.getCFrSaleSg()))
+                    .build();
+        }).toList();
+
+        return DomesticStockCashflowQueryResponse.newBuilder()
+                .addAllItems(items)
+                .build();
+    }
+
+    @Override
+    public DomesticStockExpressQueryResponse queryStockExpress(DomesticStockFinancialQueryRequest request) {
+        String tsCode = request.getTsCode();
+        long startDate = DateConvertUtils.convertDateStrToLong(request.getStartPeriod(), "yyyyMMdd");
+        long endDate = DateConvertUtils.convertDateStrToLong(request.getEndPeriod(), "yyyyMMdd");
+
+        List<StockExpress> rows = stockExpressDao.getByTsCodeAndEndDateRange(tsCode, startDate, endDate);
+
+        List<StockExpressItem> items = rows.stream().map(r -> {
+            String endDateStr = DateConvertUtils.convertTimestampToString(r.getEndDate(), "yyyyMMdd");
+            String annDateStr = DateConvertUtils.convertTimestampToString(r.getAnnDate(), "yyyyMMdd");
+            return StockExpressItem.newBuilder()
+                    .setTsCode(nvl(r.getTsCode()))
+                    .setEndDate(nvl(endDateStr))
+                    .setAnnDate(nvl(annDateStr))
+                    .setRevenue(orZero(r.getRevenue()))
+                    .setOperateProfit(orZero(r.getOperateProfit()))
+                    .setNIncome(orZero(r.getNIncome()))
+                    .setTotalAssets(orZero(r.getTotalAssets()))
+                    .setTotalHldrEqyExcMinInt(orZero(r.getTotalHldrEqyExcMinInt()))
+                    .setDilutedEps(orZero(r.getDilutedEps()))
+                    .setDilutedRoe(orZero(r.getDilutedRoe()))
+                    .setYoyNetProfit(orZero(r.getYoyNetProfit()))
+                    .setYoySales(orZero(r.getYoySales()))
+                    .setPerfSummary(nvl(r.getPerfSummary()))
+                    .build();
+        }).toList();
+
+        return DomesticStockExpressQueryResponse.newBuilder()
+                .addAllItems(items)
+                .build();
+    }
+
+    private double orZero(Double v) { return v == null ? 0.0 : v; }
+
+    private String nvl(String s) { return s == null ? "" : s; }
 }

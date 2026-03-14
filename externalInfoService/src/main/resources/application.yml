@@ -70,3 +70,14 @@ external-info:
 logging:
   level:
     world.willfrog.externalinfo: ${LOGGING_LEVEL_EXTERNAL_INFO:INFO}
+
+alphafrog:
+  rag:
+    qdrant:
+      host: ${AF_QDRANT_HOST:localhost}
+      port: ${AF_QDRANT_PORT:6334}
+      collection: ${AF_QDRANT_COLLECTION:alphafrog_financial_docs}
+    embedding:
+      base-url: ${AF_EMBEDDING_BASE_URL:https://api.openai.com/v1}
+      api-key: ${AF_EMBEDDING_API_KEY:}
+      model: ${AF_EMBEDDING_MODEL:text-embedding-3-small}
