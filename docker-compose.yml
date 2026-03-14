@@ -196,14 +196,14 @@ services:
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50053:50053"
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:
@@ -241,14 +241,14 @@ services:
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50052:50052"
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:
@@ -292,14 +292,14 @@ services:
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "20882:20882"
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:
@@ -329,12 +329,12 @@ services:
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:
@@ -371,14 +371,14 @@ services:
         -Xss512k
         -Xms64m
         -Xmx200m
-        -XX:MaxRAM=380m
-        -XX:MaxMetaspaceSize=80m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50056:50056"
     deploy:
       resources:
         limits:
-          memory: 450M
+          memory: 512M
         reservations:
           memory: 200M
     networks:
