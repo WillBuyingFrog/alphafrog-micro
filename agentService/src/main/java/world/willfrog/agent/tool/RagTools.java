@@ -17,6 +17,8 @@ import java.util.Map;
 @Component
 public class RagTools {
 
+    private static final int MAX_TOP_K = 10;
+
     @DubboReference
     private ExternalInfoDubboService externalInfoDubboService;
 
@@ -38,7 +40,7 @@ public class RagTools {
         """)
     public String ragSearch(String queryText, String docType, String tsCode, String indName, int topK) {
         try {
-            int k = (topK <= 0 || topK > 10) ? 5 : topK;
+            int k = (topK <= 0 || topK > MAX_TOP_K) ? 5 : topK;
             RagSearchRequest req = RagSearchRequest.newBuilder()
                     .setQueryText(nvl(queryText))
                     .setDocType(nvl(docType))

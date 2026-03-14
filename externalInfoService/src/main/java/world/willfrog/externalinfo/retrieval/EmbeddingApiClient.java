@@ -22,6 +22,9 @@ public class EmbeddingApiClient {
     @Value("${alphafrog.rag.embedding.model:text-embedding-3-small}")
     private String model;
 
+    @Value("${alphafrog.rag.embedding.dimensions:1024}")
+    private int dimensions;
+
     private final RestClient restClient;
 
     public EmbeddingApiClient(RestClient.Builder builder) {
@@ -37,7 +40,7 @@ public class EmbeddingApiClient {
         Map<String, Object> body = Map.of(
                 "model", model,
                 "input", text,
-                "dimensions", 1024
+                "dimensions", dimensions
         );
         Map<?, ?> response = restClient.post()
                 .uri(baseUrl + "/embeddings")
@@ -47,8 +50,17 @@ public class EmbeddingApiClient {
                 .retrieve()
                 .body(Map.class);
 
+        if (response == null || !response.containsKey("data")) {
+            throw new IllegalStateException("Embedding API returned invalid response: missing 'data' field");
+        }
         List<Map<String, Object>> data = (List<Map<String, Object>>) response.get("data");
+        if (data == null || data.isEmpty()) {
+            throw new IllegalStateException("Embedding API returned empty data array");
+        }
         List<Double> raw = (List<Double>) data.get(0).get("embedding");
+        if (raw == null || raw.isEmpty()) {
+            throw new IllegalStateException("Embedding API returned empty embedding vector");
+        }
         return raw.stream().map(Double::floatValue).toList();
     }
 }
