@@ -31,10 +31,14 @@ python server.py
 
 ## Tools
 
-- `remote_docker_ps(host)`
-- `remote_git_log(host, repo_path, limit)`
-- `remote_docker_logs(host, container, tail, since, grep, timestamps, max_bytes, timeout_seconds)`
-- `remote_docker_follow(host, container, follow_seconds, tail, since, grep, timestamps, max_bytes)`
+- `remote_docker_ps(host)` — 列出远程容器（紧凑格式，仅 name/image/status/ports）
+- `remote_git_log(host, repo_path, limit)` — 查看远程 git 日志
+- `remote_docker_logs(host, container, tail, since, grep, timestamps, max_bytes, timeout_seconds)` — 抓取容器日志
+- `remote_docker_follow(host, container, follow_seconds, tail, since, grep, timestamps, max_bytes)` — follow 容器日志（限时）
+- `remote_pg_query(env, sql)` — 在 alphafrog PostgreSQL 中执行只读 SELECT 查询
+  - `env`: `"test"` 或 `"prod"`
+  - `sql`: 仅允许 SELECT；仅允许查询 `alphafrog_*` 前缀表；最多返回 100 行
+  - 需要设置环境变量 `ALPHAFROG_PG_TEST_DSN` / `ALPHAFROG_PG_PROD_DSN`（建议放在 `~/.claude.json`）
 
 Notes:
 - `grep` supports substring match. For regex use `re:<pattern>`.
