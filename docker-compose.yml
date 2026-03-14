@@ -475,19 +475,22 @@ services:
         limits:
           memory: 768M
     # external-info-service 连接两个网络：
-    #   eth0 = shared-infra (172.20.x.x) — Docker 外部网络固定先连，Dubbo 默认选 eth0
-    #   eth1 = alphafrog-network (172.18.x.x) — 项目内部网络，其他服务在此网络
-    # command 在启动时探测 172.18.x.x 的 IP 并显式传给 Dubbo，避免注册到错误地址。
+    #   eth0 = shared-infra (外部网络，Docker 会先连接 external 网络)
+    #   eth1 = alphafrog-network (项目内部网络，Dubbo 应该注册到这个网络的 IP)
+    # 使用 DUBBO_IP_TO_BIND 环境变量显式指定 Dubbo 绑定的 IP 地址
     command:
       - sh
       - -c
       - |
-          DUBBO_IP=$$(ip -4 addr show 2>/dev/null | awk '/inet 172\.18\./{split($$2,a,"/"); print a[1]; exit}')
+          # 动态获取 alphafrog-network 网络的 IP（排除 shared-infra 的 172.20.x.x 网段）
+          DUBBO_IP=$$(ip -4 addr show 2>/dev/null | grep inet | grep -v '127.0.0.1' | grep -v '172\.20\.' | awk '{print $$2}' | cut -d/ -f1 | head -1)
           if [ -z "$$DUBBO_IP" ]; then
-            DUBBO_IP=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep '^172\.18\.' | head -1)
+            DUBBO_IP=$$(hostname -I 2>/dev/null | tr ' ' '\n' | grep -v '^172\.20\.' | grep '^172\.' | head -1)
           fi
-          echo "[alphafrog] dubbo.protocol.host = $$DUBBO_IP"
-          exec java -Ddubbo.protocol.host="$$DUBBO_IP" -jar app.jar
+          echo "[alphafrog] DUBBO_IP_TO_BIND = $$DUBBO_IP"
+          export DUBBO_IP_TO_BIND="$$DUBBO_IP"
+          export DUBBO_IP_TO_REGISTRY="$$DUBBO_IP"
+          exec java -jar app.jar
     networks:
       - alphafrog-network
       - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名
@@ -602,6 +605,10 @@ volumes:
 networks:
   alphafrog-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
   shared-infra:
     name: shared-infra
     external: true            # 不创建，使用已存在的网络（由 ~/infra/docker-compose.yml 管理）
