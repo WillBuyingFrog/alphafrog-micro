@@ -5,12 +5,14 @@ import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.hc.client5.http.classic.methods.HttpGet;
 import org.apache.hc.client5.http.classic.methods.HttpPut;
+import org.apache.hc.client5.http.config.RequestConfig;
 import org.apache.hc.client5.http.impl.classic.CloseableHttpClient;
 import org.apache.hc.client5.http.impl.classic.HttpClients;
 import org.apache.hc.core5.http.ClassicHttpResponse;
 import org.apache.hc.core5.http.ContentType;
 import org.apache.hc.core5.http.io.entity.EntityUtils;
 import org.apache.hc.core5.http.io.entity.StringEntity;
+import org.apache.hc.core5.util.Timeout;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
 
@@ -49,7 +51,7 @@ public class QdrantService {
      */
     @PostConstruct
     public void ensureCollection() {
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = buildHttpClient()) {
             // 先检查 collection 是否存在
             HttpGet getReq = new HttpGet(baseUrl + "/collections/" + collectionName);
             try (ClassicHttpResponse resp = client.execute(getReq)) {
@@ -126,7 +128,7 @@ public class QdrantService {
             return 0;
         }
 
-        try (CloseableHttpClient client = HttpClients.createDefault()) {
+        try (CloseableHttpClient client = buildHttpClient()) {
             Map<String, Object> body = Map.of("points", points);
             HttpPut putReq = new HttpPut(
                     baseUrl + "/collections/" + collectionName + "/points?wait=true"
@@ -149,6 +151,14 @@ public class QdrantService {
             log.error("[QdrantService] Upsert error for doc_id={}: {}", request.getDocId(), e.getMessage(), e);
             return 0;
         }
+    }
+
+    private CloseableHttpClient buildHttpClient() {
+        RequestConfig config = RequestConfig.custom()
+                .setConnectTimeout(Timeout.ofSeconds(5))
+                .setResponseTimeout(Timeout.ofSeconds(20))
+                .build();
+        return HttpClients.custom().setDefaultRequestConfig(config).build();
     }
 
     public String getCollectionName() {
