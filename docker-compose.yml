@@ -463,8 +463,16 @@ services:
       NACOS_ADDRESS: nacos
       AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:-/app/config/search-llm.local.json}
       LOGGING_LEVEL_EXTERNAL_INFO: ${LOGGING_LEVEL_EXTERNAL_INFO:-INFO}
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
       AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
+      AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
+      AF_RAG_FETCH_CONFIG_FILE: ${AF_RAG_FETCH_CONFIG_FILE:-/app/config/rag-fetch.local.json}
+      AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
       DUBBO_PROTOCOL_HOST: ${DUBBO_PROTOCOL_HOST:-}
     volumes:
@@ -574,6 +582,7 @@ services:
       NACOS_ADDRESS: nacos
       # 可选：覆盖 JWT 密钥（默认值在 frontend 的 application.yml 里）
       # AF_JWT_SECRET: ${AF_JWT_SECRET}
+      AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       # Memory Optimization (Medium)
       JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:

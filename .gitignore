@@ -87,6 +87,7 @@ CLAUDE.md
 .env
 agentService/config/agent-llm.local.json
 agentService/config/search-llm.local.json
+externalInfoService/config/rag-fetch.local.json
 
 # container runtime data
 /data
