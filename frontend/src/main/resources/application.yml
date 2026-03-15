@@ -42,6 +42,12 @@ security:
     task-creation-attempts: 10
     task-creation-window-minutes: 60
 
+alphafrog:
+  rag:
+    ingest:
+      admin-token: ${AF_RAG_INGEST_TOKEN:}
+      external-info-service-url: ${AF_EXTERNAL_INFO_SERVICE_URL:http://alphafrog-external-info-service:18096}
+
 dubbo:
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848

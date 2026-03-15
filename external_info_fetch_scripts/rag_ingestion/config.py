@@ -26,9 +26,9 @@ class Config:
     aliyun_doc_parser_endpoint: str      # 阿里云 DocMind endpoint（provider=aliyun 时必填）
     # 注意：阿里云 DocMind 复用 OSS 的 access_key_id / access_key_secret，无需额外字段
 
-    # externalInfoService HTTP ingestion 端点
-    ingest_endpoint: str       # 例如 "http://your-server:18096/rag/ingest"
-    ingest_admin_token: str    # 对应服务端 AF_ADMIN_TOKEN 环境变量
+    # frontend 对外暴露的 RAG ingestion 端点（frontend 内部转发给 externalInfoService）
+    ingest_endpoint: str       # 例如 "http://your-server:8090/rag/ingest"
+    ingest_admin_token: str    # 对应服务端 AF_RAG_INGEST_TOKEN 环境变量
 
 
 def load_config() -> Config:
