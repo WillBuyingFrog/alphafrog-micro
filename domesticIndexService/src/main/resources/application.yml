@@ -6,11 +6,21 @@ spring:
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
   data:
     redis:
       host: ${AF_REDIS_HOST:127.0.0.1}
       port: 6379
       password: ${AF_REDIS_PASSWORD:default}
+
+server:
+  tomcat:
+    threads:
+      max: 20
+      min-spare: 5
 
 mybatis:
   configuration:
