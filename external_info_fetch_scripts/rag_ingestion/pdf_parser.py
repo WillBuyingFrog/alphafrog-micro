@@ -73,8 +73,8 @@ def _parse_aliyun(pdf_bytes: bytes, cfg: Config) -> str:
     from alibabacloud_tea_util import models as util_models
 
     api_config = open_api_models.Config(
-        access_key_id=cfg.oss_access_key_id,
-        access_key_secret=cfg.oss_access_key_secret,
+        access_key_id=cfg.aliyun_access_key_id,
+        access_key_secret=cfg.aliyun_access_key_secret,
     )
     api_config.endpoint = cfg.aliyun_doc_parser_endpoint
     client = DocMindClient(api_config)

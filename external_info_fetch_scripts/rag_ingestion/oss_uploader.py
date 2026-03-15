@@ -1,45 +1,40 @@
 """
-上传 Markdown 到阿里云 OSS（alibabacloud-oss-v2），返回公网 URL。
+将文档内容 POST 给服务端，由服务端经 VPC 内网上传到阿里云 OSS，返回 object key。
+AK/SK 仅保存在服务端，本地脚本不再持有 OSS 凭证。
 """
-import re
-
-import alibabacloud_oss_v2 as oss
+import httpx
 
 from config import Config
 
 
-def build_oss_client(cfg: Config) -> oss.Client:
-    oss_cfg = oss.config.load_default()
-    oss_cfg.credentials_provider = oss.credentials.StaticCredentialsProvider(
-        cfg.oss_access_key_id, cfg.oss_access_key_secret
-    )
-    oss_cfg.region = cfg.oss_region
-    return oss.Client(oss_cfg)
-
-
-def upload_markdown(
-    client: oss.Client,
+def upload_doc(
     cfg: Config,
-    doc_type: str,      # "ann" | "research"
+    doc_type: str,          # "ann" | "research"
     ts_code: str,
-    date: str,           # YYYYMMDD
+    date: str,               # YYYYMMDD
     title: str,
-    markdown_text: str,
+    content: str,            # Markdown 或纯文本内容
     file_extension: str = ".md",
 ) -> str:
-    """上传 Markdown 或纯文本到 OSS，返回公网 URL。"""
-    safe_title = re.sub(r"[^\w\u4e00-\u9fff-]", "_", title)[:60]
-    key = (
-        f"{cfg.oss_path_prefix}/{doc_type}/"
-        f"{ts_code or 'no_code'}/{date}_{safe_title}{file_extension}"
-    )
+    """
+    将文档内容发送给服务端的 /rag/upload-doc 端点，由服务端上传到 OSS。
+    返回 object key，例如 "alphafrog-rag/ann/000001.SZ/20260315_标题.md"。
+    """
+    payload = {
+        "docType": doc_type,
+        "tsCode": ts_code,
+        "date": date,
+        "title": title,
+        "content": content,
+        "fileExtension": file_extension,
+    }
+    headers = {"Authorization": f"Bearer {cfg.ingest_admin_token}"}
 
-    client.put_object(
-        oss.PutObjectRequest(
-            bucket=cfg.oss_bucket,
-            key=key,
-            body=markdown_text.encode("utf-8"),
-            content_type="text/plain; charset=utf-8",
-        )
+    resp = httpx.post(
+        cfg.upload_doc_endpoint,
+        json=payload,
+        headers=headers,
+        timeout=60.0,
     )
-    return f"https://{cfg.oss_bucket}.oss-{cfg.oss_region}.aliyuncs.com/{key}"
+    resp.raise_for_status()
+    return resp.json()["ossKey"]

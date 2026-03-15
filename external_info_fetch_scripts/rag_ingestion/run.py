@@ -6,8 +6,8 @@ RAG Ingestion 主入口脚本。
 1. 从 DB 查 vectorized=FALSE 且 oss_url IS NULL 的记录（公告/研报）
 2. 对每条记录：
    a. 下载 PDF → 云端解析 → Markdown 全文
-   b. 上传 Markdown 到 OSS，获得 oss_url
-   c. 更新 DB：oss_url
+   b. POST 内容给服务端 /rag/upload-doc，服务端经 VPC 内网上传到 OSS，返回 object key
+   c. 更新 DB：oss_url（存储 object key）
    d. 全文切块 → embedding → 调 ingestion 端点写入 Qdrant
    e. 更新 DB：vectorized = TRUE
 
@@ -24,7 +24,7 @@ from tqdm import tqdm
 from config import load_config
 from db_client import DbClient
 from pdf_parser import download_pdf, pdf_bytes_to_markdown
-from oss_uploader import build_oss_client, upload_markdown
+from oss_uploader import upload_doc
 from chunker import chunk_text
 from embedder import get_embeddings
 from ingest_client import ingest_vectors
@@ -43,7 +43,7 @@ def parse_pdf_content(pdf_url: str, cfg) -> str:
         raise RuntimeError(f"failed to parse PDF: {err}") from err
 
 
-def process_announcements(db: DbClient, cfg, oss_client, limit: int):
+def process_announcements(db: DbClient, cfg, limit: int):
     records = db.get_unprocessed_announcements(limit)
     if not records:
         print("[run] No unprocessed announcements found.")
@@ -67,10 +67,8 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
                 print(f"  [skip] id={record_id} empty markdown")
                 continue
 
-            # b. 上传 OSS
-            oss_url = upload_markdown(
-                oss_client, cfg, "ann", ts_code, ann_date, title, markdown_text
-            )
+            # b. 上传 OSS（通过服务端中转）
+            oss_url = upload_doc(cfg, "ann", ts_code, ann_date, title, markdown_text)
 
             # c. 更新 DB oss_url
             db.update_announcement_oss_url(record_id, oss_url)
@@ -106,7 +104,7 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
             print(f"  [error] id={record_id}: {e}")
 
 
-def process_reports(db: DbClient, cfg, oss_client, limit: int):
+def process_reports(db: DbClient, cfg, limit: int):
     records = db.get_unprocessed_reports(limit)
     if not records:
         print("[run] No unprocessed research reports found.")
@@ -140,10 +138,9 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
                 print(f"  [skip] id={record_id} no content")
                 continue
 
-            # b. 上传 OSS
-            oss_url = upload_markdown(
-                oss_client, cfg, "research", ts_code or "", trade_date,
-                title, markdown_text,
+            # b. 上传 OSS（通过服务端中转）
+            oss_url = upload_doc(
+                cfg, "research", ts_code or "", trade_date, title, markdown_text,
                 file_extension=".txt" if used_abstract_fallback else ".md",
             )
 
@@ -200,12 +197,11 @@ def main():
     load_dotenv()
     cfg = load_config()
     db = DbClient(cfg)
-    oss_client = build_oss_client(cfg)
 
     if args.doc_type in ("ann", "all"):
-        process_announcements(db, cfg, oss_client, args.limit)
+        process_announcements(db, cfg, args.limit)
     if args.doc_type in ("research", "all"):
-        process_reports(db, cfg, oss_client, args.limit)
+        process_reports(db, cfg, args.limit)
 
     print("[run] Done.")
 
