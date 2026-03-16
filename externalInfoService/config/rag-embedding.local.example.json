@@ -1,0 +1,6 @@
+{
+  "baseUrl": "https://api.openai.com/v1",
+  "apiKey": "replace-with-your-embedding-api-key",
+  "model": "text-embedding-3-small",
+  "dimensions": 1024
+}

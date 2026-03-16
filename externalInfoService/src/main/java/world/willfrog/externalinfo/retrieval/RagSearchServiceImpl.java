@@ -77,8 +77,10 @@ public class RagSearchServiceImpl {
                         .setTsCode(getString(pl, "ts_code"))
                         .setIndName(getString(pl, "ind_name"))
                         .setTitle(getString(pl, "title"))
-                        .setDate(getString(pl, "date"))
-                        .setChunkText(getString(pl, "chunk_text"))
+                        // ingestion 侧用 ann_date（公告）或 trade_date（研报），且以 BIGINT ms 存储
+                        .setDate(getDate(pl))
+                        // ingestion 侧 chunk 文本存于 "text" 字段
+                        .setChunkText(getString(pl, "text"))
                         .setOssUrl(getString(pl, "oss_url"))
                         .build());
             }
@@ -95,5 +97,29 @@ public class RagSearchServiceImpl {
     private String getString(Map<String, Value> payload, String key) {
         Value v = payload.get(key);
         return v != null ? v.getStringValue() : "";
+    }
+
+    /**
+     * 从 payload 中读取日期值。
+     * ingestion 侧：公告存 "ann_date"、研报存 "trade_date"，均为 BIGINT ms 时间戳。
+     * 优先取 ann_date，其次 trade_date，两者均为整数时直接返回数字字符串。
+     */
+    private String getDate(Map<String, Value> payload) {
+        for (String key : new String[]{"ann_date", "trade_date"}) {
+            Value v = payload.get(key);
+            if (v == null) {
+                continue;
+            }
+            // 字符串类型（兼容未来可能改为字符串存储的情况）
+            String s = v.getStringValue();
+            if (!s.isBlank()) {
+                return s;
+            }
+            // 整数类型（当前 ingestion 以 BIGINT ms 写入）
+            if (v.getIntegerValue() != 0) {
+                return String.valueOf(v.getIntegerValue());
+            }
+        }
+        return "";
     }
 }
