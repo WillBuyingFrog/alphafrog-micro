@@ -35,9 +35,6 @@ def pdf_bytes_to_markdown(pdf_bytes: bytes, cfg: Config) -> str:
 
 # ── 百度文档解析（同步调用） ──────────────────────────────────
 
-_BAIDU_API_URL = "https://aip.baidubce.com/rest/2.0/nlp/v1/layout_parsing"
-
-
 def _parse_baidu(pdf_bytes: bytes, cfg: Config) -> str:
     file_data = base64.b64encode(pdf_bytes).decode("ascii")
     headers = {
@@ -52,9 +49,12 @@ def _parse_baidu(pdf_bytes: bytes, cfg: Config) -> str:
         "useChartRecognition": False,
     }
     response = requests.post(
-        _BAIDU_API_URL, json=payload, headers=headers, timeout=120
+        cfg.baidu_doc_parser_url, json=payload, headers=headers, timeout=120
     )
-    response.raise_for_status()
+    if not response.ok:
+        raise RuntimeError(
+            f"百度文档解析 HTTP {response.status_code}: {response.text[:500]}"
+        )
     results = response.json()["result"]["layoutParsingResults"]
     parts = [
         res["markdown"]["text"]
@@ -73,8 +73,8 @@ def _parse_aliyun(pdf_bytes: bytes, cfg: Config) -> str:
     from alibabacloud_tea_util import models as util_models
 
     api_config = open_api_models.Config(
-        access_key_id=cfg.oss_access_key_id,
-        access_key_secret=cfg.oss_access_key_secret,
+        access_key_id=cfg.aliyun_access_key_id,
+        access_key_secret=cfg.aliyun_access_key_secret,
     )
     api_config.endpoint = cfg.aliyun_doc_parser_endpoint
     client = DocMindClient(api_config)

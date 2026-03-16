@@ -84,6 +84,12 @@ alphafrog:
       qdrant-http-port: ${AF_QDRANT_HTTP_PORT:6333}
       qdrant-collection: ${AF_RAG_QDRANT_COLLECTION:alphafrog_rag}
       embedding-dim: ${AF_RAG_EMBEDDING_DIM:1024}
+    oss:
+      endpoint: ${AF_OSS_ENDPOINT:oss-ap-southeast-1-internal.aliyuncs.com}
+      bucket: ${AF_OSS_BUCKET:}
+      access-key-id: ${AF_OSS_ACCESS_KEY_ID:}
+      access-key-secret: ${AF_OSS_ACCESS_KEY_SECRET:}
+      path-prefix: ${AF_OSS_PATH_PREFIX:alphafrog-rag}
 
 logging:
   level:

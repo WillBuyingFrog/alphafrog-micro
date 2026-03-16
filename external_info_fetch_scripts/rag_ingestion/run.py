@@ -5,9 +5,10 @@ RAG Ingestion 主入口脚本。
 流程：
 1. 从 DB 查 vectorized=FALSE 且 oss_url IS NULL 的记录（公告/研报）
 2. 对每条记录：
-   a. 下载 PDF → 云端解析 → Markdown 全文
-   b. 上传 Markdown 到 OSS，获得 oss_url
-   c. 更新 DB：oss_url
+   a. 用 Jina Reader API 抓取 URL → Markdown 全文
+      （公告为 cninfo 页面，研报为 PDF 直链；无 URL 的研报退回到摘要字段）
+   b. POST 内容给服务端 /rag/upload-doc，服务端经 VPC 内网上传到 OSS，返回 object key
+   c. 更新 DB：oss_url（存储 object key）
    d. 全文切块 → embedding → 调 ingestion 端点写入 Qdrant
    e. 更新 DB：vectorized = TRUE
 
@@ -23,27 +24,14 @@ from tqdm import tqdm
 
 from config import load_config
 from db_client import DbClient
-from pdf_parser import download_pdf, pdf_bytes_to_markdown
-from oss_uploader import build_oss_client, upload_markdown
+from jina_reader import crawl_url
+from oss_uploader import upload_doc
 from chunker import chunk_text
 from embedder import get_embeddings
 from ingest_client import ingest_vectors
 
 
-def parse_pdf_content(pdf_url: str, cfg) -> str:
-    """下载并解析 PDF，失败时输出更明确的阶段信息。"""
-    try:
-        pdf_bytes = download_pdf(pdf_url)
-    except Exception as err:
-        raise RuntimeError(f"failed to download PDF: {err}") from err
-
-    try:
-        return pdf_bytes_to_markdown(pdf_bytes, cfg)
-    except Exception as err:
-        raise RuntimeError(f"failed to parse PDF: {err}") from err
-
-
-def process_announcements(db: DbClient, cfg, oss_client, limit: int):
+def process_announcements(db: DbClient, cfg, limit: int):
     records = db.get_unprocessed_announcements(limit)
     if not records:
         print("[run] No unprocessed announcements found.")
@@ -55,22 +43,26 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
         ts_code = rec["ts_code"]
         ann_date = rec["ann_date"]
         title = rec["title"]
-        pdf_url = rec["url"]
+        url = rec["url"]
 
         try:
-            # a. 下载 PDF → Markdown
-            if not pdf_url:
-                print(f"  [skip] id={record_id} no PDF url")
+            print(f"  [ann] id={record_id} ts_code={ts_code} ann_date={ann_date}")
+            print(f"        title={title!r}")
+            if not url:
+                print(f"  [skip] id={record_id} no url")
                 continue
-            markdown_text = parse_pdf_content(pdf_url, cfg)
-            if not markdown_text.strip():
-                print(f"  [skip] id={record_id} empty markdown")
-                continue
+            print(f"        url={url}")
 
-            # b. 上传 OSS
-            oss_url = upload_markdown(
-                oss_client, cfg, "ann", ts_code, ann_date, title, markdown_text
-            )
+            # a. Jina 爬取公告页面 → Markdown
+            markdown_text = crawl_url(url, cfg)
+            if not markdown_text.strip():
+                print(f"  [skip] id={record_id} empty content from Jina")
+                continue
+            print(f"  [jina] id={record_id} content_len={len(markdown_text)} chars")
+
+            # b. 上传 OSS（通过服务端中转）
+            oss_url = upload_doc(cfg, "ann", ts_code, ann_date, title, markdown_text)
+            print(f"  [oss]  id={record_id} ossKey={oss_url}")
 
             # c. 更新 DB oss_url
             db.update_announcement_oss_url(record_id, oss_url)
@@ -78,7 +70,9 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
             # d. 切块 + embedding + ingest
             chunks = chunk_text(markdown_text)
             if chunks:
+                print(f"  [chunk] id={record_id} chunks={len(chunks)}")
                 embeddings = get_embeddings(chunks, cfg)
+                print(f"  [embed] id={record_id} embeddings={len(embeddings)} dim={len(embeddings[0]) if embeddings else 0}")
                 metadata = {
                     "doc_type": "announcement",
                     "ts_code": ts_code,
@@ -96,17 +90,17 @@ def process_announcements(db: DbClient, cfg, oss_client, limit: int):
                 )
                 if success:
                     db.mark_announcement_vectorized(record_id)
-                    print(f"  [ok] id={record_id} chunks={len(chunks)}")
+                    print(f"  [ok]   id={record_id} done (chunks={len(chunks)})")
                 else:
                     print(f"  [fail] id={record_id} ingest failed")
             else:
-                print(f"  [skip] id={record_id} no chunks")
+                print(f"  [skip] id={record_id} no chunks after chunking")
 
         except Exception as e:
             print(f"  [error] id={record_id}: {e}")
 
 
-def process_reports(db: DbClient, cfg, oss_client, limit: int):
+def process_reports(db: DbClient, cfg, limit: int):
     records = db.get_unprocessed_reports(limit)
     if not records:
         print("[run] No unprocessed research reports found.")
@@ -119,33 +113,39 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
         trade_date = rec["trade_date"]
         title = rec["title"]
         abstr = rec.get("abstr", "")
-        pdf_url = rec.get("url", "")
+        url = rec.get("url", "")
 
         try:
-            # 研报有摘要文本，优先使用摘要；如果有 PDF url 也尝试解析全文
+            print(f"  [rep] id={record_id} ts_code={ts_code} trade_date={trade_date}")
+            print(f"        title={title!r}")
             markdown_text = ""
             used_abstract_fallback = False
-            if pdf_url:
-                try:
-                    markdown_text = parse_pdf_content(pdf_url, cfg)
-                except Exception as pdf_err:
-                    print(f"  [warn] id={record_id} PDF parse failed: {pdf_err}")
 
-            # 如果全文解析失败，退回到摘要
+            # a. 优先用 Jina 爬取 PDF/页面
+            if url:
+                print(f"        url={url}")
+                try:
+                    markdown_text = crawl_url(url, cfg)
+                    print(f"  [jina] id={record_id} content_len={len(markdown_text)} chars")
+                except Exception as crawl_err:
+                    print(f"  [warn] id={record_id} crawl failed: {crawl_err}")
+
+            # 退回到摘要
             if not markdown_text.strip() and abstr:
                 markdown_text = abstr
                 used_abstract_fallback = True
+                print(f"  [fallback] id={record_id} using abstract ({len(abstr)} chars)")
 
             if not markdown_text.strip():
                 print(f"  [skip] id={record_id} no content")
                 continue
 
-            # b. 上传 OSS
-            oss_url = upload_markdown(
-                oss_client, cfg, "research", ts_code or "", trade_date,
-                title, markdown_text,
+            # b. 上传 OSS（通过服务端中转）
+            oss_url = upload_doc(
+                cfg, "research", ts_code or "", trade_date, title, markdown_text,
                 file_extension=".txt" if used_abstract_fallback else ".md",
             )
+            print(f"  [oss]  id={record_id} ossKey={oss_url}")
 
             # c. 更新 DB oss_url
             db.update_report_oss_url(record_id, oss_url)
@@ -153,7 +153,9 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
             # d. 切块 + embedding + ingest
             chunks = chunk_text(markdown_text)
             if chunks:
+                print(f"  [chunk] id={record_id} chunks={len(chunks)}")
                 embeddings = get_embeddings(chunks, cfg)
+                print(f"  [embed] id={record_id} embeddings={len(embeddings)} dim={len(embeddings[0]) if embeddings else 0}")
                 metadata = {
                     "doc_type": "research_report",
                     "ts_code": ts_code or "",
@@ -171,11 +173,11 @@ def process_reports(db: DbClient, cfg, oss_client, limit: int):
                 )
                 if success:
                     db.mark_report_vectorized(record_id)
-                    print(f"  [ok] id={record_id} chunks={len(chunks)}")
+                    print(f"  [ok]   id={record_id} done (chunks={len(chunks)})")
                 else:
                     print(f"  [fail] id={record_id} ingest failed")
             else:
-                print(f"  [skip] id={record_id} no chunks")
+                print(f"  [skip] id={record_id} no chunks after chunking")
 
         except Exception as e:
             print(f"  [error] id={record_id}: {e}")
@@ -200,12 +202,11 @@ def main():
     load_dotenv()
     cfg = load_config()
     db = DbClient(cfg)
-    oss_client = build_oss_client(cfg)
 
     if args.doc_type in ("ann", "all"):
-        process_announcements(db, cfg, oss_client, args.limit)
+        process_announcements(db, cfg, args.limit)
     if args.doc_type in ("research", "all"):
-        process_reports(db, cfg, oss_client, args.limit)
+        process_reports(db, cfg, args.limit)
 
     print("[run] Done.")
 

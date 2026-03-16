@@ -473,6 +473,11 @@ services:
       AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
       AF_RAG_FETCH_CONFIG_FILE: ${AF_RAG_FETCH_CONFIG_FILE:-/app/config/rag-fetch.local.json}
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
+      AF_OSS_ENDPOINT: ${AF_OSS_ENDPOINT:-oss-ap-southeast-1-internal.aliyuncs.com}
+      AF_OSS_BUCKET: ${AF_OSS_BUCKET}
+      AF_OSS_ACCESS_KEY_ID: ${AF_OSS_ACCESS_KEY_ID}
+      AF_OSS_ACCESS_KEY_SECRET: ${AF_OSS_ACCESS_KEY_SECRET}
+      AF_OSS_PATH_PREFIX: ${AF_OSS_PATH_PREFIX:-alphafrog-rag}
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
       DUBBO_PROTOCOL_HOST: ${DUBBO_PROTOCOL_HOST:-}
     volumes:
