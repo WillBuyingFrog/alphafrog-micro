@@ -6,6 +6,10 @@ spring:
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
   rabbitmq:
     host: ${AF_RABBITMQ_HOST:localhost}
     port: ${AF_RABBITMQ_PORT:5672}

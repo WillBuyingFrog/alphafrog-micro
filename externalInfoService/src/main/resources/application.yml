@@ -4,13 +4,20 @@ server:
 spring:
   application:
     name: external-info-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT:5432}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
 
 dubbo:
   application:
     name: external-info-service
-  protocol:
-    name: tri
-    port: 50061
+  protocols:
+    tri:
+      name: tri
+      port: 50061
+      host: ${DUBBO_PROTOCOL_HOST:}
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
 
@@ -66,6 +73,23 @@ external-info:
             category-hint: global
     prompts:
       market-news-query-template: ${AF_EXTERNAL_INFO_SEARCH_PROMPTS_MARKET_NEWS_QUERY_TEMPLATE:}
+
+alphafrog:
+  rag:
+    fetch:
+      config-file: ${AF_RAG_FETCH_CONFIG_FILE:}
+      config-refresh-interval-ms: ${AF_RAG_FETCH_CONFIG_REFRESH_INTERVAL_MS:10000}
+    ingest:
+      qdrant-host: ${AF_QDRANT_HOST:shared-qdrant}
+      qdrant-http-port: ${AF_QDRANT_HTTP_PORT:6333}
+      qdrant-collection: ${AF_RAG_QDRANT_COLLECTION:alphafrog_rag}
+      embedding-dim: ${AF_RAG_EMBEDDING_DIM:1024}
+    oss:
+      endpoint: ${AF_OSS_ENDPOINT:oss-ap-southeast-1-internal.aliyuncs.com}
+      bucket: ${AF_OSS_BUCKET:}
+      access-key-id: ${AF_OSS_ACCESS_KEY_ID:}
+      access-key-secret: ${AF_OSS_ACCESS_KEY_SECRET:}
+      path-prefix: ${AF_OSS_PATH_PREFIX:alphafrog-rag}
 
 logging:
   level:

@@ -144,14 +144,23 @@ services:
       AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
-      # Memory Optimization (Medium)
-      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
+      # Memory Optimization (Compressed)
+      # domestic-stock-service 集成较重（Dubbo+MeiliSearch+Redis），Metaspace 需要更多空间
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50055:50055"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -181,14 +190,22 @@ services:
       AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
-      # Memory Optimization (Medium)
-      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50053:50053"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -218,14 +235,22 @@ services:
       AF_MEILI_API_KEY: ${AF_MEILI_API_KEY:-alphafrog_search_key}
       NACOS_ADDRESS: nacos
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
-      # Memory Optimization (Medium)
-      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50052:50052"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -261,14 +286,22 @@ services:
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       LOGGING_LEVEL_APP: ${LOGGING_LEVEL_APP:-INFO}
       AF_FETCH_CONCURRENCY: ${AF_FETCH_CONCURRENCY:-3}
-      # Memory Optimization (Medium - Adjusted)
-      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "20882:20882"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -290,12 +323,20 @@ services:
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       NACOS_ADDRESS: nacos
       ADMIN_MAGIC_PASSWORD: ${ADMIN_MAGIC_PASSWORD:-frog20191127StartFromBelieving}
-      # Memory Optimization (Light)
-      JAVA_TOOL_OPTIONS: "-Xms256m -Xmx256m"
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     deploy:
       resources:
         limits:
           memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -324,14 +365,22 @@ services:
       NACOS_ADDRESS: nacos
       NACOS_USER: ${NACOS_USER:-nacos}
       NACOS_PASSWORD: ${NACOS_PASSWORD:-nacos}
-      # Memory Optimization (Medium)
-      JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
     ports:
       - "50056:50056"
     deploy:
       resources:
         limits:
-          memory: 768M
+          memory: 512M
+        reservations:
+          memory: 200M
     networks:
       - alphafrog-network
 
@@ -414,7 +463,23 @@ services:
       NACOS_ADDRESS: nacos
       AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:-/app/config/search-llm.local.json}
       LOGGING_LEVEL_EXTERNAL_INFO: ${LOGGING_LEVEL_EXTERNAL_INFO:-INFO}
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
+      AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
+      AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
+      AF_RAG_FETCH_CONFIG_FILE: ${AF_RAG_FETCH_CONFIG_FILE:-/app/config/rag-fetch.local.json}
+      AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
+      AF_OSS_ENDPOINT: ${AF_OSS_ENDPOINT:-oss-ap-southeast-1-internal.aliyuncs.com}
+      AF_OSS_BUCKET: ${AF_OSS_BUCKET}
+      AF_OSS_ACCESS_KEY_ID: ${AF_OSS_ACCESS_KEY_ID}
+      AF_OSS_ACCESS_KEY_SECRET: ${AF_OSS_ACCESS_KEY_SECRET}
+      AF_OSS_PATH_PREFIX: ${AF_OSS_PATH_PREFIX:-alphafrog-rag}
       JAVA_TOOL_OPTIONS: "-Xms256m -Xmx512m"
+      DUBBO_PROTOCOL_HOST: ${DUBBO_PROTOCOL_HOST:-}
     volumes:
       - ./externalInfoService/config:/app/config:ro
     ports:
@@ -423,8 +488,13 @@ services:
       resources:
         limits:
           memory: 768M
+    # external-info-service 连接两个网络：
+    #   eth0 = shared-infra (外部网络，Docker 会先连接 external 网络)
+    #   eth1 = alphafrog-network (项目内部网络，Dubbo 应该注册到这个网络的 IP)
+    # IP 获取逻辑已移至 Dockerfile 的 entrypoint.sh
     networks:
       - alphafrog-network
+      - shared-infra          # eth1，仅用于 DNS 解析 shared-qdrant 容器名
 
   python-sandbox-service:
     image: alphafrog-python-sandbox:latest
@@ -517,6 +587,7 @@ services:
       NACOS_ADDRESS: nacos
       # 可选：覆盖 JWT 密钥（默认值在 frontend 的 application.yml 里）
       # AF_JWT_SECRET: ${AF_JWT_SECRET}
+      AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       # Memory Optimization (Medium)
       JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
@@ -536,3 +607,10 @@ volumes:
 networks:
   alphafrog-network:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.18.0.0/16
+          gateway: 172.18.0.1
+  shared-infra:
+    name: shared-infra
+    external: true            # 不创建，使用已存在的网络（由 ~/infra/docker-compose.yml 管理）
