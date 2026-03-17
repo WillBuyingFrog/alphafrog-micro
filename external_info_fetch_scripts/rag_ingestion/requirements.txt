@@ -8,6 +8,7 @@ psycopg2-binary>=2.9.9
 # 工具
 python-dotenv>=1.0.0
 tqdm>=4.67.0
+PyYAML>=6.0
 
 # ── 以下为未来多模态 RAG 预留，当前不使用 ──────────────────────
 # 阿里云 DocMind 文档解析 SDK
