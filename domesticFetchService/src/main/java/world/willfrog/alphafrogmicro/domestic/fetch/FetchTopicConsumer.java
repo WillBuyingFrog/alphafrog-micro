@@ -9,7 +9,11 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.domestic.fetch.config.DomesticFetchRabbitConfig;
+import world.willfrog.alphafrogmicro.domestic.fetch.rag.RagAnnouncementFetchJob;
+import world.willfrog.alphafrogmicro.domestic.fetch.rag.RagResearchReportFetchJob;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
+
+import java.util.List;
 
 @Service
 @Slf4j
@@ -19,17 +23,23 @@ public class FetchTopicConsumer {
     private final DomesticFundFetchServiceImpl domesticFundFetchService;
     private final DomesticStockFetchServiceImpl domesticStockFetchService;
     private final DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
+    private final RagAnnouncementFetchJob annJob;
+    private final RagResearchReportFetchJob reportJob;
     private final RabbitTemplate rabbitTemplate;
 
     public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
                               DomesticFundFetchServiceImpl domesticFundFetchService,
                               DomesticStockFetchServiceImpl domesticStockFetchService,
                               DomesticTradeCalendarFetchService domesticTradeCalendarFetchService,
+                              RagAnnouncementFetchJob annJob,
+                              RagResearchReportFetchJob reportJob,
                               RabbitTemplate rabbitTemplate) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
         this.domesticStockFetchService = domesticStockFetchService;
         this.domesticTradeCalendarFetchService = domesticTradeCalendarFetchService;
+        this.annJob = annJob;
+        this.reportJob = reportJob;
         this.rabbitTemplate = rabbitTemplate;
     }
 
@@ -780,6 +790,22 @@ public class FetchTopicConsumer {
                         result = -1;
                     }
                     break;
+
+                case "rag_ann_fetch": {
+                    String startDate = taskParams.getString("start_date");
+                    String endDate = taskParams.getString("end_date");
+                    String titleFilter = taskParams.getString("title_filter"); // null 若未传
+                    result = annJob.fetchRange(startDate, endDate, titleFilter);
+                    break;
+                }
+                case "rag_report_fetch": {
+                    String startDate = taskParams.getString("start_date");
+                    String endDate = taskParams.getString("end_date");
+                    com.alibaba.fastjson.JSONArray indArr = taskParams.getJSONArray("industries");
+                    List<String> industries = indArr != null ? indArr.toJavaList(String.class) : List.of();
+                    result = reportJob.fetchRange(startDate, endDate, industries);
+                    break;
+                }
 
                 default:
                     result = -2;

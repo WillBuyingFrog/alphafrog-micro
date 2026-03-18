@@ -49,22 +49,38 @@ public class RagAnnouncementFetchJob {
     /**
      * 按日期范围拉取公告（供初始化历史数据或手动触发使用）。
      * 每天单独调用一次 API，支持 offset 分页。
+     *
+     * @return 总插入条数
      */
-    public void fetchRange(String startDate, String endDate) {
+    public int fetchRange(String startDate, String endDate) {
+        return fetchRange(startDate, endDate, (String) null);
+    }
+
+    /**
+     * 按日期范围拉取公告，支持 Tushare title LIKE 过滤（如 {@code %年度报告%}）。
+     *
+     * @param startDate   开始日期 YYYYMMDD
+     * @param endDate     结束日期 YYYYMMDD
+     * @param titleFilter 标题 LIKE 过滤条件，null 或空则不过滤
+     * @return 总插入条数
+     */
+    public int fetchRange(String startDate, String endDate, String titleFilter) {
         LocalDate start = LocalDate.parse(startDate, DATE_FMT);
         LocalDate end = LocalDate.parse(endDate, DATE_FMT);
+        int total = 0;
 
         for (LocalDate date = start; !date.isAfter(end); date = date.plusDays(1)) {
             String dateStr = date.format(DATE_FMT);
             try {
-                fetchSingleDay(dateStr);
+                total += fetchSingleDay(dateStr, titleFilter);
             } catch (Exception e) {
                 log.error("[RagAnnouncementFetchJob] 抓取 date={} 失败: {}", dateStr, e.getMessage(), e);
             }
         }
+        return total;
     }
 
-    private void fetchSingleDay(String dateStr) {
+    private int fetchSingleDay(String dateStr, String titleFilter) {
         int offset = 0;
         int totalInserted = 0;
 
@@ -75,6 +91,9 @@ public class RagAnnouncementFetchJob {
             Map<String, Object> apiParams = new LinkedHashMap<>();
             apiParams.put("start_date", dateStr);
             apiParams.put("end_date", dateStr);
+            if (titleFilter != null && !titleFilter.isBlank()) {
+                apiParams.put("title", titleFilter);
+            }
             apiParams.put("offset", offset);
             apiParams.put("limit", PAGE_LIMIT);
             params.put("params", apiParams);
@@ -119,6 +138,7 @@ public class RagAnnouncementFetchJob {
             offset += items.size();
         }
 
-        log.info("[RagAnnouncementFetchJob] date={} totalInserted={}", dateStr, totalInserted);
+        log.info("[RagAnnouncementFetchJob] date={} titleFilter={} totalInserted={}", dateStr, titleFilter, totalInserted);
+        return totalInserted;
     }
 }

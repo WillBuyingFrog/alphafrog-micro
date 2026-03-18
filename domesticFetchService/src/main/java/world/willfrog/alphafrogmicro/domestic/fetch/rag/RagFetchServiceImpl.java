@@ -12,7 +12,12 @@ import java.util.concurrent.CompletableFuture;
 /**
  * RAG 元数据抓取 Dubbo 服务实现。
  * 接收 frontend 通过 Dubbo RPC 发来的触发请求，异步执行公告/研报抓取任务。
+ *
+ * @deprecated 对应的触发路径 {@code POST /rag/fetch/trigger} 已废弃，
+ *             请改用 {@code POST /tasks/create}（task_name=rag_ann_fetch 或 rag_report_fetch），
+ *             此类将在下一阶段随旧接口一并删除。
  */
+@Deprecated
 @DubboService
 @Slf4j
 public class RagFetchServiceImpl extends DubboRagFetchServiceTriple.RagFetchServiceImplBase {

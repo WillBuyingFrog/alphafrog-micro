@@ -20,7 +20,11 @@ import java.util.Map;
  * RAG 元数据抓取触发入口（公网侧）。
  *
  * <p>校验 Bearer token，通过后通过 Dubbo 调用 domesticFetchService 的 RagFetchService 异步执行。
+ *
+ * @deprecated 请改用 {@code POST /tasks/create}（task_name=rag_ann_fetch 或 rag_report_fetch），
+ *             此接口将在下一阶段删除。
  */
+@Deprecated
 @RestController
 @RequestMapping("/rag")
 @Slf4j
@@ -32,6 +36,7 @@ public class RagFetchTriggerController {
     @DubboReference
     private RagFetchService ragFetchService;
 
+    @Deprecated
     @PostMapping("/fetch/trigger")
     public ResponseEntity<?> trigger(
             @RequestHeader(value = "Authorization", required = false) String authHeader,

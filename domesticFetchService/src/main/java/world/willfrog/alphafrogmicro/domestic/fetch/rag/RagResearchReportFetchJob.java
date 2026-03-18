@@ -52,10 +52,12 @@ public class RagResearchReportFetchJob {
      * @param startDate 开始日期 YYYYMMDD
      * @param endDate   结束日期 YYYYMMDD
      * @param indName   行业名称，null 表示全量
+     * @return 总插入条数
      */
-    public void fetchRange(String startDate, String endDate, String indName) {
+    public int fetchRange(String startDate, String endDate, String indName) {
         LocalDate start = LocalDate.parse(startDate, DATE_FMT);
         LocalDate end = LocalDate.parse(endDate, DATE_FMT);
+        int total = 0;
 
         // 按月分段，避免单次数据量过大
         LocalDate segStart = start;
@@ -65,34 +67,38 @@ public class RagResearchReportFetchJob {
                 segEnd = end;
             }
             try {
-                fetchSegment(segStart.format(DATE_FMT), segEnd.format(DATE_FMT), indName);
+                total += fetchSegment(segStart.format(DATE_FMT), segEnd.format(DATE_FMT), indName);
             } catch (Exception e) {
                 log.error("[RagResearchReportFetchJob] 分段抓取失败 {}-{} ind={}: {}",
                         segStart.format(DATE_FMT), segEnd.format(DATE_FMT), indName, e.getMessage(), e);
             }
             segStart = segEnd.plusDays(1);
         }
+        return total;
     }
 
     /**
-     * 按日期范围和行业列表拉取研报（供 RagFetchServiceImpl 调用）。
+     * 按日期范围和行业列表拉取研报（供 FetchTopicConsumer / RagFetchServiceImpl 调用）。
      * 若列表为空则全量不过滤；否则对每个行业分别拉取。
      *
      * @param startDate  开始日期 YYYYMMDD
      * @param endDate    结束日期 YYYYMMDD
      * @param industries 行业列表，空列表或 null 表示全量
+     * @return 总插入条数
      */
-    public void fetchRange(String startDate, String endDate, List<String> industries) {
+    public int fetchRange(String startDate, String endDate, List<String> industries) {
         if (industries == null || industries.isEmpty()) {
-            fetchRange(startDate, endDate, (String) null);
+            return fetchRange(startDate, endDate, (String) null);
         } else {
+            int total = 0;
             for (String indName : industries) {
-                fetchRange(startDate, endDate, indName);
+                total += fetchRange(startDate, endDate, indName);
             }
+            return total;
         }
     }
 
-    private void fetchSegment(String startDate, String endDate, String indName) {
+    private int fetchSegment(String startDate, String endDate, String indName) {
         int offset = 0;
         int totalInserted = 0;
 
@@ -153,5 +159,6 @@ public class RagResearchReportFetchJob {
 
         log.info("[RagResearchReportFetchJob] {}-{} ind={} totalInserted={}",
                 startDate, endDate, indName, totalInserted);
+        return totalInserted;
     }
 }
