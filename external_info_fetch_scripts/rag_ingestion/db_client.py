@@ -34,10 +34,11 @@ class DbClient:
         date_from: str = None,
         date_to: str = None,
         ts_code: str = None,
+        title_patterns: list = None,
     ):
         """查询 vectorized=FALSE 且 oss_url IS NULL 的公告记录。
 
-        可选过滤：ann_date 起止（YYYYMMDD 字符串）、ts_code 精确匹配。
+        可选过滤：ann_date 起止（YYYYMMDD 字符串）、ts_code 精确匹配、title_patterns 模糊匹配（OR 关系）。
         """
         conditions = ["vectorized = FALSE", "oss_url IS NULL"]
         params: list = []
@@ -51,6 +52,10 @@ class DbClient:
         if ts_code:
             conditions.append("ts_code = %s")
             params.append(ts_code)
+        if title_patterns:
+            clauses = " OR ".join(["title LIKE %s"] * len(title_patterns))
+            conditions.append(f"({clauses})")
+            params.extend([f"%{p}%" for p in title_patterns])
         where = " AND ".join(conditions)
         params.extend([limit, offset])
         sql = (
@@ -88,10 +93,11 @@ class DbClient:
         date_from: str = None,
         date_to: str = None,
         ts_code: str = None,
+        title_patterns: list = None,
     ):
         """查询 vectorized=FALSE 且 oss_url IS NULL 的研报记录。
 
-        可选过滤：trade_date 起止（YYYYMMDD 字符串）、ts_code 精确匹配。
+        可选过滤：trade_date 起止（YYYYMMDD 字符串）、ts_code 精确匹配、title_patterns 模糊匹配（OR 关系）。
         """
         conditions = ["vectorized = FALSE", "oss_url IS NULL"]
         params: list = []
@@ -105,6 +111,10 @@ class DbClient:
         if ts_code:
             conditions.append("ts_code = %s")
             params.append(ts_code)
+        if title_patterns:
+            clauses = " OR ".join(["title LIKE %s"] * len(title_patterns))
+            conditions.append(f"({clauses})")
+            params.extend([f"%{p}%" for p in title_patterns])
         where = " AND ".join(conditions)
         params.extend([limit, offset])
         sql = (

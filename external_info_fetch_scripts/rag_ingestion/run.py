@@ -45,6 +45,7 @@ def process_announcements(
     date_from: str = None,
     date_to: str = None,
     ts_code: str = None,
+    title_patterns: list = None,
 ):
     records = db.get_unprocessed_announcements(
         limit=limit,
@@ -52,6 +53,7 @@ def process_announcements(
         date_from=date_from or None,
         date_to=date_to or None,
         ts_code=ts_code or None,
+        title_patterns=title_patterns or None,
     )
     if not records:
         print("[run] No unprocessed announcements found.")
@@ -128,6 +130,7 @@ def process_reports(
     date_from: str = None,
     date_to: str = None,
     ts_code: str = None,
+    title_patterns: list = None,
 ):
     records = db.get_unprocessed_reports(
         limit=limit,
@@ -135,6 +138,7 @@ def process_reports(
         date_from=date_from or None,
         date_to=date_to or None,
         ts_code=ts_code or None,
+        title_patterns=title_patterns or None,
     )
     if not records:
         print("[run] No unprocessed research reports found.")
@@ -226,18 +230,21 @@ def run_task(task: dict, db: DbClient, cfg):
     ts_code = task.get("ts_code") or None
     limit = int(task.get("limit", 50))
     offset = int(task.get("offset", 0))
+    title_patterns = task.get("title_patterns") or None
 
     print(f"\n{'='*60}")
     print(f"[task] {name!r}  doc_type={doc_type}  date_from={date_from}  date_to={date_to}")
-    print(f"       ts_code={ts_code}  limit={limit}  offset={offset}")
+    print(f"       ts_code={ts_code}  limit={limit}  offset={offset}  title_patterns={title_patterns}")
     print(f"{'='*60}")
 
     if doc_type in ("ann", "all"):
         process_announcements(db, cfg, limit=limit, offset=offset,
-                              date_from=date_from, date_to=date_to, ts_code=ts_code)
+                              date_from=date_from, date_to=date_to, ts_code=ts_code,
+                              title_patterns=title_patterns)
     if doc_type in ("research", "all"):
         process_reports(db, cfg, limit=limit, offset=offset,
-                        date_from=date_from, date_to=date_to, ts_code=ts_code)
+                        date_from=date_from, date_to=date_to, ts_code=ts_code,
+                        title_patterns=title_patterns)
 
 
 def run_from_task_config(task_config_path: str, db: DbClient, cfg):
@@ -305,6 +312,14 @@ def main():
         default=None,
         help="股票代码精确过滤（如 000001.SZ），仅在未指定 --task-config 时生效",
     )
+    parser.add_argument(
+        "--title-pattern",
+        metavar="PATTERN",
+        action="append",
+        dest="title_pattern",
+        default=None,
+        help="title 子串过滤（可重复指定，OR 关系），仅在未指定 --task-config 时生效。例：--title-pattern 年度公告 --title-pattern 年度报告",
+    )
     args = parser.parse_args()
 
     load_dotenv()
@@ -323,6 +338,7 @@ def main():
                 date_from=args.date_from,
                 date_to=args.date_to,
                 ts_code=args.ts_code,
+                title_patterns=args.title_pattern,
             )
         if args.doc_type in ("research", "all"):
             process_reports(
@@ -332,6 +348,7 @@ def main():
                 date_from=args.date_from,
                 date_to=args.date_to,
                 ts_code=args.ts_code,
+                title_patterns=args.title_pattern,
             )
         print("[run] Done.")
 
