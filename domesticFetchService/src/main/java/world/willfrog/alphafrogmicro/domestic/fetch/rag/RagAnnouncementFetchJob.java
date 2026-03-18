@@ -1,10 +1,11 @@
-package world.willfrog.externalinfo.ingestion.tushare;
+package world.willfrog.alphafrogmicro.domestic.fetch.rag;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
@@ -15,13 +16,13 @@ import java.util.Map;
 
 /**
  * 定时拉取上市公司公告元数据（TuShare anns_d 接口）并存入 DB。
+ * 从 externalInfoService 迁移，使用 domesticFetchService 统一的 TuShareRequestUtils。
  */
 @Component
 @Slf4j
-public class AnnouncementFetchJob {
+public class RagAnnouncementFetchJob {
 
-    private final RagFetchLocalConfigLoader configLoader;
-    private final TuShareRagApiClient apiClient;
+    private final TuShareRequestUtils tuShareRequestUtils;
     private final RagAnnouncementDao announcementDao;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
@@ -29,11 +30,9 @@ public class AnnouncementFetchJob {
     private static final String FIELDS = "ann_date,ts_code,name,title,url,rec_time";
     private static final int PAGE_LIMIT = 2000;
 
-    public AnnouncementFetchJob(RagFetchLocalConfigLoader configLoader,
-                                TuShareRagApiClient apiClient,
-                                RagAnnouncementDao announcementDao) {
-        this.configLoader = configLoader;
-        this.apiClient = apiClient;
+    public RagAnnouncementFetchJob(TuShareRequestUtils tuShareRequestUtils,
+                                   RagAnnouncementDao announcementDao) {
+        this.tuShareRequestUtils = tuShareRequestUtils;
         this.announcementDao = announcementDao;
     }
 
@@ -42,11 +41,8 @@ public class AnnouncementFetchJob {
      */
     @Scheduled(cron = "0 0 6 * * *")
     public void incrementalFetch() {
-        if (configLoader.current().map(c -> !c.isEnabled()).orElse(true)) {
-            return;
-        }
         String yesterday = LocalDate.now().minusDays(1).format(DATE_FMT);
-        log.info("[AnnouncementFetchJob] incremental fetch for date={}", yesterday);
+        log.info("[RagAnnouncementFetchJob] 增量抓取 date={}", yesterday);
         fetchRange(yesterday, yesterday);
     }
 
@@ -63,7 +59,7 @@ public class AnnouncementFetchJob {
             try {
                 fetchSingleDay(dateStr);
             } catch (Exception e) {
-                log.error("[AnnouncementFetchJob] failed to fetch date={}: {}", dateStr, e.getMessage(), e);
+                log.error("[RagAnnouncementFetchJob] 抓取 date={} 失败: {}", dateStr, e.getMessage(), e);
             }
         }
     }
@@ -84,27 +80,23 @@ public class AnnouncementFetchJob {
             params.put("params", apiParams);
             params.put("fields", FIELDS);
 
-            JSONObject resp = apiClient.post(params);
+            JSONObject resp = tuShareRequestUtils.createTusharePostRequest(params);
             if (resp == null) {
-                log.warn("[AnnouncementFetchJob] null response for date={} offset={}", dateStr, offset);
+                log.warn("[RagAnnouncementFetchJob] 响应为空 date={} offset={}", dateStr, offset);
                 break;
             }
 
             Integer code = resp.getInteger("code");
             if (code == null || code != 0) {
-                log.warn("[AnnouncementFetchJob] API error for date={}: code={}, msg={}",
+                log.warn("[RagAnnouncementFetchJob] API 错误 date={}: code={}, msg={}",
                         dateStr, code, resp.getString("msg"));
                 break;
             }
 
             JSONObject data = resp.getJSONObject("data");
-            if (data == null) {
-                break;
-            }
+            if (data == null) break;
             JSONArray items = data.getJSONArray("items");
-            if (items == null || items.isEmpty()) {
-                break;
-            }
+            if (items == null || items.isEmpty()) break;
 
             List<List<String>> records = new ArrayList<>();
             for (int i = 0; i < items.size(); i++) {
@@ -120,15 +112,13 @@ public class AnnouncementFetchJob {
 
             int inserted = announcementDao.batchUpsert(records);
             totalInserted += inserted;
-            log.info("[AnnouncementFetchJob] date={} offset={} fetched={} inserted={}",
+            log.info("[RagAnnouncementFetchJob] date={} offset={} fetched={} inserted={}",
                     dateStr, offset, items.size(), inserted);
 
-            if (items.size() < PAGE_LIMIT) {
-                break;
-            }
+            if (items.size() < PAGE_LIMIT) break;
             offset += items.size();
         }
 
-        log.info("[AnnouncementFetchJob] date={} totalInserted={}", dateStr, totalInserted);
+        log.info("[RagAnnouncementFetchJob] date={} totalInserted={}", dateStr, totalInserted);
     }
 }

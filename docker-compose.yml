@@ -471,7 +471,6 @@ services:
       AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
       AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
       AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
-      AF_RAG_FETCH_CONFIG_FILE: ${AF_RAG_FETCH_CONFIG_FILE:-/app/config/rag-fetch.local.json}
       AF_RAG_EMBEDDING_CONFIG_FILE: ${AF_RAG_EMBEDDING_CONFIG_FILE:-/app/config/rag-embedding.local.json}
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       AF_OSS_ENDPOINT: ${AF_OSS_ENDPOINT:-oss-ap-southeast-1-internal.aliyuncs.com}

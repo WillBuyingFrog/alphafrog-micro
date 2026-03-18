@@ -1,4 +1,4 @@
-package world.willfrog.externalinfo.ingestion.tushare;
+package world.willfrog.alphafrogmicro.domestic.fetch.rag;
 
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -9,6 +9,10 @@ import java.util.List;
 import java.util.Map;
 import java.util.TimeZone;
 
+/**
+ * 公告元数据 DAO，负责写入 alphafrog_rag_announcement 表。
+ * 从 externalInfoService 迁移至 domesticFetchService。
+ */
 @Repository
 @Slf4j
 public class RagAnnouncementDao {
@@ -39,7 +43,7 @@ public class RagAnnouncementDao {
             if (row == null || row.size() < 6) {
                 continue;
             }
-            // fields order: ann_date(0), ts_code(1), name(2), title(3), url(4), rec_time(5)
+            // 字段顺序：ann_date(0), ts_code(1), name(2), title(3), url(4), rec_time(5)
             String annDateStr = row.get(0);
             String tsCode = row.get(1);
             String name = row.get(2);
@@ -51,7 +55,7 @@ public class RagAnnouncementDao {
                 int affected = jdbcTemplate.update(sql, tsCode, name, annDateMs, title, url, recTime);
                 inserted += affected;
             } catch (Exception e) {
-                log.warn("Failed to insert announcement: ts_code={}, ann_date={}, title={}: {}",
+                log.warn("插入公告失败: ts_code={}, ann_date={}, title={}: {}",
                         tsCode, annDateStr, title, e.getMessage());
             }
         }
@@ -72,8 +76,17 @@ public class RagAnnouncementDao {
     }
 
     /**
+     * 查询待处理（vectorized=FALSE 且 oss_url IS NULL）的记录。
+     */
+    public List<Map<String, Object>> findUnprocessed(int limit) {
+        return jdbcTemplate.queryForList(
+                "SELECT id, ts_code, ann_date, title, url FROM alphafrog_rag_announcement " +
+                        "WHERE vectorized = FALSE AND oss_url IS NULL ORDER BY id LIMIT ?",
+                limit);
+    }
+
+    /**
      * 将 YYYYMMDD 字符串转换为 Asia/Shanghai 00:00:00 毫秒时间戳。
-     * 与项目 DateConvertUtils.convertDateStrToLong 保持一致。
      */
     private static long parseDateToMs(String yyyymmdd) {
         if (yyyymmdd == null || yyyymmdd.isBlank()) return -1L;
@@ -84,15 +97,5 @@ public class RagAnnouncementDao {
         } catch (Exception e) {
             return -1L;
         }
-    }
-
-    /**
-     * 查询待处理（vectorized=FALSE 且 oss_url IS NULL）的记录。
-     */
-    public List<Map<String, Object>> findUnprocessed(int limit) {
-        return jdbcTemplate.queryForList(
-                "SELECT id, ts_code, ann_date, title, url FROM alphafrog_rag_announcement " +
-                        "WHERE vectorized = FALSE AND oss_url IS NULL ORDER BY id LIMIT ?",
-                limit);
     }
 }

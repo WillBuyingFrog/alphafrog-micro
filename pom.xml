@@ -89,6 +89,7 @@
         <module>domesticStockApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
+        <module>ragFetchApi</module>
         <module>adminApi</module>
         <module>portfolioApi</module>
         <module>portfolioSummaryApi</module>

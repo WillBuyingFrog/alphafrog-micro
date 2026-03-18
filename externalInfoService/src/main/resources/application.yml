@@ -76,9 +76,6 @@ external-info:
 
 alphafrog:
   rag:
-    fetch:
-      config-file: ${AF_RAG_FETCH_CONFIG_FILE:}
-      config-refresh-interval-ms: ${AF_RAG_FETCH_CONFIG_REFRESH_INTERVAL_MS:10000}
     ingest:
       qdrant-host: ${AF_QDRANT_HOST:shared-qdrant}
       qdrant-http-port: ${AF_QDRANT_HTTP_PORT:6333}
