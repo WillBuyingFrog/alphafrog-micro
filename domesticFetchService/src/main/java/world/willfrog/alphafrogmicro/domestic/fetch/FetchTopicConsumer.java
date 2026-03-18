@@ -794,8 +794,13 @@ public class FetchTopicConsumer {
                 case "rag_ann_fetch": {
                     String startDate = taskParams.getString("start_date");
                     String endDate = taskParams.getString("end_date");
-                    String titleFilter = taskParams.getString("title_filter"); // null 若未传
-                    result = annJob.fetchRange(startDate, endDate, titleFilter);
+                    String titleFilter = taskParams.getString("title_filter");
+                    Integer offsetParam = taskParams.getInteger("offset");
+                    Integer limitParam = taskParams.getInteger("limit");
+                    int initialOffset = offsetParam != null ? offsetParam : 0;
+                    int pageLimit = limitParam != null && limitParam > 0
+                            ? limitParam : RagAnnouncementFetchJob.DEFAULT_PAGE_LIMIT;
+                    result = annJob.fetchRange(startDate, endDate, titleFilter, initialOffset, pageLimit);
                     break;
                 }
                 case "rag_report_fetch": {
@@ -803,7 +808,12 @@ public class FetchTopicConsumer {
                     String endDate = taskParams.getString("end_date");
                     com.alibaba.fastjson.JSONArray indArr = taskParams.getJSONArray("industries");
                     List<String> industries = indArr != null ? indArr.toJavaList(String.class) : List.of();
-                    result = reportJob.fetchRange(startDate, endDate, industries);
+                    Integer offsetParam = taskParams.getInteger("offset");
+                    Integer limitParam = taskParams.getInteger("limit");
+                    int initialOffset = offsetParam != null ? offsetParam : 0;
+                    int pageLimit = limitParam != null && limitParam > 0
+                            ? limitParam : RagResearchReportFetchJob.DEFAULT_PAGE_LIMIT;
+                    result = reportJob.fetchRange(startDate, endDate, industries, initialOffset, pageLimit);
                     break;
                 }
 
