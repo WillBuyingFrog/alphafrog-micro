@@ -710,12 +710,22 @@ public class MarketDataTools {
 
     @Tool("""
         查询上市公司财务报表数据（利润表/资产负债表/现金流量表/业绩快报）。
-        参数说明：
+        
+        【重要】参数必须严格使用以下格式，不要发明其他参数：
           tsCode      - 股票代码（TuShare 格式，如 600519.SH）
           reportType  - 报告类型：income（利润表）| balancesheet（资产负债表）| cashflow（现金流量表）| express（业绩快报）
-          startPeriod - 报告期开始，YYYYMMDD，如 20220101
-          endPeriod   - 报告期结束，YYYYMMDD，如 20231231
-        报告期说明：TuShare 财报 end_date 对应报告期截止日，年报为 XXXX1231，半年报为 XXXX0630，一季报为 XXXX0331，三季报为 XXXX0930。
+          startPeriod - 报告期开始，YYYYMMDD，如 20240101
+          endPeriod   - 报告期结束，YYYYMMDD，如 20241231
+        
+        【调用示例】
+        查茅台2024年年报利润表：{"tool":"getFinancialReport","params":{"tsCode":"600519.SH","reportType":"income","startPeriod":"20240101","endPeriod":"20241231"}}
+        查茅台2024年Q1-Q3利润表：{"tool":"getFinancialReport","params":{"tsCode":"600519.SH","reportType":"income","startPeriod":"20240331","endPeriod":"20240930"}}
+        
+        【报告期说明】
+        - 年报：endPeriod 为 XXXX1231（如 20241231）
+        - 半年报：endPeriod 为 XXXX0630（如 20240630）
+        - 一季报：endPeriod 为 XXXX0331（如 20240331）
+        - 三季报：endPeriod 为 XXXX0930（如 20240930）
         """)
     public String getFinancialReport(String tsCode, String reportType, String startPeriod, String endPeriod) {
         try {
