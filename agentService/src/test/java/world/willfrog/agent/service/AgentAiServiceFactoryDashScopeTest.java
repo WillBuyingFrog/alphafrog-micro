@@ -38,7 +38,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 "",
                 "qwen-plus",
                 "dashscope-key",
-                region
+                region,
+                java.util.List.of()
         );
 
         ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of("fireworks"));
@@ -66,7 +67,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 "https://custom-dashscope.example/compatible-mode/v1",
                 "qwen-plus",
                 "dashscope-key",
-                "us"
+                "us",
+                java.util.List.of()
         );
 
         ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
