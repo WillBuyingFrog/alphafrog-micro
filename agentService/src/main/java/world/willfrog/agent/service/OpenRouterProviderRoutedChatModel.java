@@ -169,7 +169,10 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     if (structuredOutputSpec != null) {
                         requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
                         provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                        provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+                        // 当有多个 provider 时，允许回退以兼容不支持结构化输出的 provider
+                        boolean allowFallbacks = structuredOutputSpec.allowProviderFallbacks() 
+                                || (providerOrder != null && providerOrder.size() > 1);
+                        provider.put("allow_fallbacks", allowFallbacks);
                     }
                     requestJsonMap.put("provider", provider);
                 }

@@ -213,6 +213,9 @@
       }
     }
   },
+  "debug": {
+    "logLlmCurl": false
+  },
   "prompts": {
     "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
     "todoPlannerSystemPromptTemplate": "file:prompts/todo/todo_planner_system.txt",
