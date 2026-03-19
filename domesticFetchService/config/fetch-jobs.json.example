@@ -1,0 +1,18 @@
+{
+  "scheduledJobs": {
+    "ragAnnouncementFetch": {
+      "enabled": true,
+      "cron": "0 0 6 * * *",
+      "description": "每天早上6点增量爬取上市公司公告"
+    },
+    "ragResearchReportFetch": {
+      "enabled": true,
+      "cron": "0 30 6 * * *",
+      "description": "每天早上6:30增量爬取券商研究报告"
+    }
+  },
+  "fetch": {
+    "concurrency": 3,
+    "timeoutSeconds": 1800
+  }
+}

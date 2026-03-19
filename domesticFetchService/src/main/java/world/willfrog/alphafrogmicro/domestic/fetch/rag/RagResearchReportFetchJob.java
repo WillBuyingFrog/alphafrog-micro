@@ -5,6 +5,7 @@ import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.domestic.fetch.config.FetchJobsConfig;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
 
 import java.time.LocalDate;
@@ -24,6 +25,7 @@ public class RagResearchReportFetchJob {
 
     private final TuShareRequestUtils tuShareRequestUtils;
     private final RagResearchReportDao researchReportDao;
+    private final FetchJobsConfig fetchJobsConfig;
 
     private static final DateTimeFormatter DATE_FMT = DateTimeFormatter.ofPattern("yyyyMMdd");
     private static final String API_NAME = "research_report";
@@ -31,9 +33,11 @@ public class RagResearchReportFetchJob {
     public static final int DEFAULT_PAGE_LIMIT = 1000;
 
     public RagResearchReportFetchJob(TuShareRequestUtils tuShareRequestUtils,
-                                     RagResearchReportDao researchReportDao) {
+                                     RagResearchReportDao researchReportDao,
+                                     FetchJobsConfig fetchJobsConfig) {
         this.tuShareRequestUtils = tuShareRequestUtils;
         this.researchReportDao = researchReportDao;
+        this.fetchJobsConfig = fetchJobsConfig;
     }
 
     /**
@@ -41,6 +45,12 @@ public class RagResearchReportFetchJob {
      */
     @Scheduled(cron = "0 30 6 * * *")
     public void incrementalFetch() {
+        // 检查配置是否启用
+        if (!fetchJobsConfig.isJobEnabled("ragResearchReportFetch")) {
+            log.info("[RagResearchReportFetchJob] 定时任务已禁用，跳过执行");
+            return;
+        }
+        
         String yesterday = LocalDate.now().minusDays(1).format(DATE_FMT);
         log.info("[RagResearchReportFetchJob] 增量抓取 date={}", yesterday);
         fetchRange(yesterday, yesterday, (String) null);
