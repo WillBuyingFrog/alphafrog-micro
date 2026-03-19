@@ -155,14 +155,21 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数（仅 OpenRouter 端点）
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
-                Map<String, Object> provider = new LinkedHashMap<>();
-                provider.put("order", providerOrder == null ? List.of() : providerOrder);
-                if (structuredOutputSpec != null) {
-                    requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
-                    provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                    provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+                boolean hasOrder = providerOrder != null && !providerOrder.isEmpty();
+                if (hasOrder || structuredOutputSpec != null) {
+                    // 只有存在实际约束时才发 provider 字段；
+                    // 空 order + 无结构化输出时不发，避免部分模型（如 kimi-k2.5）因带空 provider 字段而 404
+                    Map<String, Object> provider = new LinkedHashMap<>();
+                    if (hasOrder) {
+                        provider.put("order", providerOrder);
+                    }
+                    if (structuredOutputSpec != null) {
+                        requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
+                        provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
+                        provider.put("allow_fallbacks", structuredOutputSpec.allowProviderFallbacks());
+                    }
+                    requestJsonMap.put("provider", provider);
                 }
-                requestJsonMap.put("provider", provider);
             } else if (structuredOutputSpec != null) {
                 // 非 OpenRouter 端点也需要添加结构化输出参数
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
