@@ -9,6 +9,7 @@ import world.willfrog.alphafrogmicro.common.dao.domestic.index.IndexInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticIndexStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
+import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareResponseUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticIndexFetchServiceTriple.*;
 
@@ -228,13 +229,23 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
             JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
-            if (response == null) {
-                return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(-1).build();
+            TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(
+                    response, "index_daily");
+            if (wrapper == null) {
+                log.warn("Failed to extract data for ts_code {} between {} and {}", 
+                        tsCode, startDateTimestamp, endDateTimestamp);
+                continue; // 跳过当前指数，继续处理下一个
             }
-
-            JSONArray data = response.getJSONObject("data").getJSONArray("items");
-            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+            
+            JSONArray data = wrapper.getItems();
+            JSONArray fields = wrapper.getFields();
+            
+            // 如果没有数据，跳过当前指数
+            if (!wrapper.hasData()) {
+                log.debug("No data returned for ts_code {} between {} and {}", 
+                        tsCode, startDateTimestamp, endDateTimestamp);
+                continue;
+            }
 
             int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
 
