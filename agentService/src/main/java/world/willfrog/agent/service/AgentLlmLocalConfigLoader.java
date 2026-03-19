@@ -384,6 +384,9 @@ public class AgentLlmLocalConfigLoader {
                 && cfg.getObservability().getOpenrouter().getCostEnrichment() == null) {
             cfg.getObservability().getOpenrouter().setCostEnrichment(null);
         }
+        if (cfg.getDebug() == null) {
+            cfg.setDebug(null);
+        }
         return cfg;
     }
 }

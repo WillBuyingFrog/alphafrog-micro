@@ -22,6 +22,7 @@ public class AgentAiServiceFactory {
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
     private final OpenRouterCostService openRouterCostService;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -108,7 +109,8 @@ public class AgentAiServiceFactory {
                     httpLogger,
                     observabilityService,
                     openRouterCostService,
-                    resolved.endpointName()
+                    resolved.endpointName(),
+                    localConfigLoader
             );
         }
         return buildChatModelWithTemperature(resolved, temperatureOverride);
@@ -139,7 +141,8 @@ public class AgentAiServiceFactory {
                     httpLogger,
                     observabilityService,
                     openRouterCostService,
-                    resolved.endpointName()
+                    resolved.endpointName(),
+                    localConfigLoader
             );
         }
 

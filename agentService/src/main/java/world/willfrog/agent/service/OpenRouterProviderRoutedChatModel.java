@@ -92,6 +92,9 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     private final AgentObservabilityService observabilityService;
     private final OpenRouterCostService openRouterCostService;
     private final String endpointName;
+    
+    // Debug 配置加载器（热加载）
+    private final AgentLlmLocalConfigLoader localConfigLoader;
 
     /**
      * 生成 AI 回复。
@@ -207,6 +210,13 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // ALP-25：记录 HTTP 请求
             if (shouldCapture) {
                 requestRecord = httpLogger.recordRequest(requestUrl, "POST", requestHeaders, requestJson);
+            }
+            
+            // Debug curl 日志（热加载配置）
+            if (isDebugCurlEnabled()) {
+                curlCommand = buildCurlCommand(requestUrl, requestHeaders, requestJson);
+                log.info("[LLM Debug CURL] endpoint={} model={} providerOrder={}\n{}", 
+                        endpointName, modelName, providerOrder, curlCommand);
             }
             
             // ========== 2. 发送 HTTP 请求 ==========
@@ -392,6 +402,48 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
 
     private boolean isOpenRouterHost(String host) {
         return host != null && (host.equals("openrouter.ai") || host.endsWith(".openrouter.ai"));
+    }
+    
+    /**
+     * 检查是否开启 curl debug 日志（热加载）。
+     */
+    private boolean isDebugCurlEnabled() {
+        if (localConfigLoader == null) {
+            return false;
+        }
+        return localConfigLoader.current()
+                .map(cfg -> cfg.getDebug())
+                .map(debug -> debug.getLogLlmCurl())
+                .orElse(false);
+    }
+    
+    /**
+     * 构建 curl 命令字符串。
+     */
+    private String buildCurlCommand(String url, Map<String, String> headers, String body) {
+        StringBuilder curl = new StringBuilder();
+        curl.append("curl -X POST \\\n");
+        curl.append("  \"").append(url).append("\" \\\n");
+        
+        // 添加 headers（Authorization 脱敏）
+        if (headers != null) {
+            headers.forEach((key, value) -> {
+                String headerName = key.toLowerCase();
+                if (headerName.contains("authorization")) {
+                    curl.append("  -H \"").append(key).append(": Bearer $API_KEY\" \\\n");
+                } else {
+                    curl.append("  -H \"").append(key).append(": ").append(value).append("\" \\\n");
+                }
+            });
+        }
+        
+        // 添加 body（转义单引号）
+        if (body != null && !body.isEmpty()) {
+            String escapedBody = body.replace("'", "'\"'\"'");
+            curl.append("  -d '").append(escapedBody).append("'");
+        }
+        
+        return curl.toString();
     }
     
 }

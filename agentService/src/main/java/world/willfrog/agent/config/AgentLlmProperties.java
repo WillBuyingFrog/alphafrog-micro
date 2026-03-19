@@ -18,6 +18,7 @@ public class AgentLlmProperties {
     private Runtime runtime = new Runtime();
     private Observability observability = new Observability();
     private Prompts prompts = new Prompts();
+    private Debug debug = new Debug();
 
     public String getDefaultEndpoint() {
         return defaultEndpoint;
@@ -81,6 +82,14 @@ public class AgentLlmProperties {
 
     public void setObservability(Observability observability) {
         this.observability = observability == null ? new Observability() : observability;
+    }
+
+    public Debug getDebug() {
+        return debug;
+    }
+
+    public void setDebug(Debug debug) {
+        this.debug = debug == null ? new Debug() : debug;
     }
 
     public static class Endpoint {
@@ -899,6 +908,23 @@ public class AgentLlmProperties {
         
         public void setTimeoutMs(Integer timeoutMs) {
             this.timeoutMs = timeoutMs;
+        }
+    }
+
+    /**
+     * Debug 配置（热加载）。
+     * 用于控制运行时调试日志输出，默认全部关闭。
+     */
+    public static class Debug {
+        /** 是否打印 LLM 请求的 curl 命令 */
+        private Boolean logLlmCurl = false;
+
+        public Boolean getLogLlmCurl() {
+            return logLlmCurl;
+        }
+
+        public void setLogLlmCurl(Boolean logLlmCurl) {
+            this.logLlmCurl = logLlmCurl;
         }
     }
 
