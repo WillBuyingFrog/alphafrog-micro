@@ -143,7 +143,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
                     .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
-                    .temperature(temperature)
                     .maxCompletionTokens(maxTokens);
             
             if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
@@ -158,24 +157,18 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数（仅 OpenRouter 端点）
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
-                boolean hasOrder = providerOrder != null && !providerOrder.isEmpty();
-                if (hasOrder || structuredOutputSpec != null) {
-                    // 只有存在实际约束时才发 provider 字段；
-                    // 空 order + 无结构化输出时不发，避免部分模型（如 kimi-k2.5）因带空 provider 字段而 404
-                    Map<String, Object> provider = new LinkedHashMap<>();
-                    if (hasOrder) {
-                        provider.put("order", providerOrder);
-                    }
-                    if (structuredOutputSpec != null) {
-                        requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
-                        provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                        // 当有多个 provider 时，允许回退以兼容不支持结构化输出的 provider
-                        boolean allowFallbacks = structuredOutputSpec.allowProviderFallbacks() 
-                                || (providerOrder != null && providerOrder.size() > 1);
-                        provider.put("allow_fallbacks", allowFallbacks);
-                    }
-                    requestJsonMap.put("provider", provider);
+                Map<String, Object> provider = new LinkedHashMap<>();
+                // 总是发送 order（即使是空列表），这是 OpenRouter 的要求
+                provider.put("order", providerOrder == null ? List.of() : providerOrder);
+                if (structuredOutputSpec != null) {
+                    requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
+                    provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
+                    // 当有多个 provider 时，自动允许回退以兼容不支持结构化输出的 provider
+                    boolean allowFallbacks = structuredOutputSpec.allowProviderFallbacks() 
+                            || (providerOrder != null && providerOrder.size() > 1);
+                    provider.put("allow_fallbacks", allowFallbacks);
                 }
+                requestJsonMap.put("provider", provider);
             } else if (structuredOutputSpec != null) {
                 // 非 OpenRouter 端点也需要添加结构化输出参数
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
