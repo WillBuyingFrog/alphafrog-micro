@@ -77,7 +77,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             .build();
 
     // ========== 核心依赖 ==========
-    
+
     private final ObjectMapper objectMapper;
     private final String baseUrl;
     private final String apiKey;

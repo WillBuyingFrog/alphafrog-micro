@@ -119,7 +119,8 @@ public class AgentRunExecutor {
             boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
             boolean debugMode = eventService.extractDebugMode(run.getExt());
             AgentContext.setDebugMode(debugMode);
-            var providerOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
+            var userProviderOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
+            var providerOrder = mergeProviderOrder(userProviderOrder, resolvedLlm.validProviders());
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
@@ -321,5 +322,25 @@ public class AgentRunExecutor {
             return content;
         }
         return content.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * 合并用户指定的 provider 列表与配置中的 validProviders。
+     * 用户指定的 provider 优先放在前面，validProviders 中不重复的追加在后面作为兜底。
+     */
+    private List<String> mergeProviderOrder(List<String> userProviders, List<String> validProviders) {
+        if (validProviders == null || validProviders.isEmpty()) {
+            return userProviders == null ? List.of() : userProviders;
+        }
+        if (userProviders == null || userProviders.isEmpty()) {
+            return validProviders;
+        }
+        List<String> merged = new ArrayList<>(userProviders);
+        for (String vp : validProviders) {
+            if (!merged.contains(vp)) {
+                merged.add(vp);
+            }
+        }
+        return merged;
     }
 }

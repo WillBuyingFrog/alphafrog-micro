@@ -64,7 +64,43 @@ public class AgentLlmResolver {
             throw new IllegalArgumentException("model_name 不在允许列表: " + model);
         }
 
-        return new ResolvedLlm(endpointKey, baseUrl, model, normalize(endpoint.getApiKey()), region);
+        List<String> validProviders = resolveValidProviders(endpoint, model, properties, local);
+        return new ResolvedLlm(endpointKey, baseUrl, model, normalize(endpoint.getApiKey()), region, validProviders);
+    }
+
+    /**
+     * 从 endpoint 级或顶层 modelMetadata 中查找模型的 validProviders。
+     * 优先顺序：endpoint 级 > local 顶层 > base 顶层。
+     */
+    private List<String> resolveValidProviders(AgentLlmProperties.Endpoint endpoint,
+                                               String modelName,
+                                               AgentLlmProperties base,
+                                               AgentLlmProperties local) {
+        // 1. endpoint 级模型元数据
+        if (endpoint != null && endpoint.getModels() != null) {
+            AgentLlmProperties.ModelMetadata meta = endpoint.getModels().get(modelName);
+            if (meta != null && meta.getValidProviders() != null && !meta.getValidProviders().isEmpty()) {
+                return meta.getValidProviders().stream()
+                        .map(this::normalize).filter(v -> v != null).toList();
+            }
+        }
+        // 2. local 顶层 modelMetadata
+        if (local != null && local.getModelMetadata() != null) {
+            AgentLlmProperties.ModelMetadata meta = local.getModelMetadata().get(modelName);
+            if (meta != null && meta.getValidProviders() != null && !meta.getValidProviders().isEmpty()) {
+                return meta.getValidProviders().stream()
+                        .map(this::normalize).filter(v -> v != null).toList();
+            }
+        }
+        // 3. base 顶层 modelMetadata
+        if (base != null && base.getModelMetadata() != null) {
+            AgentLlmProperties.ModelMetadata meta = base.getModelMetadata().get(modelName);
+            if (meta != null && meta.getValidProviders() != null && !meta.getValidProviders().isEmpty()) {
+                return meta.getValidProviders().stream()
+                        .map(this::normalize).filter(v -> v != null).toList();
+            }
+        }
+        return List.of();
     }
 
     private Map<String, AgentLlmProperties.Endpoint> mergeEndpoints(AgentLlmProperties base, AgentLlmProperties local) {
