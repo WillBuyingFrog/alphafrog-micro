@@ -816,14 +816,45 @@ public class MarketDataTools {
                 ));
             }
 
-            return ok(tool, Map.of(
-                    "ts_code", nvl(tsCode),
-                    "report_type", type,
-                    "start_period", compactDate(startPeriod),
-                    "end_period", compactDate(endPeriod),
-                    "count", items.size(),
-                    "items", items
-            ));
+            // 写入数据集并返回 dataset_id
+            String datasetId = null;
+            if (datasetWriter.isEnabled()) {
+                String runId = AgentContext.getRunId();
+                String prefix = (runId != null ? runId : "unknown") + "-" + type;
+                String startStr = compactDate(startPeriod);
+                String endStr = compactDate(endPeriod);
+                
+                // 根据报表类型定义 headers
+                List<String> headers = switch (type) {
+                    case "income" -> Arrays.asList("ts_code", "end_date", "report_type", "total_revenue", "revenue", "n_income", "n_income_attr_p", "basic_eps", "ebit", "ebitda", "rd_exp");
+                    case "balancesheet" -> Arrays.asList("ts_code", "end_date", "report_type", "total_assets", "total_liab", "total_cur_assets", "total_cur_liab", "total_hldr_eqy_exc_min_int", "money_cap", "inventories", "lt_borr", "st_borr");
+                    case "cashflow" -> Arrays.asList("ts_code", "end_date", "report_type", "n_cashflow_act", "n_cashflow_inv_act", "n_cash_flows_fnc_act", "free_cashflow", "c_fr_sale_sg");
+                    case "express" -> Arrays.asList("ts_code", "end_date", "ann_date", "revenue", "operate_profit", "n_income", "total_assets", "total_hldr_eqy_exc_min_int", "diluted_eps", "diluted_roe", "yoy_net_profit", "yoy_sales", "perf_summary");
+                    default -> Arrays.asList("ts_code", "end_date");
+                };
+                
+                datasetId = datasetWriter.writeDataset(
+                        prefix, tsCode, startStr, endStr, items, headers,
+                        row -> headers.stream().map(h -> row.getOrDefault(h, "")).toList()
+                );
+                
+                if (datasetRegistry.isEnabled()) {
+                    datasetRegistry.registerDataset("financial_" + type, tsCode, startStr, endStr, headers, datasetId, items.size());
+                }
+            }
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ts_code", nvl(tsCode));
+            data.put("report_type", type);
+            data.put("start_period", compactDate(startPeriod));
+            data.put("end_period", compactDate(endPeriod));
+            data.put("count", items.size());
+            data.put("items", items);
+            if (datasetId != null) {
+                data.put("dataset_id", datasetId);
+                data.put("dataset_ids", List.of(datasetId));
+            }
+            return ok(tool, data);
         } catch (Exception e) {
             return fail("getFinancialReport", "TOOL_ERROR", "Error fetching financial report", Map.of("message", nvl(e.getMessage())));
         }
