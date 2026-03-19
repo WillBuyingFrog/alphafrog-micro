@@ -224,6 +224,7 @@ public class AgentLlmResolver {
         return target;
     }
 
-    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey, String region) {
+    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey, String region,
+                               List<String> validProviders) {
     }
 }
