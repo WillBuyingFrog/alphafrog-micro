@@ -19,6 +19,7 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
+import world.willfrog.agent.tool.RagTools;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
@@ -43,6 +44,7 @@ public class AgentRunExecutor {
     private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
     private final PythonSandboxTools pythonSandboxTools;
+    private final RagTools ragTools;
     private final AgentRunStateStore stateStore;
     private final AgentObservabilityService observabilityService;
     private final AgentCreditService creditService;
@@ -152,6 +154,7 @@ public class AgentRunExecutor {
 
             List<ToolSpecification> toolSpecifications = new ArrayList<>();
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
+            toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(ragTools));
             if (runConfig.codeInterpreterEnabled()) {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }

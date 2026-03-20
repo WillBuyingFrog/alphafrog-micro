@@ -157,10 +157,10 @@ public class ToolRouter {
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
                 );
                 case "getFinancialReport" -> marketDataTools.getFinancialReport(
-                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("arg0")),
-                        str(params.get("reportType"), params.get("report_type"), params.get("type"), params.get("arg1")),
-                        dateStr(params.get("startPeriod"), params.get("start_period"), params.get("startPeriod"), params.get("arg2")),
-                        dateStr(params.get("endPeriod"), params.get("end_period"), params.get("endPeriod"), params.get("arg3"))
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("ts code"), params.get("arg0")),
+                        str(params.get("reportType"), params.get("report_type"), params.get("type"), params.get("report type"), params.get("arg1")),
+                        dateStr(params.get("startPeriod"), params.get("start_period"), params.get("start"), params.get("arg2")),
+                        dateStr(params.get("endPeriod"), params.get("end_period"), params.get("end"), params.get("arg3"))
                 );
                 case "ragSearch" -> ragTools.ragSearch(
                         str(params.get("queryText"), params.get("query_text"), params.get("query"), params.get("arg0")),
