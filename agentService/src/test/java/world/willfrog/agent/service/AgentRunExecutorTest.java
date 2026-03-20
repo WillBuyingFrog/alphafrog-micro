@@ -16,6 +16,7 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
+import world.willfrog.agent.tool.RagTools;
 
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
@@ -51,6 +52,8 @@ class AgentRunExecutorTest {
     @Mock
     private PythonSandboxTools pythonSandboxTools;
     @Mock
+    private RagTools ragTools;
+    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentObservabilityService observabilityService;
@@ -77,6 +80,7 @@ class AgentRunExecutorTest {
                 aiServiceFactory,
                 marketDataTools,
                 pythonSandboxTools,
+                ragTools,
                 stateStore,
                 observabilityService,
                 creditService,
