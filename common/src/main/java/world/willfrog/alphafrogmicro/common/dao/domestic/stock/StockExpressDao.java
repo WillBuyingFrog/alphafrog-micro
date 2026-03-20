@@ -49,4 +49,35 @@ public interface StockExpressDao {
 
     @Delete("DELETE FROM alphafrog_stock_express WHERE ts_code = #{tsCode}")
     int deleteByTsCode(@Param("tsCode") String tsCode);
+
+    @Select("SELECT * FROM alphafrog_stock_express WHERE ts_code = #{tsCode} " +
+            "AND end_date BETWEEN #{startDate} AND #{endDate}")
+    @Results({
+            @Result(property = "id", column = "id"),
+            @Result(property = "tsCode", column = "ts_code"),
+            @Result(property = "annDate", column = "ann_date"),
+            @Result(property = "endDate", column = "end_date"),
+            @Result(property = "revenue", column = "revenue"),
+            @Result(property = "operateProfit", column = "operate_profit"),
+            @Result(property = "totalProfit", column = "total_profit"),
+            @Result(property = "nIncome", column = "n_income"),
+            @Result(property = "totalAssets", column = "total_assets"),
+            @Result(property = "totalHldrEqyExcMinInt", column = "total_hldr_eqy_exc_min_int"),
+            @Result(property = "dilutedEps", column = "diluted_eps"),
+            @Result(property = "dilutedRoe", column = "diluted_roe"),
+            @Result(property = "yoyNetProfit", column = "yoy_net_profit"),
+            @Result(property = "bps", column = "bps"),
+            @Result(property = "yoySales", column = "yoy_sales"),
+            @Result(property = "yoyOp", column = "yoy_op"),
+            @Result(property = "yoyTp", column = "yoy_tp"),
+            @Result(property = "yoyDeduNp", column = "yoy_dedu_np"),
+            @Result(property = "yoyEps", column = "yoy_eps"),
+            @Result(property = "yoyRoe", column = "yoy_roe"),
+            @Result(property = "perfSummary", column = "perf_summary"),
+            @Result(property = "isAudit", column = "is_audit"),
+            @Result(property = "remark", column = "remark")
+    })
+    List<StockExpress> getByTsCodeAndEndDateRange(@Param("tsCode") String tsCode,
+                                                   @Param("startDate") long startDate,
+                                                   @Param("endDate") long endDate);
 }

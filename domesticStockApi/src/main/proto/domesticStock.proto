@@ -315,6 +315,86 @@ message DomesticStockShareFloatFetchByDateRangeResponse {
 }
 
 
+// P7-06：财务报表查询消息
+// 公共请求体（income / balancesheet / cashflow / express 共用）
+message DomesticStockFinancialQueryRequest {
+  string ts_code      = 1;   // 股票代码，必填
+  string start_period = 2;   // 报告期开始 YYYYMMDD（如 20220101）
+  string end_period   = 3;   // 报告期结束 YYYYMMDD（如 20231231）
+}
+
+// --- 利润表 ---
+message StockIncomeItem {
+  string ts_code          = 1;
+  string end_date         = 2;
+  string report_type      = 3;
+  double total_revenue    = 4;
+  double revenue          = 5;
+  double n_income         = 6;
+  double n_income_attr_p  = 7;
+  double basic_eps        = 8;
+  double ebit             = 9;
+  double ebitda           = 10;
+  double rd_exp           = 11;
+}
+message DomesticStockIncomeQueryResponse {
+  repeated StockIncomeItem items = 1;
+}
+
+// --- 资产负债表 ---
+message StockBalancesheetItem {
+  string ts_code                    = 1;
+  string end_date                   = 2;
+  string report_type                = 3;
+  double total_assets               = 4;
+  double total_liab                 = 5;
+  double total_cur_assets           = 6;
+  double total_cur_liab             = 7;
+  double total_hldr_eqy_exc_min_int = 8;
+  double money_cap                  = 9;
+  double inventories                = 10;
+  double lt_borr                    = 11;
+  double st_borr                    = 12;
+}
+message DomesticStockBalancesheetQueryResponse {
+  repeated StockBalancesheetItem items = 1;
+}
+
+// --- 现金流量表 ---
+message StockCashflowItem {
+  string ts_code              = 1;
+  string end_date             = 2;
+  string report_type          = 3;
+  double n_cashflow_act       = 4;
+  double n_cashflow_inv_act   = 5;
+  double n_cash_flows_fnc_act = 6;
+  double free_cashflow        = 7;
+  double c_fr_sale_sg         = 8;
+}
+message DomesticStockCashflowQueryResponse {
+  repeated StockCashflowItem items = 1;
+}
+
+// --- 业绩快报 ---
+message StockExpressItem {
+  string ts_code                    = 1;
+  string end_date                   = 2;
+  string ann_date                   = 3;
+  double revenue                    = 4;
+  double operate_profit             = 5;
+  double n_income                   = 6;
+  double total_assets               = 7;
+  double total_hldr_eqy_exc_min_int = 8;
+  double diluted_eps                = 9;
+  double diluted_roe                = 10;
+  double yoy_net_profit             = 11;
+  double yoy_sales                  = 12;
+  string perf_summary               = 13;
+}
+message DomesticStockExpressQueryResponse {
+  repeated StockExpressItem items = 1;
+}
+
 service DomesticStockService {
   rpc getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest) returns (DomesticStockInfoByTsCodeResponse);
   rpc searchStock(DomesticStockSearchRequest) returns (DomesticStockSearchResponse);
@@ -322,6 +402,12 @@ service DomesticStockService {
   rpc getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest) returns (DomesticStockDailyByTradeDateResponse);
   rpc searchStockES(DomesticStockSearchESRequest) returns (DomesticStockSearchESResponse);
   rpc getStockTsCode(DomesticStockTsCodeRequest) returns (DomesticStockTsCodeResponse);
+
+  // P7-06 新增：财务报表查询
+  rpc queryStockIncome(DomesticStockFinancialQueryRequest) returns (DomesticStockIncomeQueryResponse);
+  rpc queryStockBalancesheet(DomesticStockFinancialQueryRequest) returns (DomesticStockBalancesheetQueryResponse);
+  rpc queryStockCashflow(DomesticStockFinancialQueryRequest) returns (DomesticStockCashflowQueryResponse);
+  rpc queryStockExpress(DomesticStockFinancialQueryRequest) returns (DomesticStockExpressQueryResponse);
 }
 
 

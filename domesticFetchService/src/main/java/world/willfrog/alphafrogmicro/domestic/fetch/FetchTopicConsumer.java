@@ -2,6 +2,8 @@ package world.willfrog.alphafrogmicro.domestic.fetch;
 
 import com.alibaba.fastjson.JSONObject;
 import com.rabbitmq.client.Channel;
+import jakarta.annotation.PostConstruct;
+import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.amqp.rabbit.annotation.RabbitListener;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
@@ -9,7 +11,12 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.domestic.fetch.config.DomesticFetchRabbitConfig;
+import world.willfrog.alphafrogmicro.domestic.fetch.rag.RagAnnouncementFetchJob;
+import world.willfrog.alphafrogmicro.domestic.fetch.rag.RagResearchReportFetchJob;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
+
+import java.util.List;
+import java.util.concurrent.*;
 
 @Service
 @Slf4j
@@ -19,18 +26,62 @@ public class FetchTopicConsumer {
     private final DomesticFundFetchServiceImpl domesticFundFetchService;
     private final DomesticStockFetchServiceImpl domesticStockFetchService;
     private final DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
+    private final RagAnnouncementFetchJob annJob;
+    private final RagResearchReportFetchJob reportJob;
     private final RabbitTemplate rabbitTemplate;
+
+    // 异步任务执行线程池
+    private ExecutorService taskExecutor;
+    // 跟踪正在执行的任务
+    private final ConcurrentHashMap<String, Future<?>> runningTasks = new ConcurrentHashMap<>();
 
     public FetchTopicConsumer(DomesticIndexFetchServiceImpl domesticIndexFetchService,
                               DomesticFundFetchServiceImpl domesticFundFetchService,
                               DomesticStockFetchServiceImpl domesticStockFetchService,
                               DomesticTradeCalendarFetchService domesticTradeCalendarFetchService,
+                              RagAnnouncementFetchJob annJob,
+                              RagResearchReportFetchJob reportJob,
                               RabbitTemplate rabbitTemplate) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
         this.domesticStockFetchService = domesticStockFetchService;
         this.domesticTradeCalendarFetchService = domesticTradeCalendarFetchService;
+        this.annJob = annJob;
+        this.reportJob = reportJob;
         this.rabbitTemplate = rabbitTemplate;
+    }
+
+    @PostConstruct
+    public void init() {
+        // 创建线程池：核心线程数 2，最大线程数 4，队列容量 100
+        this.taskExecutor = new ThreadPoolExecutor(
+                2, 4, 60, TimeUnit.SECONDS,
+                new LinkedBlockingQueue<>(100),
+                new ThreadFactory() {
+                    private int count = 0;
+                    @Override
+                    public Thread newThread(Runnable r) {
+                        return new Thread(r, "fetch-task-executor-" + (++count));
+                    }
+                },
+                new ThreadPoolExecutor.CallerRunsPolicy()
+        );
+        log.info("Fetch task executor initialized");
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        if (taskExecutor != null && !taskExecutor.isShutdown()) {
+            log.info("Shutting down fetch task executor...");
+            taskExecutor.shutdown();
+            try {
+                if (!taskExecutor.awaitTermination(60, TimeUnit.SECONDS)) {
+                    taskExecutor.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                taskExecutor.shutdownNow();
+            }
+        }
     }
 
 
@@ -38,19 +89,61 @@ public class FetchTopicConsumer {
     public void listenFetchTask(String message,
                                 Channel channel,
                                 @Header(AmqpHeaders.DELIVERY_TAG) long tag){
-        boolean success = false;
         log.info("Received fetch task [V2-DEBUG]: {}", message);
 
         String taskUuid = null;
+        
+        try {
+            JSONObject rawMessageJSON = JSONObject.parseObject(message);
+            if (rawMessageJSON == null) {
+                log.error("Invalid message JSON payload");
+                channel.basicNack(tag, false, false);
+                return;
+            }
+            taskUuid = rawMessageJSON.getString("task_uuid");
+            
+            // 立即确认消息，避免 RabbitMQ 超时
+            // 实际任务将在线程池中异步执行
+            channel.basicAck(tag, false);
+            
+            // 提交异步任务
+            final String finalTaskUuid = taskUuid;
+            CompletableFuture<Void> future = CompletableFuture.runAsync(
+                    () -> processFetchTask(message, finalTaskUuid), taskExecutor);
+            
+            if (taskUuid != null) {
+                runningTasks.put(taskUuid, future);
+                // 任务完成后从 map 中移除
+                future.whenComplete((result, ex) -> runningTasks.remove(finalTaskUuid));
+            }
+            
+        } catch (Exception e) {
+            log.error("Failed to process fetch task message", e);
+            try {
+                channel.basicNack(tag, false, false);
+            } catch (Exception nackEx) {
+                log.error("Failed to nack message", nackEx);
+            }
+        }
+    }
+    
+    /**
+     * 实际处理抓取任务的逻辑（在独立线程中执行）
+     */
+    private void processFetchTask(String message, String taskUuid) {
         String taskName = null;
         Integer taskSubTypeValue = null;
+        boolean success = false;
 
-        try{
+        try {
             JSONObject rawMessageJSON = JSONObject.parseObject(message);
             if (rawMessageJSON == null) {
                 throw new IllegalArgumentException("Invalid message JSON payload");
             }
-            taskUuid = rawMessageJSON.getString("task_uuid");
+            // 如果外部传入的 taskUuid 为空，尝试从消息中解析
+            if (taskUuid == null) {
+                taskUuid = rawMessageJSON.getString("task_uuid");
+            }
             taskName = rawMessageJSON.getString("task_name");
             taskSubTypeValue = rawMessageJSON.getInteger("task_sub_type");
             int taskSubType = rawMessageJSON.getIntValue("task_sub_type");
@@ -781,29 +874,50 @@ public class FetchTopicConsumer {
                     }
                     break;
 
+                case "rag_ann_fetch": {
+                    String startDate = taskParams.getString("start_date");
+                    String endDate = taskParams.getString("end_date");
+                    String titleFilter = taskParams.getString("title_filter");
+                    Integer offsetParam = taskParams.getInteger("offset");
+                    Integer limitParam = taskParams.getInteger("limit");
+                    int initialOffset = offsetParam != null ? offsetParam : 0;
+                    int pageLimit = limitParam != null && limitParam > 0
+                            ? limitParam : RagAnnouncementFetchJob.DEFAULT_PAGE_LIMIT;
+                    result = annJob.fetchRange(startDate, endDate, titleFilter, initialOffset, pageLimit);
+                    break;
+                }
+                case "rag_report_fetch": {
+                    String startDate = taskParams.getString("start_date");
+                    String endDate = taskParams.getString("end_date");
+                    com.alibaba.fastjson.JSONArray indArr = taskParams.getJSONArray("industries");
+                    List<String> industries = indArr != null ? indArr.toJavaList(String.class) : List.of();
+                    Integer offsetParam = taskParams.getInteger("offset");
+                    Integer limitParam = taskParams.getInteger("limit");
+                    int initialOffset = offsetParam != null ? offsetParam : 0;
+                    int pageLimit = limitParam != null && limitParam > 0
+                            ? limitParam : RagResearchReportFetchJob.DEFAULT_PAGE_LIMIT;
+                    result = reportJob.fetchRange(startDate, endDate, industries, initialOffset, pageLimit);
+                    break;
+                }
+
                 default:
                     result = -2;
                     break;
             }
-            log.info("Task result : {}", result);
+            log.info("Task [{}] result: {}", taskUuid, result);
             sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, null);
             success = true;
-        } catch (Exception e){
-            log.error("Failed to start task: {}", message);
-            log.error("Stack trace", e);
+        } catch (Exception e) {
+            log.error("Failed to execute task [{}]: {}", taskUuid, message, e);
             if (taskUuid != null && !taskUuid.isBlank()) {
                 sendTaskResult(taskUuid, taskName, taskSubTypeValue, -1, e.getMessage());
             }
         } finally {
-            try {
-                if (success) {
-                    channel.basicAck(tag, false);
-                } else {
-                    channel.basicNack(tag, false, false);
-                }
-            } catch (Exception ackException) {
-                log.error("Failed to ack/nack fetch task message", ackException);
+            // 任务执行完成，从运行中任务列表移除
+            if (taskUuid != null) {
+                runningTasks.remove(taskUuid);
             }
+            log.info("Task [{}] execution completed, success={}", taskUuid, success);
         }
     }
 

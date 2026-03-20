@@ -2,7 +2,7 @@
 将文档内容 POST 给服务端，由服务端经 VPC 内网上传到阿里云 OSS，返回 object key。
 AK/SK 仅保存在服务端，本地脚本不再持有 OSS 凭证。
 """
-import httpx
+import requests
 
 from config import Config
 
@@ -30,7 +30,7 @@ def upload_doc(
     }
     headers = {"Authorization": f"Bearer {cfg.ingest_admin_token}"}
 
-    resp = httpx.post(
+    resp = requests.post(
         cfg.upload_doc_endpoint,
         json=payload,
         headers=headers,

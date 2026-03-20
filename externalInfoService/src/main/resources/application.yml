@@ -76,9 +76,6 @@ external-info:
 
 alphafrog:
   rag:
-    fetch:
-      config-file: ${AF_RAG_FETCH_CONFIG_FILE:}
-      config-refresh-interval-ms: ${AF_RAG_FETCH_CONFIG_REFRESH_INTERVAL_MS:10000}
     ingest:
       qdrant-host: ${AF_QDRANT_HOST:shared-qdrant}
       qdrant-http-port: ${AF_QDRANT_HTTP_PORT:6333}
@@ -90,6 +87,21 @@ alphafrog:
       access-key-id: ${AF_OSS_ACCESS_KEY_ID:}
       access-key-secret: ${AF_OSS_ACCESS_KEY_SECRET:}
       path-prefix: ${AF_OSS_PATH_PREFIX:alphafrog-rag}
+    # RAG 语义检索（P7-05）：Qdrant gRPC 连接 + Embedding API
+    # host/collection 须与 ingest 侧保持一致（即与 AF_QDRANT_HOST 及 AF_RAG_QDRANT_COLLECTION 同一组）
+    qdrant:
+      host: ${AF_QDRANT_HOST:shared-qdrant}
+      port: ${AF_QDRANT_PORT:6334}
+      collection: ${AF_QDRANT_COLLECTION:alphafrog_rag}
+    embedding:
+      base-url: ${AF_EMBEDDING_BASE_URL:https://api.openai.com/v1}
+      api-key: ${AF_EMBEDDING_API_KEY:}
+      model: ${AF_EMBEDDING_MODEL:text-embedding-3-small}
+      # 必须与 P7-03 ingestion 脚本使用的维度一致；默认使用压缩后的 1024 维
+      dimensions: ${AF_EMBEDDING_DIMENSIONS:1024}
+      # 热加载 JSON 配置文件路径（本地 json 中的非空值覆盖上方环境变量默认值）
+      config-file: ${AF_RAG_EMBEDDING_CONFIG_FILE:}
+      config-refresh-interval-ms: ${AF_RAG_EMBEDDING_CONFIG_REFRESH_INTERVAL_MS:10000}
 
 logging:
   level:

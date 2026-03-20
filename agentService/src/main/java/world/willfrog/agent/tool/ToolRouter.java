@@ -28,6 +28,7 @@ import java.util.concurrent.TimeUnit;
 public class ToolRouter {
 
     private final MarketDataTools marketDataTools;
+    private final RagTools ragTools;
     private final PythonSandboxTools pythonSandboxTools;
     private final ToolResultCacheService toolResultCacheService;
     private final AgentObservabilityService observabilityService;
@@ -108,6 +109,9 @@ public class ToolRouter {
                 "getIndexInfo",
                 "getIndexDaily",
                 "searchIndex",
+                "getFinancialReport",
+                "ragSearch",
+                "loadDocument",
                 "executePython",
                 "spawnSubAgent",
                 "waitForSubAgent"
@@ -151,6 +155,22 @@ public class ToolRouter {
                 );
                 case "searchIndex" -> marketDataTools.searchIndex(
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
+                case "getFinancialReport" -> marketDataTools.getFinancialReport(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("ts code"), params.get("arg0")),
+                        str(params.get("reportType"), params.get("report_type"), params.get("type"), params.get("report type"), params.get("arg1")),
+                        dateStr(params.get("startPeriod"), params.get("start_period"), params.get("start"), params.get("arg2")),
+                        dateStr(params.get("endPeriod"), params.get("end_period"), params.get("end"), params.get("arg3"))
+                );
+                case "ragSearch" -> ragTools.ragSearch(
+                        str(params.get("queryText"), params.get("query_text"), params.get("query"), params.get("arg0")),
+                        str(params.get("docType"), params.get("doc_type"), params.get("arg1")),
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("arg2")),
+                        str(params.get("indName"), params.get("ind_name"), params.get("arg3")),
+                        toIntWithDefault(5, params.get("topK"), params.get("top_k"), params.get("arg4"))
+                );
+                case "loadDocument" -> ragTools.loadDocument(
+                        str(params.get("ossUrl"), params.get("oss_url"), params.get("url"), params.get("arg0"))
                 );
                 case "executePython" -> pythonSandboxTools.executePython(
                         str(params.get("code"), params.get("arg0")),
@@ -244,6 +264,18 @@ public class ToolRouter {
             return Integer.parseInt(value);
         } catch (NumberFormatException e) {
             return null;
+        }
+    }
+
+    private int toIntWithDefault(int defaultValue, Object... candidates) {
+        String value = str(candidates);
+        if (value.isEmpty()) {
+            return defaultValue;
+        }
+        try {
+            return Integer.parseInt(value);
+        } catch (NumberFormatException e) {
+            return defaultValue;
         }
     }
 
