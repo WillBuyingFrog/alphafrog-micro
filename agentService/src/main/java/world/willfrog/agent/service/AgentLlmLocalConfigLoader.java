@@ -93,12 +93,11 @@ public class AgentLlmLocalConfigLoader {
                             }
                         }
                     }
-                    log.info("Loaded local llm config from {} (endpoints={}, topLevelModels={}, endpointModels={}, modelMetadata={})",
+                    log.info("Loaded local llm config from {} (endpoints={}, topLevelModels={}, endpointModels={})",
                             path,
                             sanitized.getEndpoints().size(),
                             sanitized.getModels().size(),
-                            endpointModels,
-                            sanitized.getModelMetadata().size());
+                            endpointModels);
                 }
             } catch (Exception e) {
                 log.error("Failed to load local llm config from {}", path, e);
@@ -320,18 +319,6 @@ public class AgentLlmLocalConfigLoader {
         }
         if (cfg.getModels() == null) {
             cfg.setModels(null);
-        }
-        if (cfg.getModelMetadata() == null) {
-            cfg.setModelMetadata(null);
-        } else {
-            for (AgentLlmProperties.ModelMetadata metadata : cfg.getModelMetadata().values()) {
-                if (metadata != null && metadata.getFeatures() == null) {
-                    metadata.setFeatures(null);
-                }
-                if (metadata != null && metadata.getValidProviders() == null) {
-                    metadata.setValidProviders(null);
-                }
-            }
         }
         if (cfg.getPrompts() == null) {
             cfg.setPrompts(null);

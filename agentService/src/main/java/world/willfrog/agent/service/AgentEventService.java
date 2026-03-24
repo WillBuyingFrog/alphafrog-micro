@@ -66,13 +66,14 @@ public class AgentEventService {
     /**
      * 创建新的 run 记录并写入初始事件。
      *
-     * @param userId         用户 ID
-     * @param message        用户输入
-     * @param contextJson    上下文 JSON
-     * @param idempotencyKey 幂等键
-     * @param modelName      模型名（可为空，后续会用默认）
-     * @param endpointName   端点名（可为空，后续会用默认）
-     * @param debugMode      run 级调试模式开关
+     * @param userId           用户 ID
+     * @param message          用户输入
+     * @param contextJson      上下文 JSON
+     * @param idempotencyKey   幂等键
+     * @param modelName        模型名（可为空，后续会用默认）
+     * @param endpointName     端点名（可为空，后续会用默认）
+     * @param debugMode        run 级调试模式开关
+     * @param stageConfigJson  各阶段 LLM 配置 JSON（可为空）
      * @return 创建后的 run
      */
     public AgentRun createRun(String userId,
@@ -84,7 +85,8 @@ public class AgentEventService {
                               boolean captureLlmRequests,
                               String provider,
                               int plannerCandidateCount,
-                              boolean debugMode) {
+                              boolean debugMode,
+                              String stageConfigJson) {
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -100,6 +102,15 @@ public class AgentEventService {
             ext.put("planner_candidate_count", plannerCandidateCount);
         }
         ext.put("checkpoint_version", resolveCheckpointVersion());
+        if (stageConfigJson != null && !stageConfigJson.isBlank()) {
+            try {
+                // 存储为 JSON 对象而非字符串，便于后续解析
+                ext.put("stage_config_json", objectMapper.readTree(stageConfigJson));
+            } catch (Exception e) {
+                log.warn("解析 stage_config_json 失败，存储为原始字符串: {}", e.getMessage());
+                ext.put("stage_config_json", stageConfigJson);
+            }
+        }
         
         // 从 contextJson 中提取 execution_mode
         String executionMode = extractExecutionModeFromContext(contextJson);

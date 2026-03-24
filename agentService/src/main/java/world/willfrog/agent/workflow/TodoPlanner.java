@@ -17,6 +17,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
+import world.willfrog.agent.config.StageLlmConfig;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
@@ -172,7 +174,16 @@ public class TodoPlanner {
             AgentContext.clearStructuredOutputSpec();
 
             // 设置 Planning 阶段 reasoning 配置
-            String planningReasoningEffort = resolvePlanningReasoningEffort();
+            // 解析 planning reasoning effort：stageConfig 优先
+            String planningReasoningEffort = null;
+            RunStageConfig stageConfig = AgentContext.getStageConfig();
+            if (stageConfig != null && stageConfig.getPlanning() != null
+                    && stageConfig.getPlanning().getReasoningEffort() != null) {
+                planningReasoningEffort = stageConfig.getPlanning().getReasoningEffort();
+            }
+            if (planningReasoningEffort == null) {
+                planningReasoningEffort = resolvePlanningReasoningEffort();
+            }
             if (planningReasoningEffort != null) {
                 AgentContext.setReasoningEffort(planningReasoningEffort);
             }

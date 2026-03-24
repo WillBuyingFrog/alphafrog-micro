@@ -14,6 +14,8 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.tool.RagTools;
@@ -69,6 +71,12 @@ class AgentRunExecutorTest {
     private ChatModel chatLanguageModel;
     @Mock
     private AgentMessageService messageService;
+    @Mock
+    private AgentLlmLocalConfigLoader localConfigLoader;
+    @Mock
+    private StageConfigResolver stageConfigResolver;
+    @Mock
+    private StageConfigValidator stageConfigValidator;
 
     private AgentRunExecutor executor;
 
@@ -88,7 +96,11 @@ class AgentRunExecutorTest {
                 workflowExecutorFactory,
                 messageService,
                 new ObjectMapper(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                localConfigLoader,
+                new AgentLlmProperties(),
+                stageConfigResolver,
+                stageConfigValidator
         );
         executor.init();
 
@@ -99,6 +111,7 @@ class AgentRunExecutorTest {
         when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of());
         when(eventService.extractUserGoal(anyString())).thenReturn("goal");
         when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
+        when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null, List.of()));

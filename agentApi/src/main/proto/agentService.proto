@@ -35,6 +35,7 @@ message CreateAgentRunRequest {
   string provider = 8;
   int32 planner_candidate_count = 9;
   bool debug_mode = 10;
+  string stage_config_json = 11;  // 各阶段 LLM 配置（包含 planning/execution/sub_agent）
 }
 
 message GetAgentRunRequest {

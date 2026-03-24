@@ -14,7 +14,6 @@ public class AgentLlmProperties {
     private String defaultModel;
     private Map<String, Endpoint> endpoints = new HashMap<>();
     private List<String> models = new ArrayList<>();
-    private Map<String, ModelMetadata> modelMetadata = new HashMap<>();
     private Runtime runtime = new Runtime();
     private Observability observability = new Observability();
     private Prompts prompts = new Prompts();
@@ -50,14 +49,6 @@ public class AgentLlmProperties {
 
     public void setModels(List<String> models) {
         this.models = models == null ? new ArrayList<>() : models;
-    }
-
-    public Map<String, ModelMetadata> getModelMetadata() {
-        return modelMetadata;
-    }
-
-    public void setModelMetadata(Map<String, ModelMetadata> modelMetadata) {
-        this.modelMetadata = modelMetadata == null ? new HashMap<>() : modelMetadata;
     }
 
     public Prompts getPrompts() {
