@@ -22,6 +22,12 @@ public class AgentContext {
      */
     private static final ThreadLocal<Boolean> DEBUG_MODE_HOLDER = new ThreadLocal<>();
 
+    /**
+     * OpenRouter reasoning (thinking) effort 配置：
+     * 用于控制 reasoning 模型的思考强度，仅在 OpenRouter 端点生效。
+     */
+    private static final ThreadLocal<String> REASONING_EFFORT_HOLDER = new ThreadLocal<>();
+
     public static void setRunId(String runId) {
         RUN_ID_HOLDER.set(runId);
     }
@@ -122,6 +128,18 @@ public class AgentContext {
         DEBUG_MODE_HOLDER.remove();
     }
 
+    public static void setReasoningEffort(String effort) {
+        REASONING_EFFORT_HOLDER.set(effort);
+    }
+
+    public static String getReasoningEffort() {
+        return REASONING_EFFORT_HOLDER.get();
+    }
+
+    public static void clearReasoningEffort() {
+        REASONING_EFFORT_HOLDER.remove();
+    }
+
     public static void clearPhase() {
         PHASE_HOLDER.remove();
     }
@@ -164,6 +182,7 @@ public class AgentContext {
         clearDecisionContext();
         clearStructuredOutputSpec();
         clearDebugMode();
+        clearReasoningEffort();
     }
 
     public static final class StructuredOutputSpec {

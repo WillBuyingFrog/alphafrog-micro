@@ -171,6 +171,12 @@ public class TodoPlanner {
             AgentContext.setStage("todo_planning_analysis");
             AgentContext.clearStructuredOutputSpec();
 
+            // 设置 Planning 阶段 reasoning 配置
+            String planningReasoningEffort = resolvePlanningReasoningEffort();
+            if (planningReasoningEffort != null) {
+                AgentContext.setReasoningEffort(planningReasoningEffort);
+            }
+
             ChatResponse analysisResponse;
             String analysisText;
             ChatResponse structuredResponse;
@@ -264,6 +270,7 @@ public class TodoPlanner {
                 } else {
                     AgentContext.setStructuredOutputSpec(previousSpec);
                 }
+                AgentContext.clearReasoningEffort();
             }
 
             try {
@@ -581,6 +588,30 @@ public class TodoPlanner {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    /**
+     * 解析 Planning 阶段的 OpenRouter reasoning (thinking) 配置。
+     * <p>优先从热加载配置读取，其次从静态配置读取。</p>
+     *
+     * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
+     */
+    private String resolvePlanningReasoningEffort() {
+        // 1. 尝试从 local config (热加载) 读取
+        String effort = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getReasoning)
+                .map(AgentLlmProperties.Reasoning::resolveEffort)
+                .orElse(null);
+        if (effort != null) return effort;
+
+        // 2. 从 base properties 读取
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getPlanning() != null
+                && llmProperties.getRuntime().getPlanning().getReasoning() != null) {
+            return llmProperties.getRuntime().getPlanning().getReasoning().resolveEffort();
+        }
+        return null;
     }
 
     /**

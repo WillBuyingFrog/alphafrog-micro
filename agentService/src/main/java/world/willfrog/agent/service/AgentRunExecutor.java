@@ -12,6 +12,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunMessage;
@@ -53,6 +54,8 @@ public class AgentRunExecutor {
     private final AgentMessageService messageService;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
+    private final AgentLlmProperties llmProperties;
 
     private final AtomicInteger activeRuns = new AtomicInteger(0);
     private Timer runDurationTimer;
@@ -126,6 +129,35 @@ public class AgentRunExecutor {
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
+
+            // 解析 planning 阶段专用模型（支持独立配置）
+            AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlmForPlanning(requestedEndpointName, requestedModelName);
+            ChatModel planningModel;
+            String planningEndpointName;
+            String planningModelName;
+            String planningEndpointBaseUrl;
+            boolean useDedicatedPlanningModel = false;
+            if (planningResolvedLlm.equals(resolvedLlm)) {
+                // 没有单独配置 planning 模型，使用 execution 模型
+                planningModel = chatModel;
+                planningEndpointName = endpointName;
+                planningModelName = modelName;
+                planningEndpointBaseUrl = endpointBaseUrl;
+            } else {
+                // 有单独配置 planning 模型
+                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, providerOrder);
+                planningEndpointName = planningResolvedLlm.endpointName();
+                planningModelName = planningResolvedLlm.modelName();
+                planningEndpointBaseUrl = planningResolvedLlm.baseUrl();
+                useDedicatedPlanningModel = true;
+            }
+            // 记录 planning 模型选择事件
+            eventService.append(runId, userId, "PLANNING_MODEL_SELECTED", mapOf(
+                    "endpoint", planningEndpointName,
+                    "model", planningModelName,
+                    "dedicatedConfig", useDedicatedPlanningModel
+            ));
+
             String userGoal = resolveUserGoal(run);
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
 
@@ -175,17 +207,24 @@ public class AgentRunExecutor {
                     .run(run)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .model(chatModel)
+                    .model(planningModel)
                     .toolSpecifications(toolSpecifications)
-                    .endpointName(endpointName)
-                    .endpointBaseUrl(endpointBaseUrl)
-                    .modelName(modelName)
+                    .endpointName(planningEndpointName)
+                    .endpointBaseUrl(planningEndpointBaseUrl)
+                    .modelName(planningModelName)
                     .executionMode(executionMode)
                     .maxTodos(maxTodos)
                     .build());
 
             // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）
             WorkflowExecutor selectedExecutor = workflowExecutorFactory.select(todoPlan);
+
+            // 设置 Execution 阶段 reasoning 配置（Planning 阶段可能已清除）
+            String executionReasoningEffort = resolveExecutionReasoningEffort();
+            if (executionReasoningEffort != null) {
+                AgentContext.setReasoningEffort(executionReasoningEffort);
+            }
+
             WorkflowExecutionResult result = selectedExecutor.execute(WorkflowRequest.builder()
                     .run(run)
                     .userId(userId)
@@ -345,5 +384,29 @@ public class AgentRunExecutor {
             }
         }
         return merged;
+    }
+
+    /**
+     * 解析 Execution 阶段的 OpenRouter reasoning (thinking) 配置。
+     * <p>优先从热加载配置读取，其次从静态配置读取。</p>
+     *
+     * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
+     */
+    private String resolveExecutionReasoningEffort() {
+        // 1. 尝试从 local config (热加载) 读取
+        String effort = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getExecution)
+                .map(AgentLlmProperties.Execution::getReasoning)
+                .map(AgentLlmProperties.Reasoning::resolveEffort)
+                .orElse(null);
+        if (effort != null) return effort;
+
+        // 2. 从 base properties 读取
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null
+                && llmProperties.getRuntime().getExecution().getReasoning() != null) {
+            return llmProperties.getRuntime().getExecution().getReasoning().resolveEffort();
+        }
+        return null;
     }
 }

@@ -169,6 +169,14 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     provider.put("allow_fallbacks", allowFallbacks);
                 }
                 requestJsonMap.put("provider", provider);
+
+                // 添加 OpenRouter reasoning (thinking) 配置
+                String reasoningEffort = AgentContext.getReasoningEffort();
+                if (reasoningEffort != null && !reasoningEffort.isBlank()) {
+                    Map<String, Object> reasoning = new LinkedHashMap<>();
+                    reasoning.put("effort", reasoningEffort);
+                    requestJsonMap.put("reasoning", reasoning);
+                }
             } else if (structuredOutputSpec != null) {
                 // 非 OpenRouter 端点也需要添加结构化输出参数
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());

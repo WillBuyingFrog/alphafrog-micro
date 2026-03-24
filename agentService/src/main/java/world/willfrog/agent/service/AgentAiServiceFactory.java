@@ -47,6 +47,10 @@ public class AgentAiServiceFactory {
         return llmResolver.resolve(endpointName, modelName);
     }
 
+    public AgentLlmResolver.ResolvedLlm resolveLlmForPlanning(String endpointName, String modelName) {
+        return llmResolver.resolveForPlanning(endpointName, modelName);
+    }
+
     public ChatModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
         return buildChatModelWithProviderOrder(resolved, List.of());
     }

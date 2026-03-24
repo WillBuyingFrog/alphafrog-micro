@@ -304,6 +304,12 @@ public class AgentLlmProperties {
         private Integer maxTodos;
         /** 客户端可请求的 maxTodos 上限，超过则拒绝执行。null 表示不限制。 */
         private Integer maxTodosClientCap;
+        /** Planning 阶段专用 endpoint，未配置则使用 execution 阶段模型 */
+        private String endpointName;
+        /** Planning 阶段专用 model，未配置则使用 execution 阶段模型 */
+        private String modelName;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
         private StructuredOutput structuredOutput = new StructuredOutput();
 
         public Integer getMaxTodos() {
@@ -320,6 +326,30 @@ public class AgentLlmProperties {
 
         public void setMaxTodosClientCap(Integer maxTodosClientCap) {
             this.maxTodosClientCap = maxTodosClientCap;
+        }
+
+        public String getEndpointName() {
+            return endpointName;
+        }
+
+        public void setEndpointName(String endpointName) {
+            this.endpointName = endpointName;
+        }
+
+        public String getModelName() {
+            return modelName;
+        }
+
+        public void setModelName(String modelName) {
+            this.modelName = modelName;
+        }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
         }
 
         public StructuredOutput getStructuredOutput() {
@@ -346,6 +376,8 @@ public class AgentLlmProperties {
         private Double staticFixTemperature;
         private Boolean failFast;
         private String defaultExecutionMode;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
 
         public String getMode() {
             return mode;
@@ -458,6 +490,14 @@ public class AgentLlmProperties {
         public void setDefaultExecutionMode(String defaultExecutionMode) {
             this.defaultExecutionMode = defaultExecutionMode;
         }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
+        }
     }
 
     public static class Parallel {
@@ -501,6 +541,8 @@ public class AgentLlmProperties {
         private String lowComplexityModelName;
         private String mediumComplexityModelName;
         private String highComplexityModelName;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
         private StructuredOutput structuredOutput = new StructuredOutput();
         private Placeholder placeholder = new Placeholder();
 
@@ -591,6 +633,14 @@ public class AgentLlmProperties {
         public void setPlaceholder(Placeholder placeholder) {
             this.placeholder = placeholder == null ? new Placeholder() : placeholder;
         }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
+        }
     }
 
     public static class StructuredOutput {
@@ -668,6 +718,62 @@ public class AgentLlmProperties {
 
         public void setResolveTodoAlias(Boolean resolveTodoAlias) {
             this.resolveTodoAlias = resolveTodoAlias;
+        }
+    }
+
+    /**
+     * OpenRouter reasoning (thinking) 配置。
+     * <p>用于控制 reasoning 模型的思考强度。</p>
+     */
+    public static class Reasoning {
+        /** 是否启用 reasoning (thinking) */
+        private Boolean enabled;
+        /** reasoning effort 级别: xhigh, high, medium, low, minimal, none */
+        private String effort;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getEffort() {
+            return effort;
+        }
+
+        public void setEffort(String effort) {
+            this.effort = effort;
+        }
+
+        /**
+         * 解析并返回有效的 effort 值。
+         * <p>如果 enabled 为 null（未配置），返回 null，表示不发送 reasoning 参数（使用模型默认行为）。</p>
+         * <p>如果 enabled 为 false，返回 "none" 以显式关闭 reasoning。</p>
+         * <p>如果 enabled 为 true 但 effort 未配置，返回 "medium" 作为默认值。</p>
+         *
+         * @return 有效的 effort 值，或 null 表示不发送 reasoning 参数
+         */
+        public String resolveEffort() {
+            // enabled 未配置（null）：不发送 reasoning 参数，使用模型默认行为
+            if (enabled == null) {
+                return null;
+            }
+            // enabled 为 false：显式关闭 reasoning
+            if (!enabled) {
+                return "none";
+            }
+            // enabled 为 true：解析 effort 值
+            String e = effort == null ? null : effort.trim().toLowerCase();
+            if (e == null || e.isEmpty()) {
+                return "medium"; // 默认值
+            }
+            // 验证有效值
+            return switch (e) {
+                case "xhigh", "high", "medium", "low", "minimal", "none" -> e;
+                default -> "medium";
+            };
         }
     }
 

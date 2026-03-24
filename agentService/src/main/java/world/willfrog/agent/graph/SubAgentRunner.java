@@ -142,6 +142,12 @@ public class SubAgentRunner {
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
         String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
 
+        // 设置 Sub Agent 阶段 reasoning 配置
+        String subAgentReasoningEffort = resolveSubAgentReasoningEffort();
+        if (subAgentReasoningEffort != null) {
+            AgentContext.setReasoningEffort(subAgentReasoningEffort);
+        }
+
         List<Map<String, Object>> executedSteps = new ArrayList<>();
         try {
             // 第一步：生成“可执行的线性步骤 JSON”。若出现无效工具，自动要求模型重规划。
@@ -441,6 +447,7 @@ public class SubAgentRunner {
             } else {
                 AgentContext.setStructuredOutputSpec(previousStructuredOutputSpec);
             }
+            AgentContext.clearReasoningEffort();
         }
     }
 
@@ -1025,6 +1032,30 @@ public class SubAgentRunner {
                 .map(AgentLlmProperties.Placeholder::getResolveTodoAlias)
                 .orElse(null);
         return base == null || base;
+    }
+
+    /**
+     * 解析 Sub Agent 阶段的 OpenRouter reasoning (thinking) 配置。
+     * <p>优先从热加载配置读取，其次从静态配置读取。</p>
+     *
+     * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
+     */
+    private String resolveSubAgentReasoningEffort() {
+        // 1. 尝试从 local config (热加载) 读取
+        String effort = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getReasoning)
+                .map(AgentLlmProperties.Reasoning::resolveEffort)
+                .orElse(null);
+        if (effort != null) return effort;
+
+        // 2. 从 base properties 读取
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getSubAgent() != null
+                && llmProperties.getRuntime().getSubAgent().getReasoning() != null) {
+            return llmProperties.getRuntime().getSubAgent().getReasoning().resolveEffort();
+        }
+        return null;
     }
 
     private String compactDate(String raw) {
