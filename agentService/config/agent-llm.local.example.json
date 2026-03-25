@@ -77,6 +77,8 @@
     "planning": {
       "maxTodos": 10,
       "maxTodosClientCap": 10,
+      "endpointName": "openrouter",
+      "modelName": "anthropic/claude-3.5-sonnet",
       "structuredOutput": {
         "enabled": true,
         "maxAttempts": 3,
