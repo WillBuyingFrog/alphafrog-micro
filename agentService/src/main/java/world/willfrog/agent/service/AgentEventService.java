@@ -87,6 +87,7 @@ public class AgentEventService {
                               int plannerCandidateCount,
                               boolean debugMode,
                               String stageConfigJson) {
+        log.info("[AgentEventService] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -106,10 +107,13 @@ public class AgentEventService {
             try {
                 // 存储为 JSON 对象而非字符串，便于后续解析
                 ext.put("stage_config_json", objectMapper.readTree(stageConfigJson));
+                log.info("[AgentEventService] stage_config_json 已存入 ext: {}", stageConfigJson);
             } catch (Exception e) {
-                log.warn("解析 stage_config_json 失败，存储为原始字符串: {}", e.getMessage());
+                log.warn("[AgentEventService] 解析 stage_config_json 失败，存储为原始字符串: {}", e.getMessage());
                 ext.put("stage_config_json", stageConfigJson);
             }
+        } else {
+            log.warn("[AgentEventService] stageConfigJson 为空，未存入 ext");
         }
         
         // 从 contextJson 中提取 execution_mode
