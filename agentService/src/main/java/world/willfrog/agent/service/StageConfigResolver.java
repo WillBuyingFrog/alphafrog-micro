@@ -35,9 +35,19 @@ public class StageConfigResolver {
      * @return 合并后的阶段配置，不为 null
      */
     public RunStageConfig resolve(String extJson) {
+        log.debug("[StageConfigResolver] 开始解析 extJson: {}", extJson);
         RunStageConfig clientConfig = parseClientConfig(extJson);
+        log.debug("[StageConfigResolver] 客户端配置解析完成: planning={}, execution={}",
+                clientConfig.getPlanning() != null ? clientConfig.getPlanning() : "null",
+                clientConfig.getExecution() != null ? clientConfig.getExecution() : "null");
         RunStageConfig localConfig = buildLocalConfig();
-        return mergeConfig(clientConfig, localConfig);
+        log.debug("[StageConfigResolver] Local配置: planning={}",
+                localConfig.getPlanning() != null ? localConfig.getPlanning().getModelName() : "null");
+        RunStageConfig merged = mergeConfig(clientConfig, localConfig);
+        log.info("[StageConfigResolver] 配置合并完成: planning.endpoint={}, planning.model={}",
+                merged.getPlanning() != null ? merged.getPlanning().getEndpointName() : "null",
+                merged.getPlanning() != null ? merged.getPlanning().getModelName() : "null");
+        return merged;
     }
 
     /**
@@ -45,24 +55,34 @@ public class StageConfigResolver {
      */
     private RunStageConfig parseClientConfig(String extJson) {
         if (extJson == null || extJson.isBlank()) {
+            log.debug("[StageConfigResolver] extJson 为空");
             return new RunStageConfig();
         }
         try {
             JsonNode root = objectMapper.readTree(extJson);
+            log.debug("[StageConfigResolver] extJson 解析为 JSON: {}", root.toString());
             JsonNode stageNode = root.get("stage_config_json");
+            log.debug("[StageConfigResolver] stage_config_json 节点: {}", stageNode);
             if (stageNode == null || stageNode.isNull()) {
+                log.warn("[StageConfigResolver] stage_config_json 节点为空或不存在");
                 return new RunStageConfig();
             }
             // stage_config_json 可能是字符串（需要二次解析）或直接是对象
             String stageJson;
             if (stageNode.isTextual()) {
                 stageJson = stageNode.asText();
+                log.debug("[StageConfigResolver] stage_config_json 是字符串: {}", stageJson);
             } else {
                 stageJson = stageNode.toString();
+                log.debug("[StageConfigResolver] stage_config_json 是对象: {}", stageJson);
             }
-            return objectMapper.readValue(stageJson, RunStageConfig.class);
+            RunStageConfig config = objectMapper.readValue(stageJson, RunStageConfig.class);
+            log.info("[StageConfigResolver] 客户端配置解析成功: planning.endpoint={}, planning.model={}",
+                    config.getPlanning() != null ? config.getPlanning().getEndpointName() : "null",
+                    config.getPlanning() != null ? config.getPlanning().getModelName() : "null");
+            return config;
         } catch (Exception e) {
-            log.warn("解析客户端 stage_config_json 失败，使用默认配置: {}", e.getMessage());
+            log.warn("[StageConfigResolver] 解析客户端 stage_config_json 失败: {}", e.getMessage(), e);
             return new RunStageConfig();
         }
     }
