@@ -1,5 +1,6 @@
 package world.willfrog.alphafrogmicro.frontend.model.agent;
 
+import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.Map;
 
 public record AgentRunCreateRequest(
@@ -13,6 +14,6 @@ public record AgentRunCreateRequest(
         String provider,
         Integer plannerCandidateCount,
         Boolean debugMode,
-        String stageConfigJson
+        @JsonProperty("stage_config_json") String stageConfigJson
 ) {
 }

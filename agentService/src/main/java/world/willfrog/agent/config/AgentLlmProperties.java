@@ -1015,6 +1015,8 @@ public class AgentLlmProperties {
     public static class Debug {
         /** 是否打印 LLM 请求的 curl 命令 */
         private Boolean logLlmCurl = false;
+        /** 是否打印阶段级 LLM 配置解析日志 */
+        private Boolean logStageConfig = false;
 
         public Boolean getLogLlmCurl() {
             return logLlmCurl;
@@ -1022,6 +1024,14 @@ public class AgentLlmProperties {
 
         public void setLogLlmCurl(Boolean logLlmCurl) {
             this.logLlmCurl = logLlmCurl;
+        }
+
+        public Boolean getLogStageConfig() {
+            return logStageConfig;
+        }
+
+        public void setLogStageConfig(Boolean logStageConfig) {
+            this.logStageConfig = logStageConfig;
         }
     }
 

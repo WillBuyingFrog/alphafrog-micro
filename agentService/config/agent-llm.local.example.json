@@ -181,7 +181,8 @@
     }
   },
   "debug": {
-    "logLlmCurl": false
+    "logLlmCurl": false,
+    "logStageConfig": false
   },
   "prompts": {
     "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
