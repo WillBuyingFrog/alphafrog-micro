@@ -12,6 +12,7 @@ public record AgentRunCreateRequest(
         Boolean captureLlmRequests,
         String provider,
         Integer plannerCandidateCount,
-        Boolean debugMode
+        Boolean debugMode,
+        String stageConfigJson
 ) {
 }

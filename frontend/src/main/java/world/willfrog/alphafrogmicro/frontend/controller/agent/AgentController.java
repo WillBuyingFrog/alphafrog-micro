@@ -153,6 +153,7 @@ public class AgentController {
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
                             .setDebugMode(debugMode)
+                            .setStageConfigJson(nvl(request.stageConfigJson()))
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));
