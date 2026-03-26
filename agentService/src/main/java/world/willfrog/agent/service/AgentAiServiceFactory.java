@@ -171,13 +171,52 @@ public class AgentAiServiceFactory {
             return Map.of();
         }
         Map<String, String> headers = new HashMap<>();
-        if (openRouterHttpReferer != null && !openRouterHttpReferer.isBlank()) {
-            headers.put("HTTP-Referer", openRouterHttpReferer);
+        
+        // 优先从热加载配置读取，其次从 @Value 注解读取
+        String httpReferer = getOpenRouterHttpReferer();
+        String title = getOpenRouterTitle();
+        
+        if (httpReferer != null && !httpReferer.isBlank()) {
+            headers.put("HTTP-Referer", httpReferer);
         }
-        if (openRouterTitle != null && !openRouterTitle.isBlank()) {
-            headers.put("X-Title", openRouterTitle);
+        if (title != null && !title.isBlank()) {
+            headers.put("X-Title", title);
         }
         return headers;
+    }
+    
+    /**
+     * 获取 OpenRouter HTTP Referer，优先从热加载配置读取。
+     */
+    private String getOpenRouterHttpReferer() {
+        if (localConfigLoader != null) {
+            String fromConfig = localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getHttpReferer())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+            if (fromConfig != null) {
+                return fromConfig;
+            }
+        }
+        return openRouterHttpReferer;
+    }
+    
+    /**
+     * 获取 OpenRouter Title，优先从热加载配置读取。
+     */
+    private String getOpenRouterTitle() {
+        if (localConfigLoader != null) {
+            String fromConfig = localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getTitle())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+            if (fromConfig != null) {
+                return fromConfig;
+            }
+        }
+        return openRouterTitle;
     }
 
     private boolean isBlank(String value) {

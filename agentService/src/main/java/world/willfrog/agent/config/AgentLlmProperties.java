@@ -18,6 +18,7 @@ public class AgentLlmProperties {
     private Observability observability = new Observability();
     private Prompts prompts = new Prompts();
     private Debug debug = new Debug();
+    private OpenRouterConfig openrouter = new OpenRouterConfig();
 
     public String getDefaultEndpoint() {
         return defaultEndpoint;
@@ -81,6 +82,14 @@ public class AgentLlmProperties {
 
     public void setDebug(Debug debug) {
         this.debug = debug == null ? new Debug() : debug;
+    }
+
+    public OpenRouterConfig getOpenrouter() {
+        return openrouter;
+    }
+
+    public void setOpenrouter(OpenRouterConfig openrouter) {
+        this.openrouter = openrouter == null ? new OpenRouterConfig() : openrouter;
     }
 
     public static class Endpoint {
@@ -1052,6 +1061,33 @@ public class AgentLlmProperties {
 
         public void setLogStageConfig(Boolean logStageConfig) {
             this.logStageConfig = logStageConfig;
+        }
+    }
+
+    /**
+     * OpenRouter 专属配置。
+     * <p>用于设置 HTTP Referer 和 X-Title，使 OpenRouter Dashboard 正确显示 App 名称。</p>
+     */
+    public static class OpenRouterConfig {
+        /** HTTP Referer，OpenRouter 用于统计和展示调用来源 */
+        private String httpReferer;
+        /** App 标题，显示在 OpenRouter Dashboard 中 */
+        private String title;
+
+        public String getHttpReferer() {
+            return httpReferer;
+        }
+
+        public void setHttpReferer(String httpReferer) {
+            this.httpReferer = httpReferer;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
         }
     }
 

@@ -378,6 +378,9 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getDebug() == null) {
             cfg.setDebug(null);
         }
+        if (cfg.getOpenrouter() == null) {
+            cfg.setOpenrouter(null);
+        }
         return cfg;
     }
 }

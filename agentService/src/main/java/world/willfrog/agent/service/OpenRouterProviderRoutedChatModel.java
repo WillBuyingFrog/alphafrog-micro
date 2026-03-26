@@ -193,6 +193,10 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             String requestUrl = OpenAiCompatibleChatModelSupport.buildChatCompletionsUrl(baseUrl);
             Map<String, String> requestHeaders = OpenAiCompatibleChatModelSupport.buildRequestHeaders(apiKey);
             
+            // 确保 requestHeaders 包含所有实际发送的 headers（用于 curl 命令和 HTTP 记录）
+            requestHeaders.put("Content-Type", "application/json");
+            requestHeaders.put("Accept", "application/json");
+            
             HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(requestUrl))
                     .timeout(Duration.ofSeconds(180))
