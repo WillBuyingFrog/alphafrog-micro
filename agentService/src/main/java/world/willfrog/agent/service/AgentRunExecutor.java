@@ -13,6 +13,8 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
+import world.willfrog.agent.config.StageLlmConfig;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunMessage;
@@ -56,6 +58,8 @@ public class AgentRunExecutor {
     private final MeterRegistry meterRegistry;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
+    private final StageConfigResolver stageConfigResolver;
+    private final StageConfigValidator stageConfigValidator;
 
     private final AtomicInteger activeRuns = new AtomicInteger(0);
     private Timer runDurationTimer;
@@ -115,41 +119,57 @@ public class AgentRunExecutor {
             eventService.append(runId, userId, "EXECUTION_STARTED", mapOf("run_id", runId));
             stateStore.markRunStatus(runId, AgentRunStatus.EXECUTING.name());
 
+            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            boolean debugMode = eventService.extractDebugMode(run.getExt());
+            AgentContext.setDebugMode(debugMode);
+
+            // 解析阶段级 LLM 配置（客户端 Run 级 + local 合并）
+            RunStageConfig stageConfig = stageConfigResolver.resolve(run.getExt());
+            stageConfigValidator.validate(stageConfig);
+            AgentContext.setStageConfig(stageConfig);
+
+            // Execution 阶段模型解析
             String requestedEndpointName = eventService.extractEndpointName(run.getExt());
             String requestedModelName = eventService.extractModelName(run.getExt());
+            StageLlmConfig execStageCfg = stageConfig.getExecution();
+            if (execStageCfg != null && execStageCfg.isValid()) {
+                requestedEndpointName = execStageCfg.getEndpointName();
+                requestedModelName = execStageCfg.getModelName();
+            }
             AgentLlmResolver.ResolvedLlm resolvedLlm = aiServiceFactory.resolveLlm(requestedEndpointName, requestedModelName);
             String endpointName = resolvedLlm.endpointName();
             String modelName = resolvedLlm.modelName();
             String endpointBaseUrl = resolvedLlm.baseUrl();
-            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
-            boolean debugMode = eventService.extractDebugMode(run.getExt());
-            AgentContext.setDebugMode(debugMode);
             var userProviderOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
             var providerOrder = mergeProviderOrder(userProviderOrder, resolvedLlm.validProviders());
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
 
-            // 解析 planning 阶段专用模型（支持独立配置）
-            AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlmForPlanning(requestedEndpointName, requestedModelName);
+            // Planning 阶段模型解析：优先使用 stageConfig.planning
             ChatModel planningModel;
             String planningEndpointName;
             String planningModelName;
             String planningEndpointBaseUrl;
             boolean useDedicatedPlanningModel = false;
-            if (planningResolvedLlm.equals(resolvedLlm)) {
-                // 没有单独配置 planning 模型，使用 execution 模型
-                planningModel = chatModel;
-                planningEndpointName = endpointName;
-                planningModelName = modelName;
-                planningEndpointBaseUrl = endpointBaseUrl;
-            } else {
-                // 有单独配置 planning 模型
-                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, providerOrder);
+            StageLlmConfig planningStageCfg = stageConfig.getPlanning();
+            if (planningStageCfg != null && planningStageCfg.isValid()) {
+                // 客户端或 local 指定了 planning 专用模型
+                AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlm(
+                        planningStageCfg.getEndpointName(), planningStageCfg.getModelName());
+                // Bug 修复：planning 阶段应使用 planning 模型自己的 validProviders，而非 execution 阶段的
+                var planningProviderOrder = mergeProviderOrder(userProviderOrder, planningResolvedLlm.validProviders());
+                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, planningProviderOrder);
                 planningEndpointName = planningResolvedLlm.endpointName();
                 planningModelName = planningResolvedLlm.modelName();
                 planningEndpointBaseUrl = planningResolvedLlm.baseUrl();
                 useDedicatedPlanningModel = true;
+            } else {
+                // 退化为使用 execution 模型
+                planningModel = chatModel;
+                planningEndpointName = endpointName;
+                planningModelName = modelName;
+                planningEndpointBaseUrl = endpointBaseUrl;
             }
             // 记录 planning 模型选择事件
             eventService.append(runId, userId, "PLANNING_MODEL_SELECTED", mapOf(
@@ -220,7 +240,9 @@ public class AgentRunExecutor {
             WorkflowExecutor selectedExecutor = workflowExecutorFactory.select(todoPlan);
 
             // 设置 Execution 阶段 reasoning 配置（Planning 阶段可能已清除）
-            String executionReasoningEffort = resolveExecutionReasoningEffort();
+            String executionReasoningEffort = (execStageCfg != null && execStageCfg.getReasoningEffort() != null)
+                    ? execStageCfg.getReasoningEffort()
+                    : resolveExecutionReasoningEffort();
             if (executionReasoningEffort != null) {
                 AgentContext.setReasoningEffort(executionReasoningEffort);
             }

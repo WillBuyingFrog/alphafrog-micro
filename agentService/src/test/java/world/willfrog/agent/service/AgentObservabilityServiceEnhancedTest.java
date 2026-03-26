@@ -95,6 +95,36 @@ class AgentObservabilityServiceEnhancedTest {
     }
 
     @Test
+    void loadObservabilityJson_shouldPreferRedisCache() {
+        String runId = "test-load-from-redis";
+        when(stateStore.loadObservability(eq(runId))).thenReturn(Optional.of("{\"summary\":{\"status\":\"EXECUTING\"}}"));
+
+        String json = service.loadObservabilityJson(runId, "{\"observability\":{\"summary\":{\"status\":\"FAILED\"}}}");
+
+        assertEquals("{\"summary\":{\"status\":\"EXECUTING\"}}", json);
+    }
+
+    @Test
+    void loadObservabilityJson_shouldFallbackToSnapshotWhenRedisMissing() {
+        String runId = "test-load-from-snapshot";
+        when(stateStore.loadObservability(eq(runId))).thenReturn(Optional.empty());
+
+        String json = service.loadObservabilityJson(runId, "{\"observability\":{\"summary\":{\"status\":\"WAITING\"}}}");
+
+        assertTrue(json.contains("\"WAITING\""));
+    }
+
+    @Test
+    void loadObservabilityJson_shouldReturnEmptyWhenBothSourcesMissing() {
+        String runId = "test-load-empty";
+        when(stateStore.loadObservability(eq(runId))).thenReturn(Optional.empty());
+
+        String json = service.loadObservabilityJson(runId, "{\"answer\":\"no_observability\"}");
+
+        assertEquals("", json);
+    }
+
+    @Test
     void recordLlmCallWithRawHttp_shouldParseInputMessagesFromHttpBody() throws Exception {
         String runId = "test-raw-http-input";
         setupStateStore(runId);

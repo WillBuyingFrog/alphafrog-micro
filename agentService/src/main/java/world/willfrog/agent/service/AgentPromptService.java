@@ -318,7 +318,9 @@ public class AgentPromptService {
 
     /**
      * 规划分析阶段指令 —— 注入到 User Message，引导 LLM 先输出自然语言分析。
+     * @deprecated 使用 {@link #planningStrategyStageInstruction(String, int, int)} 替代
      */
+    @Deprecated
     public String planningAnalysisStageInstruction(String toolWhitelist, int maxTodos) {
         String template = firstNonBlank(
                 currentPrompts().getTodoPlannerSystemPromptTemplate(),
@@ -337,6 +339,101 @@ public class AgentPromptService {
         ));
         return "[Stage: PLANNING_ANALYSIS]\n" + rendered
                 + "\n请先用自然语言分析用户需求和执行思路，暂时不要输出 JSON。";
+    }
+
+    /**
+     * 第一阶段：统筹规划阶段指令（结构化输出）。
+     * 从配置文件加载: prompts/todo/planning_strategy_stage.txt
+     */
+    public String planningStrategyStageInstruction(String toolWhitelist, int maxTodos, int maxDetailLength) {
+        String template = firstNonBlank(
+                currentPrompts().getPlanningStrategyStage(),
+                loadPromptFileFromClasspath("prompts/todo/planning_strategy_stage.txt")
+        );
+        return render(template, Map.of(
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos),
+                "strategyMaxDetailLength", String.valueOf(maxDetailLength),
+                "toolCapabilities", buildToolCapabilities(toolWhitelist)
+        ));
+    }
+
+    /**
+     * 构建工具能力说明，帮助规划模型了解工具的批量操作能力。
+     */
+    private String buildToolCapabilities(String toolWhitelist) {
+        List<String> tools = List.of(toolWhitelist.split(","));
+        List<String> capabilities = new ArrayList<>();
+        
+        for (String tool : tools) {
+            tool = tool.trim();
+            switch (tool) {
+                case "getIndexDaily" -> capabilities.add(
+                    "- getIndexDaily: 批量查询指数日线数据。支持同时查询多个指数（ts_code 用逗号分隔），建议优先使用批量查询而非多次单查。");
+                case "getStockDaily" -> capabilities.add(
+                    "- getStockDaily: 批量查询股票日线数据。支持同时查询多只股票（ts_code 用逗号分隔）。");
+                case "getFundDaily" -> capabilities.add(
+                    "- getFundDaily: 批量查询基金日线数据。支持同时查询多只基金（ts_code 用逗号分隔）。");
+                case "searchIndex" -> capabilities.add(
+                    "- searchIndex: 搜索指数代码。返回指数名称和代码对应关系。");
+                case "searchStock" -> capabilities.add(
+                    "- searchStock: 搜索股票代码。返回股票名称和代码对应关系。");
+                case "searchFund" -> capabilities.add(
+                    "- searchFund: 搜索基金代码。返回基金名称和代码对应关系。");
+                case "executePython" -> capabilities.add(
+                    "- executePython: 执行 Python 代码进行数据分析。支持批量处理多个数据集（dataset_ids 用逗号分隔）。");
+                case "getIndexInfo" -> capabilities.add(
+                    "- getIndexInfo: 查询指数基本信息。支持批量查询多个指数。");
+                case "getStockInfo" -> capabilities.add(
+                    "- getStockInfo: 查询股票基本信息。支持批量查询多只股票。");
+                case "getFinancialReport" -> capabilities.add(
+                    "- getFinancialReport: 查询财务报表数据（利润表、资产负债表、现金流量表）。");
+                case "ragSearch" -> capabilities.add(
+                    "- ragSearch: RAG语义检索，查询公告、研报、年报原文内容。");
+                case "loadDocument" -> capabilities.add(
+                    "- loadDocument: 加载文档进行向量化检索。");
+                default -> capabilities.add("- " + tool + ": 可用工具");
+            }
+        }
+        
+        return String.join("\n", capabilities);
+    }
+
+    /**
+     * 第二阶段：任务拆解阶段指令（结构化输出）。
+     * 从配置文件加载: prompts/todo/planning_todos_stage.txt
+     */
+    public String planningTodosStageInstruction(world.willfrog.agent.workflow.StructuredPlanningSupport.OverallPlan overallPlan,
+                                                  String toolWhitelist, int maxTodos) {
+        String template = firstNonBlank(
+                currentPrompts().getPlanningTodosStage(),
+                loadPromptFileFromClasspath("prompts/todo/planning_todos_stage.txt")
+        );
+        String modeGuidance = "DAG".equalsIgnoreCase(overallPlan.mode())
+                ? "当前是 DAG 模式，请通过 dependsOn 表达任务依赖关系。"
+                : "当前是 LINEAR 模式，按 sequence 顺序执行即可。";
+
+        return render(template, Map.of(
+                "mode", overallPlan.mode(),
+                "detail", overallPlan.detail(),
+                "modeGuidance", modeGuidance,
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos)
+        ));
+    }
+
+    /**
+     * 从 classpath 加载 prompt 文件。
+     */
+    private String loadPromptFileFromClasspath(String path) {
+        try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+            if (is != null) {
+                return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load prompt file from classpath: {}", path, e);
+        }
+        return "";
     }
 
     /**
@@ -480,6 +577,10 @@ public class AgentPromptService {
         merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
         merged.setDagModeGuidancePrompt(firstNonBlank(local.getDagModeGuidancePrompt(), base.getDagModeGuidancePrompt()));
         merged.setDagModeGuidancePromptFile(firstNonBlank(local.getDagModeGuidancePromptFile(), base.getDagModeGuidancePromptFile()));
+        merged.setPlanningStrategyStageFile(firstNonBlank(local.getPlanningStrategyStageFile(), base.getPlanningStrategyStageFile()));
+        merged.setPlanningStrategyStage(firstNonBlank(local.getPlanningStrategyStage(), base.getPlanningStrategyStage()));
+        merged.setPlanningTodosStageFile(firstNonBlank(local.getPlanningTodosStageFile(), base.getPlanningTodosStageFile()));
+        merged.setPlanningTodosStage(firstNonBlank(local.getPlanningTodosStage(), base.getPlanningTodosStage()));
         return merged;
     }
 

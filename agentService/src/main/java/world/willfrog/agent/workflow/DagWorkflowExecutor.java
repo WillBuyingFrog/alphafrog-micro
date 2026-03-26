@@ -264,7 +264,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 request.getUserGoal(),
                 request.getToolSpecifications().stream()
                         .map(dev.langchain4j.agent.tool.ToolSpecification::name)
-                        .collect(Collectors.toSet())
+                        .collect(Collectors.toSet()),
+                request.getToolSpecifications()
         );
 
         Map<String, ReactTodoExecutor.TodoExecutionRecord> resultMap;
@@ -465,6 +466,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         return ReactTodoExecutor.TodoExecutionContext.builder()
                 .userGoal(sharedContext.getUserGoal())
                 .availableTools(sharedContext.getAvailableTools())
+                .toolSpecifications(sharedContext.getToolSpecifications())
                 .completedTodos(new ArrayList<>(sharedContext.getCompletedTodos()))
                 .datasetRefs(new HashMap<>(sharedContext.getDatasetRefs()))
                 .build();
@@ -696,12 +698,16 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     private static class SharedExecutionContext {
         private final String userGoal;
         private final Set<String> availableTools;
+        private final List<dev.langchain4j.agent.tool.ToolSpecification> toolSpecifications;
         private final List<CompletedTodoInfo> completedTodos = new CopyOnWriteArrayList<>();
         private final Map<String, String> datasetRefs = new ConcurrentHashMap<>();
 
-        SharedExecutionContext(String userGoal, Set<String> availableTools) {
+        SharedExecutionContext(String userGoal,
+                               Set<String> availableTools,
+                               List<dev.langchain4j.agent.tool.ToolSpecification> toolSpecifications) {
             this.userGoal = userGoal;
             this.availableTools = availableTools;
+            this.toolSpecifications = toolSpecifications == null ? List.of() : new ArrayList<>(toolSpecifications);
         }
 
         void addCompletedTodo(TodoItem item, ReactTodoExecutor.TodoExecutionRecord record) {
@@ -710,6 +716,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     .description(item.getDescription())
                     .output(record.getOutput())
                     .summary(record.getSummary())
+                    .messageHistory(record.getMessageHistory())
                     .build());
         }
 
@@ -723,6 +730,10 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
         Set<String> getAvailableTools() {
             return availableTools;
+        }
+
+        List<dev.langchain4j.agent.tool.ToolSpecification> getToolSpecifications() {
+            return new ArrayList<>(toolSpecifications);
         }
 
         List<CompletedTodoInfo> getCompletedTodos() {

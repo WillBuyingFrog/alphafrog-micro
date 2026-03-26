@@ -86,6 +86,10 @@ class TodoPlannerTest {
         lenient().when(promptService.reactSystemPrompt()).thenReturn("unified-system");
         lenient().when(promptService.planningAnalysisStageInstruction(anyString(), any(Integer.class))).thenReturn("[Stage: PLANNING_ANALYSIS]");
         lenient().when(promptService.planningStructuredStageInstruction()).thenReturn("[Stage: PLANNING_STRUCTURED]");
+        lenient().when(promptService.planningStrategyStageInstruction(anyString(), any(Integer.class), any(Integer.class)))
+                .thenReturn("[Stage: PLANNING_STRATEGY]");
+        lenient().when(promptService.planningTodosStageInstruction(any(), anyString(), any(Integer.class)))
+                .thenReturn("[Stage: PLANNING_TODOS]");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(stateStore.isPlanOverride(anyString())).thenReturn(false);
         lenient().when(stateStore.loadPlan(anyString())).thenReturn(Optional.empty());
@@ -95,15 +99,16 @@ class TodoPlannerTest {
     void plan_shouldGenerateTodoListAndPersist() {
         AgentRun run = run("run-1");
 
-        // Step 1: 自然语言分析 response
-        AiMessage analysisMsg = mock(AiMessage.class);
-        when(analysisMsg.text()).thenReturn("经过分析，用户需要搜索平安相关的股票信息。");
-        ChatResponse analysisResp = ChatResponse.builder()
-                .aiMessage(analysisMsg)
+        // Step 1: strategy stage response
+        AiMessage strategyMsg = mock(AiMessage.class);
+        when(strategyMsg.text()).thenReturn(
+                "{\"overallPlan\":{\"mode\":\"LINEAR\",\"detail\":\"先搜索平安相关股票信息，再整理结果。\"}}");
+        ChatResponse strategyResp = ChatResponse.builder()
+                .aiMessage(strategyMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
-        // Step 2: 结构化 JSON response - ReAct 简化格式
+        // Step 2: todos stage response
         AiMessage structuredMsg = mock(AiMessage.class);
         when(structuredMsg.text()).thenReturn(
             "{\"analysis\":\"分析用户查询需求\",\"items\":["
@@ -115,9 +120,9 @@ class TodoPlannerTest {
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
-        // 两步规划：第一次返回分析，第二次返回结构化 JSON
+        // 两步规划：第一次返回 strategy，第二次返回 todos
         when(model.chat(any(List.class)))
-                .thenReturn(analysisResp)
+                .thenReturn(strategyResp)
                 .thenReturn(structuredResp);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
@@ -134,8 +139,8 @@ class TodoPlannerTest {
         assertEquals(1, plan.getItems().size());
         assertEquals("todo_1", plan.getItems().get(0).getId());
         assertEquals("搜索平安相关的股票信息", plan.getItems().get(0).getDescription());
-        // 验证 analysis 使用了自然语言分析的结果
-        assertEquals("经过分析，用户需要搜索平安相关的股票信息。", plan.getAnalysis());
+        // 验证 analysis 使用了 strategy stage 的 detail
+        assertEquals("先搜索平安相关股票信息，再整理结果。", plan.getAnalysis());
         verify(stateStore).recordPlan(eq("run-1"), anyString(), eq(true));
         verify(eventService).append(eq("run-1"), eq("u1"), eq("TODO_LIST_CREATED"), anyMap());
     }
@@ -144,11 +149,12 @@ class TodoPlannerTest {
     void plan_shouldRespectMaxTodos() {
         AgentRun run = run("run-2");
 
-        // Step 1: analysis
-        AiMessage analysisMsg = mock(AiMessage.class);
-        when(analysisMsg.text()).thenReturn("需要查询多个股票信息。");
-        ChatResponse analysisResp = ChatResponse.builder()
-                .aiMessage(analysisMsg)
+        // Step 1: strategy
+        AiMessage strategyMsg = mock(AiMessage.class);
+        when(strategyMsg.text()).thenReturn(
+                "{\"overallPlan\":{\"mode\":\"LINEAR\",\"detail\":\"按顺序查询多个股票信息。\"}}");
+        ChatResponse strategyResp = ChatResponse.builder()
+                .aiMessage(strategyMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
@@ -166,7 +172,7 @@ class TodoPlannerTest {
                 .build();
 
         when(model.chat(any(List.class)))
-                .thenReturn(analysisResp)
+                .thenReturn(strategyResp)
                 .thenReturn(structuredResp);
 
         TodoPlan plan = planner.plan(TodoPlanner.PlanRequest.builder()
@@ -187,11 +193,12 @@ class TodoPlannerTest {
     void plan_shouldFailWhenMissingDescription() {
         AgentRun run = run("run-3");
 
-        // Step 1: analysis
-        AiMessage analysisMsg = mock(AiMessage.class);
-        when(analysisMsg.text()).thenReturn("尝试创建任务。");
-        ChatResponse analysisResp = ChatResponse.builder()
-                .aiMessage(analysisMsg)
+        // Step 1: strategy
+        AiMessage strategyMsg = mock(AiMessage.class);
+        when(strategyMsg.text()).thenReturn(
+                "{\"overallPlan\":{\"mode\":\"LINEAR\",\"detail\":\"尝试创建任务。\"}}");
+        ChatResponse strategyResp = ChatResponse.builder()
+                .aiMessage(strategyMsg)
                 .metadata(ChatResponseMetadata.builder().build())
                 .build();
 
@@ -208,7 +215,7 @@ class TodoPlannerTest {
                 .build();
 
         when(model.chat(any(List.class)))
-                .thenReturn(analysisResp)
+                .thenReturn(strategyResp)
                 .thenReturn(structuredResp);
 
         // ReAct 模式下，缺少 description 会导致结构化验证失败

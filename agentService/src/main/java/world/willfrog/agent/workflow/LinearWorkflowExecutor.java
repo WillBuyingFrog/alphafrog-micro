@@ -100,6 +100,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             ReactTodoExecutor.TodoExecutionContext todoContext = ReactTodoExecutor.TodoExecutionContext.builder()
                     .userGoal(userGoal)
                     .availableTools(availableTools)
+                    .toolSpecifications(request.getToolSpecifications())
                     .completedTodos(new ArrayList<>(completedTodos))
                     .datasetRefs(new HashMap<>(datasetRefs))
                     .build();
@@ -121,6 +122,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         .description(item.getDescription())
                         .output(record.getOutput())
                         .summary(record.getSummary())
+                        .messageHistory(record.getMessageHistory())
                         .build());
                 executionContext.put(item.getId(), toLegacyRecord(record));
                 eventService.append(runId, userId, "TODO_COMPLETED", Map.of(

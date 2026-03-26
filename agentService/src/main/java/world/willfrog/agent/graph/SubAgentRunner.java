@@ -13,6 +13,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
+import world.willfrog.agent.config.StageLlmConfig;
+import world.willfrog.agent.config.SubAgentStageConfig;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
@@ -142,8 +145,11 @@ public class SubAgentRunner {
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
         String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
 
-        // 设置 Sub Agent 阶段 reasoning 配置
-        String subAgentReasoningEffort = resolveSubAgentReasoningEffort();
+        // 设置 Sub Agent 阶段 reasoning 配置（stageConfig 优先）
+        String subAgentReasoningEffort = resolveSubAgentReasoningEffortFromStageConfig(request);
+        if (subAgentReasoningEffort == null) {
+            subAgentReasoningEffort = resolveSubAgentReasoningEffort();
+        }
         if (subAgentReasoningEffort != null) {
             AgentContext.setReasoningEffort(subAgentReasoningEffort);
         }
@@ -1040,6 +1046,23 @@ public class SubAgentRunner {
      *
      * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
      */
+    /**
+     * 从 AgentContext 的 stageConfig 中解析 sub_agent 对应复杂度的 reasoning effort。
+     * 当前使用 medium_complexity 作为默认复杂度。
+     */
+    private String resolveSubAgentReasoningEffortFromStageConfig(SubAgentRequest request) {
+        RunStageConfig stageConfig = AgentContext.getStageConfig();
+        if (stageConfig == null || stageConfig.getSubAgent() == null) {
+            return null;
+        }
+        // 默认使用 mediumComplexity，未来可根据 request 中的复杂度标签选择
+        StageLlmConfig cfg = stageConfig.getSubAgent().getMediumComplexity();
+        if (cfg != null && cfg.getReasoningEffort() != null) {
+            return cfg.getReasoningEffort();
+        }
+        return null;
+    }
+
     private String resolveSubAgentReasoningEffort() {
         // 1. 尝试从 local config (热加载) 读取
         String effort = localConfigLoader.current()

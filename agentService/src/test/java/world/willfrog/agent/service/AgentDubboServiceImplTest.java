@@ -12,12 +12,14 @@ import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
@@ -139,6 +141,64 @@ class AgentDubboServiceImplTest {
         var status = service.getStatus(GetAgentRunStatusRequest.newBuilder().setUserId("u1").setId("run-2").build());
         assertEquals("EXECUTING", status.getPhase());
         assertEquals(0, status.getTotalCreditsConsumed());
+    }
+
+    @Test
+    void cancelRun_shouldPersistObservabilitySnapshotBeforeUpdatingStatus() {
+        AgentRun existing = new AgentRun();
+        existing.setId("run-cancel-1");
+        existing.setUserId("u1");
+        existing.setStatus(AgentRunStatus.EXECUTING);
+        existing.setSnapshotJson("{\"answer\":\"partial\"}");
+
+        AgentRun updated = new AgentRun();
+        updated.setId("run-cancel-1");
+        updated.setUserId("u1");
+        updated.setStatus(AgentRunStatus.CANCELED);
+        updated.setSnapshotJson("{\"answer\":\"partial\",\"observability\":{}}");
+
+        when(runMapper.findByIdAndUser("run-cancel-1", "u1")).thenReturn(existing, updated);
+        when(observabilityService.attachObservabilityToSnapshot("run-cancel-1", "{\"answer\":\"partial\"}", AgentRunStatus.CANCELED))
+                .thenReturn("{\"answer\":\"partial\",\"observability\":{}}");
+
+        service.cancelRun(CancelAgentRunRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-cancel-1")
+                .build());
+
+        verify(observabilityService).attachObservabilityToSnapshot("run-cancel-1", "{\"answer\":\"partial\"}", AgentRunStatus.CANCELED);
+        verify(runMapper).updateSnapshot("run-cancel-1", "u1", AgentRunStatus.CANCELED,
+                "{\"answer\":\"partial\",\"observability\":{}}", false, null);
+        verify(stateStore).markRunStatus("run-cancel-1", AgentRunStatus.CANCELED.name());
+    }
+
+    @Test
+    void pauseRun_shouldPersistObservabilitySnapshotForRedisFallbackBackup() {
+        AgentRun existing = new AgentRun();
+        existing.setId("run-pause-1");
+        existing.setUserId("u1");
+        existing.setStatus(AgentRunStatus.EXECUTING);
+        existing.setSnapshotJson("{\"answer\":\"partial\"}");
+
+        AgentRun updated = new AgentRun();
+        updated.setId("run-pause-1");
+        updated.setUserId("u1");
+        updated.setStatus(AgentRunStatus.WAITING);
+        updated.setSnapshotJson("{\"answer\":\"partial\",\"observability\":{}}");
+
+        when(runMapper.findByIdAndUser("run-pause-1", "u1")).thenReturn(existing, updated);
+        when(observabilityService.attachObservabilityToSnapshot("run-pause-1", "{\"answer\":\"partial\"}", AgentRunStatus.WAITING))
+                .thenReturn("{\"answer\":\"partial\",\"observability\":{}}");
+
+        service.pauseRun(PauseAgentRunRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-pause-1")
+                .build());
+
+        verify(observabilityService).attachObservabilityToSnapshot("run-pause-1", "{\"answer\":\"partial\"}", AgentRunStatus.WAITING);
+        verify(runMapper).updateSnapshot("run-pause-1", "u1", AgentRunStatus.WAITING,
+                "{\"answer\":\"partial\",\"observability\":{}}", false, null);
+        verify(stateStore).markRunStatus("run-pause-1", AgentRunStatus.WAITING.name());
     }
 
     @Test

@@ -93,12 +93,11 @@ public class AgentLlmLocalConfigLoader {
                             }
                         }
                     }
-                    log.info("Loaded local llm config from {} (endpoints={}, topLevelModels={}, endpointModels={}, modelMetadata={})",
+                    log.info("Loaded local llm config from {} (endpoints={}, topLevelModels={}, endpointModels={})",
                             path,
                             sanitized.getEndpoints().size(),
                             sanitized.getModels().size(),
-                            endpointModels,
-                            sanitized.getModelMetadata().size());
+                            endpointModels);
                 }
             } catch (Exception e) {
                 log.error("Failed to load local llm config from {}", path, e);
@@ -168,6 +167,10 @@ public class AgentLlmLocalConfigLoader {
         prompts.setDagModeGuidancePrompt(resolvePromptText(prompts.getDagModeGuidancePrompt(), baseDir, fileTimes));
         prompts.setDagModeGuidancePromptFile(resolvePromptText(prompts.getDagModeGuidancePromptFile(), baseDir, fileTimes));
         prompts.setDagReactSystemPromptFile(resolvePromptText(prompts.getDagReactSystemPromptFile(), baseDir, fileTimes));
+        
+        // 加载两阶段 planning 的 prompt 文件（复用 resolvePromptText 处理 file: 前缀）
+        prompts.setPlanningStrategyStage(resolvePromptText(prompts.getPlanningStrategyStageFile(), baseDir, fileTimes));
+        prompts.setPlanningTodosStage(resolvePromptText(prompts.getPlanningTodosStageFile(), baseDir, fileTimes));
 
         if (hasText(prompts.getPythonRefineRequirementsFile())) {
             List<String> requirements = readPromptLines(prompts.getPythonRefineRequirementsFile(), baseDir, fileTimes);
@@ -320,18 +323,6 @@ public class AgentLlmLocalConfigLoader {
         }
         if (cfg.getModels() == null) {
             cfg.setModels(null);
-        }
-        if (cfg.getModelMetadata() == null) {
-            cfg.setModelMetadata(null);
-        } else {
-            for (AgentLlmProperties.ModelMetadata metadata : cfg.getModelMetadata().values()) {
-                if (metadata != null && metadata.getFeatures() == null) {
-                    metadata.setFeatures(null);
-                }
-                if (metadata != null && metadata.getValidProviders() == null) {
-                    metadata.setValidProviders(null);
-                }
-            }
         }
         if (cfg.getPrompts() == null) {
             cfg.setPrompts(null);

@@ -583,17 +583,47 @@ public class AgentObservabilityService {
     public String loadObservabilityJson(String runId, String snapshotJson) {
         Optional<String> cached = stateStore.loadObservability(runId);
         if (cached.isPresent()) {
+            int llmTraces = 0;
+            int toolTraces = 0;
+            try {
+                ObservabilityState state = objectMapper.readValue(cached.get(), ObservabilityState.class);
+                if (state.getDiagnostics() != null) {
+                    llmTraces = state.getDiagnostics().getLlmTraces() != null ? state.getDiagnostics().getLlmTraces().size() : 0;
+                    toolTraces = state.getDiagnostics().getToolTraces() != null ? state.getDiagnostics().getToolTraces().size() : 0;
+                }
+            } catch (Exception e) {
+                log.debug("Failed to parse observability for metrics: runId={}", runId);
+            }
+            log.info("Observability loaded from Redis: runId={}, size={} bytes, llmTraces={}, toolTraces={}", 
+                    runId, cached.get().length(), llmTraces, toolTraces);
             return cached.get();
         }
+        
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
         Object observability = snapshot.get("observability");
-        if (observability == null) {
-            return "";
+        if (observability != null) {
+            String json = safeWrite(observability);
+            log.warn("Observability fallback to snapshot: runId={}, size={} bytes", runId, json.length());
+            return json;
         }
-        return safeWrite(observability);
+        
+        log.error("Observability not found anywhere: runId={}, snapshotLength={}, redisKey={}", 
+                runId, snapshotJson == null ? 0 : snapshotJson.length(),
+                "agent:run:" + runId + ":observability");
+        return "";
     }
 
     public String attachObservabilityToSnapshot(String runId, String snapshotJson, AgentRunStatus status) {
+        int llmTracesBefore = 0;
+        int toolTracesBefore = 0;
+        try {
+            ObservabilityState currentState = loadState(runId);
+            llmTracesBefore = currentState.getDiagnostics().getLlmTraces().size();
+            toolTracesBefore = currentState.getDiagnostics().getToolTraces().size();
+        } catch (Exception e) {
+            log.debug("Could not load current state for metrics: runId={}", runId);
+        }
+        
         ObservabilityState state = mutate(runId, current -> {
             if (status != null) {
                 current.getSummary().setStatus(status.name());
@@ -603,13 +633,50 @@ public class AgentObservabilityService {
             }
         });
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
-        snapshot.put("observability", objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
-        }));
+        Map<String, Object> observabilityMap = objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
+        });
+        snapshot.put("observability", observabilityMap);
         String output = safeWrite(snapshot);
+        
+        // 强制同步保存可观测数据到 Redis，确保后续可以立即加载
+        String observabilityJson = safeWrite(observabilityMap);
+        stateStore.saveObservability(runId, observabilityJson);
+        
+        int llmTracesAfter = state.getDiagnostics().getLlmTraces().size();
+        int toolTracesAfter = state.getDiagnostics().getToolTraces().size();
+        log.info("Observability attached to snapshot: runId={}, status={}, llmTraces {}→{}, toolTraces {}→{}, snapshotSize={} bytes, redisSize={} bytes", 
+                runId, status, llmTracesBefore, llmTracesAfter, toolTracesBefore, toolTracesAfter, 
+                output.length(), observabilityJson.length());
+        
         if (status == AgentRunStatus.COMPLETED || status == AgentRunStatus.FAILED || status == AgentRunStatus.CANCELED) {
             locks.remove(runId);
         }
         return output;
+    }
+    
+    /**
+     * 强制刷新可观测数据到 Redis 并返回当前状态。
+     * 用于 cancel/pause 等需要确保数据立即落盘的场景。
+     * 
+     * @param runId Run ID
+     * @return 当前 ObservabilityState，如果未找到则返回 null
+     */
+    public ObservabilityState forceFlush(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return null;
+        }
+        Object lock = locks.computeIfAbsent(runId, key -> new Object());
+        synchronized (lock) {
+            ObservabilityState state = loadState(runId);
+            String json = safeWrite(state);
+            stateStore.saveObservability(runId, json);
+            log.info("Observability force flushed: runId={}, llmTraces={}, toolTraces={}, size={} bytes", 
+                    runId, 
+                    state.getDiagnostics().getLlmTraces().size(),
+                    state.getDiagnostics().getToolTraces().size(),
+                    json.length());
+            return state;
+        }
     }
 
     public ListMetrics extractListMetrics(String snapshotJson) {
@@ -635,9 +702,20 @@ public class AgentObservabilityService {
         Object lock = locks.computeIfAbsent(runId, key -> new Object());
         synchronized (lock) {
             ObservabilityState state = loadState(runId);
+            int tracesBefore = state.getDiagnostics().getLlmTraces().size();
+            int toolTracesBefore = state.getDiagnostics().getToolTraces().size();
+            
             updater.accept(state);
             touch(state);
-            stateStore.saveObservability(runId, safeWrite(state));
+            
+            String json = safeWrite(state);
+            stateStore.saveObservability(runId, json);
+            
+            int tracesAfter = state.getDiagnostics().getLlmTraces().size();
+            int toolTracesAfter = state.getDiagnostics().getToolTraces().size();
+            log.debug("Observability mutated: runId={}, llmTraces {}→{}, toolTraces {}→{}, size={} bytes", 
+                    runId, tracesBefore, tracesAfter, toolTracesBefore, toolTracesAfter, json.length());
+            
             return state;
         }
     }
@@ -645,10 +723,16 @@ public class AgentObservabilityService {
     private ObservabilityState loadState(String runId) {
         Optional<String> existing = stateStore.loadObservability(runId);
         if (existing.isEmpty()) {
+            log.debug("Observability state not found in Redis, creating new: runId={}", runId);
             return newState();
         }
         try {
             ObservabilityState parsed = objectMapper.readValue(existing.get(), ObservabilityState.class);
+            log.debug("Observability state loaded from Redis: runId={}, size={} bytes, llmTraces={}, toolTraces={}", 
+                    runId, existing.get().length(),
+                    parsed.getDiagnostics().getLlmTraces() != null ? parsed.getDiagnostics().getLlmTraces().size() : 0,
+                    parsed.getDiagnostics().getToolTraces() != null ? parsed.getDiagnostics().getToolTraces().size() : 0);
+            
             if (parsed.getSummary() == null) {
                 parsed.setSummary(new Summary());
             }
@@ -679,7 +763,7 @@ public class AgentObservabilityService {
             ensurePhaseKeys(parsed);
             return parsed;
         } catch (Exception e) {
-            log.warn("Parse observability state failed, fallback empty state", e);
+            log.warn("Parse observability state failed, fallback empty state: runId={}, error={}", runId, e.getMessage());
             return newState();
         }
     }

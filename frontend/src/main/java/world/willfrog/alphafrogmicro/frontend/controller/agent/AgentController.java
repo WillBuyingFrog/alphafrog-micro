@@ -141,6 +141,8 @@ public class AgentController {
                 }
             }
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
+            String stageConfigJson = nvl(request.stageConfigJson());
+            log.info("[AgentController] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
             AgentRunMessage run = agentDubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
@@ -153,6 +155,7 @@ public class AgentController {
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
                             .setDebugMode(debugMode)
+                            .setStageConfigJson(stageConfigJson)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));

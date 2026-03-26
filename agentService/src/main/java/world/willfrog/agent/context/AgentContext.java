@@ -3,6 +3,8 @@ package world.willfrog.agent.context;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import world.willfrog.agent.config.RunStageConfig;
+
 public class AgentContext {
     private static final ThreadLocal<String> RUN_ID_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<String> USER_ID_HOLDER = new ThreadLocal<>();
@@ -27,6 +29,11 @@ public class AgentContext {
      * 用于控制 reasoning 模型的思考强度，仅在 OpenRouter 端点生效。
      */
     private static final ThreadLocal<String> REASONING_EFFORT_HOLDER = new ThreadLocal<>();
+
+    /**
+     * 当前 Run 的阶段级 LLM 配置（客户端+本地合并后的最终结果）。
+     */
+    private static final ThreadLocal<RunStageConfig> STAGE_CONFIG_HOLDER = new ThreadLocal<>();
 
     public static void setRunId(String runId) {
         RUN_ID_HOLDER.set(runId);
@@ -140,6 +147,18 @@ public class AgentContext {
         REASONING_EFFORT_HOLDER.remove();
     }
 
+    public static void setStageConfig(RunStageConfig config) {
+        STAGE_CONFIG_HOLDER.set(config);
+    }
+
+    public static RunStageConfig getStageConfig() {
+        return STAGE_CONFIG_HOLDER.get();
+    }
+
+    public static void clearStageConfig() {
+        STAGE_CONFIG_HOLDER.remove();
+    }
+
     public static void clearPhase() {
         PHASE_HOLDER.remove();
     }
@@ -183,6 +202,7 @@ public class AgentContext {
         clearStructuredOutputSpec();
         clearDebugMode();
         clearReasoningEffort();
+        clearStageConfig();
     }
 
     public static final class StructuredOutputSpec {

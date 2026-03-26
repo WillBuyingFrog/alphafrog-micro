@@ -1,8 +1,12 @@
 package world.willfrog.agent.workflow;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.ToolExecutionRequest;
+import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.request.ChatRequest;
+import dev.langchain4j.model.chat.request.json.JsonObjectSchema;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -82,7 +86,8 @@ class ReactTodoExecutorTest {
                 .thenReturn(ChatResponse.builder()
                         .aiMessage(new AiMessage("{\"answer\":\"搜索完成\"}"))
                         .build());
-        when(toolRouter.invoke(eq("searchIndex"), anyMap())).thenReturn("{\"ok\":true}");
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "搜索指数",
@@ -112,8 +117,10 @@ class ReactTodoExecutorTest {
                 .thenReturn(ChatResponse.builder()
                         .aiMessage(new AiMessage("{\"answer\":\"沪深300指数2025年日线数据已获取\"}"))
                         .build());
-        when(toolRouter.invoke(eq("searchIndex"), anyMap())).thenReturn("{\"ok\":true,\"data\":{\"ts_code\":\"000300.SH\"}}");
-        when(toolRouter.invoke(eq("getIndexDaily"), anyMap())).thenReturn("{\"ok\":true,\"data\":{\"dataset_id\":\"ds_001\"}}");
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true,\"data\":{\"ts_code\":\"000300.SH\"}}", true));
+        when(toolRouter.invokeWithMeta(eq("getIndexDaily"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true,\"data\":{\"dataset_id\":\"ds_001\"}}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "获取沪深300指数2025年全年的日线行情数据",
@@ -129,8 +136,56 @@ class ReactTodoExecutorTest {
         // LLM was called 3 times (2 tool decisions + 1 answer)
         verify(model, times(3)).chat(any(List.class));
         // Tools were called 2 times
-        verify(toolRouter, times(1)).invoke(eq("searchIndex"), anyMap());
-        verify(toolRouter, times(1)).invoke(eq("getIndexDaily"), anyMap());
+        verify(toolRouter, times(1)).invokeWithMeta(eq("searchIndex"), anyMap());
+        verify(toolRouter, times(1)).invokeWithMeta(eq("getIndexDaily"), anyMap());
+    }
+
+    @Test
+    void executeWithObservability_shouldUseNativeToolExecutionRequestsWhenToolSpecsProvided() {
+        ReactTodoExecutor.TodoExecutionContext nativeContext = ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("分析指数")
+                .availableTools(Set.of("searchIndex"))
+                .toolSpecifications(List.of(
+                        ToolSpecification.builder()
+                                .name("searchIndex")
+                                .description("搜索指数")
+                                .parameters(JsonObjectSchema.builder()
+                                        .addStringProperty("keyword")
+                                        .required("keyword")
+                                        .additionalProperties(false)
+                                        .build())
+                                .build()))
+                .completedTodos(List.of())
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+
+        AiMessage toolCallMessage = AiMessage.from(
+                "",
+                List.of(ToolExecutionRequest.builder()
+                        .id("call_1")
+                        .name("searchIndex")
+                        .arguments("{\"keyword\":\"沪深300\"}")
+                        .build())
+        );
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder().aiMessage(toolCallMessage).build())
+                .thenReturn(ChatResponse.builder().aiMessage(new AiMessage("最终回答")).build());
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true,\"data\":{\"ts_code\":\"000300.SH\"}}", true));
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "搜索指数",
+                nativeContext,
+                model,
+                "run-native-1",
+                "dag_execution"
+        );
+
+        assertTrue(record.isSuccess());
+        assertEquals(1, record.getToolCallsUsed());
+        assertEquals("最终回答", record.getOutput());
+        verify(model, times(2)).chat(any(ChatRequest.class));
+        verify(toolRouter).invokeWithMeta(eq("searchIndex"), anyMap());
     }
 
     @Test
@@ -162,7 +217,8 @@ class ReactTodoExecutorTest {
                 .thenReturn(ChatResponse.builder()
                         .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"test\"}}"))
                         .build());
-        when(toolRouter.invoke(eq("searchIndex"), anyMap())).thenReturn("{\"ok\":true}");
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "无限循环测试",
@@ -190,9 +246,9 @@ class ReactTodoExecutorTest {
                 .thenReturn(ChatResponse.builder()
                         .aiMessage(new AiMessage("{\"answer\":\"找到了\"}"))
                         .build());
-        when(toolRouter.invoke(eq("searchIndex"), anyMap()))
-                .thenReturn("{\"ok\":false,\"error\":{\"message\":\"not found\"}}")
-                .thenReturn("{\"ok\":true,\"data\":{\"ts_code\":\"000001.SH\"}}");
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":false,\"error\":{\"message\":\"not found\"}}", false))
+                .thenReturn(invocationResult("{\"ok\":true,\"data\":{\"ts_code\":\"000001.SH\"}}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "搜索指数",
@@ -211,7 +267,7 @@ class ReactTodoExecutorTest {
         when(model.chat(any(List.class))).thenReturn(ChatResponse.builder()
                 .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}"))
                 .build());
-        when(toolRouter.invoke(eq("searchIndex"), anyMap())).thenThrow(new AssertionError("fatal"));
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap())).thenThrow(new AssertionError("fatal"));
 
         assertThrows(AssertionError.class, () -> executor.executeWithObservability(
                 "搜索指数",
@@ -264,6 +320,15 @@ class ReactTodoExecutorTest {
                 .availableTools(Set.of("searchIndex", "getIndexDaily"))
                 .completedTodos(List.of())
                 .datasetRefs(new java.util.HashMap<>())
+                .build();
+    }
+
+    private ToolRouter.ToolInvocationResult invocationResult(String output, boolean success) {
+        return ToolRouter.ToolInvocationResult.builder()
+                .output(output)
+                .success(success)
+                .durationMs(10L)
+                .cacheMeta(null)
                 .build();
     }
 
@@ -360,7 +425,7 @@ class ReactTodoExecutorTest {
                 .datasetRefs(new java.util.HashMap<>())
                 .build();
 
-        when(model.chat(any(List.class)))
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
                         .aiMessage(new AiMessage(
                                 "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务\"}}"))
