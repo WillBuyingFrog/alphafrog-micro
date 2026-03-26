@@ -217,7 +217,6 @@ async def remote_docker_logs(
     host: Optional[str] = None,
     container: str = "",
     tail: Optional[int] = 200,
-    since: Optional[str] = None,
     grep: Optional[str] = None,
     timestamps: bool = True,
     max_bytes: Optional[int] = 20000,
@@ -228,8 +227,7 @@ async def remote_docker_logs(
     Args:
         host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
         container: container name/id (required).
-        tail: number of lines (clamped 1..10000, default 200).
-        since: docker --since value (e.g. '10m' or ISO time).
+        tail: number of lines from the end of the log (clamped 1..10000, default 200).
         grep: substring filter, or regex via 're:<pattern>'.
         timestamps: include timestamps in output (default true).
         max_bytes: truncate stdout/stderr to this many bytes.
@@ -245,8 +243,6 @@ async def remote_docker_logs(
     args = _docker_cmd() + ["logs", f"--tail={tail_val}"]
     if timestamps:
         args.append("--timestamps")
-    if since:
-        args.append(f"--since={since}")
     args.append(container)
     result = await _run_ssh(resolved, args, timeout_seconds=timeout_seconds, max_bytes=max_bytes)
     if grep:
@@ -260,7 +256,6 @@ async def remote_docker_follow(
     container: str = "",
     follow_seconds: Optional[int] = 15,
     tail: Optional[int] = 200,
-    since: Optional[str] = None,
     grep: Optional[str] = None,
     timestamps: bool = True,
     max_bytes: Optional[int] = 50000,
@@ -271,8 +266,7 @@ async def remote_docker_follow(
         host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
         container: container name/id (required).
         follow_seconds: follow duration (clamped 1..300, default 15).
-        tail: number of lines before follow (clamped 1..10000, default 200).
-        since: docker --since value (e.g. '10m' or ISO time).
+        tail: number of lines from the end of log shown before following (clamped 1..10000, default 200).
         grep: substring filter, or regex via 're:<pattern>'.
         timestamps: include timestamps in output (default true).
         max_bytes: truncate stdout/stderr to this many bytes.
@@ -288,8 +282,6 @@ async def remote_docker_follow(
     args = _docker_cmd() + ["logs", "-f", f"--tail={tail_val}"]
     if timestamps:
         args.append("--timestamps")
-    if since:
-        args.append(f"--since={since}")
     args.append(container)
     result = await _run_ssh(resolved, args, timeout_seconds=follow_val, max_bytes=max_bytes)
     if grep:

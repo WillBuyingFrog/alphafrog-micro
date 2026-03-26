@@ -716,6 +716,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     .description(item.getDescription())
                     .output(record.getOutput())
                     .summary(record.getSummary())
+                    .messageHistory(record.getMessageHistory())
                     .build());
         }
 

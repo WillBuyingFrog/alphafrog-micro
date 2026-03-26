@@ -216,13 +216,14 @@ public class ReactTodoExecutor {
         AtomicInteger subAgentIdCounter = new AtomicInteger(0);
 
         while (callCount < maxCallsPerTodo) {
-            // 检查是否被取消
+            // 检查是否被取消或正在取消
             if (runId != null && !runId.isBlank()) {
                 Optional<String> currentStatus = stateStore.loadRunStatus(runId);
                 if (currentStatus.isPresent() && 
-                    (currentStatus.get().equals(AgentRunStatus.CANCELED.name()) || 
+                    (currentStatus.get().equals(AgentRunStatus.CANCELING.name()) ||
+                     currentStatus.get().equals(AgentRunStatus.CANCELED.name()) || 
                      currentStatus.get().equals(AgentRunStatus.FAILED.name()))) {
-                    log.info("Run {} has been canceled or failed, stopping ReAct loop", runId);
+                    log.info("Run {} has been {} during execution, stopping ReAct loop", runId, currentStatus.get());
                     return TodoExecutionRecord.builder()
                             .success(false)
                             .output(lastOutput)
@@ -230,6 +231,7 @@ public class ReactTodoExecutor {
                             .llmTraceId(lastLlmTraceId)
                             .retryCount(retryCount)
                             .toolCallsUsed(toolCallsUsed)
+                            .messageHistory(convertMessagesToSnapshots(messages))
                             .build();
                 }
             }
@@ -372,6 +374,7 @@ public class ReactTodoExecutor {
                         .llmTraceId(lastLlmTraceId)
                         .retryCount(retryCount)
                         .toolCallsUsed(toolCallsUsed)
+                        .messageHistory(convertMessagesToSnapshots(messages))
                         .build();
             }
 
@@ -383,6 +386,7 @@ public class ReactTodoExecutor {
                     .llmTraceId(lastLlmTraceId)
                     .retryCount(retryCount)
                     .toolCallsUsed(toolCallsUsed)
+                    .messageHistory(convertMessagesToSnapshots(messages))
                     .build();
         }
         
@@ -395,6 +399,7 @@ public class ReactTodoExecutor {
                 .llmTraceId(lastLlmTraceId)
                 .retryCount(retryCount)
                 .toolCallsUsed(toolCallsUsed)
+                .messageHistory(convertMessagesToSnapshots(messages))
                 .build();
     }
     
@@ -781,13 +786,20 @@ public class ReactTodoExecutor {
         }
         messages.add(new UserMessage(dynamicCtx.toString()));
         
-        // 历史完成的 Todo
+        // 历史完成的 Todo：优先使用完整消息历史（CoT）
         for (CompletedTodoInfo todo : context.getCompletedTodos()) {
-            messages.add(new UserMessage(String.format(
-                    "已完成: %s\n结果: %s",
-                    todo.getDescription(),
-                    todo.getSummary()
-            )));
+            if (todo.getMessageHistory() != null && !todo.getMessageHistory().isEmpty()) {
+                // 使用完整的消息历史还原对话上下文
+                log.debug("Restoring message history for todo {}: {} messages", todo.getTodoId(), todo.getMessageHistory().size());
+                messages.addAll(restoreMessagesFromSnapshots(todo.getMessageHistory()));
+            } else {
+                // 回退到 summary 模式（向后兼容）
+                messages.add(new UserMessage(String.format(
+                        "已完成: %s\n结果: %s",
+                        todo.getDescription(),
+                        todo.getSummary()
+                )));
+            }
         }
         
         // 当前任务
@@ -808,6 +820,120 @@ public class ReactTodoExecutor {
         userMsg.append("⚠️ 警告：工具参数名必须与工具规范完全一致。");
         
         messages.add(new UserMessage(userMsg.toString()));
+        
+        return messages;
+    }
+    
+    /**
+     * 将 ChatMessage 列表转换为 ChatMessageSnapshot 列表，用于保存和传递。
+     * 
+     * @param messages 消息列表
+     * @return 消息快照列表
+     */
+    private List<CompletedTodoInfo.ChatMessageSnapshot> convertMessagesToSnapshots(List<ChatMessage> messages) {
+        List<CompletedTodoInfo.ChatMessageSnapshot> snapshots = new ArrayList<>();
+        if (messages == null || messages.isEmpty()) {
+            return snapshots;
+        }
+        
+        for (ChatMessage message : messages) {
+            if (message instanceof SystemMessage) {
+                snapshots.add(CompletedTodoInfo.ChatMessageSnapshot.builder()
+                        .role("system")
+                        .content(((SystemMessage) message).text())
+                        .build());
+            } else if (message instanceof UserMessage) {
+                snapshots.add(CompletedTodoInfo.ChatMessageSnapshot.builder()
+                        .role("user")
+                        .content(((UserMessage) message).singleText())
+                        .build());
+            } else if (message instanceof AiMessage) {
+                AiMessage aiMsg = (AiMessage) message;
+                List<CompletedTodoInfo.ToolCallSnapshot> toolCalls = null;
+                
+                // 保存工具调用请求
+                if (aiMsg.toolExecutionRequests() != null && !aiMsg.toolExecutionRequests().isEmpty()) {
+                    toolCalls = aiMsg.toolExecutionRequests().stream()
+                            .map(req -> CompletedTodoInfo.ToolCallSnapshot.builder()
+                                    .id(req.id())
+                                    .name(req.name())
+                                    .arguments(req.arguments())
+                                    .build())
+                            .toList();
+                }
+                
+                snapshots.add(CompletedTodoInfo.ChatMessageSnapshot.builder()
+                        .role("assistant")
+                        .content(aiMsg.text())
+                        .toolCalls(toolCalls)
+                        .build());
+            } else if (message instanceof ToolExecutionResultMessage) {
+                ToolExecutionResultMessage toolMsg = (ToolExecutionResultMessage) message;
+                snapshots.add(CompletedTodoInfo.ChatMessageSnapshot.builder()
+                        .role("tool")
+                        .content(toolMsg.text())
+                        .toolName(toolMsg.toolName())
+                        .toolCallId(toolMsg.id())
+                        .build());
+            }
+        }
+        
+        return snapshots;
+    }
+    
+    /**
+     * 从 ChatMessageSnapshot 列表还原 ChatMessage 列表，用于重建对话上下文。
+     * 
+     * @param snapshots 消息快照列表
+     * @return 消息列表
+     */
+    private List<ChatMessage> restoreMessagesFromSnapshots(List<CompletedTodoInfo.ChatMessageSnapshot> snapshots) {
+        List<ChatMessage> messages = new ArrayList<>();
+        if (snapshots == null || snapshots.isEmpty()) {
+            return messages;
+        }
+        
+        // 跳过开头的 SystemMessage，因为会在 buildMessages 中重新添加
+        boolean skippedSystem = false;
+        
+        for (CompletedTodoInfo.ChatMessageSnapshot snapshot : snapshots) {
+            String role = snapshot.getRole();
+            String content = snapshot.getContent();
+            
+            if ("system".equals(role)) {
+                // 跳过 SystemMessage，避免重复
+                if (!skippedSystem) {
+                    skippedSystem = true;
+                    continue;
+                }
+                messages.add(new SystemMessage(content));
+            } else if ("user".equals(role)) {
+                messages.add(new UserMessage(content));
+            } else if ("assistant".equals(role)) {
+                // 还原工具调用请求
+                if (snapshot.getToolCalls() != null && !snapshot.getToolCalls().isEmpty()) {
+                    List<ToolExecutionRequest> toolRequests = snapshot.getToolCalls().stream()
+                            .map(tc -> ToolExecutionRequest.builder()
+                                    .id(tc.getId())
+                                    .name(tc.getName())
+                                    .arguments(tc.getArguments())
+                                    .build())
+                            .toList();
+                    messages.add(AiMessage.builder()
+                            .text(content)
+                            .toolExecutionRequests(toolRequests)
+                            .build());
+                } else {
+                    messages.add(AiMessage.from(content));
+                }
+            } else if ("tool".equals(role)) {
+                messages.add(ToolExecutionResultMessage.builder()
+                        .id(snapshot.getToolCallId())
+                        .toolName(snapshot.getToolName())
+                        .text(content)
+                        .build());
+            }
+        }
         
         return messages;
     }
@@ -1131,5 +1257,9 @@ public class ReactTodoExecutor {
         // 重试相关
         @Builder.Default
         private int retryCount = 0;
+        
+        // CoT：完整的消息历史，用于传递给后续 Todo
+        @Builder.Default
+        private List<CompletedTodoInfo.ChatMessageSnapshot> messageHistory = new ArrayList<>();
     }
 }

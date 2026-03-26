@@ -122,6 +122,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                         .description(item.getDescription())
                         .output(record.getOutput())
                         .summary(record.getSummary())
+                        .messageHistory(record.getMessageHistory())
                         .build());
                 executionContext.put(item.getId(), toLegacyRecord(record));
                 eventService.append(runId, userId, "TODO_COMPLETED", Map.of(
