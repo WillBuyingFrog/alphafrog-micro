@@ -182,6 +182,10 @@
       }
     }
   },
+  "openrouter": {
+    "http-referer": "https://alphafrog.ai",
+    "title": "AlphaFrog"
+  },
   "debug": {
     "logLlmCurl": false,
     "logStageConfig": false
