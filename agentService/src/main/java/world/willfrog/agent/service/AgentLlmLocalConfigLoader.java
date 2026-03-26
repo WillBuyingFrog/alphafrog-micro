@@ -168,19 +168,9 @@ public class AgentLlmLocalConfigLoader {
         prompts.setDagModeGuidancePromptFile(resolvePromptText(prompts.getDagModeGuidancePromptFile(), baseDir, fileTimes));
         prompts.setDagReactSystemPromptFile(resolvePromptText(prompts.getDagReactSystemPromptFile(), baseDir, fileTimes));
         
-        // 加载两阶段 planning 的 prompt 文件
-        if (hasText(prompts.getPlanningStrategyStageFile())) {
-            String content = readPromptTextFromFile(prompts.getPlanningStrategyStageFile(), baseDir, fileTimes);
-            if (hasText(content)) {
-                prompts.setPlanningStrategyStage(content);
-            }
-        }
-        if (hasText(prompts.getPlanningTodosStageFile())) {
-            String content = readPromptTextFromFile(prompts.getPlanningTodosStageFile(), baseDir, fileTimes);
-            if (hasText(content)) {
-                prompts.setPlanningTodosStage(content);
-            }
-        }
+        // 加载两阶段 planning 的 prompt 文件（复用 resolvePromptText 处理 file: 前缀）
+        prompts.setPlanningStrategyStage(resolvePromptText(prompts.getPlanningStrategyStageFile(), baseDir, fileTimes));
+        prompts.setPlanningTodosStage(resolvePromptText(prompts.getPlanningTodosStageFile(), baseDir, fileTimes));
 
         if (hasText(prompts.getPythonRefineRequirementsFile())) {
             List<String> requirements = readPromptLines(prompts.getPythonRefineRequirementsFile(), baseDir, fileTimes);
@@ -209,26 +199,6 @@ public class AgentLlmLocalConfigLoader {
             return value;
         }
         Path filePath = resolveFilePath(pathRef, baseDir);
-        if (filePath == null) {
-            return "";
-        }
-        try {
-            recordFileModifiedTime(filePath, fileTimes);
-            return Files.readString(filePath, StandardCharsets.UTF_8);
-        } catch (Exception e) {
-            log.error("Failed to load prompt file: {}", filePath, e);
-            return "";
-        }
-    }
-
-    /**
-     * 从文件路径读取 prompt 文本（直接读取，不检查 file: 前缀）。
-     */
-    private String readPromptTextFromFile(String filePathRef, Path baseDir, Map<String, Long> fileTimes) {
-        if (!hasText(filePathRef)) {
-            return "";
-        }
-        Path filePath = resolveFilePath(filePathRef.trim(), baseDir);
         if (filePath == null) {
             return "";
         }

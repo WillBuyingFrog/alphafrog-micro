@@ -81,6 +81,8 @@
       "modelName": "anthropic/claude-3.5-sonnet",
       "structuredOutput": {
         "enabled": true,
+        "strategyStageEnabled": true,
+        "strategyMaxDetailLength": 500,
         "maxAttempts": 3,
         "strict": true,
         "failOnExhaustedRetries": true,
@@ -204,6 +206,8 @@
     "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
     "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
     "dagReactSystemPromptFile": "file:prompts/todo/dag_react_system.txt",
-    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt"
+    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt",
+    "planningStrategyStageFile": "file:prompts/todo/planning_strategy_stage.txt",
+    "planningTodosStageFile": "file:prompts/todo/planning_todos_stage.txt"
   }
 }
