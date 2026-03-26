@@ -175,18 +175,28 @@ public class AgentAiServiceFactory {
         // 优先从热加载配置读取，其次从 @Value 注解读取
         String httpReferer = getOpenRouterHttpReferer();
         String title = getOpenRouterTitle();
+        String categories = getOpenRouterCategories();
         
+        // HTTP-Referer 是必需的（OpenRouter App Attribution）
         if (httpReferer != null && !httpReferer.isBlank()) {
             headers.put("HTTP-Referer", httpReferer);
         }
+        // X-OpenRouter-Title 是新的标准 header，X-Title 仍兼容
         if (title != null && !title.isBlank()) {
+            headers.put("X-OpenRouter-Title", title);
+            // 同时发送 X-Title 以确保兼容性
             headers.put("X-Title", title);
+        }
+        // 可选的分类信息
+        if (categories != null && !categories.isBlank()) {
+            headers.put("X-OpenRouter-Categories", categories);
         }
         return headers;
     }
     
     /**
      * 获取 OpenRouter HTTP Referer，优先从热加载配置读取。
+     * <p>这是 OpenRouter App Attribution 的必需字段。</p>
      */
     private String getOpenRouterHttpReferer() {
         if (localConfigLoader != null) {
@@ -204,6 +214,7 @@ public class AgentAiServiceFactory {
     
     /**
      * 获取 OpenRouter Title，优先从热加载配置读取。
+     * <p>建议使用新的 X-OpenRouter-Title header。</p>
      */
     private String getOpenRouterTitle() {
         if (localConfigLoader != null) {
@@ -217,6 +228,21 @@ public class AgentAiServiceFactory {
             }
         }
         return openRouterTitle;
+    }
+    
+    /**
+     * 获取 OpenRouter Categories，优先从热加载配置读取。
+     * <p>可选的分类信息，如 "cloud-agent,programming-app"。</p>
+     */
+    private String getOpenRouterCategories() {
+        if (localConfigLoader != null) {
+            return localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getCategories())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+        }
+        return null;
     }
 
     private boolean isBlank(String value) {

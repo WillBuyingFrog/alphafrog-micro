@@ -183,8 +183,9 @@
     }
   },
   "openrouter": {
-    "http-referer": "https://alphafrog.ai",
-    "title": "AlphaFrog"
+    "http-referer": "https://alpha.frogwch.com",
+    "title": "AlphaFrog",
+    "categories": "cloud-agent,programming-app"
   },
   "debug": {
     "logLlmCurl": false,

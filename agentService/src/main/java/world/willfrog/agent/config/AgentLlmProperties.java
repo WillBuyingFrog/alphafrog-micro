@@ -1067,12 +1067,19 @@ public class AgentLlmProperties {
     /**
      * OpenRouter 专属配置。
      * <p>用于设置 HTTP Referer 和 X-Title，使 OpenRouter Dashboard 正确显示 App 名称。</p>
+     *
+     * @see <a href="https://openrouter.ai/docs/app-attribution">OpenRouter App Attribution</a>
      */
     public static class OpenRouterConfig {
-        /** HTTP Referer，OpenRouter 用于统计和展示调用来源 */
+        /** HTTP Referer，OpenRouter 用于统计和展示调用来源（必需） */
+        @com.fasterxml.jackson.annotation.JsonProperty("http-referer")
         private String httpReferer;
-        /** App 标题，显示在 OpenRouter Dashboard 中 */
+        /** App 标题，显示在 OpenRouter Dashboard 中（可选，建议使用 X-OpenRouter-Title） */
+        @com.fasterxml.jackson.annotation.JsonProperty("title")
         private String title;
+        /** 可选的 App 分类，逗号分隔，如 "cloud-agent,programming-app" */
+        @com.fasterxml.jackson.annotation.JsonProperty("categories")
+        private String categories;
 
         public String getHttpReferer() {
             return httpReferer;
@@ -1088,6 +1095,14 @@ public class AgentLlmProperties {
 
         public void setTitle(String title) {
             this.title = title;
+        }
+
+        public String getCategories() {
+            return categories;
+        }
+
+        public void setCategories(String categories) {
+            this.categories = categories;
         }
     }
 
