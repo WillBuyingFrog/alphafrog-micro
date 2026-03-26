@@ -318,9 +318,17 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             return toRunMessage(run);
         }
         
-        // 保存可观测数据到 snapshot
+        // 保存可观测数据到 snapshot（关键：确保可观测数据被持久化）
+        String snapshotJson = run.getSnapshotJson();
+        log.info("Canceling run {}, current snapshot length: {}", run.getId(), 
+                snapshotJson == null ? 0 : snapshotJson.length());
+        
         String canceledSnapshotJson = observabilityService.attachObservabilityToSnapshot(
-                run.getId(), run.getSnapshotJson(), AgentRunStatus.CANCELED);
+                run.getId(), snapshotJson, AgentRunStatus.CANCELED);
+        
+        log.info("Saving observability to snapshot for canceled run {}, new snapshot length: {}", 
+                run.getId(), canceledSnapshotJson == null ? 0 : canceledSnapshotJson.length());
+        
         runMapper.updateSnapshot(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, 
                 canceledSnapshotJson, false, null);
         
@@ -388,6 +396,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         AgentRun run = requireRun(request.getId(), request.getUserId());
         String snapshotJson = run.getSnapshotJson();
         String observabilityJson = nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson));
+        
+        log.info("Getting result for run {}, status: {}, snapshot length: {}, observability length: {}",
+                run.getId(), run.getStatus(), 
+                snapshotJson == null ? 0 : snapshotJson.length(),
+                observabilityJson.length());
+        
         String answer = "";
         if (snapshotJson != null && !snapshotJson.isBlank()) {
             try {

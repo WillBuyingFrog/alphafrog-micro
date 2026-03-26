@@ -603,9 +603,14 @@ public class AgentObservabilityService {
             }
         });
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
-        snapshot.put("observability", objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
-        }));
+        Map<String, Object> observabilityMap = objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
+        });
+        snapshot.put("observability", observabilityMap);
         String output = safeWrite(snapshot);
+        
+        // 强制同步保存可观测数据到 Redis，确保后续可以立即加载
+        stateStore.saveObservability(runId, safeWrite(observabilityMap));
+        
         if (status == AgentRunStatus.COMPLETED || status == AgentRunStatus.FAILED || status == AgentRunStatus.CANCELED) {
             locks.remove(runId);
         }
