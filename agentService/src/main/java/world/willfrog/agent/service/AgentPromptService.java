@@ -318,7 +318,9 @@ public class AgentPromptService {
 
     /**
      * 规划分析阶段指令 —— 注入到 User Message，引导 LLM 先输出自然语言分析。
+     * @deprecated 使用 {@link #planningStrategyStageInstruction(String, int, int)} 替代
      */
+    @Deprecated
     public String planningAnalysisStageInstruction(String toolWhitelist, int maxTodos) {
         String template = firstNonBlank(
                 currentPrompts().getTodoPlannerSystemPromptTemplate(),
@@ -337,6 +339,59 @@ public class AgentPromptService {
         ));
         return "[Stage: PLANNING_ANALYSIS]\n" + rendered
                 + "\n请先用自然语言分析用户需求和执行思路，暂时不要输出 JSON。";
+    }
+
+    /**
+     * 第一阶段：统筹规划阶段指令（结构化输出）。
+     * 从配置文件加载: prompts/todo/planning_strategy_stage.txt
+     */
+    public String planningStrategyStageInstruction(String toolWhitelist, int maxTodos, int maxDetailLength) {
+        String template = firstNonBlank(
+                currentPrompts().getPlanningStrategyStage(),
+                loadPromptFileFromClasspath("prompts/todo/planning_strategy_stage.txt")
+        );
+        return render(template, Map.of(
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos),
+                "strategyMaxDetailLength", String.valueOf(maxDetailLength)
+        ));
+    }
+
+    /**
+     * 第二阶段：任务拆解阶段指令（结构化输出）。
+     * 从配置文件加载: prompts/todo/planning_todos_stage.txt
+     */
+    public String planningTodosStageInstruction(world.willfrog.agent.workflow.StructuredPlanningSupport.OverallPlan overallPlan,
+                                                  String toolWhitelist, int maxTodos) {
+        String template = firstNonBlank(
+                currentPrompts().getPlanningTodosStage(),
+                loadPromptFileFromClasspath("prompts/todo/planning_todos_stage.txt")
+        );
+        String modeGuidance = "DAG".equalsIgnoreCase(overallPlan.mode())
+                ? "当前是 DAG 模式，请通过 dependsOn 表达任务依赖关系。"
+                : "当前是 LINEAR 模式，按 sequence 顺序执行即可。";
+
+        return render(template, Map.of(
+                "mode", overallPlan.mode(),
+                "detail", overallPlan.detail(),
+                "modeGuidance", modeGuidance,
+                "toolWhitelist", safe(toolWhitelist),
+                "maxTodos", String.valueOf(maxTodos)
+        ));
+    }
+
+    /**
+     * 从 classpath 加载 prompt 文件。
+     */
+    private String loadPromptFileFromClasspath(String path) {
+        try (java.io.InputStream is = getClass().getClassLoader().getResourceAsStream(path)) {
+            if (is != null) {
+                return new String(is.readAllBytes(), java.nio.charset.StandardCharsets.UTF_8);
+            }
+        } catch (Exception e) {
+            log.warn("Failed to load prompt file from classpath: {}", path, e);
+        }
+        return "";
     }
 
     /**
@@ -480,6 +535,10 @@ public class AgentPromptService {
         merged.setDagReactSystemPromptFile(firstNonBlank(local.getDagReactSystemPromptFile(), base.getDagReactSystemPromptFile()));
         merged.setDagModeGuidancePrompt(firstNonBlank(local.getDagModeGuidancePrompt(), base.getDagModeGuidancePrompt()));
         merged.setDagModeGuidancePromptFile(firstNonBlank(local.getDagModeGuidancePromptFile(), base.getDagModeGuidancePromptFile()));
+        merged.setPlanningStrategyStageFile(firstNonBlank(local.getPlanningStrategyStageFile(), base.getPlanningStrategyStageFile()));
+        merged.setPlanningStrategyStage(firstNonBlank(local.getPlanningStrategyStage(), base.getPlanningStrategyStage()));
+        merged.setPlanningTodosStageFile(firstNonBlank(local.getPlanningTodosStageFile(), base.getPlanningTodosStageFile()));
+        merged.setPlanningTodosStage(firstNonBlank(local.getPlanningTodosStage(), base.getPlanningTodosStage()));
         return merged;
     }
 

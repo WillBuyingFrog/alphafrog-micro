@@ -126,6 +126,214 @@ public class TodoPlanner {
     }
 
     private TodoPlan generatePlanWithRetries(PlanRequest request, Set<String> toolWhitelist) {
+        // 判断是否使用新的两阶段结构化输出
+        if (strategyStageEnabled()) {
+            return generatePlanWithTwoStageStructured(request, toolWhitelist);
+        }
+        // 否则使用旧的两阶段流程（第一阶段自然语言）
+        return generatePlanWithLegacyTwoStage(request, toolWhitelist);
+    }
+
+    /**
+     * 新的两阶段结构化输出规划。
+     * 第一阶段：统筹规划（结构化输出 overallPlan）
+     * 第二阶段：任务拆解（结构化输出 todo list）
+     */
+    private TodoPlan generatePlanWithTwoStageStructured(PlanRequest request, Set<String> toolWhitelist) {
+        String runId = request.getRun().getId();
+        boolean structuredEnabled = planningStructuredEnabled();
+        int maxAttempts = resolvePlanningMaxAttempts();
+        int maxTodos = resolveMaxTodos(request);
+        int maxDetailLength = resolveStrategyMaxDetailLength();
+        String lastCategory = "";
+        String lastError = "";
+        observabilityService.markPlanningStructured(runId, structuredEnabled);
+        observabilityService.setLastPlanningErrorCategory(runId, "");
+
+        String toolList = toolWhitelist.stream().sorted().collect(Collectors.joining(", "));
+        String reactSystem = promptService.reactSystemPrompt();
+        String dynamicPrefix = promptService.dynamicContextPrefix();
+        String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
+
+        for (int attempt = 1; attempt <= maxAttempts; attempt++) {
+            observabilityService.incrementPlanningAttempts(runId, false);
+
+            // ─── ReAct 累积式上下文：两步规划共享同一 context ───
+            ReactConversationContext ctx = new ReactConversationContext();
+            ctx.setSystemMessage(reactSystem);
+
+            // ── Step 1：统筹规划阶段（结构化输出）──
+            String strategyStage = promptService.planningStrategyStageInstruction(toolList, maxTodos, maxDetailLength);
+            String strategyContent;
+            if (dialogueContext.isBlank()) {
+                strategyContent = dynamicPrefix + "\n" + strategyStage + "\n\n用户需求：" + request.getUserGoal();
+            } else {
+                strategyContent = dynamicPrefix + "\n" + strategyStage + "\n\n"
+                        + "历史对话压缩内容：\n" + dialogueContext
+                        + "\n\n当前轮次用户需求：" + request.getUserGoal();
+            }
+            ctx.addUserMessage(strategyContent);
+
+            String previousStage = AgentContext.getStage();
+            AgentContext.StructuredOutputSpec previousSpec = AgentContext.getStructuredOutputSpec();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
+            AgentContext.setStage("planning_strategy");
+
+            // 设置 reasoning 配置
+            setPlanningReasoningEffort();
+
+            ChatResponse strategyResponse;
+            String strategyRaw;
+            StructuredPlanningSupport.OverallPlan overallPlan = null;
+
+            try {
+                // 第一阶段使用结构化输出
+                if (structuredEnabled) {
+                    AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                            "strategy_plan",
+                            planningStructuredStrict(),
+                            StructuredPlanningSupport.strategyStageJsonSchema(maxDetailLength),
+                            planningRequireProviderParameters(),
+                            planningAllowProviderFallbacks()
+                    ));
+                } else {
+                    AgentContext.clearStructuredOutputSpec();
+                }
+
+                long strategyStartedAt = System.currentTimeMillis();
+                strategyResponse = request.getModel().chat(ctx.getMessages());
+                strategyRaw = strategyResponse.aiMessage() == null ? "" : nvl(strategyResponse.aiMessage().text());
+                long strategyCompletedAt = System.currentTimeMillis();
+
+                Map<String, Object> strategySnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        ctx.getMessages(),
+                        request.getToolSpecifications(),
+                        Map.of("stage", "planning_strategy", "attempt", attempt)
+                );
+                observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_PLANNING,
+                        strategyResponse.metadata() != null ? strategyResponse.metadata().tokenUsage() : null,
+                        strategyCompletedAt - strategyStartedAt,
+                        strategyStartedAt,
+                        strategyCompletedAt,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        strategySnapshot,
+                        strategyRaw
+                );
+
+                // 解析第一阶段输出
+                JsonNode strategyRoot = StructuredPlanningSupport.parseStructuredJson(objectMapper, strategyRaw);
+                StructuredPlanningSupport.ValidationResultWithData<StructuredPlanningSupport.OverallPlan> strategyValidation =
+                        StructuredPlanningSupport.validateStrategyStage(strategyRoot, maxDetailLength);
+                if (!strategyValidation.valid()) {
+                    throw new StructuredPlanningSupport.StructuredPlanningException(
+                            strategyValidation.category(), strategyValidation.message());
+                }
+                overallPlan = strategyValidation.data();
+
+                ctx.addAssistantMessage(strategyRaw);
+
+                // ── Step 2：任务拆解阶段 ──
+                String todosStage = promptService.planningTodosStageInstruction(overallPlan, toolList, maxTodos);
+                ctx.addUserMessage(todosStage);
+
+                AgentContext.setStage("planning_todos");
+                if (structuredEnabled) {
+                    AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                            "todo_plan",
+                            planningStructuredStrict(),
+                            StructuredPlanningSupport.todoPlanningJsonSchema(),
+                            planningRequireProviderParameters(),
+                            planningAllowProviderFallbacks()
+                    ));
+                } else {
+                    AgentContext.clearStructuredOutputSpec();
+                }
+
+                long todosStartedAt = System.currentTimeMillis();
+                ChatResponse todosResponse = request.getModel().chat(ctx.getMessages());
+                String todosRaw = todosResponse.aiMessage() == null ? "" : nvl(todosResponse.aiMessage().text());
+                Map<String, Object> todosSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
+                        request.getEndpointName(),
+                        request.getEndpointBaseUrl(),
+                        request.getModelName(),
+                        ctx.getMessages(),
+                        request.getToolSpecifications(),
+                        Map.of("stage", "planning_todos", "attempt", attempt)
+                );
+                long todosCompletedAt = System.currentTimeMillis();
+                observabilityService.recordLlmCall(
+                        runId,
+                        AgentObservabilityService.PHASE_PLANNING,
+                        todosResponse.metadata() != null ? todosResponse.metadata().tokenUsage() : null,
+                        todosCompletedAt - todosStartedAt,
+                        todosStartedAt,
+                        todosCompletedAt,
+                        request.getEndpointName(),
+                        request.getModelName(),
+                        null,
+                        todosSnapshot,
+                        todosRaw
+                );
+
+                // 解析第二阶段输出
+                JsonNode todosRoot = StructuredPlanningSupport.parseStructuredJson(objectMapper, todosRaw);
+                StructuredPlanningSupport.ValidationResult todosValidation =
+                        StructuredPlanningSupport.validateTodoPlan(todosRoot, maxTodos, toolWhitelist);
+                if (!todosValidation.valid()) {
+                    throw new StructuredPlanningSupport.StructuredPlanningException(
+                            todosValidation.category(), todosValidation.message());
+                }
+
+                TodoPlan todoPlan = parsePlanNode(todosRoot);
+                todoPlan.setAnalysis(overallPlan.detail());
+                todoPlan.setExecutionMode(parsePlanExecutionMode(overallPlan.mode()));
+                observabilityService.setLastPlanningErrorCategory(runId, "");
+                return todoPlan;
+
+            } catch (StructuredPlanningSupport.StructuredPlanningException e) {
+                lastCategory = nvl(e.category());
+                lastError = nvl(e.getMessage());
+                observabilityService.setLastPlanningErrorCategory(runId, lastCategory);
+                eventService.append(runId, request.getUserId(), "PLANNING_RETRY", Map.of(
+                        "attempt", attempt,
+                        "max_attempts", maxAttempts,
+                        "error_category", nvl(lastCategory),
+                        "error", nvl(lastError)
+                ));
+            } finally {
+                if (previousStage == null || previousStage.isBlank()) {
+                    AgentContext.clearStage();
+                } else {
+                    AgentContext.setStage(previousStage);
+                }
+                if (previousSpec == null) {
+                    AgentContext.clearStructuredOutputSpec();
+                } else {
+                    AgentContext.setStructuredOutputSpec(previousSpec);
+                }
+                AgentContext.clearReasoningEffort();
+            }
+        }
+
+        if (planningFailOnExhaustedRetries()) {
+            throw new IllegalStateException("planning_retry_exhausted:"
+                    + nvl(lastCategory) + ":" + nvl(lastError));
+        }
+        return TodoPlan.builder().analysis("").items(List.of()).build();
+    }
+
+    /**
+     * 旧的两阶段规划（第一阶段自然语言，第二阶段结构化）。
+     * 保留用于向后兼容。
+     */
+    private TodoPlan generatePlanWithLegacyTwoStage(PlanRequest request, Set<String> toolWhitelist) {
         String runId = request.getRun().getId();
         boolean structuredEnabled = planningStructuredEnabled();
         int maxAttempts = resolvePlanningMaxAttempts();
@@ -173,20 +381,7 @@ public class TodoPlanner {
             AgentContext.setStage("todo_planning_analysis");
             AgentContext.clearStructuredOutputSpec();
 
-            // 设置 Planning 阶段 reasoning 配置
-            // 解析 planning reasoning effort：stageConfig 优先
-            String planningReasoningEffort = null;
-            RunStageConfig stageConfig = AgentContext.getStageConfig();
-            if (stageConfig != null && stageConfig.getPlanning() != null
-                    && stageConfig.getPlanning().getReasoningEffort() != null) {
-                planningReasoningEffort = stageConfig.getPlanning().getReasoningEffort();
-            }
-            if (planningReasoningEffort == null) {
-                planningReasoningEffort = resolvePlanningReasoningEffort();
-            }
-            if (planningReasoningEffort != null) {
-                AgentContext.setReasoningEffort(planningReasoningEffort);
-            }
+            setPlanningReasoningEffort();
 
             ChatResponse analysisResponse;
             String analysisText;
@@ -313,6 +508,24 @@ public class TodoPlanner {
         return TodoPlan.builder().analysis("").items(List.of()).build();
     }
 
+    /**
+     * 设置 Planning 阶段的 reasoning effort 配置。
+     */
+    private void setPlanningReasoningEffort() {
+        String planningReasoningEffort = null;
+        RunStageConfig stageConfig = AgentContext.getStageConfig();
+        if (stageConfig != null && stageConfig.getPlanning() != null
+                && stageConfig.getPlanning().getReasoningEffort() != null) {
+            planningReasoningEffort = stageConfig.getPlanning().getReasoningEffort();
+        }
+        if (planningReasoningEffort == null) {
+            planningReasoningEffort = resolvePlanningReasoningEffort();
+        }
+        if (planningReasoningEffort != null) {
+            AgentContext.setReasoningEffort(planningReasoningEffort);
+        }
+    }
+
     private TodoPlan normalize(TodoPlan source, int maxTodos, Set<String> toolWhitelist) {
         TodoPlan out = new TodoPlan();
         out.setAnalysis(nvl(source.getAnalysis()));
@@ -426,6 +639,14 @@ public class TodoPlanner {
         }
     }
 
+    private PlanExecutionMode parsePlanExecutionMode(String text) {
+        try {
+            return PlanExecutionMode.valueOf(nvl(text).trim().toUpperCase());
+        } catch (Exception e) {
+            return PlanExecutionMode.AUTO;
+        }
+    }
+
     private int resolveMaxTodos(PlanRequest request) {
         // 1. 客户端传入了 maxTodos：先做 cap 校验，超限则立即拒绝
         if (request != null && request.getMaxTodos() != null && request.getMaxTodos() > 0) {
@@ -487,6 +708,53 @@ public class TodoPlanner {
                 .map(AgentLlmProperties.StructuredOutput::getEnabled)
                 .orElse(null);
         return base == null || base;
+    }
+
+    /**
+     * 是否启用第一阶段结构化输出（统筹规划阶段）。
+     * 默认 true（使用新的两阶段结构化输出）。
+     */
+    private boolean strategyStageEnabled() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyStageEnabled);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyStageEnabled)
+                .orElse(null);
+        // 默认启用新的两阶段结构化输出
+        return base == null || base;
+    }
+
+    /**
+     * 解析第一阶段 detail 的最大长度限制。
+     * 默认 500 字符。
+     */
+    private int resolveStrategyMaxDetailLength() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyMaxDetailLength)
+                .orElse(0);
+        if (local > 0) {
+            return local;
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyMaxDetailLength)
+                .orElse(0);
+        if (base > 0) {
+            return base;
+        }
+        return 500; // 默认值
     }
 
     private int resolvePlanningMaxAttempts() {

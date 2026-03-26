@@ -641,6 +641,10 @@ public class AgentLlmProperties {
         private Boolean failOnExhaustedRetries;
         private Boolean requireProviderParameters;
         private Boolean allowProviderFallbacks;
+        /** 第一阶段是否启用结构化输出（默认 true） */
+        private Boolean strategyStageEnabled = true;
+        /** 第一阶段 detail 最大长度（字符数），默认 500 */
+        private Integer strategyMaxDetailLength = 500;
 
         public Boolean getEnabled() {
             return enabled;
@@ -688,6 +692,22 @@ public class AgentLlmProperties {
 
         public void setAllowProviderFallbacks(Boolean allowProviderFallbacks) {
             this.allowProviderFallbacks = allowProviderFallbacks;
+        }
+
+        public Boolean getStrategyStageEnabled() {
+            return strategyStageEnabled;
+        }
+
+        public void setStrategyStageEnabled(Boolean strategyStageEnabled) {
+            this.strategyStageEnabled = strategyStageEnabled;
+        }
+
+        public Integer getStrategyMaxDetailLength() {
+            return strategyMaxDetailLength;
+        }
+
+        public void setStrategyMaxDetailLength(Integer strategyMaxDetailLength) {
+            this.strategyMaxDetailLength = strategyMaxDetailLength;
         }
     }
 
@@ -1060,6 +1080,14 @@ public class AgentLlmProperties {
         private String dagReactSystemPromptFile;
         private String dagModeGuidancePrompt;
         private String dagModeGuidancePromptFile;
+        /** 第一阶段统筹规划 prompt 文件路径（相对于 config 目录） */
+        private String planningStrategyStageFile = "prompts/todo/planning_strategy_stage.txt";
+        /** 第一阶段统筹规划 prompt 内容（由 loader 从文件读取） */
+        private String planningStrategyStage;
+        /** 第二阶段任务拆解 prompt 文件路径（相对于 config 目录） */
+        private String planningTodosStageFile = "prompts/todo/planning_todos_stage.txt";
+        /** 第二阶段任务拆解 prompt 内容（由 loader 从文件读取） */
+        private String planningTodosStage;
 
         public String getAgentRunSystemPrompt() {
             return agentRunSystemPrompt;
@@ -1251,6 +1279,38 @@ public class AgentLlmProperties {
 
         public void setDagModeGuidancePromptFile(String dagModeGuidancePromptFile) {
             this.dagModeGuidancePromptFile = dagModeGuidancePromptFile;
+        }
+
+        public String getPlanningStrategyStageFile() {
+            return planningStrategyStageFile;
+        }
+
+        public void setPlanningStrategyStageFile(String planningStrategyStageFile) {
+            this.planningStrategyStageFile = planningStrategyStageFile;
+        }
+
+        public String getPlanningStrategyStage() {
+            return planningStrategyStage;
+        }
+
+        public void setPlanningStrategyStage(String planningStrategyStage) {
+            this.planningStrategyStage = planningStrategyStage;
+        }
+
+        public String getPlanningTodosStageFile() {
+            return planningTodosStageFile;
+        }
+
+        public void setPlanningTodosStageFile(String planningTodosStageFile) {
+            this.planningTodosStageFile = planningTodosStageFile;
+        }
+
+        public String getPlanningTodosStage() {
+            return planningTodosStage;
+        }
+
+        public void setPlanningTodosStage(String planningTodosStage) {
+            this.planningTodosStage = planningTodosStage;
         }
     }
 

@@ -301,4 +301,149 @@ public final class StructuredPlanningSupport {
             return category;
         }
     }
+
+    /**
+     * 第一阶段统筹规划的输出结构。
+     */
+    public record OverallPlan(String mode, String detail) {
+    }
+
+    /**
+     * 第一阶段（统筹规划）的 JSON Schema。
+     *
+     * @param maxDetailLength detail 字段最大长度限制
+     */
+    public static Map<String, Object> strategyStageJsonSchema(int maxDetailLength) {
+        return Map.of(
+                "type", "object",
+                "additionalProperties", false,
+                "required", List.of("overallPlan"),
+                "properties", Map.of(
+                        "overallPlan", Map.of(
+                                "type", "object",
+                                "additionalProperties", false,
+                                "required", List.of("mode", "detail"),
+                                "properties", Map.of(
+                                        "mode", Map.of(
+                                                "type", "string",
+                                                "enum", List.of("LINEAR", "DAG"),
+                                                "description", "执行模式：LINEAR串行(1段描述)或DAG并行(2-3段描述)"
+                                        ),
+                                        "detail", Map.of(
+                                                "type", "string",
+                                                "maxLength", maxDetailLength,
+                                                "description", "LINEAR模式用1个完整自然段，DAG模式用2-3个完整自然段，描述整体思路。严禁展开具体工作内容、代码、参数。"
+                                        )
+                                )
+                        )
+                )
+        );
+    }
+
+    /**
+     * 验证第一阶段的统筹规划输出。
+     *
+     * @param root            JSON 根节点
+     * @param maxDetailLength detail 最大长度限制
+     * @return 包含 OverallPlan 的验证结果
+     */
+    public static ValidationResultWithData<OverallPlan> validateStrategyStage(
+            JsonNode root,
+            int maxDetailLength) {
+        if (root == null || !root.isObject()) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_not_object", null);
+        }
+
+        JsonNode overallPlanNode = root.get("overallPlan");
+        if (overallPlanNode == null || !overallPlanNode.isObject()) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_missing_overall_plan", null);
+        }
+
+        // 验证 mode
+        JsonNode modeNode = overallPlanNode.get("mode");
+        if (modeNode == null || !modeNode.isTextual()) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_missing_mode", null);
+        }
+        String mode = modeNode.asText().trim().toUpperCase();
+        if (!"LINEAR".equals(mode) && !"DAG".equals(mode)) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_invalid_mode:" + mode, null);
+        }
+
+        // 验证 detail
+        JsonNode detailNode = overallPlanNode.get("detail");
+        if (detailNode == null || !detailNode.isTextual()) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_missing_detail", null);
+        }
+        String detail = detailNode.asText().trim();
+        if (detail.isEmpty()) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_detail_empty", null);
+        }
+        if (detail.length() > maxDetailLength) {
+            return ValidationResultWithData.invalid(CATEGORY_SCHEMA_VALIDATION_ERROR,
+                    "strategy_plan_detail_too_long:" + detail.length() + ">" + maxDetailLength, null);
+        }
+
+        // 验证自然段数量（可选的软性约束）
+        int paragraphCount = countParagraphs(detail);
+        if ("LINEAR".equals(mode) && paragraphCount > 1) {
+            // LINEAR 模式建议 1 段，但允许多段（仅警告）
+            // 这里不做硬性返回错误，让调用方决定如何处理
+        } else if ("DAG".equals(mode) && paragraphCount > 3) {
+            // DAG 模式建议 2-3 段，超过 3 段可能过于详细
+            // 同上，软性约束
+        }
+
+        return ValidationResultWithData.ok(new OverallPlan(mode, detail));
+    }
+
+    /**
+     * 从 JSON 根节点提取 OverallPlan。
+     *
+     * @param root JSON 根节点
+     * @return OverallPlan 对象
+     * @throws StructuredPlanningException 如果提取失败
+     */
+    public static OverallPlan extractOverallPlan(JsonNode root) {
+        if (root == null || !root.isObject()) {
+            throw new StructuredPlanningException(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_not_object");
+        }
+        JsonNode overallPlanNode = root.get("overallPlan");
+        if (overallPlanNode == null || !overallPlanNode.isObject()) {
+            throw new StructuredPlanningException(CATEGORY_SCHEMA_VALIDATION_ERROR, "strategy_plan_missing_overall_plan");
+        }
+        String mode = overallPlanNode.path("mode").asText("LINEAR").trim().toUpperCase();
+        String detail = overallPlanNode.path("detail").asText("").trim();
+        return new OverallPlan(mode, detail);
+    }
+
+    /**
+     * 统计自然段数量（按空行分隔）。
+     */
+    private static int countParagraphs(String text) {
+        if (text == null || text.isEmpty()) {
+            return 0;
+        }
+        // 按一个或多个空行分割
+        String[] paragraphs = text.split("\\n\\s*\\n");
+        int count = 0;
+        for (String p : paragraphs) {
+            if (!p.trim().isEmpty()) {
+                count++;
+            }
+        }
+        return count;
+    }
+
+    /**
+     * 带数据的验证结果。
+     */
+    public record ValidationResultWithData<T>(boolean valid, String category, String message, T data) {
+        public static <T> ValidationResultWithData<T> ok(T data) {
+            return new ValidationResultWithData<>(true, "", "", data);
+        }
+
+        public static <T> ValidationResultWithData<T> invalid(String category, String message, T data) {
+            return new ValidationResultWithData<>(false, category == null ? "" : category, message == null ? "" : message, data);
+        }
+    }
 }

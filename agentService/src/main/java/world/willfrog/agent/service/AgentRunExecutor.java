@@ -157,7 +157,9 @@ public class AgentRunExecutor {
                 // 客户端或 local 指定了 planning 专用模型
                 AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlm(
                         planningStageCfg.getEndpointName(), planningStageCfg.getModelName());
-                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, providerOrder);
+                // Bug 修复：planning 阶段应使用 planning 模型自己的 validProviders，而非 execution 阶段的
+                var planningProviderOrder = mergeProviderOrder(userProviderOrder, planningResolvedLlm.validProviders());
+                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, planningProviderOrder);
                 planningEndpointName = planningResolvedLlm.endpointName();
                 planningModelName = planningResolvedLlm.modelName();
                 planningEndpointBaseUrl = planningResolvedLlm.baseUrl();
