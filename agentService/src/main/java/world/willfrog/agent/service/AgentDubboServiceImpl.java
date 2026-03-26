@@ -317,6 +317,13 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
+        
+        // 保存可观测数据到 snapshot
+        String canceledSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                run.getId(), run.getSnapshotJson(), AgentRunStatus.CANCELED);
+        runMapper.updateSnapshot(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, 
+                canceledSnapshotJson, false, null);
+        
         runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "CANCELED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.CANCELED.name());
