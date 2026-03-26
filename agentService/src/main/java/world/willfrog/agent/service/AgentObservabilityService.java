@@ -583,14 +583,19 @@ public class AgentObservabilityService {
     public String loadObservabilityJson(String runId, String snapshotJson) {
         Optional<String> cached = stateStore.loadObservability(runId);
         if (cached.isPresent()) {
+            log.debug("Loaded observability from Redis: runId={}, length={}", runId, cached.get().length());
             return cached.get();
         }
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
         Object observability = snapshot.get("observability");
         if (observability == null) {
+            log.warn("Observability not found in Redis or snapshot: runId={}, snapshotLength={}",
+                    runId, snapshotJson == null ? 0 : snapshotJson.length());
             return "";
         }
-        return safeWrite(observability);
+        String json = safeWrite(observability);
+        log.debug("Loaded observability from snapshot fallback: runId={}, length={}", runId, json.length());
+        return json;
     }
 
     public String attachObservabilityToSnapshot(String runId, String snapshotJson, AgentRunStatus status) {

@@ -350,6 +350,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
+        String waitingSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                run.getId(), run.getSnapshotJson(), AgentRunStatus.WAITING);
+        runMapper.updateSnapshot(run.getId(), run.getUserId(), AgentRunStatus.WAITING,
+                waitingSnapshotJson, false, null);
         runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "PAUSED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.WAITING.name());

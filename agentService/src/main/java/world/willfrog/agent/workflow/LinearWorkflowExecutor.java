@@ -100,6 +100,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             ReactTodoExecutor.TodoExecutionContext todoContext = ReactTodoExecutor.TodoExecutionContext.builder()
                     .userGoal(userGoal)
                     .availableTools(availableTools)
+                    .toolSpecifications(request.getToolSpecifications())
                     .completedTodos(new ArrayList<>(completedTodos))
                     .datasetRefs(new HashMap<>(datasetRefs))
                     .build();
