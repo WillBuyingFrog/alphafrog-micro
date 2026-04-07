@@ -69,7 +69,8 @@ services:
     container_name: alphafrog-nacos
     environment:
       MODE: standalone
-      PREFER_HOST_MODE: hostname
+      # 生产环境下 hostname 可能是容器随机名，Dubbo/Nacos 客户端未必能稳定解析，统一改为 IP 暴露
+      PREFER_HOST_MODE: ip
       NACOS_AUTH_ENABLE: "false"
       # Memory Optimization
       JVM_XMS: 512m
