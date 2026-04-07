@@ -134,161 +134,63 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** �
 
 ## 便捷部署
 
-### 从 v0.4 迁移
+### 版本迁移
 
-若您已部署 v0.4 版本，按以下步骤升级至 v0.5：
+AlphaFrog 提供自动化的版本迁移工具，支持从 v0.2 开始任意旧版本到任意更新版本的迁移。
 
-#### 1. 备份数据
-```bash
-# 备份 PostgreSQL 数据库
-pg_dump -h your_host -U your_user -d alphafrog > alphafrog_v0.4_backup_$(date +%Y%m%d).sql
-
-# 备份现有配置
-cp agentService/config/agent-llm.local.json agentService/config/agent-llm.local.json.v0.4.backup
-cp externalInfoService/config/search-llm.local.json externalInfoService/config/search-llm.local.json.v0.4.backup 2>/dev/null || true
-```
-
-#### 2. 更新代码
-```bash
-git fetch origin
-git checkout v0.5
-# 或 git checkout tags/v0.5.0
-```
-
-#### 3. 环境配置变更
-
-**重要**: 消息队列已从 Kafka 迁移至 RabbitMQ
+#### 迁移前准备
 
 ```bash
-# 更新 .env 文件，移除 Kafka 相关配置，添加 RabbitMQ 配置
-# 添加 MeiliSearch 配置
-MEILISEARCH_URL=http://meilisearch:7700
-MEILISEARCH_API_KEY=your-master-key
+# 1. 备份数据库
+pg_dump -h your_host -U your_user -d alphafrog > alphafrog_backup_$(date +%Y%m%d).sql
+
+# 2. 备份配置文件
+cp .env .env.backup
+cp agentService/config/agent-llm.local.json agentService/config/agent-llm.local.json.backup
+cp externalInfoService/config/search-llm.local.json externalInfoService/config/search-llm.local.json.backup 2>/dev/null || true
 ```
 
-#### 4. 配置文件更新
+#### 使用迁移工具
 
-**agent-llm.local.json** - 新增可观测性配置：
-```json
-{
-  "enableCachedTokens": true,
-  "cachedTokensTimeout": "15s",
-  "enableOpenRouterCostEnrichment": true,
-  "structuredOutput": {
-    "maxRetries": 3
-  },
-  "retryBudget": {
-    "staticPrecheck": 3,
-    "runtimeExecution": 2,
-    "semanticJudge": 2,
-    "total": 10
-  }
-}
-```
-
-#### 5. 迁移 search-llm 配置至 externalInfoService
 ```bash
-# 将 search-llm.local.json 从 agentService/config/ 复制至 externalInfoService/config/
-cp agentService/config/search-llm.local.json externalInfoService/config/search-llm.local.json
+# 安装依赖
+pip install psycopg2-binary pyyaml
+
+# 创建数据库连接配置
+cp db/migrate_config.example.yml migrate/migrate_config.yml
+# 编辑 migrate/migrate_config.yml，填写数据库连接信息
+
+# 查看当前版本和待执行迁移
+python migrate/migrate.py status
+
+# 查看迁移计划（不执行）
+python migrate/migrate.py plan --from v0.3-phase1 --to v0.5
+
+# 自动检测当前版本并迁移到最新
+python migrate/migrate.py migrate --auto
+
+# 指定版本范围迁移
+python migrate/migrate.py migrate --from v0.2 --to v0.6
+
+# 强制执行，跳过确认
+python migrate/migrate.py migrate --auto --force
 ```
 
-#### 6. 初始化 MeiliSearch 索引
-```bash
-# 启动服务后，执行数据同步
-curl -X POST http://localhost:8090/api/admin/meilisearch/sync
-```
+#### 迁移脚本说明
 
-#### 7. 构建并重启服务
-```bash
-# 构建镜像
-bash build_all_images.sh
+迁移工具会执行两类脚本：
+- **SQL 脚本**：数据库 DDL/DML 变更（创建表、添加字段、创建索引等）
+- **Python 脚本**：配置检查脚本（检查环境变量、配置文件结构等）
 
-# 滚动重启（注意顺序：基础设施服务 -> 数据服务 -> 业务服务）
-docker-compose up -d rabbitmq meilisearch
-docker-compose up -d --no-deps --build external-info-service
-docker-compose up -d --no-deps --build agent-service
-docker-compose up -d --no-deps --build frontend
-```
+每个版本的迁移脚本位于 `db/migrations/upgrades/<版本号>/` 目录下。
 
----
+#### 重要版本变更提醒
 
-### 从 v0.3 迁移
+- **v0.3-phase1 -> v0.4**：新增 admin 服务，需要配置 ADMIN_MAGIC_PASSWORD，agent-llm 配置结构升级
+- **v0.4 -> v0.5**：Kafka 迁移至 RabbitMQ，新增 MeiliSearch，search-llm 配置迁移至 externalInfoService
+- **v0.5 -> v0.6**：agent-llm 配置大幅升级（per-run stage LLM config、structured output、debug flags）
 
-若您已部署 v0.3 版本，按以下步骤升级至 v0.4：
-
-#### 1. 备份数据
-```bash
-# 备份 PostgreSQL 数据库
-pg_dump -h your_host -U your_user -d alphafrog > alphafrog_v0.3_backup_$(date +%Y%m%d).sql
-
-# 备份现有配置
-cp agentService/config/agent-llm.local.json agentService/config/agent-llm.local.json.v0.3.backup
-```
-
-#### 2. 更新代码
-```bash
-git fetch origin
-git checkout v0.4
-# 或 git checkout tags/v0.4.0
-```
-
-#### 3. 执行数据库迁移（按时间顺序）
-```bash
-# 连接 PostgreSQL 后依次执行以下迁移脚本
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260122_agent.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260210_agent_expired.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260212_auth_invite_reset.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_agent_credit.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_admin_credit_governance.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260213_agent_runs_perf.sql
-psql -h your_host -U your_user -d alphafrog -f portfolio_schema_migration_20260216_multi_turn_message.sql
-```
-
-#### 4. 更新配置文件
-
-**agent-llm.local.json** - 配置结构升级：
-```json
-{
-  "defaultEndpoint": "openrouter",
-  "defaultModel": "moonshotai/kimi-k2.5",
-  "endpoints": {
-    "openrouter": {
-      "baseUrl": "https://openrouter.ai/api/v1",
-      "apiKey": "your-api-key",
-      "models": {
-        "moonshotai/kimi-k2.5": {
-          "displayName": "Kimi K2.5",
-          "baseRate": 0.3,
-          "validProviders": ["moonshotai/int4", "fireworks"]
-        }
-      }
-    }
-  }
-}
-```
-
-**环境变量** - 新增 Magic Password：
-```bash
-# 在 .env 文件中添加
-ADMIN_MAGIC_PASSWORD=your_secure_password_here
-```
-
-#### 5. 部署 Prompt 文件
-```bash
-# 将 prompts 目录部署到配置目录
-rsync -av agentService/config/prompts/ /path/to/config/prompts/
-```
-
-#### 6. 构建并重启服务
-```bash
-# 构建镜像
-bash build_all_images.sh
-
-# 滚动重启服务（推荐顺序）
-docker-compose up -d --no-deps --build agent-service
-docker-compose up -d --no-deps --build admin-service
-docker-compose up -d --no-deps --build frontend
-```
+对于配置变更，Python 检查脚本会输出提示信息，需要您根据提示手动完成配置更新。
 
 ---
 
@@ -312,9 +214,11 @@ cp .env.example .env
 # 创建数据库（若不存在）
 createdb -h your_host -U your_user alphafrog
 
-# 执行完整 Schema（v0.4 已包含所有历史变更）
+# 使用迁移工具执行初始化脚本
+# 或手动执行完整 Schema
 psql -h your_host -U your_user -d alphafrog -f alphafrog_schema_full.sql
-# 或按顺序执行 portfolio_schema.sql + 各 migration 文件
+
+# 关于迁移工具的详细说明，请参考 db/MIGRATION_DESIGN.md
 ```
 
 #### 3. 配置 LLM
@@ -453,7 +357,7 @@ docker-compose up -d
 | 文档 | 说明 |
 |------|------|
 | [deploy_guide.md](./deploy_guide.md) | 完整部署指南（构建、Docker 打包、服务上线） |
-| [portfolio_schema.sql](./portfolio_schema.sql) | Portfolio 服务数据库 Schema |
+| [migrate/MIGRATION_DESIGN.md](./migrate/MIGRATION_DESIGN.md) | 迁移工具设计与使用说明 |
 | [alphafrog-wiki/agent-api-guide.md](./alphafrog-wiki/agent-api-guide.md) | Agent 对外 API 文档 |
 
 > Frontend 对外接口文档将后续统一重构发布。
