@@ -72,11 +72,24 @@ db/
 pip install psycopg2-binary pyyaml
 ```
 
-### 2. 创建配置文件
+### 2. 配置文件
+
+迁移工具支持两种配置文件格式（按查找优先级）：
+
+**方式一：使用项目已有的 `.env` 文件**
+
+如果项目根目录已有 `.env` 文件且包含 `AF_DB_MAIN_*` 变量，迁移工具会自动读取：
 
 ```bash
-cp db/migrate_config.example.yml db/migrate_config.yml
-# 编辑 db/migrate_config.yml，填写数据库连接信息
+# 确认 .env 中包含数据库配置
+grep AF_DB_MAIN .env
+```
+
+**方式二：创建 YAML 配置文件**
+
+```bash
+cp migrate/migrate_config.example.yml migrate/migrate_config.yml
+# 编辑 migrate/migrate_config.yml，填写数据库连接信息
 ```
 
 ### 3. 查看迁移状态

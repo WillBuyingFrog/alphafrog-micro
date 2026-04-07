@@ -56,6 +56,8 @@ DEFAULT_MIGRATIONS_DIR = Path(__file__).parent / "migrations"
 DEFAULT_CONFIG_PATHS = [
     Path(__file__).parent / "migrate_config.yml",
     Path.cwd() / "migrate" / "migrate_config.yml",
+    Path(__file__).parent.parent / ".env",
+    Path.cwd() / ".env",
 ]
 DEFAULT_MANIFEST_PATH = Path(__file__).parent / "version_manifest.json"
 
@@ -116,6 +118,27 @@ class DatabaseConfig:
             name=db_config.get("name", "alphafrog"),
             user=db_config.get("user", "postgres"),
             password=db_config.get("password", ""),
+        )
+
+    @classmethod
+    def from_env(cls, path: Path) -> "DatabaseConfig":
+        """从.env文件加载配置"""
+        config = {}
+        with open(path, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if not line or line.startswith("#"):
+                    continue
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                    config[key.strip()] = value.strip()
+
+        return cls(
+            host=config.get("AF_DB_MAIN_HOST", "localhost"),
+            port=int(config.get("AF_DB_MAIN_PORT", 5432)),
+            name=config.get("AF_DB_MAIN_DATABASE", "alphafrog"),
+            user=config.get("AF_DB_MAIN_USER", "alphafrog"),
+            password=config.get("AF_DB_MAIN_PASSWORD", ""),
         )
 
     def to_dsn(self) -> str:
@@ -762,21 +785,29 @@ def main():
     # 查找配置文件
     config_path = find_config_file(args.config)
     if not config_path:
-        log_error("未找到配置文件，请创建 migrate/migrate_config.yml 或使用 --config 指定")
-        print("\n配置文件示例:")
+        log_error("未找到配置文件，请创建 migrate/migrate_config.yml 或确保 .env 文件存在")
+        print("\n配置文件选项（按优先级）：")
+        print("1. migrate/migrate_config.yml（YAML 格式）")
+        print("2. .env（项目根目录，已包含 AF_DB_MAIN_* 变量）")
+        print("\nmigrate_config.yml 示例:")
         print("""
 database:
   host: localhost
   port: 5432
   name: alphafrog
-  user: postgres
+  user: alphafrog
   password: your_password
         """)
         sys.exit(1)
 
     # 加载配置
     try:
-        db_config = DatabaseConfig.from_yaml(config_path)
+        if config_path.name == ".env":
+            db_config = DatabaseConfig.from_env(config_path)
+            log_info(f"从 .env 文件加载数据库配置: {config_path}")
+        else:
+            db_config = DatabaseConfig.from_yaml(config_path)
+            log_info(f"从 YAML 文件加载数据库配置: {config_path}")
     except Exception as e:
         log_error(f"加载配置文件失败: {e}")
         sys.exit(1)

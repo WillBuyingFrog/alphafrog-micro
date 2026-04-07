@@ -156,9 +156,11 @@ cp externalInfoService/config/search-llm.local.json externalInfoService/config/s
 # 安装依赖
 pip install psycopg2-binary pyyaml
 
-# 创建数据库连接配置
-cp db/migrate_config.example.yml migrate/migrate_config.yml
-# 编辑 migrate/migrate_config.yml，填写数据库连接信息
+# 配置文件（二选一）
+# 方式1：如果已有 .env 文件，直接使用（自动检测 AF_DB_MAIN_* 变量）
+# 方式2：创建 YAML 配置
+cp migrate/migrate_config.example.yml migrate/migrate_config.yml
+# 编辑 migrate/migrate_config.yml
 
 # 查看当前版本和待执行迁移
 python migrate/migrate.py status

@@ -12,11 +12,29 @@ AlphaFrog 迁移工具支持从 v0.2 开始任意旧版本到任意更新版本�
 pip install psycopg2-binary pyyaml
 ```
 
-### 2. 创建配置文件
+### 2. 配置文件
+
+迁移工具会自动查找以下配置文件（按优先级）：
+
+1. `migrate/migrate_config.yml`（YAML 格式）
+2. `.env`（项目根目录，读取 `AF_DB_MAIN_*` 变量）
+
+如果项目根目录已有 `.env` 文件且包含数据库配置，迁移工具会自动使用它：
+
+```bash
+# .env 中需要包含以下变量
+AF_DB_MAIN_HOST=localhost
+AF_DB_MAIN_PORT=5432
+AF_DB_MAIN_DATABASE=alphafrog
+AF_DB_MAIN_USER=alphafrog
+AF_DB_MAIN_PASSWORD=your_password
+```
+
+或者手动创建 YAML 配置：
 
 ```bash
 cp migrate/migrate_config.example.yml migrate/migrate_config.yml
-# 编辑 migrate/migrate_config.yml，填写数据库连接信息
+# 编辑 migrate/migrate_config.yml
 ```
 
 ### 3. 查看迁移状态
