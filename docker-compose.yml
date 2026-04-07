@@ -437,6 +437,13 @@ services:
       LOGGING_LEVEL_AGENT: ${LOGGING_LEVEL_AGENT:-INFO}
       # Memory Optimization (Heavy)
       JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1g"
+      # HTTP/HTTPS 代理（访问 OpenRouter 等境外服务时使用）
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
     volumes:
       - ./data/agent_datasets:/data/agent_datasets
       - ./agentService/config:/app/config:ro
@@ -472,6 +479,13 @@ services:
       AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
       AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
       AF_RAG_EMBEDDING_CONFIG_FILE: ${AF_RAG_EMBEDDING_CONFIG_FILE:-/app/config/rag-embedding.local.json}
+      # HTTP/HTTPS 代理（访问 Perplexity/Exa 等境外服务时使用）
+      HTTP_PROXY: ${HTTP_PROXY:-}
+      HTTPS_PROXY: ${HTTPS_PROXY:-}
+      http_proxy: ${HTTP_PROXY:-}
+      https_proxy: ${HTTPS_PROXY:-}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       AF_OSS_ENDPOINT: ${AF_OSS_ENDPOINT:-oss-ap-southeast-1-internal.aliyuncs.com}
       AF_OSS_BUCKET: ${AF_OSS_BUCKET}

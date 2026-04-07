@@ -44,6 +44,7 @@ Usage:
   ./deploy_latest.sh --services serviceA,serviceB
   ./deploy_latest.sh --with-infra     # rebuild with infrastructure services
   ./deploy_latest.sh --all            # rebuild all including python services
+  ./deploy_latest.sh --deploy-only    # skip build, only recreate containers
 
 Services:
   # Business Services
@@ -97,6 +98,7 @@ declare -A SERVICE_MODULE=(
 RAW_SERVICES=()
 WITH_INFRA=false
 WITH_ALL=false
+DEPLOY_ONLY=false
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -110,6 +112,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --all)
       WITH_ALL=true
+      shift
+      ;;
+    --deploy-only)
+      DEPLOY_ONLY=true
       shift
       ;;
     -s|--services)
@@ -183,35 +189,39 @@ else
   done
 fi
 
-echo "=== Selected services to rebuild: ${SELECTED[*]} ==="
+echo "=== Selected services: ${SELECTED[*]} ==="
 
-# Maven 编译
-if [[ ${#SERVICES[@]} -eq 0 ]]; then
-  echo "=== Building all Java modules ==="
-  mvn -DskipTests compile install
-else
-  MODULES=()
+# Maven 编译（--deploy-only 时跳过）
+if [[ "$DEPLOY_ONLY" != true ]]; then
+  if [[ ${#SERVICES[@]} -eq 0 ]]; then
+    echo "=== Building all Java modules ==="
+    mvn -DskipTests compile install
+  else
+    MODULES=()
+    for svc in "${SELECTED[@]}"; do
+      mod="${SERVICE_MODULE[$svc]:-}"
+      if [[ -n "$mod" ]]; then
+        MODULES+=("$mod")
+      fi
+    done
+    if [[ ${#MODULES[@]} -gt 0 ]]; then
+      echo "=== Building modules: ${MODULES[*]} ==="
+      MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
+      mvn -DskipTests -pl "$MODULE_LIST" -am compile install
+    fi
+  fi
+
+  # Docker 构建镜像
+  echo "=== Building Docker images ==="
   for svc in "${SELECTED[@]}"; do
-    mod="${SERVICE_MODULE[$svc]:-}"
-    if [[ -n "$mod" ]]; then
-      MODULES+=("$mod")
+    if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
+      echo "Building: $svc"
+      bash "${SERVICE_BUILD[$svc]}"
     fi
   done
-  if [[ ${#MODULES[@]} -gt 0 ]]; then
-    echo "=== Building modules: ${MODULES[*]} ==="
-    MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
-    mvn -DskipTests -pl "$MODULE_LIST" -am compile install
-  fi
+else
+  echo "=== Deploy-only mode: skipping build ==="
 fi
-
-# Docker 构建镜像
-echo "=== Building Docker images ==="
-for svc in "${SELECTED[@]}"; do
-  if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
-    echo "Building: $svc"
-    bash "${SERVICE_BUILD[$svc]}"
-  fi
-done
 
 # 检查 Docker Compose 命令
 if command -v docker >/dev/null 2>&1; then
