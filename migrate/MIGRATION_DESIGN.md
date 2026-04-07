@@ -19,7 +19,9 @@ AlphaFrog 迁移工具是一个基于 Python 的数据库和配置迁移框架�
 
 ### 版本清单（version_manifest.json）
 
-`version_manifest.json` 是迁移工具的核心配置文件，定义了每个版本的：
+`version_manifest.json` 是迁移工具的核心配置文件，定义了已发布版本的：
+
+注意：开发中的版本不写入 manifest，使用 `--to current` 模式直接扫描文件系统。
 - `tag`：版本标签（如 v0.4）
 - `commit`：对应的 git commit hash
 - `services`：该版本包含的微服务列表
@@ -90,20 +92,23 @@ python db/migrate.py status
 python db/migrate.py plan --from v0.3-phase1 --to v0.5
 
 # 从当前版本到最新版本
-python db/migrate.py plan --auto --to v0.6
+python migrate/migrate.py plan --auto --to current
 ```
 
 ### 5. 执行迁移
 
 ```bash
-# 自动检测当前版本并迁移到最新
-python db/migrate.py migrate --auto
+# 自动检测当前版本并迁移到最新发布版本
+python migrate/migrate.py migrate --auto
 
 # 指定版本范围
-python db/migrate.py migrate --from v0.2 --to v0.6
+python migrate/migrate.py migrate --from v0.2 --to v0.5
+
+# 迁移到当前分支最新状态（开发分支验证）
+python migrate/migrate.py migrate --from v0.5 --to current
 
 # 强制执行，跳过确认
-python db/migrate.py migrate --auto --force
+python migrate/migrate.py migrate --auto --force
 ```
 
 ## 添加新版本的迁移脚本

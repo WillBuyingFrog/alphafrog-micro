@@ -106,31 +106,6 @@
       "upgrades": [
         "v0.5/"
       ]
-    },
-    {
-      "tag": "v0.6",
-      "commit": "5564b07",
-      "services": [
-        "domestic-stock",
-        "domestic-fund",
-        "domestic-index",
-        "domestic-fetch",
-        "portfolio",
-        "frontend",
-        "agent",
-        "python-sandbox",
-        "python-sandbox-gateway",
-        "admin",
-        "external-info"
-      ],
-      "infra": [
-        "redis",
-        "rabbitmq",
-        "meilisearch"
-      ],
-      "upgrades": [
-        "v0.6/"
-      ]
     }
   ]
 }

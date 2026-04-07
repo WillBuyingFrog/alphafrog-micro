@@ -28,11 +28,14 @@ python migrate/migrate.py status
 ### 4. 执行迁移
 
 ```bash
-# 自动检测当前版本并迁移到最新
+# 自动检测当前版本并迁移到最新发布版本
 python migrate/migrate.py migrate --auto
 
 # 指定版本范围
-python migrate/migrate.py migrate --from v0.2 --to v0.6
+python migrate/migrate.py migrate --from v0.2 --to v0.5
+
+# 迁移到当前分支最新状态（开发分支验证）
+python migrate/migrate.py migrate --from v0.5 --to current
 
 # 强制执行，跳过确认
 python migrate/migrate.py migrate --auto --force

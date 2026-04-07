@@ -21,6 +21,9 @@ AlphaFrog 数据库迁移工具（v2）
     # 指定版本范围迁移
     python migrate/migrate.py migrate --from v0.2 --to v0.6
 
+    # 迁移到当前分支的最新状态（用于开发分支验证）
+    python migrate/migrate.py migrate --from v0.5 --to current
+
     # 强制执行，不提示确认
     python migrate/migrate.py migrate --auto --force
 
@@ -214,19 +217,28 @@ class VersionDetector:
         return None
 
     def detect(self, conn) -> Optional[str]:
-        """综合检测当前版本"""
-        git_version = self.detect_from_git()
-        db_version = self.detect_from_db(conn)
+        """综合检测当前版本
 
-        if git_version and db_version:
-            if git_version == db_version:
-                return git_version
-            log_warning(f"git 检测到版本 {git_version}，数据库记录版本 {db_version}，以数据库为准")
+        版本探测优先级：
+        1. 数据库记录（schema_migrations.target_version）- 反映实际部署状态
+        2. git 检测 - 仅作为辅助提示
+
+        如果数据库记录和 git 检测结果不一致，以数据库为准，因为数据库状态
+        反映的是实际部署的版本，而 git 分支可能已经被切到了新版本。
+        """
+        db_version = self.detect_from_db(conn)
+        git_version = self.detect_from_git()
+
+        if db_version:
+            if git_version and git_version != db_version:
+                log_info(f"git 当前分支对应版本: {git_version}，数据库实际版本: {db_version}")
+                log_info("以数据库记录为准")
             return db_version
-        elif git_version:
+
+        if git_version:
+            log_info(f"数据库无迁移记录，git 检测到版本: {git_version}")
             return git_version
-        elif db_version:
-            return db_version
+
         return None
 
 
@@ -291,6 +303,79 @@ class MigrationPlanner:
                         if migration:
                             migration.module = version["tag"]
                             migrations.append(migration)
+
+        return migrations, version_changes
+
+    def plan_current(self, from_version: str) -> Tuple[List[Migration], List[Dict]]:
+        """
+        生成到当前分支最新状态的迁移计划
+        不依赖 version_manifest.json，直接扫描文件系统中的所有升级脚本
+
+        返回: (迁移脚本列表, 版本变更信息列表)
+        """
+        migrations = []
+        version_changes = []
+        seen_versions = set()
+
+        upgrades_dir = self.migrations_dir / "upgrades"
+        if not upgrades_dir.exists():
+            return migrations, version_changes
+
+        # 扫描所有版本目录，按目录名排序
+        version_dirs = sorted([d for d in upgrades_dir.iterdir() if d.is_dir()], key=lambda d: d.name)
+
+        for version_dir in version_dirs:
+            version_tag = version_dir.name
+
+            # 跳过起始版本及之前的版本
+            # 找到 manifest 中 from_version 的索引，只包含之后的版本
+            from_idx = -1
+            for i, v in enumerate(self.versions):
+                if v["tag"] == from_version:
+                    from_idx = i
+                    break
+
+            # 如果该版本目录在 manifest 中存在且索引 <= from_idx，跳过
+            version_in_manifest = False
+            for i, v in enumerate(self.versions):
+                if v["tag"] == version_tag:
+                    version_in_manifest = True
+                    if i <= from_idx:
+                        continue
+                    break
+
+            # 如果目录名不在 manifest 中（开发中的新版本），也包含进来
+            if version_in_manifest:
+                for i, v in enumerate(self.versions):
+                    if v["tag"] == version_tag and i > from_idx:
+                        if version_tag not in seen_versions:
+                            seen_versions.add(version_tag)
+                            prev_version = self.versions[i - 1]["tag"]
+                            version_changes.append({
+                                "from": prev_version,
+                                "to": version_tag,
+                                "services_added": list(set(v.get("services", [])) - set(self.versions[i - 1].get("services", []))),
+                                "infra_changed": list(set(v.get("infra", [])) - set(self.versions[i - 1].get("infra", []))),
+                            })
+                        break
+            else:
+                # 开发中的版本，不在 manifest 中
+                if version_tag not in seen_versions:
+                    seen_versions.add(version_tag)
+                    version_changes.append({
+                        "from": from_version if not version_changes else version_changes[-1]["to"],
+                        "to": version_tag,
+                        "services_added": [],
+                        "infra_changed": [],
+                        "note": "开发中版本，尚未发布"
+                    })
+
+            # 收集该版本目录下的所有脚本
+            for filepath in sorted(version_dir.glob("*")):
+                migration = Migration.from_file(filepath)
+                if migration:
+                    migration.module = version_tag
+                    migrations.append(migration)
 
         return migrations, version_changes
 
@@ -477,22 +562,29 @@ class MigrationManager:
     def plan(self, from_version: str, to_version: str):
         """显示迁移计划"""
         try:
-            migrations, version_changes = self.planner.plan(from_version, to_version)
+            if to_version == "current":
+                migrations, version_changes = self.planner.plan_current(from_version)
+            else:
+                migrations, version_changes = self.planner.plan(from_version, to_version)
         except ValueError as e:
             log_error(str(e))
             return False
 
         print("\n" + "=" * 70)
-        print(f"迁移计划: {from_version} -> {to_version}")
+        if to_version == "current":
+            print(f"迁移计划: {from_version} -> current（当前分支最新状态）")
+        else:
+            print(f"迁移计划: {from_version} -> {to_version}")
         print("=" * 70)
 
         if version_changes:
             print("\n【版本变更概览】")
             for change in version_changes:
-                print(f"  {change['from']} -> {change['to']}")
-                if change["services_added"]:
+                note = change.get("note", "")
+                print(f"  {change['from']} -> {change['to']}" + (f" [{note}]" if note else ""))
+                if change.get("services_added"):
                     print(f"    新增服务: {', '.join(change['services_added'])}")
-                if change["infra_changed"]:
+                if change.get("infra_changed"):
                     print(f"    基础设施变更: {', '.join(change['infra_changed'])}")
 
         if migrations:
@@ -536,7 +628,10 @@ class MigrationManager:
             return True
 
         try:
-            migrations, version_changes = self.planner.plan(from_version, to_version)
+            if to_version == "current":
+                migrations, version_changes = self.planner.plan_current(from_version)
+            else:
+                migrations, version_changes = self.planner.plan(from_version, to_version)
         except ValueError as e:
             log_error(str(e))
             return False
@@ -553,16 +648,20 @@ class MigrationManager:
 
         # 显示迁移计划
         print("\n" + "=" * 70)
-        print(f"迁移计划: {from_version} -> {to_version}")
+        if to_version == "current":
+            print(f"迁移计划: {from_version} -> current（当前分支最新状态）")
+        else:
+            print(f"迁移计划: {from_version} -> {to_version}")
         print("=" * 70)
 
         if version_changes:
             print("\n【版本变更概览】")
             for change in version_changes:
-                print(f"  {change['from']} -> {change['to']}")
-                if change["services_added"]:
+                note = change.get("note", "")
+                print(f"  {change['from']} -> {change['to']}" + (f" [{note}]" if note else ""))
+                if change.get("services_added"):
                     print(f"    新增服务: {', '.join(change['services_added'])}")
-                if change["infra_changed"]:
+                if change.get("infra_changed"):
                     print(f"    基础设施变更: {', '.join(change['infra_changed'])}")
 
         print(f"\n【待执行脚本】共 {len(pending)} 个")
@@ -580,8 +679,11 @@ class MigrationManager:
         success_count = 0
         fail_count = 0
 
+        # 当目标为 current 时，使用实际版本目录名作为数据库记录的 target_version
+        target_for_db = to_version if to_version != "current" else (version_changes[-1]["to"] if version_changes else "current")
+
         for migration in pending:
-            if self.execute_migration(migration, to_version):
+            if self.execute_migration(migration, target_for_db):
                 success_count += 1
             else:
                 fail_count += 1
@@ -629,11 +731,14 @@ def main():
   # 查看迁移计划（不执行）
   python migrate/migrate.py plan --from v0.3-phase1 --to v0.5
 
-  # 自动检测当前版本并迁移到最新
+  # 自动检测当前版本并迁移到最新发布版本
   python migrate/migrate.py migrate --auto
 
   # 指定版本范围迁移
-  python migrate/migrate.py migrate --from v0.2 --to v0.6
+  python migrate/migrate.py migrate --from v0.2 --to v0.5
+
+  # 迁移到当前分支最新状态（开发分支验证）
+  python migrate/migrate.py migrate --from v0.5 --to current
 
   # 强制执行，不提示确认
   python migrate/migrate.py migrate --auto --force
@@ -647,7 +752,7 @@ def main():
     parser.add_argument("--config", "-c", help="配置文件路径")
     parser.add_argument("--force", "-f", action="store_true", help="强制执行，不提示确认")
     parser.add_argument("--from", dest="from_version", help="起始版本号")
-    parser.add_argument("--to", dest="to_version", help="目标版本号")
+    parser.add_argument("--to", dest="to_version", help="目标版本号，使用 'current' 表示当前分支最新状态")
     parser.add_argument("--auto", action="store_true", help="自动检测当前版本")
     parser.add_argument("--migrations-dir", "-d", help="迁移脚本目录路径")
     parser.add_argument("--manifest", "-m", help="版本清单文件路径")
@@ -707,6 +812,8 @@ database:
                 all_tags = manager.planner.get_all_version_tags()
                 if all_tags:
                     args.to_version = all_tags[-1]
+                    log_info(f"目标版本未指定，默认使用最新发布版本: {args.to_version}")
+                    log_info("如需验证当前分支最新状态，请使用 --to current")
                 else:
                     log_error("无法确定目标版本，请使用 --to 指定")
                     sys.exit(1)
