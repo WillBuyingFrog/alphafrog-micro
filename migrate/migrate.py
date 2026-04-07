@@ -133,8 +133,15 @@ class DatabaseConfig:
                     key, value = line.split("=", 1)
                     config[key.strip()] = value.strip()
 
+        host = config.get("AF_DB_MAIN_HOST", "localhost")
+        # .env 中的 host.docker.internal 是 Docker 容器内使用的特殊主机名
+        # 在宿主机上直接运行时需要替换为 localhost
+        if host == "host.docker.internal":
+            log_info("检测到 host.docker.internal，在宿主机上运行时自动替换为 localhost")
+            host = "localhost"
+
         return cls(
-            host=config.get("AF_DB_MAIN_HOST", "localhost"),
+            host=host,
             port=int(config.get("AF_DB_MAIN_PORT", 5432)),
             name=config.get("AF_DB_MAIN_DATABASE", "alphafrog"),
             user=config.get("AF_DB_MAIN_USER", "alphafrog"),
