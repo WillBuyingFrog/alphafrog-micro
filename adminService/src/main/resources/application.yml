@@ -18,6 +18,8 @@ dubbo:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
     # 当前未使用 Nacos 作为 Dubbo 配置中心，显式关闭默认兜底，避免启动时额外做 config-center 健康检查
     use-as-config-center: false
+    # 当前未使用 Nacos 作为 Dubbo 元数据中心，显式关闭默认兜底，避免启动时额外做 metadata-center 健康检查
+    use-as-metadata-center: false
   protocol:
     port: 50057
     name: tri
