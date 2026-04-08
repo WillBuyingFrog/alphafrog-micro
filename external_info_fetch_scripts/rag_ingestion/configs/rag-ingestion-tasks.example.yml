@@ -1,0 +1,54 @@
+# RAG Ingestion 任务配置文件示例
+# 用法：python run.py --task-config rag-ingestion-tasks.yml
+#
+# 每个 task 对应一次 DB 查询+处理批次。
+# API 密钥、DSN 等敏感配置仍从 .env 读取，此文件只配置"处理哪些数据"。
+#
+# 字段说明：
+#   name           - 任务名称（仅用于日志，可任意命名）
+#   doc_type       - 文档类型：ann（公告）| research（研报）| all（两者）
+#   date_from      - 起始日期（含），格式 YYYYMMDD，留空或省略则不过滤
+#   date_to        - 截止日期（含），格式 YYYYMMDD，留空或省略则不过滤
+#   ts_code        - 股票代码精确过滤（如 000001.SZ），留空或省略则不过滤
+#   title_patterns - title 子串过滤列表，OR 关系（包含任意一个即满足），省略则不过滤
+#   limit          - 本次最多处理条数（默认 50）
+#   offset         - DB 查询偏移量，用于分批处理（默认 0）
+#   enabled        - false 则跳过本 task（默认 true）
+
+tasks:
+  - name: 近期A股公告
+    doc_type: ann
+    date_from: "20260101"
+    date_to: "20260317"
+    ts_code: ""
+    limit: 50
+    offset: 0
+    enabled: true
+
+  - name: 平安银行研报
+    doc_type: research
+    date_from: "20260101"
+    date_to: ""
+    ts_code: "000001.SZ"
+    limit: 20
+    offset: 0
+    enabled: true
+
+  - name: 全量研报第二批（offset示例）
+    doc_type: research
+    date_from: "20260101"
+    date_to: "20260317"
+    ts_code: ""
+    limit: 50
+    offset: 50
+    enabled: false
+
+  - name: 年报公告处理（title_patterns示例）
+    doc_type: ann
+    date_from: "20250101"
+    date_to: "20251231"
+    title_patterns:
+      - "年度公告"
+      - "年度报告"
+    limit: 100
+    enabled: false

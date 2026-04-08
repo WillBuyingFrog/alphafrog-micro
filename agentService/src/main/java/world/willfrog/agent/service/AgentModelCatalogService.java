@@ -172,11 +172,11 @@ public class AgentModelCatalogService {
         if (!removedEndpoints.isEmpty()) {
             log.warn("Removed endpoints without baseUrl: {}", removedEndpoints);
         }
-        log.info("mergeEndpoints result: endpoints={}, modelCounts={}", 
-                merged.keySet(),
-                merged.entrySet().stream().collect(java.util.stream.Collectors.toMap(
-                    Map.Entry::getKey, 
-                    e -> e.getValue() != null && e.getValue().getModels() != null ? e.getValue().getModels().size() : 0)));
+        // log.info("mergeEndpoints result: endpoints={}, modelCounts={}", 
+        //         merged.keySet(),
+        //         merged.entrySet().stream().collect(java.util.stream.Collectors.toMap(
+        //             Map.Entry::getKey, 
+        //             e -> e.getValue() != null && e.getValue().getModels() != null ? e.getValue().getModels().size() : 0)));
         return merged;
     }
 
@@ -246,30 +246,13 @@ public class AgentModelCatalogService {
         return baseRoutes == null ? List.of() : baseRoutes;
     }
 
+    /**
+     * 从 endpoints 下的 models 中收集模型元信息。
+     */
     private Map<String, AgentLlmProperties.ModelMetadata> mergeModelMetadata(AgentLlmProperties base,
                                                                               AgentLlmProperties local,
                                                                               Map<String, AgentLlmProperties.Endpoint> endpoints) {
         Map<String, AgentLlmProperties.ModelMetadata> merged = new LinkedHashMap<>();
-        if (base != null && base.getModelMetadata() != null) {
-            for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : base.getModelMetadata().entrySet()) {
-                String key = normalize(entry.getKey());
-                if (key == null) {
-                    continue;
-                }
-                merged.put(key, copyModelMetadata(entry.getValue()));
-            }
-        }
-        if (local != null && local.getModelMetadata() != null) {
-            for (Map.Entry<String, AgentLlmProperties.ModelMetadata> entry : local.getModelMetadata().entrySet()) {
-                String key = normalize(entry.getKey());
-                if (key == null) {
-                    continue;
-                }
-                AgentLlmProperties.ModelMetadata source = entry.getValue();
-                AgentLlmProperties.ModelMetadata target = merged.computeIfAbsent(key, ignored -> new AgentLlmProperties.ModelMetadata());
-                mergeModelMetadataInto(target, source);
-            }
-        }
         if (endpoints != null && !endpoints.isEmpty()) {
             for (AgentLlmProperties.Endpoint endpoint : endpoints.values()) {
                 if (endpoint == null || endpoint.getModels() == null) {

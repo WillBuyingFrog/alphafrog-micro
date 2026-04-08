@@ -1,9 +1,8 @@
 syntax = "proto3";
 
+option java_multiple_files = true;
 
 package world.willfrog.alphafrogmicro.domestic.idl;
-
-option java_multiple_files = true;
 
 /**
   基金基本信息
@@ -211,8 +210,80 @@ service DomesticFundService {
 
 }
 
+/**
+  基金管理人爬取
+ */
+
+message DomesticFundCompanyFetchRequest {
+}
+
+message DomesticFundCompanyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金经理爬取
+ */
+
+message DomesticFundManagerFetchByTsCodeRequest {
+  string tsCode = 1;
+  string annDate = 2;
+  string name = 3;
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticFundManagerFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金份额爬取
+ */
+
+message DomesticFundShareFetchByTradeDateRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string market = 5;
+  int32 offset = 6;
+  int32 limit = 7;
+}
+
+message DomesticFundShareFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF份额规模爬取
+ */
+
+message DomesticEtfShareSizeFetchByTradeDateRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string exchange = 5;
+  int32 offset = 6;
+  int32 limit = 7;
+}
+
+message DomesticEtfShareSizeFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
+  rpc fetchFundCompany(DomesticFundCompanyFetchRequest) returns (DomesticFundCompanyFetchResponse);
+  rpc fetchFundManagerByTsCode(DomesticFundManagerFetchByTsCodeRequest) returns (DomesticFundManagerFetchByTsCodeResponse);
+  rpc fetchFundShareByTradeDate(DomesticFundShareFetchByTradeDateRequest) returns (DomesticFundShareFetchByTradeDateResponse);
+  rpc fetchEtfShareSizeByTradeDate(DomesticEtfShareSizeFetchByTradeDateRequest) returns (DomesticEtfShareSizeFetchByTradeDateResponse);
 }

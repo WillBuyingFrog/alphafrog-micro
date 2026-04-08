@@ -1,7 +1,7 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.Test;
@@ -27,7 +27,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
                 mock(AgentObservabilityService.class),
-                mock(OpenRouterCostService.class)
+                mock(OpenRouterCostService.class),
+                mock(AgentLlmLocalConfigLoader.class)
         );
         ReflectionTestUtils.setField(factory, "openAiApiKey", "fallback-key");
         ReflectionTestUtils.setField(factory, "maxTokens", 1024);
@@ -38,10 +39,11 @@ class AgentAiServiceFactoryDashScopeTest {
                 "",
                 "qwen-plus",
                 "dashscope-key",
-                region
+                region,
+                java.util.List.of()
         );
 
-        ChatLanguageModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of("fireworks"));
+        ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of("fireworks"));
 
         assertInstanceOf(DashScopeChatModel.class, model);
         String baseUrl = (String) ReflectionTestUtils.getField(model, "baseUrl");
@@ -55,7 +57,8 @@ class AgentAiServiceFactoryDashScopeTest {
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
                 mock(AgentObservabilityService.class),
-                mock(OpenRouterCostService.class)
+                mock(OpenRouterCostService.class),
+                mock(AgentLlmLocalConfigLoader.class)
         );
         ReflectionTestUtils.setField(factory, "openAiApiKey", "fallback-key");
         ReflectionTestUtils.setField(factory, "maxTokens", 1024);
@@ -66,10 +69,11 @@ class AgentAiServiceFactoryDashScopeTest {
                 "https://custom-dashscope.example/compatible-mode/v1",
                 "qwen-plus",
                 "dashscope-key",
-                "us"
+                "us",
+                java.util.List.of()
         );
 
-        ChatLanguageModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
+        ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
 
         assertInstanceOf(DashScopeChatModel.class, model);
         String baseUrl = (String) ReflectionTestUtils.getField(model, "baseUrl");

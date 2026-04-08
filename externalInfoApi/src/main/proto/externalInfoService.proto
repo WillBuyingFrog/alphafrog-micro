@@ -29,6 +29,33 @@ message GetTodayMarketNewsResponse {
   string provider = 3;
 }
 
+// RAG 语义检索请求
+message RagSearchRequest {
+  string query_text = 1;        // 查询语句（自然语言）
+  string doc_type   = 2;        // "announcement" | "research_report" | ""（不过滤）
+  string ts_code    = 3;        // 可选，限定公司（如 "600519.SH"）
+  string ind_name   = 4;        // 可选，限定行业（如 "电子"）；仅对研报有效
+  int32  top_k      = 5;        // 返回条数，0 则服务端默认 5
+}
+
+// 单个检索结果
+message RagSearchResultItem {
+  float  score      = 1;        // 余弦相似度（0-1，越大越相关）
+  string doc_type   = 2;        // "announcement" 或 "research_report"
+  string ts_code    = 3;        // 股票代码（公告专属）
+  string ind_name   = 4;        // 行业名称（研报专属）
+  string title      = 5;        // 标题
+  string date       = 6;        // 公告日期或研报日期（YYYYMMDD）
+  string chunk_text = 7;        // 命中的文本片段
+  string oss_url    = 8;        // 原文全文 OSS URL（Markdown），供 loadDocument 工具使用
+}
+
+message RagSearchResponse {
+  repeated RagSearchResultItem items = 1;
+  int32 total = 2;              // 实际返回条数
+}
+
 service ExternalInfoDubboService {
   rpc GetTodayMarketNews(GetTodayMarketNewsRequest) returns (GetTodayMarketNewsResponse);
+  rpc RagSearch(RagSearchRequest) returns (RagSearchResponse);
 }

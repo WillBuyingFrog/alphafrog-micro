@@ -208,4 +208,226 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
     }
 
 
+    // ==================== 新增：基金管理人 ====================
+
+    @Override
+    public DomesticFundCompanyFetchResponse fetchFundCompany(
+            DomesticFundCompanyFetchRequest request) {
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_company");
+        params.put("params", queryParams);
+        params.put("fields", "name,shortname,short_enname,province,city,address,phone,office,website," +
+                "chairman,manager,reg_capital,setup_date,end_date,employees,main_business,org_code,credit_code");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticFundCompanyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticFundStoreUtils.storeFundCompanyByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticFundCompanyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticFundCompanyFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：基金经理 ====================
+
+    @Override
+    public DomesticFundManagerFetchByTsCodeResponse fetchFundManagerByTsCode(
+            DomesticFundManagerFetchByTsCodeRequest request) {
+
+        String tsCode = request.getTsCode();
+        String annDate = request.getAnnDate();
+        String name = request.getName();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_manager 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_manager");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (annDate != null && !annDate.isBlank()) {
+            queryParams.put("ann_date", annDate);
+        }
+        if (name != null && !name.isBlank()) {
+            queryParams.put("name", name);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,ann_date,name,gender,birth_year,edu,nationality,begin_date,end_date,resume");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticFundManagerFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticFundStoreUtils.storeFundManagerByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticFundManagerFetchByTsCodeResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticFundManagerFetchByTsCodeResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：基金份额 ====================
+
+    @Override
+    public DomesticFundShareFetchByTradeDateResponse fetchFundShareByTradeDate(
+            DomesticFundShareFetchByTradeDateRequest request) {
+
+        String tsCode = request.getTsCode();
+        String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        String market = request.getMarket();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 2000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_share 使用默认页大小 2000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_share");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        if (market != null && !market.isBlank()) {
+            queryParams.put("market", market);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,trade_date,fd_share");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticFundShareFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticFundStoreUtils.storeFundShareByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticFundShareFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticFundShareFetchByTradeDateResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
+    // ==================== 新增：ETF 份额规模 ====================
+
+    @Override
+    public DomesticEtfShareSizeFetchByTradeDateResponse fetchEtfShareSizeByTradeDate(
+            DomesticEtfShareSizeFetchByTradeDateRequest request) {
+
+        String tsCode = request.getTsCode();
+        String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        String exchange = request.getExchange();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        // 如果 limit 未提供或为 0，使用默认值并打印 warning
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，etf_share_size 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "etf_share_size");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        if (exchange != null && !exchange.isBlank()) {
+            queryParams.put("exchange", exchange);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "trade_date,ts_code,etf_name,total_share,total_size,nav,close,exchange");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticEtfShareSizeFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+        int result = domesticFundStoreUtils.storeEtfShareSizeByRawTuShareOutput(data, fields);
+
+        if (result < 0) {
+            return DomesticEtfShareSizeFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticEtfShareSizeFetchByTradeDateResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+
 }

@@ -55,6 +55,9 @@ public class AgentObservabilityService {
     @Value("${agent.observability.llm-trace.reasoning-max-chars:20000}")
     private int llmTraceReasoningMaxChars;
 
+    @Value("${agent.observability.tool-trace.max-output-chars:100000}")
+    private int toolTraceMaxOutputChars;
+
     public void initializeRun(String runId, String endpointName, String modelName) {
         initializeRun(runId, endpointName, modelName, false);
     }
@@ -232,7 +235,7 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            appendLlmTrace(state.getDiagnostics(), traceId, runId, phase, stage, durationMs, startedAtMillis, completedAtMillis,
+            appendLlmTrace(state.getDiagnostics(), traceId, runId, phase, stage, tokenUsage, durationMs, startedAtMillis, completedAtMillis,
                     endpointName, modelName, errorMessage, sanitizedRequestSnapshot, responsePreview, reasoning);
         });
         return traceId;
@@ -386,6 +389,7 @@ public class AgentObservabilityService {
                     runId, 
                     phase, 
                     stage,
+                    tokenUsage,
                     cachedTokens,
                     durationMs, 
                     startedAtMillis,
@@ -579,17 +583,47 @@ public class AgentObservabilityService {
     public String loadObservabilityJson(String runId, String snapshotJson) {
         Optional<String> cached = stateStore.loadObservability(runId);
         if (cached.isPresent()) {
+            int llmTraces = 0;
+            int toolTraces = 0;
+            try {
+                ObservabilityState state = objectMapper.readValue(cached.get(), ObservabilityState.class);
+                if (state.getDiagnostics() != null) {
+                    llmTraces = state.getDiagnostics().getLlmTraces() != null ? state.getDiagnostics().getLlmTraces().size() : 0;
+                    toolTraces = state.getDiagnostics().getToolTraces() != null ? state.getDiagnostics().getToolTraces().size() : 0;
+                }
+            } catch (Exception e) {
+                log.debug("Failed to parse observability for metrics: runId={}", runId);
+            }
+            log.info("Observability loaded from Redis: runId={}, size={} bytes, llmTraces={}, toolTraces={}", 
+                    runId, cached.get().length(), llmTraces, toolTraces);
             return cached.get();
         }
+        
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
         Object observability = snapshot.get("observability");
-        if (observability == null) {
-            return "";
+        if (observability != null) {
+            String json = safeWrite(observability);
+            log.warn("Observability fallback to snapshot: runId={}, size={} bytes", runId, json.length());
+            return json;
         }
-        return safeWrite(observability);
+        
+        log.error("Observability not found anywhere: runId={}, snapshotLength={}, redisKey={}", 
+                runId, snapshotJson == null ? 0 : snapshotJson.length(),
+                "agent:run:" + runId + ":observability");
+        return "";
     }
 
     public String attachObservabilityToSnapshot(String runId, String snapshotJson, AgentRunStatus status) {
+        int llmTracesBefore = 0;
+        int toolTracesBefore = 0;
+        try {
+            ObservabilityState currentState = loadState(runId);
+            llmTracesBefore = currentState.getDiagnostics().getLlmTraces().size();
+            toolTracesBefore = currentState.getDiagnostics().getToolTraces().size();
+        } catch (Exception e) {
+            log.debug("Could not load current state for metrics: runId={}", runId);
+        }
+        
         ObservabilityState state = mutate(runId, current -> {
             if (status != null) {
                 current.getSummary().setStatus(status.name());
@@ -599,13 +633,50 @@ public class AgentObservabilityService {
             }
         });
         Map<String, Object> snapshot = parseJsonObject(snapshotJson);
-        snapshot.put("observability", objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
-        }));
+        Map<String, Object> observabilityMap = objectMapper.convertValue(state, new TypeReference<Map<String, Object>>() {
+        });
+        snapshot.put("observability", observabilityMap);
         String output = safeWrite(snapshot);
+        
+        // 强制同步保存可观测数据到 Redis，确保后续可以立即加载
+        String observabilityJson = safeWrite(observabilityMap);
+        stateStore.saveObservability(runId, observabilityJson);
+        
+        int llmTracesAfter = state.getDiagnostics().getLlmTraces().size();
+        int toolTracesAfter = state.getDiagnostics().getToolTraces().size();
+        log.info("Observability attached to snapshot: runId={}, status={}, llmTraces {}→{}, toolTraces {}→{}, snapshotSize={} bytes, redisSize={} bytes", 
+                runId, status, llmTracesBefore, llmTracesAfter, toolTracesBefore, toolTracesAfter, 
+                output.length(), observabilityJson.length());
+        
         if (status == AgentRunStatus.COMPLETED || status == AgentRunStatus.FAILED || status == AgentRunStatus.CANCELED) {
             locks.remove(runId);
         }
         return output;
+    }
+    
+    /**
+     * 强制刷新可观测数据到 Redis 并返回当前状态。
+     * 用于 cancel/pause 等需要确保数据立即落盘的场景。
+     * 
+     * @param runId Run ID
+     * @return 当前 ObservabilityState，如果未找到则返回 null
+     */
+    public ObservabilityState forceFlush(String runId) {
+        if (runId == null || runId.isBlank()) {
+            return null;
+        }
+        Object lock = locks.computeIfAbsent(runId, key -> new Object());
+        synchronized (lock) {
+            ObservabilityState state = loadState(runId);
+            String json = safeWrite(state);
+            stateStore.saveObservability(runId, json);
+            log.info("Observability force flushed: runId={}, llmTraces={}, toolTraces={}, size={} bytes", 
+                    runId, 
+                    state.getDiagnostics().getLlmTraces().size(),
+                    state.getDiagnostics().getToolTraces().size(),
+                    json.length());
+            return state;
+        }
     }
 
     public ListMetrics extractListMetrics(String snapshotJson) {
@@ -631,9 +702,20 @@ public class AgentObservabilityService {
         Object lock = locks.computeIfAbsent(runId, key -> new Object());
         synchronized (lock) {
             ObservabilityState state = loadState(runId);
+            int tracesBefore = state.getDiagnostics().getLlmTraces().size();
+            int toolTracesBefore = state.getDiagnostics().getToolTraces().size();
+            
             updater.accept(state);
             touch(state);
-            stateStore.saveObservability(runId, safeWrite(state));
+            
+            String json = safeWrite(state);
+            stateStore.saveObservability(runId, json);
+            
+            int tracesAfter = state.getDiagnostics().getLlmTraces().size();
+            int toolTracesAfter = state.getDiagnostics().getToolTraces().size();
+            log.debug("Observability mutated: runId={}, llmTraces {}→{}, toolTraces {}→{}, size={} bytes", 
+                    runId, tracesBefore, tracesAfter, toolTracesBefore, toolTracesAfter, json.length());
+            
             return state;
         }
     }
@@ -641,10 +723,16 @@ public class AgentObservabilityService {
     private ObservabilityState loadState(String runId) {
         Optional<String> existing = stateStore.loadObservability(runId);
         if (existing.isEmpty()) {
+            log.debug("Observability state not found in Redis, creating new: runId={}", runId);
             return newState();
         }
         try {
             ObservabilityState parsed = objectMapper.readValue(existing.get(), ObservabilityState.class);
+            log.debug("Observability state loaded from Redis: runId={}, size={} bytes, llmTraces={}, toolTraces={}", 
+                    runId, existing.get().length(),
+                    parsed.getDiagnostics().getLlmTraces() != null ? parsed.getDiagnostics().getLlmTraces().size() : 0,
+                    parsed.getDiagnostics().getToolTraces() != null ? parsed.getDiagnostics().getToolTraces().size() : 0);
+            
             if (parsed.getSummary() == null) {
                 parsed.setSummary(new Summary());
             }
@@ -675,7 +763,7 @@ public class AgentObservabilityService {
             ensurePhaseKeys(parsed);
             return parsed;
         } catch (Exception e) {
-            log.warn("Parse observability state failed, fallback empty state", e);
+            log.warn("Parse observability state failed, fallback empty state: runId={}, error={}", runId, e.getMessage());
             return newState();
         }
     }
@@ -845,6 +933,10 @@ public class AgentObservabilityService {
         return llmTraceReasoningMaxChars <= 0 ? 20000 : llmTraceReasoningMaxChars;
     }
 
+    private int toolTraceOutputLimit() {
+        return toolTraceMaxOutputChars <= 0 ? 100000 : toolTraceMaxOutputChars;
+    }
+
     private int llmTraceCallLimit() {
         return llmTraceMaxCalls <= 0 ? 100 : llmTraceMaxCalls;
     }
@@ -858,6 +950,7 @@ public class AgentObservabilityService {
                                 String runId,
                                 String phase,
                                 String stage,
+                                TokenUsage tokenUsage,
                                 long durationMs,
                                 long startedAtMillis,
                                 long completedAtMillis,
@@ -889,9 +982,19 @@ public class AgentObservabilityService {
         trace.setError(trim(errorMessage, 1000));
         trace.setRequest(requestSnapshot);
         trace.setResponsePreview(responsePreview);
+        trace.setInputMessages(requestSnapshot);
+        trace.setOutputText(responsePreview);
+        trace.setTodoId(nvl(AgentContext.getTodoId()));
+        trace.setTodoSequence(AgentContext.getTodoSequence());
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        // 设置 Token 统计
+        if (tokenUsage != null) {
+            trace.setInputTokens(tokenUsage.inputTokenCount() != null ? tokenUsage.inputTokenCount().longValue() : null);
+            trace.setOutputTokens(tokenUsage.outputTokenCount() != null ? tokenUsage.outputTokenCount().longValue() : null);
+            trace.setTotalTokens(tokenUsage.totalTokenCount() != null ? tokenUsage.totalTokenCount().longValue() : null);
+        }
         traces.add(trace);
         int limit = llmTraceCallLimit();
         while (traces.size() > limit) {
@@ -933,6 +1036,7 @@ public class AgentObservabilityService {
             String runId,
             String phase,
             String stage,
+            TokenUsage tokenUsage,
             Integer cachedTokens,
             long durationMs,
             long startedAtMillis,
@@ -970,6 +1074,12 @@ public class AgentObservabilityService {
         trace.setReasoningText(reasoning == null ? "" : reasoning.text());
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        // 设置 Token 统计
+        if (tokenUsage != null) {
+            trace.setInputTokens(tokenUsage.inputTokenCount() != null ? tokenUsage.inputTokenCount().longValue() : null);
+            trace.setOutputTokens(tokenUsage.outputTokenCount() != null ? tokenUsage.outputTokenCount().longValue() : null);
+            trace.setTotalTokens(tokenUsage.totalTokenCount() != null ? tokenUsage.totalTokenCount().longValue() : null);
+        }
         trace.setCachedTokens(captureCachedTokens ? cachedTokens : null);
         
         // 设置原始 HTTP 请求信息
@@ -1004,6 +1114,22 @@ public class AgentObservabilityService {
         // 保留向后兼容的字段
         trace.setRequest(null);
         trace.setResponsePreview(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
+        
+        // 设置新的 inputMessages / outputText 字段
+        if (httpRequest != null && httpRequest.getBody() != null && !httpRequest.getBody().isBlank()) {
+            try {
+                Map<String, Object> body = objectMapper.readValue(httpRequest.getBody(), new TypeReference<Map<String, Object>>() {});
+                trace.setInputMessages(sanitizeRequestSnapshot(body));
+            } catch (Exception e) {
+                // 解析失败时，将 body 原文作为 inputMessages 的一部分
+                Map<String, Object> fallback = new LinkedHashMap<>();
+                fallback.put("raw", preview(httpRequest.getBody(), llmTraceTextLimit()));
+                trace.setInputMessages(fallback);
+            }
+        }
+        trace.setOutputText(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
+        trace.setTodoId(nvl(AgentContext.getTodoId()));
+        trace.setTodoSequence(AgentContext.getTodoSequence());
         
         traces.add(trace);
         
@@ -1054,7 +1180,7 @@ public class AgentObservabilityService {
         trace.setCacheSource(nvl(cacheSource));
         trace.setCacheTtlRemainingMs(cacheTtlRemainingMs);
         trace.setEstimatedSavedDurationMs(Math.max(0L, estimatedSavedDurationMs));
-        trace.setOutputPreview(preview(output, llmTraceTextLimit()));
+        trace.setOutput(preview(output, toolTraceOutputLimit()));
         trace.setError(trim(errorMessage, 1000));
         trace.setDecisionLlmTraceId(nvl(AgentContext.getDecisionTraceId()));
         trace.setDecisionStage(nvl(AgentContext.getDecisionStage()));
@@ -1338,6 +1464,29 @@ public class AgentObservabilityService {
         private Object reasoningDetails;
         private boolean reasoningTruncated;
         
+        // ========== 关联的 Todo/DAG 节点 ==========
+        
+        /** 关联的 Todo 任务 ID（DAG 模式下为节点 ID） */
+        private String todoId;
+        /** Todo 序号 */
+        private Integer todoSequence;
+        
+        // ========== LLM 输入输出 ==========
+        
+        /** LLM 调用时的完整 messages 快照 */
+        private Map<String, Object> inputMessages;
+        /** LLM 响应文本（截断预览） */
+        private String outputText;
+        
+        // ========== Token 统计 ==========
+        
+        /** 输入 Token 数 */
+        private Long inputTokens;
+        /** 输出 Token 数 */
+        private Long outputTokens;
+        /** 总 Token 数 */
+        private Long totalTokens;
+        
         // ========== Token Cache 追踪 ==========
         
         /** Cache 命中 token 数 */
@@ -1375,14 +1524,14 @@ public class AgentObservabilityService {
         // ========== 向后兼容的字段 ==========
         
         /**
-         * @deprecated 使用 {@link #httpRequest} 替代
+         * @deprecated 使用 {@link #inputMessages} 替代
          * 保留用于向后兼容，内容为 LangChain4j 转换后的请求快照
          */
         @Deprecated
         private Map<String, Object> request;
         
         /**
-         * @deprecated 使用 {@link #httpResponse} 替代
+         * @deprecated 使用 {@link #outputText} 替代
          * 保留用于向后兼容，仅包含响应文本预览
          */
         @Deprecated
@@ -1410,11 +1559,29 @@ public class AgentObservabilityService {
         private String cacheSource;
         private long cacheTtlRemainingMs;
         private long estimatedSavedDurationMs;
-        private String outputPreview;
+        /** 工具输出（长度受配置 agent.observability.tool-trace.max-output-chars 控制） */
+        private String output;
         private String error;
         private String decisionLlmTraceId;
         private String decisionStage;
         private String decisionExcerpt;
+
+        /**
+         * @deprecated 使用 {@link #output} 替代
+         * 保留用于向后兼容（JSON 反序列化）
+         */
+        @Deprecated
+        public void setOutputPreview(String value) {
+            this.output = value;
+        }
+
+        /**
+         * @deprecated 使用 {@link #getOutput()} 替代
+         */
+        @Deprecated
+        public String getOutputPreview() {
+            return this.output;
+        }
     }
     
     /**

@@ -181,7 +181,219 @@ message DomesticStockDailyFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 按照日期范围爬取全部股票日线（批量历史数据初始化）
+message DomesticStockDailyFetchAllByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
 
+message DomesticStockDailyFetchAllByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ==================== PR #35 新增：股票财务数据爬取 ====================
+*/
+
+// 4.2 利润表爬取
+message DomesticStockIncomeFetchByPeriodRequest {
+  string period = 1;  // 报告期，如 20231231
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticStockIncomeFetchByPeriodResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.3 资产负债表爬取
+message DomesticStockBalancesheetFetchByPeriodRequest {
+  string period = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticStockBalancesheetFetchByPeriodResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.4 现金流量表爬取
+message DomesticStockCashflowFetchByPeriodRequest {
+  string period = 1;
+  int32 offset = 2;
+  int32 limit = 3;
+}
+
+message DomesticStockCashflowFetchByPeriodResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.5 业绩预告爬取
+message DomesticStockForecastFetchByDateRangeRequest {
+  string startDate = 1;  // 公告开始日期 YYYYMMDD
+  string endDate = 2;    // 公告结束日期 YYYYMMDD
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticStockForecastFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.6 业绩快报爬取
+message DomesticStockExpressFetchByDateRangeRequest {
+  string startDate = 1;
+  string endDate = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticStockExpressFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.7 卖方盈利预测爬取
+message DomesticStockReportRcFetchByDateRangeRequest {
+  string startDate = 1;  // 报告开始日期 YYYYMMDD
+  string endDate = 2;    // 报告结束日期 YYYYMMDD
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticStockReportRcFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.8 个股资金流向爬取
+message DomesticStockMoneyflowFetchByTradeDateRequest {
+  string tradeDate = 1;  // 交易日期 YYYYMMDD
+  string startDate = 2;  // 开始日期（用于批量抓取）
+  string endDate = 3;    // 结束日期（用于批量抓取）
+  int32 offset = 4;      // 偏移量
+  int32 limit = 5;       // 限制数量
+}
+
+message DomesticStockMoneyflowFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.9 前十大股东爬取
+message DomesticStockTop10HoldersFetchByTsCodeRequest {
+  string tsCode = 1;
+  string startDate = 2;  // 报告期开始
+  string endDate = 3;    // 报告期结束
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticStockTop10HoldersFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+// 4.10 限售股解禁爬取
+message DomesticStockShareFloatFetchByDateRangeRequest {
+  string startDate = 1;  // 解禁日期开始
+  string endDate = 2;    // 解禁日期结束
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticStockShareFloatFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+
+// P7-06：财务报表查询消息
+// 公共请求体（income / balancesheet / cashflow / express 共用）
+message DomesticStockFinancialQueryRequest {
+  string ts_code      = 1;   // 股票代码，必填
+  string start_period = 2;   // 报告期开始 YYYYMMDD（如 20220101）
+  string end_period   = 3;   // 报告期结束 YYYYMMDD（如 20231231）
+}
+
+// --- 利润表 ---
+message StockIncomeItem {
+  string ts_code          = 1;
+  string end_date         = 2;
+  string report_type      = 3;
+  double total_revenue    = 4;
+  double revenue          = 5;
+  double n_income         = 6;
+  double n_income_attr_p  = 7;
+  double basic_eps        = 8;
+  double ebit             = 9;
+  double ebitda           = 10;
+  double rd_exp           = 11;
+}
+message DomesticStockIncomeQueryResponse {
+  repeated StockIncomeItem items = 1;
+}
+
+// --- 资产负债表 ---
+message StockBalancesheetItem {
+  string ts_code                    = 1;
+  string end_date                   = 2;
+  string report_type                = 3;
+  double total_assets               = 4;
+  double total_liab                 = 5;
+  double total_cur_assets           = 6;
+  double total_cur_liab             = 7;
+  double total_hldr_eqy_exc_min_int = 8;
+  double money_cap                  = 9;
+  double inventories                = 10;
+  double lt_borr                    = 11;
+  double st_borr                    = 12;
+}
+message DomesticStockBalancesheetQueryResponse {
+  repeated StockBalancesheetItem items = 1;
+}
+
+// --- 现金流量表 ---
+message StockCashflowItem {
+  string ts_code              = 1;
+  string end_date             = 2;
+  string report_type          = 3;
+  double n_cashflow_act       = 4;
+  double n_cashflow_inv_act   = 5;
+  double n_cash_flows_fnc_act = 6;
+  double free_cashflow        = 7;
+  double c_fr_sale_sg         = 8;
+}
+message DomesticStockCashflowQueryResponse {
+  repeated StockCashflowItem items = 1;
+}
+
+// --- 业绩快报 ---
+message StockExpressItem {
+  string ts_code                    = 1;
+  string end_date                   = 2;
+  string ann_date                   = 3;
+  double revenue                    = 4;
+  double operate_profit             = 5;
+  double n_income                   = 6;
+  double total_assets               = 7;
+  double total_hldr_eqy_exc_min_int = 8;
+  double diluted_eps                = 9;
+  double diluted_roe                = 10;
+  double yoy_net_profit             = 11;
+  double yoy_sales                  = 12;
+  string perf_summary               = 13;
+}
+message DomesticStockExpressQueryResponse {
+  repeated StockExpressItem items = 1;
+}
 
 service DomesticStockService {
   rpc getStockInfoByTsCode(DomesticStockInfoByTsCodeRequest) returns (DomesticStockInfoByTsCodeResponse);
@@ -190,10 +402,29 @@ service DomesticStockService {
   rpc getStockDailyByTradeDate(DomesticStockDailyByTradeDateRequest) returns (DomesticStockDailyByTradeDateResponse);
   rpc searchStockES(DomesticStockSearchESRequest) returns (DomesticStockSearchESResponse);
   rpc getStockTsCode(DomesticStockTsCodeRequest) returns (DomesticStockTsCodeResponse);
+
+  // P7-06 新增：财务报表查询
+  rpc queryStockIncome(DomesticStockFinancialQueryRequest) returns (DomesticStockIncomeQueryResponse);
+  rpc queryStockBalancesheet(DomesticStockFinancialQueryRequest) returns (DomesticStockBalancesheetQueryResponse);
+  rpc queryStockCashflow(DomesticStockFinancialQueryRequest) returns (DomesticStockCashflowQueryResponse);
+  rpc queryStockExpress(DomesticStockFinancialQueryRequest) returns (DomesticStockExpressQueryResponse);
 }
 
 
 service DomesticStockFetchService {
   rpc fetchStockInfoByMarket(DomesticStockInfoFetchByMarketRequest) returns (DomesticStockInfoFetchByMarketResponse);
   rpc fetchStockDailyByTradeDate(DomesticStockDailyFetchByTradeDateRequest) returns (DomesticStockDailyFetchByTradeDateResponse);
+  // 批量拉取全部股票日线（历史数据初始化）
+  rpc fetchStockDailyAllByDateRange(DomesticStockDailyFetchAllByDateRangeRequest) returns (DomesticStockDailyFetchAllByDateRangeResponse);
+  
+  // PR #35 新增股票财务数据爬取接口
+  rpc fetchStockIncomeByPeriod(DomesticStockIncomeFetchByPeriodRequest) returns (DomesticStockIncomeFetchByPeriodResponse);
+  rpc fetchStockBalancesheetByPeriod(DomesticStockBalancesheetFetchByPeriodRequest) returns (DomesticStockBalancesheetFetchByPeriodResponse);
+  rpc fetchStockCashflowByPeriod(DomesticStockCashflowFetchByPeriodRequest) returns (DomesticStockCashflowFetchByPeriodResponse);
+  rpc fetchStockForecastByDateRange(DomesticStockForecastFetchByDateRangeRequest) returns (DomesticStockForecastFetchByDateRangeResponse);
+  rpc fetchStockExpressByDateRange(DomesticStockExpressFetchByDateRangeRequest) returns (DomesticStockExpressFetchByDateRangeResponse);
+  rpc fetchStockReportRcByDateRange(DomesticStockReportRcFetchByDateRangeRequest) returns (DomesticStockReportRcFetchByDateRangeResponse);
+  rpc fetchStockMoneyflowByTradeDate(DomesticStockMoneyflowFetchByTradeDateRequest) returns (DomesticStockMoneyflowFetchByTradeDateResponse);
+  rpc fetchStockTop10HoldersByTsCode(DomesticStockTop10HoldersFetchByTsCodeRequest) returns (DomesticStockTop10HoldersFetchByTsCodeResponse);
+  rpc fetchStockShareFloatByDateRange(DomesticStockShareFloatFetchByDateRangeRequest) returns (DomesticStockShareFloatFetchByDateRangeResponse);
 }

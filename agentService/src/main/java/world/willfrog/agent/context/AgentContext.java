@@ -3,6 +3,8 @@ package world.willfrog.agent.context;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import world.willfrog.agent.config.RunStageConfig;
+
 public class AgentContext {
     private static final ThreadLocal<String> RUN_ID_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<String> USER_ID_HOLDER = new ThreadLocal<>();
@@ -21,6 +23,17 @@ public class AgentContext {
      * 每个 run 在执行线程（含并行子线程）里独立保存，避免跨 run 串扰。
      */
     private static final ThreadLocal<Boolean> DEBUG_MODE_HOLDER = new ThreadLocal<>();
+
+    /**
+     * OpenRouter reasoning (thinking) effort 配置：
+     * 用于控制 reasoning 模型的思考强度，仅在 OpenRouter 端点生效。
+     */
+    private static final ThreadLocal<String> REASONING_EFFORT_HOLDER = new ThreadLocal<>();
+
+    /**
+     * 当前 Run 的阶段级 LLM 配置（客户端+本地合并后的最终结果）。
+     */
+    private static final ThreadLocal<RunStageConfig> STAGE_CONFIG_HOLDER = new ThreadLocal<>();
 
     public static void setRunId(String runId) {
         RUN_ID_HOLDER.set(runId);
@@ -122,6 +135,30 @@ public class AgentContext {
         DEBUG_MODE_HOLDER.remove();
     }
 
+    public static void setReasoningEffort(String effort) {
+        REASONING_EFFORT_HOLDER.set(effort);
+    }
+
+    public static String getReasoningEffort() {
+        return REASONING_EFFORT_HOLDER.get();
+    }
+
+    public static void clearReasoningEffort() {
+        REASONING_EFFORT_HOLDER.remove();
+    }
+
+    public static void setStageConfig(RunStageConfig config) {
+        STAGE_CONFIG_HOLDER.set(config);
+    }
+
+    public static RunStageConfig getStageConfig() {
+        return STAGE_CONFIG_HOLDER.get();
+    }
+
+    public static void clearStageConfig() {
+        STAGE_CONFIG_HOLDER.remove();
+    }
+
     public static void clearPhase() {
         PHASE_HOLDER.remove();
     }
@@ -164,6 +201,8 @@ public class AgentContext {
         clearDecisionContext();
         clearStructuredOutputSpec();
         clearDebugMode();
+        clearReasoningEffort();
+        clearStageConfig();
     }
 
     public static final class StructuredOutputSpec {

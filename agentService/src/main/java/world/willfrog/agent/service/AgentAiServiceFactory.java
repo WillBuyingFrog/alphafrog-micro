@@ -1,7 +1,7 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -22,6 +22,7 @@ public class AgentAiServiceFactory {
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
     private final OpenRouterCostService openRouterCostService;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -38,7 +39,7 @@ public class AgentAiServiceFactory {
     @Value("${agent.llm.openrouter.title:}")
     private String openRouterTitle;
 
-    public ChatLanguageModel buildChatModel(String endpointName, String modelName) {
+    public ChatModel buildChatModel(String endpointName, String modelName) {
         return buildChatModelWithProviderOrder(resolveLlm(endpointName, modelName), List.of());
     }
 
@@ -46,11 +47,15 @@ public class AgentAiServiceFactory {
         return llmResolver.resolve(endpointName, modelName);
     }
 
-    public ChatLanguageModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
+    public AgentLlmResolver.ResolvedLlm resolveLlmForPlanning(String endpointName, String modelName) {
+        return llmResolver.resolveForPlanning(endpointName, modelName);
+    }
+
+    public ChatModel buildChatModel(AgentLlmResolver.ResolvedLlm resolved) {
         return buildChatModelWithProviderOrder(resolved, List.of());
     }
 
-    public ChatLanguageModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved, Double temperatureOverride) {
+    public ChatModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved, Double temperatureOverride) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
@@ -76,7 +81,7 @@ public class AgentAiServiceFactory {
         return builder.build();
     }
 
-    public ChatLanguageModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
+    public ChatModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
                                                                            List<String> providerOrder,
                                                                            Double temperatureOverride) {
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
@@ -108,13 +113,14 @@ public class AgentAiServiceFactory {
                     httpLogger,
                     observabilityService,
                     openRouterCostService,
-                    resolved.endpointName()
+                    resolved.endpointName(),
+                    localConfigLoader
             );
         }
         return buildChatModelWithTemperature(resolved, temperatureOverride);
     }
 
-    public ChatLanguageModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
+    public ChatModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
@@ -139,7 +145,8 @@ public class AgentAiServiceFactory {
                     httpLogger,
                     observabilityService,
                     openRouterCostService,
-                    resolved.endpointName()
+                    resolved.endpointName(),
+                    localConfigLoader
             );
         }
 
@@ -164,20 +171,85 @@ public class AgentAiServiceFactory {
             return Map.of();
         }
         Map<String, String> headers = new HashMap<>();
-        if (openRouterHttpReferer != null && !openRouterHttpReferer.isBlank()) {
-            headers.put("HTTP-Referer", openRouterHttpReferer);
+        
+        // 优先从热加载配置读取，其次从 @Value 注解读取
+        String httpReferer = getOpenRouterHttpReferer();
+        String title = getOpenRouterTitle();
+        String categories = getOpenRouterCategories();
+        
+        // HTTP-Referer 是必需的（OpenRouter App Attribution）
+        if (httpReferer != null && !httpReferer.isBlank()) {
+            headers.put("HTTP-Referer", httpReferer);
         }
-        if (openRouterTitle != null && !openRouterTitle.isBlank()) {
-            headers.put("X-Title", openRouterTitle);
+        // X-OpenRouter-Title 是新的标准 header，X-Title 仍兼容
+        if (title != null && !title.isBlank()) {
+            headers.put("X-OpenRouter-Title", title);
+            // 同时发送 X-Title 以确保兼容性
+            headers.put("X-Title", title);
+        }
+        // 可选的分类信息
+        if (categories != null && !categories.isBlank()) {
+            headers.put("X-OpenRouter-Categories", categories);
         }
         return headers;
+    }
+    
+    /**
+     * 获取 OpenRouter HTTP Referer，优先从热加载配置读取。
+     * <p>这是 OpenRouter App Attribution 的必需字段。</p>
+     */
+    private String getOpenRouterHttpReferer() {
+        if (localConfigLoader != null) {
+            String fromConfig = localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getHttpReferer())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+            if (fromConfig != null) {
+                return fromConfig;
+            }
+        }
+        return openRouterHttpReferer;
+    }
+    
+    /**
+     * 获取 OpenRouter Title，优先从热加载配置读取。
+     * <p>建议使用新的 X-OpenRouter-Title header。</p>
+     */
+    private String getOpenRouterTitle() {
+        if (localConfigLoader != null) {
+            String fromConfig = localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getTitle())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+            if (fromConfig != null) {
+                return fromConfig;
+            }
+        }
+        return openRouterTitle;
+    }
+    
+    /**
+     * 获取 OpenRouter Categories，优先从热加载配置读取。
+     * <p>可选的分类信息，如 "cloud-agent,programming-app"。</p>
+     */
+    private String getOpenRouterCategories() {
+        if (localConfigLoader != null) {
+            return localConfigLoader.current()
+                    .map(cfg -> cfg.getOpenrouter())
+                    .map(or -> or.getCategories())
+                    .filter(v -> v != null && !v.isBlank())
+                    .orElse(null);
+        }
+        return null;
     }
 
     private boolean isBlank(String value) {
         return value == null || value.trim().isEmpty();
     }
 
-    private ChatLanguageModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
+    private ChatModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
                                                       String apiKey,
                                                       double finalTemperature) {
         return new DashScopeChatModel(

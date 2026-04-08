@@ -117,4 +117,28 @@ class AgentLlmLocalConfigLoaderTest {
 
         assertEquals("semantic prompt v2", loader.current().orElseThrow().getPrompts().getSemanticJudgeSystemPromptTemplate());
     }
+
+    @Test
+    void load_shouldResolveDagModeGuidancePromptFile() throws Exception {
+        Path promptsDir = tempDir.resolve("prompts").resolve("todo");
+        Files.createDirectories(promptsDir);
+        Path guidanceFile = promptsDir.resolve("dag_mode_guidance.txt");
+        Files.writeString(guidanceFile, "dag guidance v1", StandardCharsets.UTF_8);
+
+        Path configFile = tempDir.resolve("agent-llm.local.json");
+        Files.writeString(configFile, """
+                {
+                  "prompts": {
+                    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt"
+                  }
+                }
+                """, StandardCharsets.UTF_8);
+
+        AgentLlmLocalConfigLoader loader = new AgentLlmLocalConfigLoader(new ObjectMapper());
+        ReflectionTestUtils.setField(loader, "configFile", configFile.toString());
+        loader.load();
+
+        var local = loader.current().orElseThrow();
+        assertEquals("dag guidance v1", local.getPrompts().getDagModeGuidancePromptFile());
+    }
 }

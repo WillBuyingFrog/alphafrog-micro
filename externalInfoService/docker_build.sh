@@ -11,4 +11,5 @@ else
   PROXY_ARGS=""
 fi
 
-docker build $PROXY_ARGS -t alphafrog-micro-external-info-service:latest ./externalInfoService
+# 使用 host 网络模式构建，使容器内 127.0.0.1 指向宿主机代理
+docker build --network host $PROXY_ARGS -t alphafrog-micro-external-info-service:latest ./externalInfoService

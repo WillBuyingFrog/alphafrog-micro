@@ -2,7 +2,7 @@ package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -14,13 +14,18 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+import world.willfrog.agent.tool.RagTools;
+
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
+import world.willfrog.agent.workflow.WorkflowExecutor;
+import world.willfrog.agent.workflow.WorkflowExecutorFactory;
 
 import java.util.List;
 import java.util.Map;
@@ -49,6 +54,8 @@ class AgentRunExecutorTest {
     @Mock
     private PythonSandboxTools pythonSandboxTools;
     @Mock
+    private RagTools ragTools;
+    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentObservabilityService observabilityService;
@@ -57,11 +64,19 @@ class AgentRunExecutorTest {
     @Mock
     private TodoPlanner todoPlanner;
     @Mock
-    private LinearWorkflowExecutor workflowExecutor;
+    private WorkflowExecutorFactory workflowExecutorFactory;
     @Mock
-    private ChatLanguageModel chatLanguageModel;
+    private WorkflowExecutor workflowExecutor;
+    @Mock
+    private ChatModel chatLanguageModel;
     @Mock
     private AgentMessageService messageService;
+    @Mock
+    private AgentLlmLocalConfigLoader localConfigLoader;
+    @Mock
+    private StageConfigResolver stageConfigResolver;
+    @Mock
+    private StageConfigValidator stageConfigValidator;
 
     private AgentRunExecutor executor;
 
@@ -73,14 +88,19 @@ class AgentRunExecutorTest {
                 aiServiceFactory,
                 marketDataTools,
                 pythonSandboxTools,
+                ragTools,
                 stateStore,
                 observabilityService,
                 creditService,
                 todoPlanner,
-                workflowExecutor,
+                workflowExecutorFactory,
                 messageService,
                 new ObjectMapper(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                localConfigLoader,
+                new AgentLlmProperties(),
+                stageConfigResolver,
+                stageConfigValidator
         );
         executor.init();
 
@@ -91,11 +111,13 @@ class AgentRunExecutorTest {
         when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of());
         when(eventService.extractUserGoal(anyString())).thenReturn("goal");
         when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
+        when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
-                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null));
+                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null, List.of()));
         when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
         lenient().when(creditService.calculateRunTotalCredits(anyString(), anyString(), any())).thenReturn(0);
+        lenient().when(workflowExecutorFactory.select(any())).thenReturn(workflowExecutor);
     }
 
     @Test

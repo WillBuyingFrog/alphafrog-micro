@@ -5,14 +5,17 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
+import world.willfrog.agent.config.StageLlmConfig;
+import world.willfrog.agent.config.SubAgentStageConfig;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
@@ -130,7 +133,7 @@ public class SubAgentRunner {
      * @param model   聊天模型
      * @return 子代理执行结果
      */
-    public SubAgentResult run(SubAgentRequest request, ChatLanguageModel model) {
+    public SubAgentResult run(SubAgentRequest request, ChatModel model) {
         if (request == null || request.getGoal() == null || request.getGoal().isBlank()) {
             return SubAgentResult.builder().success(false).error("sub_agent goal missing").build();
         }
@@ -141,6 +144,15 @@ public class SubAgentRunner {
         Set<String> whitelist = request.getToolWhitelist() == null ? Collections.emptySet() : request.getToolWhitelist();
         String tools = whitelist.stream().sorted().collect(Collectors.joining(", "));
         String systemPrompt = buildPlannerPrompt(tools, request.getMaxSteps());
+
+        // 设置 Sub Agent 阶段 reasoning 配置（stageConfig 优先）
+        String subAgentReasoningEffort = resolveSubAgentReasoningEffortFromStageConfig(request);
+        if (subAgentReasoningEffort == null) {
+            subAgentReasoningEffort = resolveSubAgentReasoningEffort();
+        }
+        if (subAgentReasoningEffort != null) {
+            AgentContext.setReasoningEffort(subAgentReasoningEffort);
+        }
 
         List<Map<String, Object>> executedSteps = new ArrayList<>();
         try {
@@ -158,7 +170,8 @@ public class SubAgentRunner {
                 observabilityService.incrementPlanningAttempts(request.getRunId(), true);
                 List<dev.langchain4j.data.message.ChatMessage> planMessages = List.of(
                         new SystemMessage(systemPrompt),
-                        new UserMessage("目标: " + request.getGoal()
+                        new UserMessage(promptService.dynamicContextPrefix() + "\n"
+                                + "目标: " + request.getGoal()
                                 + "\n上下文: " + (request.getContext() == null ? "" : request.getContext())
                                 + "\n" + retryHint)
                 );
@@ -177,10 +190,10 @@ public class SubAgentRunner {
                 }
                 long llmStartedAt = System.currentTimeMillis();
                 try {
-                    Response<dev.langchain4j.data.message.AiMessage> planResp = model.generate(planMessages);
+                    ChatResponse planResp = model.chat(planMessages);
                     long llmCompletedAt = System.currentTimeMillis();
                     long llmDurationMs = llmCompletedAt - llmStartedAt;
-                    String planText = planResp.content() == null ? "" : nvl(planResp.content().text());
+                    String planText = planResp.aiMessage() == null ? "" : nvl(planResp.aiMessage().text());
                     Map<String, Object> planRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                             request.getEndpointName(),
                             request.getEndpointBaseUrl(),
@@ -196,7 +209,7 @@ public class SubAgentRunner {
                     planTraceId = observabilityService.recordLlmCall(
                             request.getRunId(),
                             AgentObservabilityService.PHASE_SUB_AGENT,
-                            planResp.tokenUsage(),
+                            planResp.metadata() != null ? planResp.metadata().tokenUsage() : null,
                             llmDurationMs,
                             llmStartedAt,
                             llmCompletedAt,
@@ -372,14 +385,15 @@ public class SubAgentRunner {
             String executedStepsJson = objectMapper.writeValueAsString(executedSteps);
             List<dev.langchain4j.data.message.ChatMessage> summaryMessages = List.of(
                     new SystemMessage(summaryPrompt),
-                    new UserMessage("目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
+                    new UserMessage(promptService.dynamicContextPrefix() + "\n"
+                            + "目标: " + request.getGoal() + "\n结果: " + executedStepsJson)
             );
             AgentContext.setStage("sub_agent_summary");
             long llmStartedAt = System.currentTimeMillis();
-            Response<dev.langchain4j.data.message.AiMessage> finalResp = model.generate(summaryMessages);
+            ChatResponse finalResp = model.chat(summaryMessages);
             long llmCompletedAt = System.currentTimeMillis();
             long llmDurationMs = llmCompletedAt - llmStartedAt;
-            String finalText = finalResp.content().text();
+            String finalText = finalResp.aiMessage().text();
             Map<String, Object> summaryRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
                     request.getEndpointName(),
                     request.getEndpointBaseUrl(),
@@ -391,7 +405,7 @@ public class SubAgentRunner {
             observabilityService.recordLlmCall(
                     request.getRunId(),
                     AgentObservabilityService.PHASE_SUB_AGENT,
-                    finalResp.tokenUsage(),
+                    finalResp.metadata() != null ? finalResp.metadata().tokenUsage() : null,
                     llmDurationMs,
                     llmStartedAt,
                     llmCompletedAt,
@@ -439,6 +453,7 @@ public class SubAgentRunner {
             } else {
                 AgentContext.setStructuredOutputSpec(previousStructuredOutputSpec);
             }
+            AgentContext.clearReasoningEffort();
         }
     }
 
@@ -1023,6 +1038,47 @@ public class SubAgentRunner {
                 .map(AgentLlmProperties.Placeholder::getResolveTodoAlias)
                 .orElse(null);
         return base == null || base;
+    }
+
+    /**
+     * 解析 Sub Agent 阶段的 OpenRouter reasoning (thinking) 配置。
+     * <p>优先从热加载配置读取，其次从静态配置读取。</p>
+     *
+     * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
+     */
+    /**
+     * 从 AgentContext 的 stageConfig 中解析 sub_agent 对应复杂度的 reasoning effort。
+     * 当前使用 medium_complexity 作为默认复杂度。
+     */
+    private String resolveSubAgentReasoningEffortFromStageConfig(SubAgentRequest request) {
+        RunStageConfig stageConfig = AgentContext.getStageConfig();
+        if (stageConfig == null || stageConfig.getSubAgent() == null) {
+            return null;
+        }
+        // 默认使用 mediumComplexity，未来可根据 request 中的复杂度标签选择
+        StageLlmConfig cfg = stageConfig.getSubAgent().getMediumComplexity();
+        if (cfg != null && cfg.getReasoningEffort() != null) {
+            return cfg.getReasoningEffort();
+        }
+        return null;
+    }
+
+    private String resolveSubAgentReasoningEffort() {
+        // 1. 尝试从 local config (热加载) 读取
+        String effort = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getSubAgent)
+                .map(AgentLlmProperties.SubAgent::getReasoning)
+                .map(AgentLlmProperties.Reasoning::resolveEffort)
+                .orElse(null);
+        if (effort != null) return effort;
+
+        // 2. 从 base properties 读取
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getSubAgent() != null
+                && llmProperties.getRuntime().getSubAgent().getReasoning() != null) {
+            return llmProperties.getRuntime().getSubAgent().getReasoning().resolveEffort();
+        }
+        return null;
     }
 
     private String compactDate(String raw) {

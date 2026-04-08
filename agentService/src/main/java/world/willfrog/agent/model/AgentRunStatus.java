@@ -8,6 +8,7 @@ public enum AgentRunStatus {
     SUMMARIZING,
     COMPLETED,
     FAILED,
+    CANCELING,  // 正在取消中，用于通知执行线程停止
     CANCELED,
     EXPIRED;
 }

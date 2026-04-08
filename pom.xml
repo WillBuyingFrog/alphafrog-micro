@@ -12,6 +12,7 @@
         <!-- 用 release 代替 -source/-target，避免模块路径告警 -->
         <maven.compiler.release>17</maven.compiler.release>
         <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+        <lombok.version>1.18.42</lombok.version>
 
         <dubbo.version>3.3.2</dubbo.version>
         <spring-boot.version>3.2.3</spring-boot.version>
@@ -73,9 +74,10 @@
                         <annotationProcessorPaths>
                             <path>
                                 <groupId>org.projectlombok</groupId>
-                            <artifactId>lombok</artifactId>
-                        </path>
-                    </annotationProcessorPaths>
+                                <artifactId>lombok</artifactId>
+                                <version>${lombok.version}</version>
+                            </path>
+                        </annotationProcessorPaths>
                 </configuration>
             </plugin>
         </plugins>
@@ -87,6 +89,7 @@
         <module>domesticStockApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
+        <module>ragFetchApi</module>
         <module>adminApi</module>
         <module>portfolioApi</module>
         <module>portfolioSummaryApi</module>

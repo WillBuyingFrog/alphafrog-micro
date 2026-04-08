@@ -170,15 +170,6 @@
           AND user_id = #{userId}
     </update>
 
-    <update id="updatePlan">
-        UPDATE alphafrog_agent_run
-        SET status = #{status},
-            plan_json = CAST(#{planJson} AS jsonb),
-            updated_at = CURRENT_TIMESTAMP
-        WHERE id = #{id}
-          AND user_id = #{userId}
-    </update>
-
     <update id="updatePlanJson">
         UPDATE alphafrog_agent_run
         SET plan_json = CAST(#{planJson} AS jsonb),

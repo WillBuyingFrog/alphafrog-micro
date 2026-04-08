@@ -66,13 +66,14 @@ public class AgentEventService {
     /**
      * 创建新的 run 记录并写入初始事件。
      *
-     * @param userId         用户 ID
-     * @param message        用户输入
-     * @param contextJson    上下文 JSON
-     * @param idempotencyKey 幂等键
-     * @param modelName      模型名（可为空，后续会用默认）
-     * @param endpointName   端点名（可为空，后续会用默认）
-     * @param debugMode      run 级调试模式开关
+     * @param userId           用户 ID
+     * @param message          用户输入
+     * @param contextJson      上下文 JSON
+     * @param idempotencyKey   幂等键
+     * @param modelName        模型名（可为空，后续会用默认）
+     * @param endpointName     端点名（可为空，后续会用默认）
+     * @param debugMode        run 级调试模式开关
+     * @param stageConfigJson  各阶段 LLM 配置 JSON（可为空）
      * @return 创建后的 run
      */
     public AgentRun createRun(String userId,
@@ -84,7 +85,9 @@ public class AgentEventService {
                               boolean captureLlmRequests,
                               String provider,
                               int plannerCandidateCount,
-                              boolean debugMode) {
+                              boolean debugMode,
+                              String stageConfigJson) {
+        log.info("[AgentEventService] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
         String runId = java.util.UUID.randomUUID().toString().replace("-", "");
 
         Map<String, Object> ext = new HashMap<>();
@@ -100,6 +103,24 @@ public class AgentEventService {
             ext.put("planner_candidate_count", plannerCandidateCount);
         }
         ext.put("checkpoint_version", resolveCheckpointVersion());
+        if (stageConfigJson != null && !stageConfigJson.isBlank()) {
+            try {
+                // 存储为 JSON 对象而非字符串，便于后续解析
+                ext.put("stage_config_json", objectMapper.readTree(stageConfigJson));
+                log.info("[AgentEventService] stage_config_json 已存入 ext: {}", stageConfigJson);
+            } catch (Exception e) {
+                log.warn("[AgentEventService] 解析 stage_config_json 失败，存储为原始字符串: {}", e.getMessage());
+                ext.put("stage_config_json", stageConfigJson);
+            }
+        } else {
+            log.warn("[AgentEventService] stageConfigJson 为空，未存入 ext");
+        }
+        
+        // 从 contextJson 中提取 execution_mode
+        String executionMode = extractExecutionModeFromContext(contextJson);
+        if (executionMode != null && !executionMode.isBlank()) {
+            ext.put("execution_mode", executionMode);
+        }
 
         AgentRun run = new AgentRun();
         run.setId(runId);
@@ -266,6 +287,65 @@ public class AgentEventService {
      */
     public boolean extractDebugMode(String extJson) {
         return extractBooleanFromExt(extJson, "debug_mode", "debugMode", "debug_mode");
+    }
+
+    /**
+     * 从 ext JSON 中提取执行模式。
+     *
+     * @param extJson ext 字段 JSON
+     * @return execution_mode 字段值，默认为 AUTO
+     */
+    public String extractExecutionMode(String extJson) {
+        String mode = extractField(extJson, "execution_mode");
+        if (mode == null || mode.isBlank()) {
+            mode = extractField(extJson, "executionMode");
+        }
+        return mode == null || mode.isBlank() ? "AUTO" : mode;
+    }
+
+    /**
+     * 从 ext JSON 中提取是否启用 Plan Patch（默认 false）。
+     */
+    public boolean extractEnablePlanPatch(String extJson) {
+        return extractBooleanFromExt(extJson, "enable_plan_patch", "enablePlanPatch", "enable_plan_patch");
+    }
+
+    /**
+     * 从 ext JSON 中提取每次 run 的 maxTodos 上限（可选，未传则返回 null，由服务端配置兜底）。
+     */
+    public Integer extractMaxTodos(String extJson) {
+        String raw = extractField(extJson, "max_todos");
+        if (raw == null || raw.isBlank()) {
+            raw = extractField(extJson, "maxTodos");
+        }
+        if (raw == null || raw.isBlank()) {
+            return null;
+        }
+        try {
+            int v = Integer.parseInt(raw.trim());
+            return v > 0 ? v : null;
+        } catch (NumberFormatException e) {
+            return null;
+        }
+    }
+    
+    /**
+     * 从 contextJson 中提取执行模式。
+     */
+    private String extractExecutionModeFromContext(String contextJson) {
+        if (contextJson == null || contextJson.isBlank()) {
+            return null;
+        }
+        try {
+            Map<?, ?> map = objectMapper.readValue(contextJson, Map.class);
+            Object mode = map.get("execution_mode");
+            if (mode == null) {
+                mode = map.get("executionMode");
+            }
+            return mode != null ? mode.toString() : null;
+        } catch (Exception e) {
+            return null;
+        }
     }
 
     public List<String> extractOpenRouterProviderOrder(String extJson) {

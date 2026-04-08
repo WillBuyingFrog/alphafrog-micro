@@ -3,7 +3,7 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.agent.tool.ToolSpecifications;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.Gauge;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.Timer;
@@ -12,6 +12,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.config.RunStageConfig;
+import world.willfrog.agent.config.StageLlmConfig;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunMessage;
@@ -19,9 +22,13 @@ import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+import world.willfrog.agent.tool.RagTools;
+import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
+import world.willfrog.agent.workflow.WorkflowExecutor;
+import world.willfrog.agent.workflow.WorkflowExecutorFactory;
+import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -40,14 +47,19 @@ public class AgentRunExecutor {
     private final AgentAiServiceFactory aiServiceFactory;
     private final MarketDataTools marketDataTools;
     private final PythonSandboxTools pythonSandboxTools;
+    private final RagTools ragTools;
     private final AgentRunStateStore stateStore;
     private final AgentObservabilityService observabilityService;
     private final AgentCreditService creditService;
     private final TodoPlanner todoPlanner;
-    private final LinearWorkflowExecutor workflowExecutor;
+    private final WorkflowExecutorFactory workflowExecutorFactory;
     private final AgentMessageService messageService;
     private final ObjectMapper objectMapper;
     private final MeterRegistry meterRegistry;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
+    private final AgentLlmProperties llmProperties;
+    private final StageConfigResolver stageConfigResolver;
+    private final StageConfigValidator stageConfigValidator;
 
     private final AtomicInteger activeRuns = new AtomicInteger(0);
     private Timer runDurationTimer;
@@ -107,19 +119,65 @@ public class AgentRunExecutor {
             eventService.append(runId, userId, "EXECUTION_STARTED", mapOf("run_id", runId));
             stateStore.markRunStatus(runId, AgentRunStatus.EXECUTING.name());
 
+            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            boolean debugMode = eventService.extractDebugMode(run.getExt());
+            AgentContext.setDebugMode(debugMode);
+
+            // 解析阶段级 LLM 配置（客户端 Run 级 + local 合并）
+            RunStageConfig stageConfig = stageConfigResolver.resolve(run.getExt());
+            stageConfigValidator.validate(stageConfig);
+            AgentContext.setStageConfig(stageConfig);
+
+            // Execution 阶段模型解析
             String requestedEndpointName = eventService.extractEndpointName(run.getExt());
             String requestedModelName = eventService.extractModelName(run.getExt());
+            StageLlmConfig execStageCfg = stageConfig.getExecution();
+            if (execStageCfg != null && execStageCfg.isValid()) {
+                requestedEndpointName = execStageCfg.getEndpointName();
+                requestedModelName = execStageCfg.getModelName();
+            }
             AgentLlmResolver.ResolvedLlm resolvedLlm = aiServiceFactory.resolveLlm(requestedEndpointName, requestedModelName);
             String endpointName = resolvedLlm.endpointName();
             String modelName = resolvedLlm.modelName();
             String endpointBaseUrl = resolvedLlm.baseUrl();
-            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
-            boolean debugMode = eventService.extractDebugMode(run.getExt());
-            AgentContext.setDebugMode(debugMode);
-            var providerOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
+            var userProviderOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
+            var providerOrder = mergeProviderOrder(userProviderOrder, resolvedLlm.validProviders());
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
-            ChatLanguageModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
+            ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
+
+            // Planning 阶段模型解析：优先使用 stageConfig.planning
+            ChatModel planningModel;
+            String planningEndpointName;
+            String planningModelName;
+            String planningEndpointBaseUrl;
+            boolean useDedicatedPlanningModel = false;
+            StageLlmConfig planningStageCfg = stageConfig.getPlanning();
+            if (planningStageCfg != null && planningStageCfg.isValid()) {
+                // 客户端或 local 指定了 planning 专用模型
+                AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlm(
+                        planningStageCfg.getEndpointName(), planningStageCfg.getModelName());
+                // Bug 修复：planning 阶段应使用 planning 模型自己的 validProviders，而非 execution 阶段的
+                var planningProviderOrder = mergeProviderOrder(userProviderOrder, planningResolvedLlm.validProviders());
+                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, planningProviderOrder);
+                planningEndpointName = planningResolvedLlm.endpointName();
+                planningModelName = planningResolvedLlm.modelName();
+                planningEndpointBaseUrl = planningResolvedLlm.baseUrl();
+                useDedicatedPlanningModel = true;
+            } else {
+                // 退化为使用 execution 模型
+                planningModel = chatModel;
+                planningEndpointName = endpointName;
+                planningModelName = modelName;
+                planningEndpointBaseUrl = endpointBaseUrl;
+            }
+            // 记录 planning 模型选择事件
+            eventService.append(runId, userId, "PLANNING_MODEL_SELECTED", mapOf(
+                    "endpoint", planningEndpointName,
+                    "model", planningModelName,
+                    "dedicatedConfig", useDedicatedPlanningModel
+            ));
+
             String userGoal = resolveUserGoal(run);
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
 
@@ -148,31 +206,58 @@ public class AgentRunExecutor {
 
             List<ToolSpecification> toolSpecifications = new ArrayList<>();
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
+            toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(ragTools));
             if (runConfig.codeInterpreterEnabled()) {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }
+
+            // 解析执行模式
+            String executionModeStr = eventService.extractExecutionMode(run.getExt());
+            PlanExecutionMode executionMode;
+            try {
+                executionMode = PlanExecutionMode.valueOf(executionModeStr.toUpperCase());
+            } catch (Exception e) {
+                executionMode = PlanExecutionMode.AUTO;
+            }
+            boolean enablePlanPatch = eventService.extractEnablePlanPatch(run.getExt());
+            Integer maxTodos = eventService.extractMaxTodos(run.getExt());
+            log.info("Run {} execution mode: {}, maxTodos override: {}", runId, executionMode, maxTodos);
 
             var todoPlan = todoPlanner.plan(TodoPlanner.PlanRequest.builder()
                     .run(run)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .model(chatModel)
+                    .model(planningModel)
                     .toolSpecifications(toolSpecifications)
-                    .endpointName(endpointName)
-                    .endpointBaseUrl(endpointBaseUrl)
-                    .modelName(modelName)
+                    .endpointName(planningEndpointName)
+                    .endpointBaseUrl(planningEndpointBaseUrl)
+                    .modelName(planningModelName)
+                    .executionMode(executionMode)
+                    .maxTodos(maxTodos)
                     .build());
 
-            WorkflowExecutionResult result = workflowExecutor.execute(LinearWorkflowExecutor.WorkflowRequest.builder()
+            // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）
+            WorkflowExecutor selectedExecutor = workflowExecutorFactory.select(todoPlan);
+
+            // 设置 Execution 阶段 reasoning 配置（Planning 阶段可能已清除）
+            String executionReasoningEffort = (execStageCfg != null && execStageCfg.getReasoningEffort() != null)
+                    ? execStageCfg.getReasoningEffort()
+                    : resolveExecutionReasoningEffort();
+            if (executionReasoningEffort != null) {
+                AgentContext.setReasoningEffort(executionReasoningEffort);
+            }
+
+            WorkflowExecutionResult result = selectedExecutor.execute(WorkflowRequest.builder()
                     .run(run)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .todoPlan(todoPlan)
+                    .plan(todoPlan)
                     .model(chatModel)
                     .toolSpecifications(toolSpecifications)
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
                     .modelName(modelName)
+                    .enablePlanPatch(enablePlanPatch)
                     .build());
 
             if (result.isPaused()) {
@@ -301,5 +386,49 @@ public class AgentRunExecutor {
             return content;
         }
         return content.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * 合并用户指定的 provider 列表与配置中的 validProviders。
+     * 用户指定的 provider 优先放在前面，validProviders 中不重复的追加在后面作为兜底。
+     */
+    private List<String> mergeProviderOrder(List<String> userProviders, List<String> validProviders) {
+        if (validProviders == null || validProviders.isEmpty()) {
+            return userProviders == null ? List.of() : userProviders;
+        }
+        if (userProviders == null || userProviders.isEmpty()) {
+            return validProviders;
+        }
+        List<String> merged = new ArrayList<>(userProviders);
+        for (String vp : validProviders) {
+            if (!merged.contains(vp)) {
+                merged.add(vp);
+            }
+        }
+        return merged;
+    }
+
+    /**
+     * 解析 Execution 阶段的 OpenRouter reasoning (thinking) 配置。
+     * <p>优先从热加载配置读取，其次从静态配置读取。</p>
+     *
+     * @return reasoning effort 值，或 null 表示不配置（使用模型默认行为）
+     */
+    private String resolveExecutionReasoningEffort() {
+        // 1. 尝试从 local config (热加载) 读取
+        String effort = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getExecution)
+                .map(AgentLlmProperties.Execution::getReasoning)
+                .map(AgentLlmProperties.Reasoning::resolveEffort)
+                .orElse(null);
+        if (effort != null) return effort;
+
+        // 2. 从 base properties 读取
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null
+                && llmProperties.getRuntime().getExecution().getReasoning() != null) {
+            return llmProperties.getRuntime().getExecution().getReasoning().resolveEffort();
+        }
+        return null;
     }
 }

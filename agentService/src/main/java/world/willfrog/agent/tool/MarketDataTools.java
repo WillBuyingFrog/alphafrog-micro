@@ -51,8 +51,17 @@ public class MarketDataTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool("查询单只股票基础信息。参数要求：tsCode 必须是 TuShare 代码格式“6位数字.交易所后缀”，例如 000001.SZ、600519.SH；后缀通常为 SH/SZ/BJ（按数据源可用值）。不要只传裸代码（如 000001）。")
+    @Tool("查询单只或多只股票基础信息。参数要求：tsCode 支持 | 分隔的多个代码（最多3个）或 JSON 数组，每个代码必须是 TuShare 格式如 000001.SZ。批量示例：\"000001.SZ|600519.SH\"")
     public String getStockInfo(String tsCode) {
+        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
+        if (tsCodes.size() > 1) {
+            return batchSearch("getStockInfo", tsCodes, this::getStockInfoSingle);
+        }
+        String single = tsCodes.isEmpty() ? tsCode : tsCodes.get(0);
+        return getStockInfoSingle(single);
+    }
+
+    private String getStockInfoSingle(String tsCode) {
         try {
             DomesticStockInfoByTsCodeRequest request = DomesticStockInfoByTsCodeRequest.newBuilder()
                     .setTsCode(nvl(tsCode))
@@ -190,8 +199,17 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询单只指数基础信息。参数要求：tsCode 必须是 TuShare 指数代码格式“6位数字.交易所后缀”，例如 000300.SH、000905.SH；不要只传裸代码。")
+    @Tool("查询单只或多只指数基础信息。参数要求：tsCode 支持 | 分隔的多个代码（最多3个）或 JSON 数组，每个代码必须是 TuShare 指数代码格式如 000300.SH。批量示例：\"000300.SH|000905.SH\"")
     public String getIndexInfo(String tsCode) {
+        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
+        if (tsCodes.size() > 1) {
+            return batchSearch("getIndexInfo", tsCodes, this::getIndexInfoSingle);
+        }
+        String single = tsCodes.isEmpty() ? tsCode : tsCodes.get(0);
+        return getIndexInfoSingle(single);
+    }
+
+    private String getIndexInfoSingle(String tsCode) {
         try {
             DomesticIndexInfoByTsCodeRequest request = DomesticIndexInfoByTsCodeRequest.newBuilder()
                     .setTsCode(nvl(tsCode))
@@ -688,5 +706,174 @@ public class MarketDataTools {
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r");
+    }
+
+    @Tool("""
+        查询上市公司财务报表数据（利润表/资产负债表/现金流量表/业绩快报）。
+        
+        【参数规范 - 必须严格遵循】
+          tsCode      - 股票代码（TuShare 格式，如 600519.SH）
+          reportType  - 报告类型：income（利润表）| balancesheet（资产负债表）| cashflow（现金流量表）| express（业绩快报）
+          startPeriod - 报告期开始，YYYYMMDD，如 20240101
+          endPeriod   - 报告期结束，YYYYMMDD，如 20241231
+        
+        【⚠️ 严禁使用以下参数，会导致调用失败】
+          period, date, year, month, quarter 等替代参数
+        
+        【正确调用示例】
+        ✅ 查茅台2024年年报利润表：{"tool":"getFinancialReport","params":{"tsCode":"600519.SH","reportType":"income","startPeriod":"20240101","endPeriod":"20241231"}}
+        ✅ 查茅台2024年Q1-Q3利润表：{"tool":"getFinancialReport","params":{"tsCode":"600519.SH","reportType":"income","startPeriod":"20240331","endPeriod":"20240930"}}
+        
+        【错误调用示例 - 会导致失败】
+        ❌ {"tsCode":"600519.SH","period":"20241231","reportType":"income"}  // 用了period而不是startPeriod/endPeriod
+        ❌ {"tsCode":"600519.SH","year":"2024","reportType":"income"}  // 发明year参数
+        
+        【报告期速查】
+        - 2024年报：startPeriod=20240101, endPeriod=20241231
+        - 2024半年报：startPeriod=20240101, endPeriod=20240630
+        - 2024一季报：startPeriod=20240101, endPeriod=20240331
+        - 2024三季报：startPeriod=20240101, endPeriod=20240930
+        """)
+    public String getFinancialReport(String tsCode, String reportType, String startPeriod, String endPeriod) {
+        try {
+            String tool = "getFinancialReport";
+            String type = nvl(reportType).trim().toLowerCase();
+            DomesticStockFinancialQueryRequest req = DomesticStockFinancialQueryRequest.newBuilder()
+                    .setTsCode(nvl(tsCode))
+                    .setStartPeriod(compactDate(startPeriod))
+                    .setEndPeriod(compactDate(endPeriod))
+                    .build();
+
+            List<Map<String, Object>> items;
+            switch (type) {
+                case "income" -> {
+                    DomesticStockIncomeQueryResponse resp = domesticStockService.queryStockIncome(req);
+                    items = resp.getItemsList().stream().map(r -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("ts_code", r.getTsCode());
+                        row.put("end_date", r.getEndDate());
+                        row.put("report_type", r.getReportType());
+                        row.put("total_revenue", r.getTotalRevenue());
+                        row.put("revenue", r.getRevenue());
+                        row.put("n_income", r.getNIncome());
+                        row.put("n_income_attr_p", r.getNIncomeAttrP());
+                        row.put("basic_eps", r.getBasicEps());
+                        row.put("ebit", r.getEbit());
+                        row.put("ebitda", r.getEbitda());
+                        row.put("rd_exp", r.getRdExp());
+                        return row;
+                    }).toList();
+                }
+                case "balancesheet" -> {
+                    DomesticStockBalancesheetQueryResponse resp = domesticStockService.queryStockBalancesheet(req);
+                    items = resp.getItemsList().stream().map(r -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("ts_code", r.getTsCode());
+                        row.put("end_date", r.getEndDate());
+                        row.put("report_type", r.getReportType());
+                        row.put("total_assets", r.getTotalAssets());
+                        row.put("total_liab", r.getTotalLiab());
+                        row.put("total_cur_assets", r.getTotalCurAssets());
+                        row.put("total_cur_liab", r.getTotalCurLiab());
+                        row.put("total_hldr_eqy_exc_min_int", r.getTotalHldrEqyExcMinInt());
+                        row.put("money_cap", r.getMoneyCap());
+                        row.put("inventories", r.getInventories());
+                        row.put("lt_borr", r.getLtBorr());
+                        row.put("st_borr", r.getStBorr());
+                        return row;
+                    }).toList();
+                }
+                case "cashflow" -> {
+                    DomesticStockCashflowQueryResponse resp = domesticStockService.queryStockCashflow(req);
+                    items = resp.getItemsList().stream().map(r -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("ts_code", r.getTsCode());
+                        row.put("end_date", r.getEndDate());
+                        row.put("report_type", r.getReportType());
+                        row.put("n_cashflow_act", r.getNCashflowAct());
+                        row.put("n_cashflow_inv_act", r.getNCashflowInvAct());
+                        row.put("n_cash_flows_fnc_act", r.getNCashFlowsFncAct());
+                        row.put("free_cashflow", r.getFreeCashflow());
+                        row.put("c_fr_sale_sg", r.getCFrSaleSg());
+                        return row;
+                    }).toList();
+                }
+                case "express" -> {
+                    DomesticStockExpressQueryResponse resp = domesticStockService.queryStockExpress(req);
+                    items = resp.getItemsList().stream().map(r -> {
+                        Map<String, Object> row = new LinkedHashMap<>();
+                        row.put("ts_code", r.getTsCode());
+                        row.put("end_date", r.getEndDate());
+                        row.put("ann_date", r.getAnnDate());
+                        row.put("revenue", r.getRevenue());
+                        row.put("operate_profit", r.getOperateProfit());
+                        row.put("n_income", r.getNIncome());
+                        row.put("total_assets", r.getTotalAssets());
+                        row.put("total_hldr_eqy_exc_min_int", r.getTotalHldrEqyExcMinInt());
+                        row.put("diluted_eps", r.getDilutedEps());
+                        row.put("diluted_roe", r.getDilutedRoe());
+                        row.put("yoy_net_profit", r.getYoyNetProfit());
+                        row.put("yoy_sales", r.getYoySales());
+                        row.put("perf_summary", r.getPerfSummary());
+                        return row;
+                    }).toList();
+                }
+                default -> {
+                    return fail(tool, "INVALID_ARGUMENT", "Unknown reportType: " + type +
+                            ". Must be one of: income, balancesheet, cashflow, express", Map.of("reportType", type));
+                }
+            }
+
+            if (items.isEmpty()) {
+                return fail(tool, "NO_DATA", "No financial data found", Map.of(
+                        "ts_code", nvl(tsCode),
+                        "report_type", type,
+                        "start_period", compactDate(startPeriod),
+                        "end_period", compactDate(endPeriod)
+                ));
+            }
+
+            // 写入数据集并返回 dataset_id
+            String datasetId = null;
+            if (datasetWriter.isEnabled()) {
+                String runId = AgentContext.getRunId();
+                String prefix = (runId != null ? runId : "unknown") + "-" + type;
+                String startStr = compactDate(startPeriod);
+                String endStr = compactDate(endPeriod);
+                
+                // 根据报表类型定义 headers
+                List<String> headers = switch (type) {
+                    case "income" -> Arrays.asList("ts_code", "end_date", "report_type", "total_revenue", "revenue", "n_income", "n_income_attr_p", "basic_eps", "ebit", "ebitda", "rd_exp");
+                    case "balancesheet" -> Arrays.asList("ts_code", "end_date", "report_type", "total_assets", "total_liab", "total_cur_assets", "total_cur_liab", "total_hldr_eqy_exc_min_int", "money_cap", "inventories", "lt_borr", "st_borr");
+                    case "cashflow" -> Arrays.asList("ts_code", "end_date", "report_type", "n_cashflow_act", "n_cashflow_inv_act", "n_cash_flows_fnc_act", "free_cashflow", "c_fr_sale_sg");
+                    case "express" -> Arrays.asList("ts_code", "end_date", "ann_date", "revenue", "operate_profit", "n_income", "total_assets", "total_hldr_eqy_exc_min_int", "diluted_eps", "diluted_roe", "yoy_net_profit", "yoy_sales", "perf_summary");
+                    default -> Arrays.asList("ts_code", "end_date");
+                };
+                
+                datasetId = datasetWriter.writeDataset(
+                        prefix, tsCode, startStr, endStr, items, headers,
+                        row -> headers.stream().map(h -> row.getOrDefault(h, "")).toList()
+                );
+                
+                if (datasetRegistry.isEnabled()) {
+                    datasetRegistry.registerDataset("financial_" + type, tsCode, startStr, endStr, headers, datasetId, items.size());
+                }
+            }
+
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ts_code", nvl(tsCode));
+            data.put("report_type", type);
+            data.put("start_period", compactDate(startPeriod));
+            data.put("end_period", compactDate(endPeriod));
+            data.put("count", items.size());
+            data.put("items", items);
+            if (datasetId != null) {
+                data.put("dataset_id", datasetId);
+                data.put("dataset_ids", List.of(datasetId));
+            }
+            return ok(tool, data);
+        } catch (Exception e) {
+            return fail("getFinancialReport", "TOOL_ERROR", "Error fetching financial report", Map.of("message", nvl(e.getMessage())));
+        }
     }
 }

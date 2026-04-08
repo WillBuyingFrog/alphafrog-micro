@@ -10,41 +10,6 @@
     "qwen-max",
     "qwen-turbo"
   ],
-  "modelMetadata": {
-    "moonshotai/kimi-k2.5": {
-      "displayName": "Kimi K2.5",
-      "baseRate": 0.3,
-      "features": ["reasoning", "code"],
-      "validProviders": ["moonshotai/int4", "fireworks"]
-    },
-    "openai/gpt-5.2": {
-      "displayName": "GPT-5.2",
-      "baseRate": 1.0,
-      "features": ["reasoning", "code", "web_search"]
-    },
-    "qwen/qwen3-max-thinking": {
-      "displayName": "Qwen3 Max Thinking",
-      "baseRate": 0.5,
-      "features": ["reasoning", "code"]
-    },
-    "accounts/fireworks/models/kimi-k2p5": {
-      "displayName": "Kimi K2.5 (Fireworks)",
-      "baseRate": 0.1,
-      "features": ["reasoning", "code"]
-    },
-    "qwen-plus": {
-      "displayName": "Qwen Plus",
-      "baseRate": 0.2
-    },
-    "qwen-max": {
-      "displayName": "Qwen Max",
-      "baseRate": 0.5
-    },
-    "qwen-turbo": {
-      "displayName": "Qwen Turbo",
-      "baseRate": 0.1
-    }
-  },
   "endpoints": {
     "openrouter": {
       "baseUrl": "https://openrouter.ai/api/v1",
@@ -110,13 +75,14 @@
       "datasetTtlSeconds": 604800
     },
     "planning": {
-      "candidatePlanCount": 3,
-      "maxLocalReplans": 2,
       "maxTodos": 10,
-      "autoSplitThreshold": 3,
-      "complexityPenaltyLambda": 0.25,
+      "maxTodosClientCap": 10,
+      "endpointName": "openrouter",
+      "modelName": "anthropic/claude-3.5-sonnet",
       "structuredOutput": {
         "enabled": true,
+        "strategyStageEnabled": true,
+        "strategyMaxDetailLength": 500,
         "maxAttempts": 3,
         "strict": true,
         "failOnExhaustedRetries": true,
@@ -142,12 +108,19 @@
     },
     "parallel": {
       "maxParallelSearchQueries": 3,
-      "maxParallelDailyQueries": 2
+      "maxParallelDailyQueries": 2,
+      "dagThreadPoolSize": 4
     },
     "subAgent": {
       "enabled": true,
       "complexityThreshold": "MEDIUM",
       "maxSteps": 6,
+      "maxCount": 3,
+      "endpointName": "openrouter",
+      "modelName": "openai/gpt-5.2",
+      "lowComplexityModelName": "moonshotai/kimi-k2.5",
+      "mediumComplexityModelName": "openai/gpt-5.2",
+      "highComplexityModelName": "qwen/qwen3-max-thinking",
       "structuredOutput": {
         "enabled": true,
         "maxAttempts": 3,
@@ -193,6 +166,7 @@
         "summaryProviderOrder": [
           "fireworks"
         ],
+        "minMessagesForCompression": 4,
         "summaryMaxChars": 1200,
         "summaryTemperature": 0.2,
         "minMessagesForSummary": 6,
@@ -208,6 +182,15 @@
       }
     }
   },
+  "openrouter": {
+    "http-referer": "https://alpha.frogwch.com",
+    "title": "AlphaFrog",
+    "categories": "cloud-agent,programming-app"
+  },
+  "debug": {
+    "logLlmCurl": false,
+    "logStageConfig": false
+  },
   "prompts": {
     "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
     "todoPlannerSystemPromptTemplate": "file:prompts/todo/todo_planner_system.txt",
@@ -217,6 +200,7 @@
     "parallelFinalSystemPrompt": "file:prompts/parallel/parallel_final_system.txt",
     "parallelPatchPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_patch_planner_system.txt",
     "planJudgeSystemPromptTemplate": "file:prompts/plan/plan_judge_system.txt",
+    "planJudgeRuntimeSystemPromptTemplate": "file:prompts/plan/plan_judge_runtime_system.txt",
     "semanticJudgeSystemPromptTemplate": "file:prompts/judge/semantic_judge_system.txt",
     "subAgentPlannerSystemPromptTemplate": "file:prompts/sub_agent/sub_agent_planner_system.txt",
     "subAgentSummarySystemPrompt": "file:prompts/sub_agent/sub_agent_summary_system.txt",
@@ -225,6 +209,10 @@
     "pythonRefineOutputInstruction": "file:prompts/python/python_refine_output_instruction.txt",
     "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
     "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
-    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt"
+    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
+    "dagReactSystemPromptFile": "file:prompts/todo/dag_react_system.txt",
+    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt",
+    "planningStrategyStageFile": "file:prompts/todo/planning_strategy_stage.txt",
+    "planningTodosStageFile": "file:prompts/todo/planning_todos_stage.txt"
   }
 }

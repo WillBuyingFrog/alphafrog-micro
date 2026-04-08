@@ -59,12 +59,17 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendReques
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageItemResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceDetailResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceSpanItem;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
 @RestController
 @RequestMapping("/api/agent/runs")
@@ -136,6 +141,8 @@ public class AgentController {
                 }
             }
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
+            String stageConfigJson = nvl(request.stageConfigJson());
+            log.info("[AgentController] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
             AgentRunMessage run = agentDubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
@@ -148,6 +155,7 @@ public class AgentController {
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
                             .setDebugMode(debugMode)
+                            .setStageConfigJson(stageConfigJson)
                             .build()
             );
             return ResponseWrapper.success(toRunResponse(run));
@@ -316,7 +324,7 @@ public class AgentController {
                         e.getRunId(),
                         e.getSeq(),
                         e.getEventType(),
-                        e.getPayloadJson(),
+                        parseJsonOrNull(e.getPayloadJson()),
                         e.getCreatedAt()
                 ));
             }
@@ -403,8 +411,8 @@ public class AgentController {
                     result.getId(),
                     result.getStatus(),
                     emptyToNull(result.getAnswer()),
-                    emptyToNull(result.getPayloadJson()),
-                    emptyToNull(result.getObservabilityJson()),
+                    parseJsonOrNull(result.getPayloadJson()),
+                    parseJsonOrNull(result.getObservabilityJson()),
                     Math.max(0, result.getTotalCreditsConsumed())
             );
             if (!"COMPLETED".equalsIgnoreCase(result.getStatus())) {
@@ -439,16 +447,199 @@ public class AgentController {
                     emptyToNull(status.getCurrentTool()),
                     emptyToNull(status.getLastEventType()),
                     emptyToNull(status.getLastEventAt()),
-                    emptyToNull(status.getLastEventPayloadJson()),
-                    emptyToNull(status.getPlanJson()),
-                    emptyToNull(status.getProgressJson()),
-                    emptyToNull(status.getObservabilityJson()),
+                    parseJsonOrNull(status.getLastEventPayloadJson()),
+                    parseJsonOrNull(status.getPlanJson()),
+                    parseJsonOrNull(status.getProgressJson()),
+                    parseJsonOrNull(status.getObservabilityJson()),
                     Math.max(0, status.getTotalCreditsConsumed())
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");
         } catch (Exception e) {
             return handleError(e, "查询 agent status");
+        }
+    }
+
+    @GetMapping("/{runId}/traces")
+    public ResponseWrapper<TraceListResponse> traces(Authentication authentication,
+                                                     @PathVariable("runId") String runId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = agentDubboService.getResult(
+                    GetAgentRunResultRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .build()
+            );
+            String obsJson = result.getObservabilityJson();
+            if (obsJson == null || obsJson.isBlank()) {
+                return ResponseWrapper.success(new TraceListResponse(List.of(),
+                        new TraceListResponse.TraceSummary(0, 0, 0, 0)));
+            }
+
+            Map<String, Object> obs = objectMapper.readValue(obsJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+            Map<String, Object> summary = obs.get("summary") instanceof Map
+                    ? (Map<String, Object>) obs.get("summary") : Map.of();
+
+            List<TraceSpanItem> spans = new ArrayList<>();
+
+            // LLM Traces
+            Object llmTracesObj = diagnostics.get("llmTraces");
+            if (llmTracesObj instanceof List<?> llmTraces) {
+                for (Object item : llmTraces) {
+                    if (item instanceof Map<?, ?> m) {
+                        spans.add(TraceSpanItem.builder()
+                                .type("llm")
+                                .traceId(strVal(m.get("traceId")))
+                                .time(strVal(m.get("time")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .model(strVal(m.get("model")))
+                                .inputTokens(nullableLong(m.get("inputTokens")))
+                                .outputTokens(nullableLong(m.get("outputTokens")))
+                                .hasError(boolVal(m.get("hasError")))
+                                .hasInputMessages(m.get("inputMessages") != null)
+                                .hasReasoning(m.get("reasoningText") != null
+                                        && !strVal(m.get("reasoningText")).isBlank())
+                                .outputSummary(truncate(strVal(m.get("outputText")), 200))
+                                .build());
+                    }
+                }
+            }
+
+            // Tool Traces
+            Object toolTracesObj = diagnostics.get("toolTraces");
+            if (toolTracesObj instanceof List<?> toolTraces) {
+                for (Object item : toolTraces) {
+                    if (item instanceof Map<?, ?> m) {
+                        spans.add(TraceSpanItem.builder()
+                                .type("tool")
+                                .traceId(strVal(m.get("traceId")))
+                                .time(strVal(m.get("time")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .toolName(strVal(m.get("toolName")))
+                                .success(boolVal(m.get("success")))
+                                .cacheHit(boolVal(m.get("cacheHit")))
+                                .decisionLlmTraceId(emptyToNull(strVal(m.get("decisionLlmTraceId"))))
+                                .outputSummary(truncate(strVal(m.get("output")), 200))
+                                .build());
+                    }
+                }
+            }
+
+            // Sort by time, assign seq
+            spans.sort(Comparator.comparing(s -> s.getTime() == null ? "" : s.getTime()));
+            AtomicInteger seqCounter = new AtomicInteger(1);
+            spans.forEach(s -> s.setSeq(seqCounter.getAndIncrement()));
+
+            TraceListResponse.TraceSummary traceSummary = new TraceListResponse.TraceSummary(
+                    longVal(summary.get("llmCalls")),
+                    longVal(summary.get("toolCalls")),
+                    longVal(summary.get("totalDurationMs")),
+                    longVal(summary.get("totalTokens"))
+            );
+
+            return ResponseWrapper.success(new TraceListResponse(spans, traceSummary));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 traces");
+        } catch (Exception e) {
+            return handleError(e, "查询 traces");
+        }
+    }
+
+    @GetMapping("/{runId}/traces/{traceId}")
+    public ResponseWrapper<TraceDetailResponse> traceDetail(Authentication authentication,
+                                                            @PathVariable("runId") String runId,
+                                                            @PathVariable("traceId") String traceId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = agentDubboService.getResult(
+                    GetAgentRunResultRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .build()
+            );
+            String obsJson = result.getObservabilityJson();
+            if (obsJson == null || obsJson.isBlank()) {
+                return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "trace 不存在");
+            }
+
+            Map<String, Object> obs = objectMapper.readValue(obsJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+
+            // Search in LLM Traces
+            Object llmTracesObj = diagnostics.get("llmTraces");
+            if (llmTracesObj instanceof List<?> llmTraces) {
+                for (Object item : llmTraces) {
+                    if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("llm")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .model(strVal(m.get("model")))
+                                .endpoint(strVal(m.get("endpoint")))
+                                .inputTokens(nullableLong(m.get("inputTokens")))
+                                .outputTokens(nullableLong(m.get("outputTokens")))
+                                .cachedTokens(m.get("cachedTokens") instanceof Number n ? n.intValue() : null)
+                                .actualCost(m.get("actualCost") instanceof Number n ? n.doubleValue() : null)
+                                .inputMessages(m.get("inputMessages"))
+                                .outputText(strVal(m.get("outputText")))
+                                .reasoningText(strVal(m.get("reasoningText")))
+                                .hasError(boolVal(m.get("hasError")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .build());
+                    }
+                }
+            }
+
+            // Search in Tool Traces
+            Object toolTracesObj = diagnostics.get("toolTraces");
+            if (toolTracesObj instanceof List<?> toolTraces) {
+                for (Object item : toolTraces) {
+                    if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("tool")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .toolName(strVal(m.get("toolName")))
+                                .params(m.get("params") instanceof Map ? (Map<String, Object>) m.get("params") : null)
+                                .output(strVal(m.get("output")))
+                                .success(boolVal(m.get("success")))
+                                .cacheHit(boolVal(m.get("cacheHit")))
+                                .cacheKey(emptyToNull(strVal(m.get("cacheKey"))))
+                                .decisionLlmTraceId(emptyToNull(strVal(m.get("decisionLlmTraceId"))))
+                                .decisionExcerpt(emptyToNull(strVal(m.get("decisionExcerpt"))))
+                                .build());
+                    }
+                }
+            }
+
+            return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "trace 不存在");
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 trace 详情");
+        } catch (Exception e) {
+            return handleError(e, "查询 trace 详情");
         }
     }
 
@@ -768,8 +959,8 @@ public class AgentController {
                 run.getStatus(),
                 run.getCurrentStep(),
                 run.getMaxSteps(),
-                emptyToNull(run.getPlanJson()),
-                emptyToNull(run.getSnapshotJson()),
+                parseJsonOrNull(run.getPlanJson()),
+                parseJsonOrNull(run.getSnapshotJson()),
                 emptyToNull(run.getLastError()),
                 emptyToNull(run.getTtlExpiresAt()),
                 emptyToNull(run.getStartedAt()),
@@ -829,6 +1020,39 @@ public class AgentController {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private Object parseJsonOrNull(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            return json;
+        }
+    }
+
+    private String strVal(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private long longVal(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        return 0L;
+    }
+
+    private Long nullableLong(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        return null;
+    }
+
+    private boolean boolVal(Object value) {
+        if (value instanceof Boolean b) return b;
+        return false;
+    }
+
+    private String truncate(String value, int maxLen) {
+        if (value == null || value.length() <= maxLen) return value;
+        return value.substring(0, maxLen) + "...";
     }
 
     private boolean toBoolean(Object value) {

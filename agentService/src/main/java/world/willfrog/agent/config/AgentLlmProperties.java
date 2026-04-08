@@ -14,10 +14,11 @@ public class AgentLlmProperties {
     private String defaultModel;
     private Map<String, Endpoint> endpoints = new HashMap<>();
     private List<String> models = new ArrayList<>();
-    private Map<String, ModelMetadata> modelMetadata = new HashMap<>();
     private Runtime runtime = new Runtime();
     private Observability observability = new Observability();
     private Prompts prompts = new Prompts();
+    private Debug debug = new Debug();
+    private OpenRouterConfig openrouter = new OpenRouterConfig();
 
     public String getDefaultEndpoint() {
         return defaultEndpoint;
@@ -51,14 +52,6 @@ public class AgentLlmProperties {
         this.models = models == null ? new ArrayList<>() : models;
     }
 
-    public Map<String, ModelMetadata> getModelMetadata() {
-        return modelMetadata;
-    }
-
-    public void setModelMetadata(Map<String, ModelMetadata> modelMetadata) {
-        this.modelMetadata = modelMetadata == null ? new HashMap<>() : modelMetadata;
-    }
-
     public Prompts getPrompts() {
         return prompts;
     }
@@ -81,6 +74,22 @@ public class AgentLlmProperties {
 
     public void setObservability(Observability observability) {
         this.observability = observability == null ? new Observability() : observability;
+    }
+
+    public Debug getDebug() {
+        return debug;
+    }
+
+    public void setDebug(Debug debug) {
+        this.debug = debug == null ? new Debug() : debug;
+    }
+
+    public OpenRouterConfig getOpenrouter() {
+        return openrouter;
+    }
+
+    public void setOpenrouter(OpenRouterConfig openrouter) {
+        this.openrouter = openrouter == null ? new OpenRouterConfig() : openrouter;
     }
 
     public static class Endpoint {
@@ -292,28 +301,16 @@ public class AgentLlmProperties {
     }
 
     public static class Planning {
-        private Integer candidatePlanCount;
-        private Integer maxLocalReplans;
         private Integer maxTodos;
-        private Integer autoSplitThreshold;
-        private Double complexityPenaltyLambda;
+        /** 客户端可请求的 maxTodos 上限，超过则拒绝执行。null 表示不限制。 */
+        private Integer maxTodosClientCap;
+        /** Planning 阶段专用 endpoint，未配置则使用 execution 阶段模型 */
+        private String endpointName;
+        /** Planning 阶段专用 model，未配置则使用 execution 阶段模型 */
+        private String modelName;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
         private StructuredOutput structuredOutput = new StructuredOutput();
-
-        public Integer getCandidatePlanCount() {
-            return candidatePlanCount;
-        }
-
-        public void setCandidatePlanCount(Integer candidatePlanCount) {
-            this.candidatePlanCount = candidatePlanCount;
-        }
-
-        public Integer getMaxLocalReplans() {
-            return maxLocalReplans;
-        }
-
-        public void setMaxLocalReplans(Integer maxLocalReplans) {
-            this.maxLocalReplans = maxLocalReplans;
-        }
 
         public Integer getMaxTodos() {
             return maxTodos;
@@ -323,20 +320,36 @@ public class AgentLlmProperties {
             this.maxTodos = maxTodos;
         }
 
-        public Integer getAutoSplitThreshold() {
-            return autoSplitThreshold;
+        public Integer getMaxTodosClientCap() {
+            return maxTodosClientCap;
         }
 
-        public void setAutoSplitThreshold(Integer autoSplitThreshold) {
-            this.autoSplitThreshold = autoSplitThreshold;
+        public void setMaxTodosClientCap(Integer maxTodosClientCap) {
+            this.maxTodosClientCap = maxTodosClientCap;
         }
 
-        public Double getComplexityPenaltyLambda() {
-            return complexityPenaltyLambda;
+        public String getEndpointName() {
+            return endpointName;
         }
 
-        public void setComplexityPenaltyLambda(Double complexityPenaltyLambda) {
-            this.complexityPenaltyLambda = complexityPenaltyLambda;
+        public void setEndpointName(String endpointName) {
+            this.endpointName = endpointName;
+        }
+
+        public String getModelName() {
+            return modelName;
+        }
+
+        public void setModelName(String modelName) {
+            this.modelName = modelName;
+        }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
         }
 
         public StructuredOutput getStructuredOutput() {
@@ -363,6 +376,8 @@ public class AgentLlmProperties {
         private Double staticFixTemperature;
         private Boolean failFast;
         private String defaultExecutionMode;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
 
         public String getMode() {
             return mode;
@@ -475,11 +490,20 @@ public class AgentLlmProperties {
         public void setDefaultExecutionMode(String defaultExecutionMode) {
             this.defaultExecutionMode = defaultExecutionMode;
         }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
+        }
     }
 
     public static class Parallel {
         private Integer maxParallelSearchQueries;
         private Integer maxParallelDailyQueries;
+        private Integer dagThreadPoolSize;
 
         public Integer getMaxParallelSearchQueries() {
             return maxParallelSearchQueries;
@@ -496,12 +520,29 @@ public class AgentLlmProperties {
         public void setMaxParallelDailyQueries(Integer maxParallelDailyQueries) {
             this.maxParallelDailyQueries = maxParallelDailyQueries;
         }
+
+        public Integer getDagThreadPoolSize() {
+            return dagThreadPoolSize;
+        }
+
+        public void setDagThreadPoolSize(Integer dagThreadPoolSize) {
+            this.dagThreadPoolSize = dagThreadPoolSize;
+        }
     }
 
     public static class SubAgent {
         private Boolean enabled;
         private String complexityThreshold;
         private Integer maxSteps;
+        /** 单个 Todo 内最多并行启动的子代理数量。*/
+        private Integer maxCount;
+        private String endpointName;
+        private String modelName;
+        private String lowComplexityModelName;
+        private String mediumComplexityModelName;
+        private String highComplexityModelName;
+        /** OpenRouter reasoning (thinking) 配置 */
+        private Reasoning reasoning = new Reasoning();
         private StructuredOutput structuredOutput = new StructuredOutput();
         private Placeholder placeholder = new Placeholder();
 
@@ -529,6 +570,54 @@ public class AgentLlmProperties {
             this.maxSteps = maxSteps;
         }
 
+        public Integer getMaxCount() {
+            return maxCount;
+        }
+
+        public void setMaxCount(Integer maxCount) {
+            this.maxCount = maxCount;
+        }
+
+        public String getEndpointName() {
+            return endpointName;
+        }
+
+        public void setEndpointName(String endpointName) {
+            this.endpointName = endpointName;
+        }
+
+        public String getModelName() {
+            return modelName;
+        }
+
+        public void setModelName(String modelName) {
+            this.modelName = modelName;
+        }
+
+        public String getLowComplexityModelName() {
+            return lowComplexityModelName;
+        }
+
+        public void setLowComplexityModelName(String lowComplexityModelName) {
+            this.lowComplexityModelName = lowComplexityModelName;
+        }
+
+        public String getMediumComplexityModelName() {
+            return mediumComplexityModelName;
+        }
+
+        public void setMediumComplexityModelName(String mediumComplexityModelName) {
+            this.mediumComplexityModelName = mediumComplexityModelName;
+        }
+
+        public String getHighComplexityModelName() {
+            return highComplexityModelName;
+        }
+
+        public void setHighComplexityModelName(String highComplexityModelName) {
+            this.highComplexityModelName = highComplexityModelName;
+        }
+
         public StructuredOutput getStructuredOutput() {
             return structuredOutput;
         }
@@ -544,6 +633,14 @@ public class AgentLlmProperties {
         public void setPlaceholder(Placeholder placeholder) {
             this.placeholder = placeholder == null ? new Placeholder() : placeholder;
         }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
+        }
     }
 
     public static class StructuredOutput {
@@ -553,6 +650,10 @@ public class AgentLlmProperties {
         private Boolean failOnExhaustedRetries;
         private Boolean requireProviderParameters;
         private Boolean allowProviderFallbacks;
+        /** 第一阶段是否启用结构化输出（默认 true） */
+        private Boolean strategyStageEnabled = true;
+        /** 第一阶段 detail 最大长度（字符数），默认 500 */
+        private Integer strategyMaxDetailLength = 500;
 
         public Boolean getEnabled() {
             return enabled;
@@ -601,6 +702,22 @@ public class AgentLlmProperties {
         public void setAllowProviderFallbacks(Boolean allowProviderFallbacks) {
             this.allowProviderFallbacks = allowProviderFallbacks;
         }
+
+        public Boolean getStrategyStageEnabled() {
+            return strategyStageEnabled;
+        }
+
+        public void setStrategyStageEnabled(Boolean strategyStageEnabled) {
+            this.strategyStageEnabled = strategyStageEnabled;
+        }
+
+        public Integer getStrategyMaxDetailLength() {
+            return strategyMaxDetailLength;
+        }
+
+        public void setStrategyMaxDetailLength(Integer strategyMaxDetailLength) {
+            this.strategyMaxDetailLength = strategyMaxDetailLength;
+        }
     }
 
     public static class Placeholder {
@@ -621,6 +738,62 @@ public class AgentLlmProperties {
 
         public void setResolveTodoAlias(Boolean resolveTodoAlias) {
             this.resolveTodoAlias = resolveTodoAlias;
+        }
+    }
+
+    /**
+     * OpenRouter reasoning (thinking) 配置。
+     * <p>用于控制 reasoning 模型的思考强度。</p>
+     */
+    public static class Reasoning {
+        /** 是否启用 reasoning (thinking) */
+        private Boolean enabled;
+        /** reasoning effort 级别: xhigh, high, medium, low, minimal, none */
+        private String effort;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public String getEffort() {
+            return effort;
+        }
+
+        public void setEffort(String effort) {
+            this.effort = effort;
+        }
+
+        /**
+         * 解析并返回有效的 effort 值。
+         * <p>如果 enabled 为 null（未配置），返回 null，表示不发送 reasoning 参数（使用模型默认行为）。</p>
+         * <p>如果 enabled 为 false，返回 "none" 以显式关闭 reasoning。</p>
+         * <p>如果 enabled 为 true 但 effort 未配置，返回 "medium" 作为默认值。</p>
+         *
+         * @return 有效的 effort 值，或 null 表示不发送 reasoning 参数
+         */
+        public String resolveEffort() {
+            // enabled 未配置（null）：不发送 reasoning 参数，使用模型默认行为
+            if (enabled == null) {
+                return null;
+            }
+            // enabled 为 false：显式关闭 reasoning
+            if (!enabled) {
+                return "none";
+            }
+            // enabled 为 true：解析 effort 值
+            String e = effort == null ? null : effort.trim().toLowerCase();
+            if (e == null || e.isEmpty()) {
+                return "medium"; // 默认值
+            }
+            // 验证有效值
+            return switch (e) {
+                case "xhigh", "high", "medium", "low", "minimal", "none" -> e;
+                default -> "medium";
+            };
         }
     }
 
@@ -734,6 +907,7 @@ public class AgentLlmProperties {
         private List<String> summaryProviderOrder = new ArrayList<>();
         private Integer summaryMaxChars;
         private Double summaryTemperature;
+        private Integer minMessagesForCompression;
         private Integer minMessagesForSummary;
         private Integer summaryMaxMessages;
 
@@ -791,6 +965,14 @@ public class AgentLlmProperties {
 
         public void setSummaryTemperature(Double summaryTemperature) {
             this.summaryTemperature = summaryTemperature;
+        }
+
+        public Integer getMinMessagesForCompression() {
+            return minMessagesForCompression;
+        }
+
+        public void setMinMessagesForCompression(Integer minMessagesForCompression) {
+            this.minMessagesForCompression = minMessagesForCompression;
         }
 
         public Integer getMinMessagesForSummary() {
@@ -855,6 +1037,75 @@ public class AgentLlmProperties {
         }
     }
 
+    /**
+     * Debug 配置（热加载）。
+     * 用于控制运行时调试日志输出，默认全部关闭。
+     */
+    public static class Debug {
+        /** 是否打印 LLM 请求的 curl 命令 */
+        private Boolean logLlmCurl = false;
+        /** 是否打印阶段级 LLM 配置解析日志 */
+        private Boolean logStageConfig = false;
+
+        public Boolean getLogLlmCurl() {
+            return logLlmCurl;
+        }
+
+        public void setLogLlmCurl(Boolean logLlmCurl) {
+            this.logLlmCurl = logLlmCurl;
+        }
+
+        public Boolean getLogStageConfig() {
+            return logStageConfig;
+        }
+
+        public void setLogStageConfig(Boolean logStageConfig) {
+            this.logStageConfig = logStageConfig;
+        }
+    }
+
+    /**
+     * OpenRouter 专属配置。
+     * <p>用于设置 HTTP Referer 和 X-Title，使 OpenRouter Dashboard 正确显示 App 名称。</p>
+     *
+     * @see <a href="https://openrouter.ai/docs/app-attribution">OpenRouter App Attribution</a>
+     */
+    public static class OpenRouterConfig {
+        /** HTTP Referer，OpenRouter 用于统计和展示调用来源（必需） */
+        @com.fasterxml.jackson.annotation.JsonProperty("http-referer")
+        private String httpReferer;
+        /** App 标题，显示在 OpenRouter Dashboard 中（可选，建议使用 X-OpenRouter-Title） */
+        @com.fasterxml.jackson.annotation.JsonProperty("title")
+        private String title;
+        /** 可选的 App 分类，逗号分隔，如 "cloud-agent,programming-app" */
+        @com.fasterxml.jackson.annotation.JsonProperty("categories")
+        private String categories;
+
+        public String getHttpReferer() {
+            return httpReferer;
+        }
+
+        public void setHttpReferer(String httpReferer) {
+            this.httpReferer = httpReferer;
+        }
+
+        public String getTitle() {
+            return title;
+        }
+
+        public void setTitle(String title) {
+            this.title = title;
+        }
+
+        public String getCategories() {
+            return categories;
+        }
+
+        public void setCategories(String categories) {
+            this.categories = categories;
+        }
+    }
+
     public static class Prompts {
         private String agentRunSystemPrompt;
         private String todoPlannerSystemPromptTemplate;
@@ -864,6 +1115,7 @@ public class AgentLlmProperties {
         private String parallelFinalSystemPrompt;
         private String parallelPatchPlannerSystemPromptTemplate;
         private String planJudgeSystemPromptTemplate;
+        private String planJudgeRuntimeSystemPromptTemplate;
         private String semanticJudgeSystemPromptTemplate;
         private String subAgentPlannerSystemPromptTemplate;
         private String subAgentSummarySystemPrompt;
@@ -875,6 +1127,18 @@ public class AgentLlmProperties {
         private String datasetFieldSpecsFile;
         private String orchestratorPlanningSystemPrompt;
         private String orchestratorSummarySystemPrompt;
+        private String dagReactSystemPrompt;
+        private String dagReactSystemPromptFile;
+        private String dagModeGuidancePrompt;
+        private String dagModeGuidancePromptFile;
+        /** 第一阶段统筹规划 prompt 文件路径（相对于 config 目录） */
+        private String planningStrategyStageFile = "prompts/todo/planning_strategy_stage.txt";
+        /** 第一阶段统筹规划 prompt 内容（由 loader 从文件读取） */
+        private String planningStrategyStage;
+        /** 第二阶段任务拆解 prompt 文件路径（相对于 config 目录） */
+        private String planningTodosStageFile = "prompts/todo/planning_todos_stage.txt";
+        /** 第二阶段任务拆解 prompt 内容（由 loader 从文件读取） */
+        private String planningTodosStage;
 
         public String getAgentRunSystemPrompt() {
             return agentRunSystemPrompt;
@@ -938,6 +1202,14 @@ public class AgentLlmProperties {
 
         public void setPlanJudgeSystemPromptTemplate(String planJudgeSystemPromptTemplate) {
             this.planJudgeSystemPromptTemplate = planJudgeSystemPromptTemplate;
+        }
+
+        public String getPlanJudgeRuntimeSystemPromptTemplate() {
+            return planJudgeRuntimeSystemPromptTemplate;
+        }
+
+        public void setPlanJudgeRuntimeSystemPromptTemplate(String planJudgeRuntimeSystemPromptTemplate) {
+            this.planJudgeRuntimeSystemPromptTemplate = planJudgeRuntimeSystemPromptTemplate;
         }
 
         public String getSemanticJudgeSystemPromptTemplate() {
@@ -1026,6 +1298,70 @@ public class AgentLlmProperties {
 
         public void setOrchestratorSummarySystemPrompt(String orchestratorSummarySystemPrompt) {
             this.orchestratorSummarySystemPrompt = orchestratorSummarySystemPrompt;
+        }
+
+        public String getDagReactSystemPrompt() {
+            return dagReactSystemPrompt;
+        }
+
+        public void setDagReactSystemPrompt(String dagReactSystemPrompt) {
+            this.dagReactSystemPrompt = dagReactSystemPrompt;
+        }
+
+        public String getDagReactSystemPromptFile() {
+            return dagReactSystemPromptFile;
+        }
+
+        public void setDagReactSystemPromptFile(String dagReactSystemPromptFile) {
+            this.dagReactSystemPromptFile = dagReactSystemPromptFile;
+        }
+
+        public String getDagModeGuidancePrompt() {
+            return dagModeGuidancePrompt;
+        }
+
+        public void setDagModeGuidancePrompt(String dagModeGuidancePrompt) {
+            this.dagModeGuidancePrompt = dagModeGuidancePrompt;
+        }
+
+        public String getDagModeGuidancePromptFile() {
+            return dagModeGuidancePromptFile;
+        }
+
+        public void setDagModeGuidancePromptFile(String dagModeGuidancePromptFile) {
+            this.dagModeGuidancePromptFile = dagModeGuidancePromptFile;
+        }
+
+        public String getPlanningStrategyStageFile() {
+            return planningStrategyStageFile;
+        }
+
+        public void setPlanningStrategyStageFile(String planningStrategyStageFile) {
+            this.planningStrategyStageFile = planningStrategyStageFile;
+        }
+
+        public String getPlanningStrategyStage() {
+            return planningStrategyStage;
+        }
+
+        public void setPlanningStrategyStage(String planningStrategyStage) {
+            this.planningStrategyStage = planningStrategyStage;
+        }
+
+        public String getPlanningTodosStageFile() {
+            return planningTodosStageFile;
+        }
+
+        public void setPlanningTodosStageFile(String planningTodosStageFile) {
+            this.planningTodosStageFile = planningTodosStageFile;
+        }
+
+        public String getPlanningTodosStage() {
+            return planningTodosStage;
+        }
+
+        public void setPlanningTodosStage(String planningTodosStage) {
+            this.planningTodosStage = planningTodosStage;
         }
     }
 

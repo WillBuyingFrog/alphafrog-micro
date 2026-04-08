@@ -133,7 +133,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 request.getCaptureLlmRequests(),
                 request.getProvider(),
                 request.getPlannerCandidateCount(),
-                request.getDebugMode()
+                request.getDebugMode(),
+                request.getStageConfigJson()
         );
         executor.executeAsync(run.getId());
         return toRunMessage(run);
@@ -316,10 +317,45 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
-        runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, eventService.nextInterruptedExpiresAt());
-        eventService.append(run.getId(), run.getUserId(), "CANCELED", Map.of("run_id", run.getId()));
-        stateStore.markRunStatus(run.getId(), AgentRunStatus.CANCELED.name());
-        return toRunMessage(requireRun(run.getId(), run.getUserId()));
+        
+        String runId = run.getId();
+        String userId = run.getUserId();
+        
+        // 1. 先标记状态为 CANCELING（让执行线程知道要停止）
+        log.info("Canceling run {}: marking status as CANCELING", runId);
+        stateStore.markRunStatus(runId, AgentRunStatus.CANCELING.name());
+        
+        // 2. 等待一小段时间，让执行线程完成当前的 observability 写入
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Cancel run {} interrupted during wait", runId);
+        }
+        
+        // 3. 强制刷新可观测数据到 Redis
+        log.info("Canceling run {}: force flushing observability", runId);
+        observabilityService.forceFlush(runId);
+        
+        // 4. 保存可观测数据到 snapshot
+        String snapshotJson = run.getSnapshotJson();
+        log.info("Canceling run {}: attaching observability to snapshot, current snapshot length: {}", 
+                runId, snapshotJson == null ? 0 : snapshotJson.length());
+        
+        String canceledSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                runId, snapshotJson, AgentRunStatus.CANCELED);
+        
+        // 5. 保存到数据库
+        runMapper.updateSnapshot(runId, userId, AgentRunStatus.CANCELED, 
+                canceledSnapshotJson, false, null);
+        runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.CANCELED, 
+                eventService.nextInterruptedExpiresAt());
+        
+        eventService.append(runId, userId, "CANCELED", Map.of("run_id", runId));
+        stateStore.markRunStatus(runId, AgentRunStatus.CANCELED.name());
+        
+        log.info("Canceling run {}: completed successfully", runId);
+        return toRunMessage(requireRun(runId, userId));
     }
 
     /**
@@ -334,6 +370,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
+        String waitingSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                run.getId(), run.getSnapshotJson(), AgentRunStatus.WAITING);
+        runMapper.updateSnapshot(run.getId(), run.getUserId(), AgentRunStatus.WAITING,
+                waitingSnapshotJson, false, null);
         runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "PAUSED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.WAITING.name());
@@ -380,6 +420,12 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         AgentRun run = requireRun(request.getId(), request.getUserId());
         String snapshotJson = run.getSnapshotJson();
         String observabilityJson = nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson));
+        
+        log.info("Getting result for run {}, status: {}, snapshot length: {}, observability length: {}",
+                run.getId(), run.getStatus(), 
+                snapshotJson == null ? 0 : snapshotJson.length(),
+                observabilityJson.length());
+        
         String answer = "";
         if (snapshotJson != null && !snapshotJson.isBlank()) {
             try {

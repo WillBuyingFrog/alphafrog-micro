@@ -64,7 +64,66 @@ public class AgentLlmResolver {
             throw new IllegalArgumentException("model_name 不在允许列表: " + model);
         }
 
-        return new ResolvedLlm(endpointKey, baseUrl, model, normalize(endpoint.getApiKey()), region);
+        List<String> validProviders = resolveValidProviders(endpoint, model, properties, local);
+        return new ResolvedLlm(endpointKey, baseUrl, model, normalize(endpoint.getApiKey()), region, validProviders);
+    }
+
+    /**
+     * 解析 planning 阶段的 LLM 配置。
+     * 如果 runtime.planning.endpointName 或 modelName 有配置，则使用 planning 专用配置；
+     * 否则退化为普通 resolve 逻辑（使用 execution 阶段模型）。
+     *
+     * @param requestedEndpointName 请求携带的端点名
+     * @param requestedModelName    请求携带的模型名
+     * @return 解析后的 LLM 配置
+     */
+    public ResolvedLlm resolveForPlanning(String requestedEndpointName, String requestedModelName) {
+        AgentLlmProperties local = localConfigLoader.current().orElse(null);
+
+        // 1. 尝试从 local config (热加载) 读取 planning 专用配置
+        String planningEndpoint = null;
+        String planningModel = null;
+        if (local != null && local.getRuntime() != null && local.getRuntime().getPlanning() != null) {
+            planningEndpoint = normalize(local.getRuntime().getPlanning().getEndpointName());
+            planningModel = normalize(local.getRuntime().getPlanning().getModelName());
+        }
+
+        // 2. 尝试从 base properties 读取 planning 专用配置
+        if (planningEndpoint == null && planningModel == null) {
+            if (properties.getRuntime() != null && properties.getRuntime().getPlanning() != null) {
+                planningEndpoint = normalize(properties.getRuntime().getPlanning().getEndpointName());
+                planningModel = normalize(properties.getRuntime().getPlanning().getModelName());
+            }
+        }
+
+        // 3. 如果 planning 有独立配置，使用 planning 配置解析
+        if (planningEndpoint != null || planningModel != null) {
+            // 使用 planning 配置优先，但允许请求参数覆盖
+            String effectiveEndpoint = firstNonBlank(normalize(requestedEndpointName), planningEndpoint);
+            String effectiveModel = firstNonBlank(normalize(requestedModelName), planningModel);
+            return resolve(effectiveEndpoint, effectiveModel);
+        }
+
+        // 4. 没有 planning 专用配置，退化为使用 execution 阶段模型
+        return resolve(requestedEndpointName, requestedModelName);
+    }
+
+    /**
+     * 从 endpoint 级模型元数据中查找模型的 validProviders。
+     */
+    private List<String> resolveValidProviders(AgentLlmProperties.Endpoint endpoint,
+                                               String modelName,
+                                               AgentLlmProperties base,
+                                               AgentLlmProperties local) {
+        // endpoint 级模型元数据
+        if (endpoint != null && endpoint.getModels() != null) {
+            AgentLlmProperties.ModelMetadata meta = endpoint.getModels().get(modelName);
+            if (meta != null && meta.getValidProviders() != null && !meta.getValidProviders().isEmpty()) {
+                return meta.getValidProviders().stream()
+                        .map(this::normalize).filter(v -> v != null).toList();
+            }
+        }
+        return List.of();
     }
 
     private Map<String, AgentLlmProperties.Endpoint> mergeEndpoints(AgentLlmProperties base, AgentLlmProperties local) {
@@ -188,6 +247,7 @@ public class AgentLlmResolver {
         return target;
     }
 
-    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey, String region) {
+    public record ResolvedLlm(String endpointName, String baseUrl, String modelName, String apiKey, String region,
+                               List<String> validProviders) {
     }
 }

@@ -35,7 +35,8 @@ class AgentModelCatalogServiceTest {
         metadata.setDisplayName("GPT-5.2");
         metadata.setBaseRate(1.0D);
         metadata.setFeatures(List.of("reasoning", "code"));
-        properties.setModelMetadata(Map.of("openai/gpt-5.2", metadata));
+        // modelMetadata 已迁移到 endpoint.models
+        openrouter.setModels(Map.of("openai/gpt-5.2", metadata));
 
         AgentLlmProperties.JudgeRoute route = new AgentLlmProperties.JudgeRoute();
         route.setEndpointName("openrouter");
