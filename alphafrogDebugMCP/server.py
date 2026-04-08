@@ -4,9 +4,10 @@ import asyncpg
 import os
 import re
 import shlex
+import sys
 import time
 from pathlib import Path
-from typing import Optional, Tuple, List
+from typing import List, Optional, Tuple
 
 from dotenv import load_dotenv
 from mcp.server.fastmcp import FastMCP
@@ -35,20 +36,37 @@ def _env_list(key: str) -> List[str]:
     return [item.strip() for item in raw.split(",") if item.strip()]
 
 
-def _get_default_host() -> Optional[str]:
-    return os.getenv("ALPHAFROG_DEBUG_DEFAULT_HOST")
-
-
-def _resolve_host(host: Optional[str]) -> str:
-    resolved = host or _get_default_host()
+def _resolve_env_to_host(env: str) -> Tuple[Optional[str], Optional[str]]:
+    """根据 test/prod 解析 SSH host。返回 (host, error)，error 非空表示失败（面向调用方的泛化文案）。"""
+    if env not in ("test", "prod"):
+        return None, "env 必须为 test 或 prod"
+    key = f"ALPHAFROG_DEBUG_SSH_HOST_{env.upper()}"
+    resolved = os.getenv(key, "").strip()
     if not resolved:
-        raise ValueError("host is required and no default host is set")
+        if env == "test":
+            return None, "测试环境远程访问尚未在服务端配置完成"
+        return None, "生产环境远程访问尚未在服务端配置完成"
     if not _HOST_RE.match(resolved):
-        raise ValueError("invalid host format")
+        return None, "服务端远程主机配置格式无效"
     allowed = _env_list("ALPHAFROG_DEBUG_SSH_HOSTS")
     if allowed and resolved not in allowed:
-        raise ValueError("host is not in ALPHAFROG_DEBUG_SSH_HOSTS")
-    return resolved
+        return None, "远程主机不在服务端允许列表中"
+    return resolved, None
+
+
+def _repo_path_for_env(env: str, repo_path_override: Optional[str]) -> Tuple[Optional[str], Optional[str]]:
+    """远程仓库路径：显式参数优先，否则按环境变量与默认回退。"""
+    if repo_path_override and repo_path_override.strip():
+        return repo_path_override.strip(), None
+    if env == "test":
+        p = os.getenv("ALPHAFROG_DEBUG_REPO_PATH_TEST", "").strip()
+    else:
+        p = os.getenv("ALPHAFROG_DEBUG_REPO_PATH_PROD", "").strip()
+    if not p:
+        p = os.getenv("ALPHAFROG_DEBUG_DEFAULT_REPO_PATH", "").strip()
+    if not p:
+        return None, "远程仓库路径尚未在服务端配置完成"
+    return p, None
 
 
 def _ssh_base_args(host: str) -> List[str]:
@@ -101,6 +119,18 @@ def _filter_output(text: str, grep: Optional[str]) -> str:
     return "\n".join(lines)
 
 
+def _redact_ssh_tool_result(result: dict, host: str) -> dict:
+    """移除或脱敏可能暴露 SSH 目标的字段，再返回给 MCP 调用方。"""
+    out = dict(result)
+    out.pop("command", None)
+    # stderr 中偶发含 Host 名，做一次简单替换
+    if host and result.get("stderr"):
+        out["stderr"] = result["stderr"].replace(host, "[远程主机已隐藏]")
+    if host and result.get("stdout"):
+        out["stdout"] = result["stdout"].replace(host, "[远程主机已隐藏]")
+    return out
+
+
 async def _run_ssh(
     host: str,
     remote_args: List[str],
@@ -145,16 +175,19 @@ async def _run_ssh(
 
 
 @mcp.tool()
-async def remote_docker_ps(host: Optional[str] = None) -> dict:
+async def remote_docker_ps(env: str) -> dict:
     """List running docker containers on the remote host (compact output).
 
     Args:
-        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        env: Target environment. Must be "test" or "prod".
 
     Returns:
-        dict with: ok, exit_code, duration_ms, items (list of dicts with name/image/status/ports), count.
+        dict with: ok, exit_code, duration_ms, items (list of dicts with name/image/status/ports), count;
+        or ok False and error.
     """
-    resolved = _resolve_host(host)
+    resolved, err = _resolve_env_to_host(env)
+    if err:
+        return {"ok": False, "error": err}
     # 不用 table 前缀：table 模式输出对齐空格而非 tab，无法可靠分割。
     # 直接用模板输出真实 tab 分隔符，每行即一条记录（无 header 行）。
     format_arg = "{{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"
@@ -189,32 +222,35 @@ async def remote_docker_ps(host: Optional[str] = None) -> dict:
 
 @mcp.tool()
 async def remote_git_log(
-    host: Optional[str] = None,
+    env: str,
     repo_path: Optional[str] = None,
     limit: Optional[int] = 10,
 ) -> dict:
     """Show recent git log on the remote host.
 
     Args:
-        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
-        repo_path: remote repo path (default: ALPHAFROG_DEBUG_DEFAULT_REPO_PATH).
+        env: Target environment. Must be "test" or "prod".
+        repo_path: optional remote repo path (overrides server-side path for this env).
         limit: max commits to return (clamped 1..200).
 
     Returns:
-        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+        dict with ok/exit_code/timed_out/duration_ms/stdout/stderr（不含 command）.
     """
-    resolved = _resolve_host(host)
-    repo = repo_path or os.getenv("ALPHAFROG_DEBUG_DEFAULT_REPO_PATH")
-    if not repo:
-        raise ValueError("repo_path is required and no default repo path is set")
+    resolved, err = _resolve_env_to_host(env)
+    if err:
+        return {"ok": False, "error": err}
+    repo, repo_err = _repo_path_for_env(env, repo_path)
+    if repo_err:
+        return {"ok": False, "error": repo_err}
     limit_val = _clamp_int(limit, 10, 1, 200)
     remote_args = _git_cmd() + ["-C", repo, "log", f"-n{limit_val}", "--oneline", "--decorate"]
-    return await _run_ssh(resolved, remote_args)
+    raw = await _run_ssh(resolved, remote_args)
+    return _redact_ssh_tool_result(raw, resolved)
 
 
 @mcp.tool()
 async def remote_docker_logs(
-    host: Optional[str] = None,
+    env: str,
     container: str = "",
     tail: Optional[int] = 200,
     grep: Optional[str] = None,
@@ -225,7 +261,7 @@ async def remote_docker_logs(
     """Fetch docker logs on the remote host (non-follow).
 
     Args:
-        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        env: Target environment. Must be "test" or "prod".
         container: container name/id (required).
         tail: number of lines from the end of the log (clamped 1..10000, default 200).
         grep: substring filter, or regex via 're:<pattern>'.
@@ -234,11 +270,13 @@ async def remote_docker_logs(
         timeout_seconds: overall timeout for command.
 
     Returns:
-        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+        dict with ok/exit_code/timed_out/duration_ms/stdout/stderr（不含 command）.
     """
     if not container:
-        raise ValueError("container is required")
-    resolved = _resolve_host(host)
+        return {"ok": False, "error": "container 参数不能为空"}
+    resolved, err = _resolve_env_to_host(env)
+    if err:
+        return {"ok": False, "error": err}
     tail_val = _clamp_int(tail, 200, 1, 10000)
     args = _docker_cmd() + ["logs", f"--tail={tail_val}"]
     if timestamps:
@@ -247,12 +285,12 @@ async def remote_docker_logs(
     result = await _run_ssh(resolved, args, timeout_seconds=timeout_seconds, max_bytes=max_bytes)
     if grep:
         result["stdout"] = _filter_output(result["stdout"], grep)
-    return result
+    return _redact_ssh_tool_result(result, resolved)
 
 
 @mcp.tool()
 async def remote_docker_follow(
-    host: Optional[str] = None,
+    env: str,
     container: str = "",
     follow_seconds: Optional[int] = 15,
     tail: Optional[int] = 200,
@@ -263,7 +301,7 @@ async def remote_docker_follow(
     """Follow docker logs on the remote host for a limited time.
 
     Args:
-        host: SSH host alias (default: ALPHAFROG_DEBUG_DEFAULT_HOST).
+        env: Target environment. Must be "test" or "prod".
         container: container name/id (required).
         follow_seconds: follow duration (clamped 1..300, default 15).
         tail: number of lines from the end of log shown before following (clamped 1..10000, default 200).
@@ -272,11 +310,13 @@ async def remote_docker_follow(
         max_bytes: truncate stdout/stderr to this many bytes.
 
     Returns:
-        dict with ok/exit_code/timed_out/duration_ms/command/stdout/stderr.
+        dict with ok/exit_code/timed_out/duration_ms/stdout/stderr（不含 command）.
     """
     if not container:
-        raise ValueError("container is required")
-    resolved = _resolve_host(host)
+        return {"ok": False, "error": "container 参数不能为空"}
+    resolved, err = _resolve_env_to_host(env)
+    if err:
+        return {"ok": False, "error": err}
     follow_val = _clamp_int(follow_seconds, 15, 1, 300)
     tail_val = _clamp_int(tail, 200, 1, 10000)
     args = _docker_cmd() + ["logs", "-f", f"--tail={tail_val}"]
@@ -286,7 +326,7 @@ async def remote_docker_follow(
     result = await _run_ssh(resolved, args, timeout_seconds=follow_val, max_bytes=max_bytes)
     if grep:
         result["stdout"] = _filter_output(result["stdout"], grep)
-    return result
+    return _redact_ssh_tool_result(result, resolved)
 
 
 _ALLOWED_TABLE_PREFIX = "alphafrog_"
@@ -313,6 +353,12 @@ def _validate_sql(sql: str) -> Optional[str]:
     return None
 
 
+def _pg_config_error_message(env: str) -> str:
+    if env == "test":
+        return "所选测试环境尚未在服务端完成数据库连接配置"
+    return "所选生产环境尚未在服务端完成数据库连接配置"
+
+
 @mcp.tool()
 async def remote_pg_query(
     env: str,
@@ -328,7 +374,7 @@ async def remote_pg_query(
         dict with: ok, columns, rows (list of lists), row_count, truncated.
     """
     if env not in ("test", "prod"):
-        return {"ok": False, "error": "env must be 'test' or 'prod'"}
+        return {"ok": False, "error": "env 必须为 test 或 prod"}
 
     rejection = _validate_sql(sql)
     if rejection:
@@ -337,7 +383,7 @@ async def remote_pg_query(
     dsn_key = f"ALPHAFROG_PG_{env.upper()}_DSN"
     dsn = os.getenv(dsn_key)
     if not dsn:
-        return {"ok": False, "error": f"Environment variable {dsn_key} is not set"}
+        return {"ok": False, "error": _pg_config_error_message(env)}
 
     # 强制替换或追加 LIMIT，防止内层查询拉取大量行
     safe_sql = _LIMIT_RE.sub("", sql.rstrip().rstrip(";")).rstrip()
@@ -359,7 +405,8 @@ async def remote_pg_query(
         finally:
             await conn.close()
     except Exception as e:
-        return {"ok": False, "error": str(e)}
+        print(f"[remote_pg_query] {e!r}", file=sys.stderr)
+        return {"ok": False, "error": "数据库查询执行失败，详情请查看 MCP 服务端日志"}
 
 
 if __name__ == "__main__":

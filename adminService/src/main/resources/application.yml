@@ -14,6 +14,8 @@ mybatis:
 dubbo:
   application:
     name: admin-service
+    # 当前集群沿用 Dubbo 2 风格的接口级服务发现，显式关闭 Dubbo 3 默认的应用级双注册/双订阅
+    register-mode: interface
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
     # 当前未使用 Nacos 作为 Dubbo 配置中心，显式关闭默认兜底，避免启动时额外做 config-center 健康检查
