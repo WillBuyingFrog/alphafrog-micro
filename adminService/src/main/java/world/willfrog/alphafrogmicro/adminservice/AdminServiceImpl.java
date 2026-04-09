@@ -19,12 +19,14 @@ import world.willfrog.alphafrogmicro.common.dao.agent.AdminAuditLogDao;
 import world.willfrog.alphafrogmicro.common.dao.agent.AdminIdempotencyDao;
 import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditApplicationDao;
 import world.willfrog.alphafrogmicro.common.dao.agent.AgentCreditLedgerDao;
+import world.willfrog.alphafrogmicro.common.dao.admin.AdminDataOverviewCacheDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.common.DataOverviewDao;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AdminAuditLog;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AdminIdempotency;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditApplication;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AgentCreditLedger;
+import world.willfrog.alphafrogmicro.common.pojo.admin.AdminDataOverviewCache;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.nio.charset.StandardCharsets;
@@ -72,6 +74,7 @@ public class AdminServiceImpl extends AdminServiceImplBase {
 
     private final UserDao userDao;
     private final DataOverviewDao dataOverviewDao;
+    private final AdminDataOverviewCacheDao dataOverviewCacheDao;
     private final PasswordEncoder passwordEncoder;
     private final AgentCreditApplicationDao creditApplicationDao;
     private final AgentCreditLedgerDao creditLedgerDao;
@@ -85,6 +88,7 @@ public class AdminServiceImpl extends AdminServiceImplBase {
 
     public AdminServiceImpl(UserDao userDao,
                             DataOverviewDao dataOverviewDao,
+                            AdminDataOverviewCacheDao dataOverviewCacheDao,
                             PasswordEncoder passwordEncoder,
                             AgentCreditApplicationDao creditApplicationDao,
                             AgentCreditLedgerDao creditLedgerDao,
@@ -93,6 +97,7 @@ public class AdminServiceImpl extends AdminServiceImplBase {
                             PlatformTransactionManager transactionManager) {
         this.userDao = userDao;
         this.dataOverviewDao = dataOverviewDao;
+        this.dataOverviewCacheDao = dataOverviewCacheDao;
         this.passwordEncoder = passwordEncoder;
         this.creditApplicationDao = creditApplicationDao;
         this.creditLedgerDao = creditLedgerDao;
@@ -271,12 +276,14 @@ public class AdminServiceImpl extends AdminServiceImplBase {
 
     @Override
     public AdminOverallResponse getAdminOverall(AdminOverallRequest request) {
-        long fundCount = dataOverviewDao.countFundInfo();
-        long indexCount = dataOverviewDao.countIndexInfo();
-        long stockCount = dataOverviewDao.countStockInfo();
-        long fundNavCount = dataOverviewDao.countFundNav();
-        long indexDailyCount = dataOverviewDao.countIndexDaily();
-        long stockDailyCount = dataOverviewDao.countStockDaily();
+        AdminDataOverviewCache cache = dataOverviewCacheDao.getLatest();
+        
+        long fundCount = cache != null ? cache.getFundCount() : 0;
+        long indexCount = cache != null ? cache.getIndexCount() : 0;
+        long stockCount = cache != null ? cache.getStockCount() : 0;
+        long fundNavCount = cache != null ? cache.getFundNavCount() : 0;
+        long indexDailyCount = cache != null ? cache.getIndexDailyCount() : 0;
+        long stockDailyCount = cache != null ? cache.getStockDailyCount() : 0;
 
         return AdminOverallResponse.newBuilder()
                 .setFundCount(fundCount)

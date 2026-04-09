@@ -100,3 +100,5 @@ remote_pr/
 
 # migrate config
 migrate_config.yml
+
+node_modules/
