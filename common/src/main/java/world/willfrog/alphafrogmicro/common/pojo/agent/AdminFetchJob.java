@@ -41,4 +41,6 @@ public class AdminFetchJob {
     private OffsetDateTime updatedAt;
 
     private OffsetDateTime finishedAt;
+
+    private String executionOptions;
 }

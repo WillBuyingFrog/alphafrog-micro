@@ -6,6 +6,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.scheduling.annotation.Async;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import world.willfrog.alphafrogmicro.common.dao.agent.AdminFetchJobDao;
@@ -21,8 +22,11 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
-import java.time.temporal.ChronoUnit;
 import java.util.*;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.Executor;
+import java.util.concurrent.Semaphore;
+import java.util.stream.Collectors;
 
 /**
  * admin 抓取任务批次（Job）服务
@@ -38,6 +42,7 @@ public class AdminFetchJobService {
     private final FetchTaskStatusService fetchTaskStatusService;
     private final RateLimitingService rateLimitingService;
     private final FetchQueueService fetchQueueService;
+    private final Executor fetchJobDispatchExecutor;
 
     @DubboReference
     private DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
@@ -45,6 +50,10 @@ public class AdminFetchJobService {
     private static final ZoneId ZONE_SHANGHAI = ZoneId.of("Asia/Shanghai");
     private static final int MAX_LEAF_TASKS = 5000;
     private static final int DEFAULT_LIMIT = 5000;
+    private static final int DEFAULT_WORKER_THREADS = 4;
+    private static final int DEFAULT_TASK_INTERVAL_MS = 200;
+    private static final int MAX_WORKER_THREADS = 20;
+    private static final int MAX_TASK_INTERVAL_MS = 5000;
 
     private static final Set<String> STRING_DATE_TASKS = Set.of(
             "index_daily_basic", "sw_industry_daily", "fund_share", "etf_share_size"
@@ -59,6 +68,47 @@ public class AdminFetchJobService {
     );
     private static final Set<String> VALID_MODES = Set.of("tasks", "task_sets", "fetch_info", "all");
 
+    private static final List<TaskVariantMeta> VARIANT_METAS = buildVariantMetas();
+
+    // ==================== Structured Meta Records ====================
+
+    private record TaskVariantMeta(
+            String taskName,
+            int taskSubType,
+            String label,
+            String description,
+            List<String> allowedTaskSetModes,
+            List<FieldMeta> fields,
+            String executionSummaryTemplate
+    ) {}
+
+    private record FieldMeta(
+            String name,
+            String label,
+            String inputType,
+            Object defaultValue,
+            String description,
+            boolean required,
+            RuleCondition effectiveWhen,
+            RuleCondition requiredWhen,
+            RuleCondition ignoredWhen,
+            FieldValidation validation
+    ) {}
+
+    private sealed interface RuleCondition {
+        record Always() implements RuleCondition {}
+        record Never() implements RuleCondition {}
+        record PathIn(String path, List<String> values) implements RuleCondition {}
+        record PathEquals(String path, Object value) implements RuleCondition {}
+        record And(List<RuleCondition> conditions) implements RuleCondition {}
+        record Or(List<RuleCondition> conditions) implements RuleCondition {}
+    }
+
+    private record FieldValidation(Integer min, Integer max, Boolean nonZero, String pattern) {}
+
+    private record PreviewError(String path, String code, String message) {}
+    private record PreviewWarning(String path, String code, String message) {}
+
     // ==================== Catalog ====================
 
     public Map<String, Object> buildCatalog() {
@@ -70,84 +120,266 @@ public class AdminFetchJobService {
     }
 
     private List<Map<String, Object>> buildTaskCatalog() {
-        List<Map<String, Object>> list = new ArrayList<>();
-        list.add(taskMeta("stock_daily", "股票日线", List.of(1, 2), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, stockDailyParams()));
-        list.add(taskMeta("stock_quote", "股票行情", List.of(1, 2), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("index_quote", "指数行情", List.of(1, 2), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("index_weight", "指数权重", List.of(1), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("index_daily_basic", "指数日线指标", List.of(1, 2), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "yyyyMMdd", false, commonRangeParams()));
-        list.add(taskMeta("fund_nav", "基金净值", List.of(1, 2), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("fund_portfolio", "基金持仓", List.of(1), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("fund_share", "基金份额", List.of(1), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "yyyyMMdd", false, commonRangeParams()));
-        list.add(taskMeta("etf_share_size", "ETF 份额规模", List.of(1), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "yyyyMMdd", false, commonRangeParams()));
-        list.add(taskMeta("trade_calendar", "交易日历", List.of(1), List.of("date_range_with_offsets"), "timestamp", false, commonRangeParams()));
-        list.add(taskMeta("sw_industry_daily", "申万行业日线", List.of(1), List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets"), "yyyyMMdd", false, commonRangeParams()));
-        list.add(taskMeta("sw_industry_classify", "申万行业分类", List.of(1), List.of(), "", true, List.of()));
-        list.add(taskMeta("sw_industry_member", "申万行业成分", List.of(1), List.of(), "", true, List.of()));
-        list.add(taskMeta("ci_index_member", "中证指数成分", List.of(1), List.of(), "", true, List.of()));
-        list.add(taskMeta("fund_manager", "基金经理", List.of(1), List.of(), "", true, List.of()));
-        list.add(taskMeta("fund_info", "基金基本信息", List.of(1), List.of(), "", false, infoParams()));
-        list.add(taskMeta("stock_info", "股票基本信息", List.of(1), List.of(), "", false, infoParams()));
-        list.add(taskMeta("index_info", "指数基本信息", List.of(1), List.of(), "", false, infoParams()));
-        return list;
+        List<Map<String, Object>> result = new ArrayList<>();
+        Map<String, List<TaskVariantMeta>> grouped = new LinkedHashMap<>();
+        for (TaskVariantMeta vm : VARIANT_METAS) {
+            grouped.computeIfAbsent(vm.taskName(), k -> new ArrayList<>()).add(vm);
+        }
+        for (Map.Entry<String, List<TaskVariantMeta>> entry : grouped.entrySet()) {
+            Map<String, Object> taskMap = new LinkedHashMap<>();
+            taskMap.put("taskName", entry.getKey());
+            taskMap.put("label", taskLabel(entry.getKey()));
+            List<Map<String, Object>> variants = new ArrayList<>();
+            for (TaskVariantMeta vm : entry.getValue()) {
+                variants.add(convertVariantMetaToMap(vm));
+            }
+            taskMap.put("variants", variants);
+            result.add(taskMap);
+        }
+        return result;
     }
 
-    private Map<String, Object> taskMeta(String taskName, String label, List<Integer> subTypes,
-                                         List<String> taskSetModes, String dateStyle,
-                                         boolean acceptsEmpty, List<Map<String, Object>> paramsSchema) {
+    private Map<String, Object> convertVariantMetaToMap(TaskVariantMeta vm) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("taskName", taskName);
-        map.put("label", label);
-        map.put("supportedSubTypes", subTypes);
-        map.put("taskSetModes", taskSetModes);
-        map.put("dateStyle", dateStyle);
-        map.put("acceptsEmptyTaskParams", acceptsEmpty);
-        map.put("paramsSchema", paramsSchema);
-        map.put("defaultParams", Map.of("offset", 0, "limit", 5000));
+        map.put("taskSubType", vm.taskSubType());
+        map.put("label", vm.label());
+        map.put("description", vm.description());
+        map.put("allowedTaskSetModes", vm.allowedTaskSetModes());
+        List<Map<String, Object>> fieldMaps = new ArrayList<>();
+        for (FieldMeta f : vm.fields()) {
+            Map<String, Object> fm = new LinkedHashMap<>();
+            fm.put("name", f.name());
+            fm.put("label", f.label());
+            fm.put("inputType", f.inputType());
+            fm.put("defaultValue", f.defaultValue());
+            fm.put("description", f.description());
+            fm.put("required", f.required());
+            fm.put("effectiveWhen", convertConditionToMap(f.effectiveWhen()));
+            fm.put("requiredWhen", convertConditionToMap(f.requiredWhen()));
+            fm.put("ignoredWhen", convertConditionToMap(f.ignoredWhen()));
+            if (f.validation() != null) {
+                Map<String, Object> vmMap = new LinkedHashMap<>();
+                vmMap.put("min", f.validation().min());
+                vmMap.put("max", f.validation().max());
+                vmMap.put("nonZero", f.validation().nonZero());
+                vmMap.put("pattern", f.validation().pattern());
+                fm.put("validation", vmMap);
+            }
+            fieldMaps.add(fm);
+        }
+        map.put("fields", fieldMaps);
+        map.put("executionSummary", vm.executionSummaryTemplate());
         return map;
     }
 
-    private List<Map<String, Object>> commonRangeParams() {
-        return List.of(
-                paramSchema("offset", "偏移量", "number", false, "0", 0),
-                paramSchema("limit", "每页条数", "number", false, "5000", 5000),
-                paramSchema("trade_date_timestamp", "交易日时间戳", "number", false, "", null),
-                paramSchema("trade_date", "交易日(YYYYMMDD)", "string", false, "", null),
-                paramSchema("start_date_timestamp", "开始日期时间戳", "number", false, "", null),
-                paramSchema("end_date_timestamp", "结束日期时间戳", "number", false, "", null),
-                paramSchema("start_date", "开始日期", "string", false, "", null),
-                paramSchema("end_date", "结束日期", "string", false, "", null)
-        );
+    private Object convertConditionToMap(RuleCondition condition) {
+        if (condition instanceof RuleCondition.Always) {
+            return "ALWAYS";
+        }
+        if (condition instanceof RuleCondition.Never) {
+            return "NEVER";
+        }
+        if (condition instanceof RuleCondition.PathIn pathIn) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("operator", "in");
+            m.put("path", pathIn.path());
+            m.put("values", pathIn.values());
+            return m;
+        }
+        if (condition instanceof RuleCondition.PathEquals pathEquals) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("operator", "equals");
+            m.put("path", pathEquals.path());
+            m.put("value", pathEquals.value());
+            return m;
+        }
+        if (condition instanceof RuleCondition.And and) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("operator", "and");
+            m.put("conditions", and.conditions().stream().map(this::convertConditionToMap).toList());
+            return m;
+        }
+        if (condition instanceof RuleCondition.Or or) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("operator", "or");
+            m.put("conditions", or.conditions().stream().map(this::convertConditionToMap).toList());
+            return m;
+        }
+        return null;
     }
 
-    private List<Map<String, Object>> stockDailyParams() {
-        return List.of(
-                paramSchema("offset", "偏移量", "number", false, "0", 0),
-                paramSchema("limit", "每页条数", "number", false, "5000", 5000),
-                paramSchema("trade_date_timestamp", "交易日时间戳", "number", false, "", null),
-                paramSchema("start_date_timestamp", "开始日期时间戳", "number", false, "", null),
-                paramSchema("end_date_timestamp", "结束日期时间戳", "number", false, "", null)
-        );
+    private static String taskLabel(String taskName) {
+        return switch (taskName) {
+            case "stock_daily" -> "股票日线";
+            case "stock_quote" -> "股票行情";
+            case "index_quote" -> "指数行情";
+            case "index_weight" -> "指数权重";
+            case "index_daily_basic" -> "指数日线指标";
+            case "fund_nav" -> "基金净值";
+            case "fund_portfolio" -> "基金持仓";
+            case "fund_share" -> "基金份额";
+            case "etf_share_size" -> "ETF 份额规模";
+            case "trade_calendar" -> "交易日历";
+            case "sw_industry_daily" -> "申万行业日线";
+            case "sw_industry_classify" -> "申万行业分类";
+            case "sw_industry_member" -> "申万行业成分";
+            case "ci_index_member" -> "中证指数成分";
+            case "fund_manager" -> "基金经理";
+            case "fund_info" -> "基金基本信息";
+            case "stock_info" -> "股票基本信息";
+            case "index_info" -> "指数基本信息";
+            default -> taskName;
+        };
     }
 
-    private List<Map<String, Object>> infoParams() {
-        return List.of(
-                paramSchema("offset", "偏移量", "number", false, "0", 0),
-                paramSchema("limit", "每页条数", "number", false, "5000", 5000),
-                paramSchema("market", "市场", "string", false, "E", "E")
+    private static List<TaskVariantMeta> buildVariantMetas() {
+        List<TaskVariantMeta> list = new ArrayList<>();
+
+        // Range tasks with 4 modes
+        List<String> all4Modes = List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
+
+        list.add(vm("stock_daily", 1, "股票日线（明细）", "按日期或 offset 抓取股票日线明细", all4Modes,
+                stockDailyFields(false), "股票日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+        list.add(vm("stock_daily", 2, "股票日线（汇总）", "按日期或 offset 抓取股票日线汇总", all4Modes,
+                stockDailyFields(false), "股票日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("stock_quote", 1, "股票行情（明细）", "按日期或 offset 抓取股票行情", all4Modes,
+                commonRangeFields(false, true), "股票行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+        list.add(vm("stock_quote", 2, "股票行情（汇总）", "按日期或 offset 抓取股票行情汇总", all4Modes,
+                commonRangeFields(false, true), "股票行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("index_quote", 1, "指数行情（明细）", "按日期或 offset 抓取指数行情", all4Modes,
+                commonRangeFields(false, true), "指数行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+        list.add(vm("index_quote", 2, "指数行情（汇总）", "按日期或 offset 抓取指数行情汇总", all4Modes,
+                commonRangeFields(false, true), "指数行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("index_weight", 1, "指数权重", "按日期或 offset 抓取指数权重", all4Modes,
+                commonRangeFields(false, true), "指数权重将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("index_daily_basic", 1, "指数日线指标（明细）", "按日期或 offset 抓取指数日线指标", all4Modes,
+                commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+        list.add(vm("index_daily_basic", 2, "指数日线指标（汇总）", "按日期或 offset 抓取指数日线指标汇总", all4Modes,
+                commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("fund_nav", 1, "基金净值（明细）", "按日期或 offset 抓取基金净值", all4Modes,
+                commonRangeFields(false, true), "基金净值将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+        list.add(vm("fund_nav", 2, "基金净值（汇总）", "按日期或 offset 抓取基金净值汇总", all4Modes,
+                commonRangeFields(false, true), "基金净值将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("fund_portfolio", 1, "基金持仓", "按日期或 offset 抓取基金持仓", all4Modes,
+                commonRangeFields(false, true), "基金持仓将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("fund_share", 1, "基金份额", "按日期抓取基金份额", all4Modes,
+                commonRangeFields(true, false), "基金份额将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("etf_share_size", 1, "ETF 份额规模", "按日期抓取 ETF 份额规模", all4Modes,
+                commonRangeFields(true, false), "ETF 份额规模将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        list.add(vm("trade_calendar", 1, "交易日历", "按日期范围抓取交易日历", List.of("date_range_with_offsets"),
+                commonRangeFields(false, true), "交易日历将按 offset 步进逐条抓取指定日期范围的数据。"));
+
+        list.add(vm("sw_industry_daily", 1, "申万行业日线", "按日期抓取申万行业日线", all4Modes,
+                commonRangeFields(true, false), "申万行业日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+
+        // Empty params tasks
+        list.add(vm("sw_industry_classify", 1, "申万行业分类", "抓取申万行业分类", List.of(),
+                List.of(), "申万行业分类将一次性抓取全部数据。"));
+        list.add(vm("sw_industry_member", 1, "申万行业成分", "抓取申万行业成分", List.of(),
+                List.of(), "申万行业成分将一次性抓取全部数据。"));
+        list.add(vm("ci_index_member", 1, "中证指数成分", "抓取中证指数成分", List.of(),
+                List.of(), "中证指数成分将一次性抓取全部数据。"));
+        list.add(vm("fund_manager", 1, "基金经理", "抓取基金经理信息", List.of(),
+                List.of(), "基金经理信息将一次性抓取全部数据。"));
+
+        // Info tasks
+        List<FieldMeta> infoFields = List.of(
+                field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0),
+                field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000),
+                field("task_params.market", "市场", "string", always(), never(), null, never(), "E")
         );
+        list.add(vm("fund_info", 1, "基金基本信息", "抓取基金基本信息", List.of(),
+                infoFields, "基金基本信息将按市场过滤一次性抓取。"));
+        list.add(vm("stock_info", 1, "股票基本信息", "抓取股票基本信息", List.of(),
+                infoFields, "股票基本信息将按市场过滤一次性抓取。"));
+        list.add(vm("index_info", 1, "指数基本信息", "抓取指数基本信息", List.of(),
+                infoFields, "指数基本信息将按市场过滤一次性抓取。"));
+
+        return Collections.unmodifiableList(list);
     }
 
-    private Map<String, Object> paramSchema(String name, String label, String type,
-                                            boolean required, String placeholder, Object defaultValue) {
-        Map<String, Object> map = new LinkedHashMap<>();
-        map.put("name", name);
-        map.put("label", label);
-        map.put("type", type);
-        map.put("required", required);
-        map.put("placeholder", placeholder);
-        map.put("defaultValue", defaultValue);
-        return map;
+    private static TaskVariantMeta vm(String taskName, int taskSubType, String label, String description,
+                                      List<String> allowedModes, List<FieldMeta> fields, String summary) {
+        return new TaskVariantMeta(taskName, taskSubType, label, description, allowedModes, fields, summary);
+    }
+
+    private static FieldMeta field(String name, String label, String inputType,
+                                   RuleCondition effectiveWhen, RuleCondition requiredWhen,
+                                   FieldValidation validation, RuleCondition ignoredWhen, Object defaultValue) {
+        return new FieldMeta(name, label, inputType, defaultValue, "", false, effectiveWhen, requiredWhen, ignoredWhen, validation);
+    }
+
+    private static List<FieldMeta> commonRangeFields(boolean useStringDate, boolean hasDateStrParams) {
+        List<FieldMeta> fields = new ArrayList<>();
+        RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
+        RuleCondition offsetModes = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
+        RuleCondition fixedDateModes = pathIn("task_set_mode", "date_range_with_offsets");
+
+        fields.add(field("trade_dates.start_timestamp", "开始日期时间戳", "number", dateModes, dateModes, null, never(), null));
+        fields.add(field("trade_dates.end_timestamp", "结束日期时间戳", "number", dateModes, dateModes, null, never(), null));
+        fields.add(field("date_range.start_date", "开始日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
+        fields.add(field("date_range.end_date", "结束日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
+        fields.add(field("offset_range.start", "Offset 起始", "number", offsetModes, offsetModes, null, never(), null));
+        fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
+        fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
+                new FieldValidation(1, null, true, null), never(), null));
+        fields.add(field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000));
+        fields.add(field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0));
+
+        if (useStringDate) {
+            fields.add(field("task_params.trade_date", "交易日(YYYYMMDD)", "string", always(), never(), null,
+                    pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
+        } else {
+            fields.add(field("task_params.trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
+                    pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
+        }
+        if (hasDateStrParams && !useStringDate) {
+            fields.add(field("task_params.start_date", "开始日期", "string", always(), never(), null,
+                    pathIn("task_set_mode", "date_range_with_offsets"), null));
+            fields.add(field("task_params.end_date", "结束日期", "string", always(), never(), null,
+                    pathIn("task_set_mode", "date_range_with_offsets"), null));
+        }
+        return fields;
+    }
+
+    private static List<FieldMeta> stockDailyFields(boolean useStringDate) {
+        List<FieldMeta> fields = new ArrayList<>();
+        RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
+        RuleCondition offsetModes = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
+        RuleCondition fixedDateModes = pathIn("task_set_mode", "date_range_with_offsets");
+
+        fields.add(field("trade_dates.start_timestamp", "开始日期时间戳", "number", dateModes, dateModes, null, never(), null));
+        fields.add(field("trade_dates.end_timestamp", "结束日期时间戳", "number", dateModes, dateModes, null, never(), null));
+        fields.add(field("date_range.start_date", "开始日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
+        fields.add(field("date_range.end_date", "结束日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
+        fields.add(field("offset_range.start", "Offset 起始", "number", offsetModes, offsetModes, null, never(), null));
+        fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
+        fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
+                new FieldValidation(1, null, true, null), never(), null));
+        fields.add(field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000));
+        fields.add(field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0));
+        fields.add(field("task_params.trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
+                pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
+        fields.add(field("task_params.start_date_timestamp", "开始日期时间戳", "number", always(), never(), null,
+                pathIn("task_set_mode", "date_range_with_offsets"), null));
+        fields.add(field("task_params.end_date_timestamp", "结束日期时间戳", "number", always(), never(), null,
+                pathIn("task_set_mode", "date_range_with_offsets"), null));
+        return fields;
+    }
+
+    private static RuleCondition always() { return new RuleCondition.Always(); }
+    private static RuleCondition never() { return new RuleCondition.Never(); }
+    private static RuleCondition pathIn(String path, String... values) {
+        return new RuleCondition.PathIn(path, List.of(values));
     }
 
     private Map<String, Object> buildFetchInfoCatalog() {
@@ -193,6 +425,337 @@ public class AdminFetchJobService {
         return map;
     }
 
+    // ==================== Preview ====================
+
+    public Map<String, Object> previewJob(Map<String, Object> body) {
+        List<PreviewError> errors = new ArrayList<>();
+        List<PreviewWarning> warnings = new ArrayList<>();
+        List<Map<String, Object>> parameterAnalysis = new ArrayList<>();
+        List<Map<String, Object>> behaviorSummary = new ArrayList<>();
+
+        String mode = getString(body, "mode");
+        if (mode == null || !VALID_MODES.contains(mode)) {
+            errors.add(new PreviewError("mode", "INVALID_MODE", "mode 必须是 tasks / task_sets / fetch_info / all 之一"));
+            return buildPreviewResponse(false, errors, warnings, parameterAnalysis, behaviorSummary, body);
+        }
+
+        List<LeafTask> leafTasks;
+        try {
+            leafTasks = expandJobBody(body, mode);
+        } catch (IllegalArgumentException e) {
+            errors.add(new PreviewError("", "EXPANSION_ERROR", e.getMessage()));
+            return buildPreviewResponse(false, errors, warnings, parameterAnalysis, behaviorSummary, body);
+        }
+
+        if (leafTasks.isEmpty()) {
+            errors.add(new PreviewError("", "NO_TASKS", "没有可执行的任务，请检查请求体中的 tasks / task_sets / fetch_info 配置"));
+        }
+
+        if (leafTasks.size() > MAX_LEAF_TASKS) {
+            errors.add(new PreviewError("", "EXCEEDS_MAX_LEAF_TASKS",
+                    "展开后的叶子任务数超过上限 " + MAX_LEAF_TASKS + "，当前 " + leafTasks.size()));
+        }
+
+        // Parameter analysis per source item
+        try {
+            parameterAnalysis.addAll(analyzeBodyParameters(body, mode, errors, warnings));
+        } catch (Exception e) {
+            log.warn("Failed to analyze parameters", e);
+        }
+
+        // Behavior summary
+        behaviorSummary.addAll(buildBehaviorSummary(leafTasks));
+
+        return buildPreviewResponse(errors.isEmpty(), errors, warnings, parameterAnalysis, behaviorSummary, body);
+    }
+
+    private Map<String, Object> buildPreviewResponse(boolean valid, List<PreviewError> errors,
+                                                     List<PreviewWarning> warnings,
+                                                     List<Map<String, Object>> parameterAnalysis,
+                                                     List<Map<String, Object>> behaviorSummary,
+                                                     Map<String, Object> body) {
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("valid", valid);
+        result.put("errors", errors.stream().map(e -> Map.of("path", e.path(), "code", e.code(), "message", e.message())).toList());
+        result.put("warnings", warnings.stream().map(w -> Map.of("path", w.path(), "code", w.code(), "message", w.message())).toList());
+        result.put("parameterAnalysis", parameterAnalysis);
+        result.put("behaviorSummary", behaviorSummary);
+        result.put("executionPlan", buildExecutionPlan(body));
+        return result;
+    }
+
+    private Map<String, Object> buildExecutionPlan(Map<String, Object> body) {
+        Map<String, Object> opts = parseExecutionOptions(body);
+        Map<String, Object> plan = new LinkedHashMap<>();
+        plan.put("orchestrationMode", "SERVER_ASYNC");
+        plan.put("workerThreads", opts.get("workerThreads"));
+        plan.put("taskIntervalMs", opts.get("taskIntervalMs"));
+        plan.put("note", "任务提交后由服务端继续派发，关闭页面不影响执行。");
+        return plan;
+    }
+
+    private List<Map<String, Object>> analyzeBodyParameters(Map<String, Object> body, String mode,
+                                                            List<PreviewError> errors, List<PreviewWarning> warnings) {
+        List<Map<String, Object>> result = new ArrayList<>();
+        if (("tasks".equals(mode) || "all".equals(mode)) && body.get("tasks") instanceof List<?> tasksRaw) {
+            for (int i = 0; i < tasksRaw.size(); i++) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> raw = (Map<String, Object>) tasksRaw.get(i);
+                result.add(analyzeSourceItem(raw, "tasks[" + i + "]", null, errors, warnings));
+            }
+        }
+        if (("task_sets".equals(mode) || "all".equals(mode)) && body.get("task_sets") instanceof List<?> setsRaw) {
+            for (int i = 0; i < setsRaw.size(); i++) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> raw = (Map<String, Object>) setsRaw.get(i);
+                String tsm = normalizeTaskSetMode(raw);
+                result.add(analyzeSourceItem(raw, "task_sets[" + i + "]", tsm, errors, warnings));
+            }
+        }
+        if (("fetch_info".equals(mode) || "all".equals(mode)) && body.get("fetch_info") instanceof Map<?, ?> fiRaw) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> fetchInfo = (Map<String, Object>) fiRaw;
+            for (Map.Entry<String, Object> entry : fetchInfo.entrySet()) {
+                if (!INFO_TASK_NAME.containsKey(entry.getKey())) continue;
+                @SuppressWarnings("unchecked")
+                Map<String, Object> raw = entry.getValue() instanceof Map<?, ?> m ? (Map<String, Object>) m : Map.of();
+                String taskName = INFO_TASK_NAME.get(entry.getKey());
+                TaskVariantMeta meta = findVariantMeta(taskName, 1);
+                if (meta != null) {
+                    result.add(analyzeSourceItemWithMeta(raw, "fetch_info." + entry.getKey(), null, meta, errors, warnings));
+                }
+            }
+        }
+        return result;
+    }
+
+    private Map<String, Object> analyzeSourceItem(Map<String, Object> raw, String scope, String taskSetMode,
+                                                  List<PreviewError> errors, List<PreviewWarning> warnings) {
+        String taskName = getTaskName(raw);
+        int taskSubType = getIntValue(raw.get("task_sub_type"), 1);
+        TaskVariantMeta meta = findVariantMeta(taskName, taskSubType);
+        if (meta == null) {
+            errors.add(new PreviewError(scope + ".task_name", "UNKNOWN_TASK",
+                    "未知的任务类型: " + taskName + " (subType=" + taskSubType + ")"));
+            Map<String, Object> empty = new LinkedHashMap<>();
+            empty.put("scope", scope);
+            empty.put("effective", List.of());
+            empty.put("requiredMissing", List.of());
+            empty.put("optionalEffectiveEmpty", List.of());
+            empty.put("ignored", List.of());
+            empty.put("invalid", List.of());
+            return empty;
+        }
+        if (taskSetMode != null && !meta.allowedTaskSetModes().contains(taskSetMode)) {
+            errors.add(new PreviewError(scope + ".task_set_mode", "UNSUPPORTED_TASK_SET_MODE",
+                    "该任务子类型不支持 " + taskSetMode + " 模式"));
+        }
+        return analyzeSourceItemWithMeta(raw, scope, taskSetMode, meta, errors, warnings);
+    }
+
+    private Map<String, Object> analyzeSourceItemWithMeta(Map<String, Object> raw, String scope, String taskSetMode,
+                                                          TaskVariantMeta meta,
+                                                          List<PreviewError> errors, List<PreviewWarning> warnings) {
+        Map<String, Object> context = buildContext(raw, taskSetMode);
+        List<String> effective = new ArrayList<>();
+        List<String> requiredMissing = new ArrayList<>();
+        List<String> optionalEffectiveEmpty = new ArrayList<>();
+        List<String> ignored = new ArrayList<>();
+        List<String> invalid = new ArrayList<>();
+
+        for (FieldMeta field : meta.fields()) {
+            Object value = getFieldValue(raw, field.name());
+            boolean isEffective = evaluateCondition(field.effectiveWhen(), context);
+            boolean isRequired = evaluateCondition(field.requiredWhen(), context);
+            boolean isIgnored = evaluateCondition(field.ignoredWhen(), context);
+
+            boolean isInvalid = false;
+            String invalidCode = null;
+            if (field.validation() != null && !isEmptyValue(value)) {
+                if (field.validation().nonZero() != null && field.validation().nonZero()) {
+                    int iv = parseIntSilent(value);
+                    if (iv <= 0) {
+                        isInvalid = true;
+                        invalidCode = "INVALID_RANGE_STEP";
+                    }
+                }
+                if (!isInvalid && field.validation().min() != null) {
+                    int iv = parseIntSilent(value);
+                    if (iv < field.validation().min()) {
+                        isInvalid = true;
+                        invalidCode = "VALIDATION_MIN_EXCEEDED";
+                    }
+                }
+            }
+
+            if (isInvalid) {
+                invalid.add(field.name());
+                errors.add(new PreviewError(scope + "." + field.name(), invalidCode != null ? invalidCode : "VALIDATION_ERROR",
+                        field.label() + " 校验失败"));
+            } else if (isRequired && isEmptyValue(value)) {
+                requiredMissing.add(field.name());
+                errors.add(new PreviewError(scope + "." + field.name(), "REQUIRED_FIELD_MISSING",
+                        field.label() + " 为必填项"));
+            } else if (isIgnored) {
+                if (!isEmptyValue(value)) {
+                    warnings.add(new PreviewWarning(scope + "." + field.name(), "IGNORED_FIELD",
+                            field.label() + " 当前配置下不会生效"));
+                }
+                ignored.add(field.name());
+            } else if (isEffective) {
+                effective.add(field.name());
+                if (!field.required() && isEmptyValue(value)) {
+                    optionalEffectiveEmpty.add(field.name());
+                }
+            }
+        }
+
+        Map<String, Object> analysis = new LinkedHashMap<>();
+        analysis.put("scope", scope);
+        analysis.put("effective", effective);
+        analysis.put("requiredMissing", requiredMissing);
+        analysis.put("optionalEffectiveEmpty", optionalEffectiveEmpty);
+        analysis.put("ignored", ignored);
+        analysis.put("invalid", invalid);
+        return analysis;
+    }
+
+    private Map<String, Object> buildContext(Map<String, Object> rawItem, String taskSetMode) {
+        Map<String, Object> context = new HashMap<>();
+        flattenMap("", rawItem, context);
+        if (taskSetMode != null) {
+            context.put("task_set_mode", taskSetMode);
+        }
+        Object tsCode = context.get("ts_code");
+        if (tsCode == null) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> tp = rawItem.get("task_params") instanceof Map<?, ?> m ? (Map<String, Object>) m : null;
+            if (tp != null) tsCode = tp.get("ts_code");
+        }
+        if (tsCode != null) context.put("ts_code", tsCode);
+        return context;
+    }
+
+    private void flattenMap(String prefix, Map<String, Object> source, Map<String, Object> target) {
+        for (Map.Entry<String, Object> entry : source.entrySet()) {
+            String key = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
+            if (entry.getValue() instanceof Map<?, ?> map) {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> m = (Map<String, Object>) map;
+                flattenMap(key, m, target);
+            } else {
+                target.put(key, entry.getValue());
+            }
+        }
+    }
+
+    private Object getFieldValue(Map<String, Object> raw, String fieldName) {
+        String[] parts = fieldName.split("\\.");
+        Object current = raw;
+        for (String part : parts) {
+            if (current instanceof Map<?, ?> map) {
+                current = map.get(part);
+            } else {
+                return null;
+            }
+        }
+        return current;
+    }
+
+    private boolean evaluateCondition(RuleCondition condition, Map<String, Object> context) {
+        if (condition instanceof RuleCondition.Always) {
+            return true;
+        }
+        if (condition instanceof RuleCondition.Never) {
+            return false;
+        }
+        if (condition instanceof RuleCondition.PathIn pathIn) {
+            Object value = context.get(pathIn.path());
+            return value != null && pathIn.values().contains(String.valueOf(value));
+        }
+        if (condition instanceof RuleCondition.PathEquals pathEquals) {
+            Object value = context.get(pathEquals.path());
+            return value != null && String.valueOf(value).equals(String.valueOf(pathEquals.value()));
+        }
+        if (condition instanceof RuleCondition.And and) {
+            return and.conditions().stream().allMatch(c -> evaluateCondition(c, context));
+        }
+        if (condition instanceof RuleCondition.Or or) {
+            return or.conditions().stream().anyMatch(c -> evaluateCondition(c, context));
+        }
+        return false;
+    }
+
+    private TaskVariantMeta findVariantMeta(String taskName, int taskSubType) {
+        for (TaskVariantMeta vm : VARIANT_METAS) {
+            if (vm.taskName().equals(taskName) && vm.taskSubType() == taskSubType) {
+                return vm;
+            }
+        }
+        return null;
+    }
+
+    private List<Map<String, Object>> buildBehaviorSummary(List<LeafTask> leafTasks) {
+        Map<String, List<LeafTask>> grouped = leafTasks.stream()
+                .collect(Collectors.groupingBy(l -> l.sourceScope != null ? l.sourceScope : (l.sourceKind + "[" + l.sourceIndex + "]")));
+        List<Map<String, Object>> summary = new ArrayList<>();
+        for (Map.Entry<String, List<LeafTask>> entry : grouped.entrySet()) {
+            String scope = entry.getKey();
+            List<LeafTask> leaves = entry.getValue();
+            if (leaves.isEmpty()) continue;
+            LeafTask first = leaves.get(0);
+            TaskVariantMeta meta = findVariantMeta(first.taskName, first.taskSubType);
+            String title = meta != null ? meta.executionSummaryTemplate() : first.taskName + " 任务";
+            String description = buildBehaviorDescription(first, leaves.size());
+
+            List<Map<String, Object>> samples = new ArrayList<>();
+            for (int i = 0; i < Math.min(3, leaves.size()); i++) {
+                LeafTask leaf = leaves.get(i);
+                Map<String, Object> sample = new LinkedHashMap<>();
+                sample.put("title", "叶子请求 " + (i + 1));
+                sample.put("description", buildSampleDescription(leaf));
+                samples.add(sample);
+            }
+
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("scope", scope);
+            item.put("title", title);
+            item.put("description", description);
+            item.put("expansionCount", leaves.size());
+            item.put("sampleLeafRequests", samples);
+            summary.add(item);
+        }
+        return summary;
+    }
+
+    private String buildBehaviorDescription(LeafTask first, int count) {
+        String mode = first.taskSetMode != null ? first.taskSetMode : "";
+        StringBuilder sb = new StringBuilder();
+        sb.append("后端会把当前配置展开为 ").append(count).append(" 条叶子抓取任务");
+        switch (mode) {
+            case "trade_dates" -> sb.append("，按交易日逐日展开。");
+            case "offsets" -> sb.append("，按 offset 步进展开。");
+            case "trade_dates_with_offsets" -> sb.append("，按日期与 offset 笛卡尔积展开。");
+            case "date_range_with_offsets" -> sb.append("，按固定日期范围与 offset 步进展开。");
+            default -> sb.append("。");
+        }
+        return sb.toString();
+    }
+
+    private String buildSampleDescription(LeafTask leaf) {
+        return buildParamsSummary(leaf.taskName, leaf.taskParams);
+    }
+
+    private int parseIntSilent(Object value) {
+        if (value == null) return 0;
+        if (value instanceof Number n) return n.intValue();
+        try {
+            return Integer.parseInt(value.toString().trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
+    }
+
     // ==================== Job 创建 ====================
 
     @Transactional
@@ -211,6 +774,135 @@ public class AdminFetchJobService {
             label = "";
         }
 
+        List<LeafTask> leafTasks = expandJobBody(body, mode);
+
+        if (leafTasks.isEmpty()) {
+            throw new IllegalArgumentException("没有可执行的任务，请检查请求体中的 tasks / task_sets / fetch_info 配置");
+        }
+
+        if (leafTasks.size() > MAX_LEAF_TASKS) {
+            throw new IllegalArgumentException("展开后的叶子任务数超过上限 " + MAX_LEAF_TASKS + "，当前 " + leafTasks.size());
+        }
+
+        Map<String, Object> executionOptions = parseExecutionOptions(body);
+        int workerThreads = (Integer) executionOptions.get("workerThreads");
+        int taskIntervalMs = (Integer) executionOptions.get("taskIntervalMs");
+
+        String jobUuid = UUID.randomUUID().toString();
+        OffsetDateTime now = OffsetDateTime.now();
+
+        // 落库 job
+        AdminFetchJob job = new AdminFetchJob();
+        job.setJobUuid(jobUuid);
+        job.setMode(mode);
+        job.setLabel(label);
+        job.setStatus("PENDING");
+        job.setRequestedSpec(JSONObject.toJSONString(body));
+        job.setNormalizedSpec(buildNormalizedSpec(body, leafTasks));
+        job.setExpandedTaskCount(leafTasks.size());
+        job.setPendingCount(leafTasks.size());
+        job.setRunningCount(0);
+        job.setSuccessCount(0);
+        job.setFailureCount(0);
+        job.setCreatedBy(createdBy);
+        job.setCreatedAt(now);
+        job.setUpdatedAt(now);
+        job.setExecutionOptions(JSONObject.toJSONString(executionOptions));
+        adminFetchJobDao.insert(job);
+
+        // 落库叶子任务（状态 PENDING，不立即派发）
+        List<Map<String, Object>> preview = new ArrayList<>();
+        for (LeafTask leaf : leafTasks) {
+            String taskUuid = UUID.randomUUID().toString();
+            leaf.taskUuid = taskUuid;
+
+            AdminFetchTask task = new AdminFetchTask();
+            task.setTaskUuid(taskUuid);
+            task.setJobUuid(jobUuid);
+            task.setTaskName(leaf.taskName);
+            task.setTaskSubType(leaf.taskSubType);
+            task.setStatus("PENDING");
+            task.setSourceKind(leaf.sourceKind);
+            task.setSourceIndex(leaf.sourceIndex);
+            task.setTaskSetMode(leaf.taskSetMode);
+            task.setParamsSummary(leaf.paramsSummary);
+            task.setInputParams(leaf.inputParams);
+            task.setDispatchPayload(leaf.dispatchPayload);
+            task.setCreatedBy(createdBy);
+            task.setCreatedAt(now);
+            task.setUpdatedAt(now);
+            adminFetchTaskDao.insert(task);
+
+            Map<String, Object> p = new LinkedHashMap<>();
+            p.put("taskUuid", taskUuid);
+            p.put("taskName", leaf.taskName);
+            p.put("taskSubType", leaf.taskSubType);
+            p.put("status", "PENDING");
+            preview.add(p);
+        }
+
+        // 启动异步派发
+        dispatchJobAsync(jobUuid, workerThreads, taskIntervalMs);
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("job", convertJobToMap(job));
+        result.put("itemsPreview", preview);
+        result.put("executionOptions", executionOptions);
+        result.put("orchestrationMode", "SERVER_ASYNC");
+        result.put("message", "Job creation request received and is being processed.");
+        return result;
+    }
+
+    private Map<String, Object> parseExecutionOptions(Map<String, Object> body) {
+        Map<String, Object> defaults = new LinkedHashMap<>();
+        defaults.put("workerThreads", DEFAULT_WORKER_THREADS);
+        defaults.put("taskIntervalMs", DEFAULT_TASK_INTERVAL_MS);
+
+        Object eoRaw = body.get("execution_options");
+        if (!(eoRaw instanceof Map<?, ?> eoMap)) {
+            return defaults;
+        }
+        @SuppressWarnings("unchecked")
+        Map<String, Object> eo = (Map<String, Object>) eoMap;
+
+        Object wt = eo.get("worker_threads");
+        if (wt != null) {
+            int w = getIntValue(wt, DEFAULT_WORKER_THREADS);
+            if (w >= 1 && w <= MAX_WORKER_THREADS) {
+                defaults.put("workerThreads", w);
+            }
+        }
+        Object ti = eo.get("task_interval_ms");
+        if (ti != null) {
+            int t = getIntValue(ti, DEFAULT_TASK_INTERVAL_MS);
+            if (t >= 0 && t <= MAX_TASK_INTERVAL_MS) {
+                defaults.put("taskIntervalMs", t);
+            }
+        }
+        return defaults;
+    }
+
+    private String buildNormalizedSpec(Map<String, Object> body, List<LeafTask> leafTasks) {
+        Map<String, Object> spec = new LinkedHashMap<>(body);
+        spec.put("expanded_task_count", leafTasks.size());
+        List<Map<String, Object>> expanded = new ArrayList<>();
+        for (LeafTask leaf : leafTasks) {
+            Map<String, Object> m = new LinkedHashMap<>();
+            m.put("task_name", leaf.taskName);
+            m.put("task_sub_type", leaf.taskSubType);
+            m.put("source_kind", leaf.sourceKind);
+            m.put("source_index", leaf.sourceIndex);
+            m.put("task_set_mode", leaf.taskSetMode);
+            m.put("task_params", leaf.taskParams);
+            expanded.add(m);
+        }
+        spec.put("expanded_tasks", expanded);
+        return JSONObject.toJSONString(spec);
+    }
+
+    // ==================== 共享展开逻辑 ====================
+
+    private List<LeafTask> expandJobBody(Map<String, Object> body, String mode) {
         List<LeafTask> leafTasks = new ArrayList<>();
 
         if ("tasks".equals(mode) || "all".equals(mode)) {
@@ -237,94 +929,8 @@ public class AdminFetchJobService {
             }
         }
 
-        if (leafTasks.isEmpty()) {
-            throw new IllegalArgumentException("没有可执行的任务，请检查请求体中的 tasks / task_sets / fetch_info 配置");
-        }
-
-        if (leafTasks.size() > MAX_LEAF_TASKS) {
-            throw new IllegalArgumentException("展开后的叶子任务数超过上限 " + MAX_LEAF_TASKS + "，当前 " + leafTasks.size());
-        }
-
-        String jobUuid = UUID.randomUUID().toString();
-        OffsetDateTime now = OffsetDateTime.now();
-
-        // 落库 job
-        AdminFetchJob job = new AdminFetchJob();
-        job.setJobUuid(jobUuid);
-        job.setMode(mode);
-        job.setLabel(label);
-        job.setStatus("PENDING");
-        job.setRequestedSpec(JSONObject.toJSONString(body));
-        job.setNormalizedSpec(buildNormalizedSpec(body, leafTasks));
-        job.setExpandedTaskCount(leafTasks.size());
-        job.setPendingCount(leafTasks.size());
-        job.setRunningCount(0);
-        job.setSuccessCount(0);
-        job.setFailureCount(0);
-        job.setCreatedBy(createdBy);
-        job.setCreatedAt(now);
-        job.setUpdatedAt(now);
-        adminFetchJobDao.insert(job);
-
-        // 落库叶子任务并派发
-        List<Map<String, Object>> preview = new ArrayList<>();
-        for (LeafTask leaf : leafTasks) {
-            String taskUuid = UUID.randomUUID().toString();
-            leaf.taskUuid = taskUuid;
-
-            AdminFetchTask task = new AdminFetchTask();
-            task.setTaskUuid(taskUuid);
-            task.setJobUuid(jobUuid);
-            task.setTaskName(leaf.taskName);
-            task.setTaskSubType(leaf.taskSubType);
-            task.setStatus("PENDING");
-            task.setSourceKind(leaf.sourceKind);
-            task.setSourceIndex(leaf.sourceIndex);
-            task.setTaskSetMode(leaf.taskSetMode);
-            task.setParamsSummary(leaf.paramsSummary);
-            task.setInputParams(leaf.inputParams);
-            task.setDispatchPayload(leaf.dispatchPayload);
-            task.setCreatedBy(createdBy);
-            task.setCreatedAt(now);
-            task.setUpdatedAt(now);
-            adminFetchTaskDao.insert(task);
-
-            dispatchLeafTask(leaf);
-
-            Map<String, Object> p = new LinkedHashMap<>();
-            p.put("taskUuid", taskUuid);
-            p.put("taskName", leaf.taskName);
-            p.put("taskSubType", leaf.taskSubType);
-            p.put("status", "PENDING");
-            preview.add(p);
-        }
-
-        Map<String, Object> result = new LinkedHashMap<>();
-        result.put("job", convertJobToMap(job));
-        result.put("itemsPreview", preview);
-        result.put("message", "Job creation request received and is being processed.");
-        return result;
+        return leafTasks;
     }
-
-    private String buildNormalizedSpec(Map<String, Object> body, List<LeafTask> leafTasks) {
-        Map<String, Object> spec = new LinkedHashMap<>(body);
-        spec.put("expanded_task_count", leafTasks.size());
-        List<Map<String, Object>> expanded = new ArrayList<>();
-        for (LeafTask leaf : leafTasks) {
-            Map<String, Object> m = new LinkedHashMap<>();
-            m.put("task_name", leaf.taskName);
-            m.put("task_sub_type", leaf.taskSubType);
-            m.put("source_kind", leaf.sourceKind);
-            m.put("source_index", leaf.sourceIndex);
-            m.put("task_set_mode", leaf.taskSetMode);
-            m.put("task_params", leaf.taskParams);
-            expanded.add(m);
-        }
-        spec.put("expanded_tasks", expanded);
-        return JSONObject.toJSONString(spec);
-    }
-
-    // ==================== 展开逻辑 ====================
 
     private List<LeafTask> expandRawTasks(List<Map<String, Object>> tasks, String sourceKind) {
         List<LeafTask> result = new ArrayList<>();
@@ -333,6 +939,7 @@ public class AdminFetchJobService {
             LeafTask leaf = normalizeSingleTask(raw, i);
             leaf.sourceKind = sourceKind;
             leaf.sourceIndex = i;
+            leaf.sourceScope = "tasks[" + i + "]";
             leaf.paramsSummary = buildParamsSummary(leaf.taskName, leaf.taskParams);
             leaf.inputParams = JSONObject.toJSONString(raw);
             leaf.dispatchPayload = buildDispatchPayload(leaf.taskUuid, leaf.taskName, leaf.taskSubType, leaf.taskParams);
@@ -344,7 +951,11 @@ public class AdminFetchJobService {
     private List<LeafTask> expandTaskSets(List<Map<String, Object>> taskSets) {
         List<LeafTask> result = new ArrayList<>();
         for (int i = 0; i < taskSets.size(); i++) {
-            result.addAll(expandSingleTaskSet(taskSets.get(i), i));
+            List<LeafTask> leaves = expandSingleTaskSet(taskSets.get(i), i);
+            for (LeafTask leaf : leaves) {
+                leaf.sourceScope = "task_sets[" + i + "]";
+            }
+            result.addAll(leaves);
         }
         return result;
     }
@@ -366,7 +977,7 @@ public class AdminFetchJobService {
         // 合并顶层非保留字段到 task_params（与 ingestion_flow.py 对齐）
         Set<String> skipKeys = Set.of("task_name", "task_type", "task_sub_type", "task_subtype", "taskSubType",
                 "task_params", "trade_dates", "date_range", "task_set_mode", "expand_mode",
-                "offset_range", "offset_start", "offset_end", "offset_step", "ingest_token");
+                "offset_range", "offset_start", "offset_end", "offset_step", "ingest_token", "execution_options");
         for (Map.Entry<String, Object> entry : rawTask.entrySet()) {
             if (skipKeys.contains(entry.getKey())) continue;
             if (!baseParams.containsKey(entry.getKey())) {
@@ -500,6 +1111,7 @@ public class AdminFetchJobService {
             leaf.taskParams = params;
             leaf.sourceKind = "FETCH_INFO";
             leaf.sourceIndex = idx++;
+            leaf.sourceScope = "fetch_info." + infoType;
             leaf.paramsSummary = buildParamsSummary(leaf.taskName, params);
             leaf.inputParams = JSONObject.toJSONString(settings);
             leaf.dispatchPayload = buildDispatchPayload(leaf.taskUuid, leaf.taskName, leaf.taskSubType, params);
@@ -517,7 +1129,7 @@ public class AdminFetchJobService {
         @SuppressWarnings("unchecked")
         Map<String, Object> taskParams = raw.get("task_params") == null ? new LinkedHashMap<>() : new LinkedHashMap<>((Map<String, Object>) raw.get("task_params"));
 
-        Set<String> skipKeys = Set.of("task_name", "task_type", "task_sub_type", "task_subtype", "taskSubType", "task_params", "ingest_token");
+        Set<String> skipKeys = Set.of("task_name", "task_type", "task_sub_type", "task_subtype", "taskSubType", "task_params", "ingest_token", "execution_options");
         for (Map.Entry<String, Object> entry : raw.entrySet()) {
             if (skipKeys.contains(entry.getKey())) continue;
             if (!taskParams.containsKey(entry.getKey())) {
@@ -745,6 +1357,73 @@ public class AdminFetchJobService {
         return summary;
     }
 
+    // ==================== 异步派发 ====================
+
+    @Async("fetchJobDispatchExecutor")
+    public void dispatchJobAsync(String jobUuid, int workerThreads, int taskIntervalMs) {
+        int pageSize = 500;
+        int offset = 0;
+        Semaphore semaphore = new Semaphore(Math.max(1, workerThreads));
+
+        while (true) {
+            List<AdminFetchTask> pendingTasks = adminFetchTaskDao.listPendingByJobUuid(jobUuid, pageSize, offset);
+            if (pendingTasks.isEmpty()) {
+                break;
+            }
+            List<CompletableFuture<Void>> futures = new ArrayList<>();
+            for (AdminFetchTask task : pendingTasks) {
+                try {
+                    semaphore.acquire();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+                if (taskIntervalMs > 0) {
+                    try {
+                        Thread.sleep(taskIntervalMs);
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        semaphore.release();
+                        break;
+                    }
+                }
+                futures.add(CompletableFuture.runAsync(() -> {
+                    try {
+                        LeafTask leaf = convertTaskToLeaf(task);
+                        dispatchLeafTask(leaf);
+                    } finally {
+                        semaphore.release();
+                    }
+                }, fetchJobDispatchExecutor));
+            }
+            if (!futures.isEmpty()) {
+                CompletableFuture.allOf(futures.toArray(new CompletableFuture[0])).join();
+            }
+            offset += pageSize;
+        }
+    }
+
+    private LeafTask convertTaskToLeaf(AdminFetchTask task) {
+        LeafTask leaf = new LeafTask();
+        leaf.taskUuid = task.getTaskUuid();
+        leaf.taskName = task.getTaskName();
+        leaf.taskSubType = task.getTaskSubType();
+        leaf.sourceKind = task.getSourceKind();
+        leaf.sourceIndex = task.getSourceIndex();
+        leaf.taskSetMode = task.getTaskSetMode();
+        leaf.dispatchPayload = task.getDispatchPayload();
+        Map<String, Object> payloadMap = parseJsonToMap(task.getDispatchPayload());
+        Object tp = payloadMap.get("task_params");
+        if (tp instanceof Map<?, ?> m) {
+            @SuppressWarnings("unchecked")
+            Map<String, Object> params = new LinkedHashMap<>((Map<String, Object>) m);
+            leaf.taskParams = params;
+        } else {
+            leaf.taskParams = new LinkedHashMap<>();
+        }
+        return leaf;
+    }
+
     // ==================== 派发 ====================
 
     private void dispatchLeafTask(LeafTask leaf) {
@@ -834,6 +1513,12 @@ public class AdminFetchJobService {
         return value == null ? null : value.toString().trim();
     }
 
+    private boolean isEmptyValue(Object value) {
+        if (value == null) return true;
+        if (value instanceof String s) return s.isBlank();
+        return false;
+    }
+
     // ==================== 状态更新（供内部 Dubbo 回调使用） ====================
 
     private void markTaskSuccess(String taskUuid, int fetchedItemsCount) {
@@ -920,6 +1605,7 @@ public class AdminFetchJobService {
         Map<String, Object> map = convertJobToMap(job);
         map.put("requestedSpec", parseJson(job.getRequestedSpec()));
         map.put("normalizedSpec", parseJson(job.getNormalizedSpec()));
+        map.put("executionOptions", parseJson(job.getExecutionOptions()));
 
         int pending = adminFetchTaskDao.countByJobUuidAndStatus(jobUuid, "PENDING");
         int running = adminFetchTaskDao.countByJobUuidAndStatus(jobUuid, "RUNNING");
@@ -931,6 +1617,18 @@ public class AdminFetchJobService {
         expansionSummary.put("success", success);
         expansionSummary.put("failure", failure);
         map.put("expansionSummary", expansionSummary);
+
+        Map<String, Object> executionOptions = parseJsonToMap(job.getExecutionOptions());
+        int workerThreads = executionOptions.get("workerThreads") instanceof Number n ? n.intValue() : DEFAULT_WORKER_THREADS;
+        int taskIntervalMs = executionOptions.get("taskIntervalMs") instanceof Number n ? n.intValue() : DEFAULT_TASK_INTERVAL_MS;
+
+        Map<String, Object> dispatchStats = new LinkedHashMap<>();
+        dispatchStats.put("dispatchedCount", job.getExpandedTaskCount() - pending);
+        dispatchStats.put("pendingDispatchCount", pending);
+        dispatchStats.put("workerThreads", workerThreads);
+        dispatchStats.put("taskIntervalMs", taskIntervalMs);
+        map.put("dispatchStats", dispatchStats);
+        map.put("orchestrationNote", "当前由服务端异步派发，页面关闭不影响任务继续运行");
 
         List<AdminFetchTask> previewTasks = adminFetchTaskDao.listByJobUuid(jobUuid, 20, 0);
         map.put("tasksPreview", previewTasks.stream().map(this::convertTaskToPreviewMap).toList());
@@ -953,6 +1651,10 @@ public class AdminFetchJobService {
             res.put("message", "No failed tasks to retry");
             return res;
         }
+
+        Map<String, Object> executionOptions = parseJsonToMap(job.getExecutionOptions());
+        int workerThreads = executionOptions.get("workerThreads") instanceof Number n ? n.intValue() : DEFAULT_WORKER_THREADS;
+        int taskIntervalMs = executionOptions.get("taskIntervalMs") instanceof Number n ? n.intValue() : DEFAULT_TASK_INTERVAL_MS;
 
         List<Map<String, Object>> results = new ArrayList<>();
         OffsetDateTime now = OffsetDateTime.now();
@@ -985,22 +1687,6 @@ public class AdminFetchJobService {
             newTask.setRetryOfTaskUuid(sourceUuid);
             adminFetchTaskDao.insert(newTask);
 
-            LeafTask leaf = new LeafTask();
-            leaf.taskUuid = newTaskUuid;
-            leaf.taskName = sourceTask.getTaskName();
-            leaf.taskSubType = sourceTask.getTaskSubType();
-            leaf.dispatchPayload = sourceTask.getDispatchPayload();
-            Map<String, Object> payloadMap = parseJsonToMap(sourceTask.getDispatchPayload());
-            Object tp = payloadMap.get("task_params");
-            if (tp instanceof Map) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> m = (Map<String, Object>) tp;
-                leaf.taskParams = m;
-            } else {
-                leaf.taskParams = new LinkedHashMap<>();
-            }
-            dispatchLeafTask(leaf);
-
             r.put("newTaskUuid", newTaskUuid);
             r.put("success", true);
             results.add(r);
@@ -1008,6 +1694,9 @@ public class AdminFetchJobService {
 
         // 刷新计数
         refreshJobCounters(jobUuid);
+
+        // 启动异步派发
+        dispatchJobAsync(jobUuid, workerThreads, taskIntervalMs);
 
         Map<String, Object> res = new LinkedHashMap<>();
         res.put("jobUuid", jobUuid);
@@ -1092,6 +1781,7 @@ public class AdminFetchJobService {
         Map<String, Object> taskParams;
         String sourceKind;
         int sourceIndex;
+        String sourceScope;
         String taskSetMode;
         String paramsSummary;
         String inputParams;

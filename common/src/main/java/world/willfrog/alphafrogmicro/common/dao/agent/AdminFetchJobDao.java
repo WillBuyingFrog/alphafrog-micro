@@ -12,11 +12,11 @@ public interface AdminFetchJobDao {
     @Insert("INSERT INTO alphafrog_admin_fetch_job (" +
             "job_uuid, mode, label, status, requested_spec, normalized_spec, " +
             "expanded_task_count, pending_count, running_count, success_count, failure_count, " +
-            "created_by, created_at, updated_at" +
+            "created_by, created_at, updated_at, execution_options" +
             ") VALUES (" +
             "#{jobUuid}, #{mode}, #{label}, #{status}, CAST(#{requestedSpec} AS jsonb), CAST(#{normalizedSpec} AS jsonb), " +
             "#{expandedTaskCount}, #{pendingCount}, #{runningCount}, #{successCount}, #{failureCount}, " +
-            "#{createdBy}, #{createdAt}, #{updatedAt}" +
+            "#{createdBy}, #{createdAt}, #{updatedAt}, CAST(#{executionOptions} AS jsonb)" +
             ")")
     int insert(AdminFetchJob job);
 
@@ -37,7 +37,8 @@ public interface AdminFetchJobDao {
             @Result(property = "createdBy", column = "created_by"),
             @Result(property = "createdAt", column = "created_at"),
             @Result(property = "updatedAt", column = "updated_at"),
-            @Result(property = "finishedAt", column = "finished_at")
+            @Result(property = "finishedAt", column = "finished_at"),
+            @Result(property = "executionOptions", column = "execution_options")
     })
     AdminFetchJob getByJobUuid(String jobUuid);
 

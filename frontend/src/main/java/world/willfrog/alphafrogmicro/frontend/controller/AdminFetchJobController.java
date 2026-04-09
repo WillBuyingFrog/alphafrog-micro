@@ -38,6 +38,30 @@ public class AdminFetchJobController {
         return ResponseEntity.ok(adminFetchJobService.buildCatalog());
     }
 
+    @PostMapping("/fetch-jobs:preview")
+    public ResponseEntity<?> previewJob(Authentication authentication,
+                                        @RequestBody Map<String, Object> requestBody) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (requestBody == null) {
+            return ResponseEntity.badRequest().body(Map.of("valid", false, "errors", 
+                List.of(Map.of("path", "", "code", "EMPTY_BODY", "message", "Request body is required"))));
+        }
+        try {
+            Map<String, Object> result = adminFetchJobService.previewJob(requestBody);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("valid", false, "errors",
+                List.of(Map.of("path", "", "code", "PREVIEW_ERROR", "message", e.getMessage()))));
+        } catch (Exception e) {
+            log.error("Failed to preview admin fetch job", e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("valid", false, "errors",
+                        List.of(Map.of("path", "", "code", "INTERNAL_ERROR", "message", e.getMessage()))));
+        }
+    }
+
     @PostMapping("/fetch-jobs")
     public ResponseEntity<?> createJob(Authentication authentication,
                                        @RequestBody Map<String, Object> requestBody) {

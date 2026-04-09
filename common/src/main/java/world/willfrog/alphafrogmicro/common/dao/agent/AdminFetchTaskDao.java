@@ -144,4 +144,10 @@ public interface AdminFetchTaskDao {
     int countTodayByStatus(@Param("status") String status,
                            @Param("startOfDay") OffsetDateTime startOfDay,
                            @Param("endOfDay") OffsetDateTime endOfDay);
+
+    @Select("SELECT * FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} AND status = 'PENDING' ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}")
+    @ResultMap("adminFetchTaskResultMap")
+    List<AdminFetchTask> listPendingByJobUuid(@Param("jobUuid") String jobUuid,
+                                              @Param("limit") int limit,
+                                              @Param("offset") int offset);
 }
