@@ -9,6 +9,7 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
+import world.willfrog.alphafrogmicro.frontend.service.AdminFetchTaskService;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
 @Service
@@ -19,6 +20,7 @@ public class FetchTaskStatusListener {
     private static final int MAX_MESSAGE_LOG_LENGTH = 2000;
 
     private final FetchTaskStatusService fetchTaskStatusService;
+    private final AdminFetchTaskService adminFetchTaskService;
 
     @RabbitListener(queues = TaskProducerRabbitConfig.FETCH_RESULT_QUEUE)
     public void listenFetchTaskStatus(String message,
@@ -53,6 +55,8 @@ public class FetchTaskStatusListener {
             } else {
                 fetchTaskStatusService.updateStatus(taskUuid, taskName, taskSubType, status, fetchedItemsCount, msg);
             }
+            // 同步更新 admin fetch task 持久化记录
+            syncAdminFetchTaskStatus(taskUuid, status, fetchedItemsCount, msg);
             success = true;
         } catch (Exception e) {
             log.error("Failed to handle fetch task status: {}", message, e);
@@ -66,6 +70,24 @@ public class FetchTaskStatusListener {
             } catch (Exception ackException) {
                 log.error("Failed to ack/nack fetch task status message", ackException);
             }
+        }
+    }
+
+    private void syncAdminFetchTaskStatus(String taskUuid, String status, Integer fetchedItemsCount, String message) {
+        try {
+            if (taskUuid == null || taskUuid.isBlank()) {
+                return;
+            }
+            int count = fetchedItemsCount == null ? 0 : fetchedItemsCount;
+            if (FetchTaskStatusService.STATUS_SUCCESS.equalsIgnoreCase(status)) {
+                adminFetchTaskService.markSuccess(taskUuid, count);
+            } else if (FetchTaskStatusService.STATUS_FAILURE.equalsIgnoreCase(status)) {
+                adminFetchTaskService.markFailure(taskUuid, count, message);
+            } else {
+                adminFetchTaskService.markRunning(taskUuid);
+            }
+        } catch (Exception e) {
+            log.error("Failed to sync admin fetch task status taskUuid={}", taskUuid, e);
         }
     }
 
