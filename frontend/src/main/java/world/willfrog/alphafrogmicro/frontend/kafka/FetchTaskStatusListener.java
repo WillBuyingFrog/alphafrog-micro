@@ -9,6 +9,9 @@ import org.springframework.amqp.support.AmqpHeaders;
 import org.springframework.messaging.handler.annotation.Header;
 import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
+import world.willfrog.alphafrogmicro.common.dao.agent.AdminFetchTaskDao;
+import world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask;
+import world.willfrog.alphafrogmicro.frontend.service.AdminFetchJobService;
 import world.willfrog.alphafrogmicro.frontend.service.AdminFetchTaskService;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
 
@@ -21,6 +24,8 @@ public class FetchTaskStatusListener {
 
     private final FetchTaskStatusService fetchTaskStatusService;
     private final AdminFetchTaskService adminFetchTaskService;
+    private final AdminFetchJobService adminFetchJobService;
+    private final AdminFetchTaskDao adminFetchTaskDao;
 
     @RabbitListener(queues = TaskProducerRabbitConfig.FETCH_RESULT_QUEUE)
     public void listenFetchTaskStatus(String message,
@@ -85,6 +90,15 @@ public class FetchTaskStatusListener {
                 adminFetchTaskService.markFailure(taskUuid, count, message);
             } else {
                 adminFetchTaskService.markRunning(taskUuid);
+            }
+            // 若该 task 属于某个 job，刷新 job 计数
+            AdminFetchTask task = adminFetchTaskDao.getByTaskUuid(taskUuid);
+            if (task != null && task.getJobUuid() != null) {
+                try {
+                    adminFetchJobService.refreshJobCounters(task.getJobUuid());
+                } catch (Exception e) {
+                    log.error("Failed to refresh job counters for jobUuid={}", task.getJobUuid(), e);
+                }
             }
         } catch (Exception e) {
             log.error("Failed to sync admin fetch task status taskUuid={}", taskUuid, e);

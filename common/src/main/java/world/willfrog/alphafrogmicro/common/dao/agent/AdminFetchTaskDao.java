@@ -11,10 +11,12 @@ public interface AdminFetchTaskDao {
 
     @Insert("INSERT INTO alphafrog_admin_fetch_task (" +
             "task_uuid, template_key, task_name, task_sub_type, status, fetched_items_count, message, " +
-            "params_summary, input_params, dispatch_payload, created_by, created_at, updated_at, retry_of_task_uuid" +
+            "params_summary, input_params, dispatch_payload, created_by, created_at, updated_at, retry_of_task_uuid, " +
+            "job_uuid, source_kind, source_index, task_set_mode" +
             ") VALUES (" +
             "#{taskUuid}, #{templateKey}, #{taskName}, #{taskSubType}, #{status}, #{fetchedItemsCount}, #{message}, " +
-            "#{paramsSummary}, CAST(#{inputParams} AS jsonb), CAST(#{dispatchPayload} AS jsonb), #{createdBy}, #{createdAt}, #{updatedAt}, #{retryOfTaskUuid}" +
+            "#{paramsSummary}, CAST(#{inputParams} AS jsonb), CAST(#{dispatchPayload} AS jsonb), #{createdBy}, #{createdAt}, #{updatedAt}, #{retryOfTaskUuid}, " +
+            "#{jobUuid}, #{sourceKind}, #{sourceIndex}, #{taskSetMode}" +
             ")")
     int insert(AdminFetchTask task);
 
@@ -35,7 +37,11 @@ public interface AdminFetchTaskDao {
             @Result(property = "createdAt", column = "created_at"),
             @Result(property = "updatedAt", column = "updated_at"),
             @Result(property = "finishedAt", column = "finished_at"),
-            @Result(property = "retryOfTaskUuid", column = "retry_of_task_uuid")
+            @Result(property = "retryOfTaskUuid", column = "retry_of_task_uuid"),
+            @Result(property = "jobUuid", column = "job_uuid"),
+            @Result(property = "sourceKind", column = "source_kind"),
+            @Result(property = "sourceIndex", column = "source_index"),
+            @Result(property = "taskSetMode", column = "task_set_mode")
     })
     AdminFetchTask getByTaskUuid(String taskUuid);
 
@@ -69,6 +75,10 @@ public interface AdminFetchTaskDao {
             "<if test='status != null and status != \"\"'> AND status = #{status}</if>" +
             "<if test='templateKey != null and templateKey != \"\"'> AND template_key = #{templateKey}</if>" +
             "<if test='taskUuid != null and taskUuid != \"\"'> AND task_uuid = #{taskUuid}</if>" +
+            "<if test='jobUuid != null and jobUuid != \"\"'> AND job_uuid = #{jobUuid}</if>" +
+            "<if test='taskName != null and taskName != \"\"'> AND task_name = #{taskName}</if>" +
+            "<if test='taskSubType != null'> AND task_sub_type = #{taskSubType}</if>" +
+            "<if test='sourceKind != null and sourceKind != \"\"'> AND source_kind = #{sourceKind}</if>" +
             "<if test='createdFrom != null and createdFrom != \"\"'> AND created_at &gt;= CAST(#{createdFrom} AS TIMESTAMP WITH TIME ZONE)</if>" +
             "<if test='createdTo != null and createdTo != \"\"'> AND created_at &lt;= CAST(#{createdTo} AS TIMESTAMP WITH TIME ZONE)</if>" +
             "</where>" +
@@ -78,6 +88,10 @@ public interface AdminFetchTaskDao {
     List<AdminFetchTask> listByConditions(@Param("status") String status,
                                           @Param("templateKey") String templateKey,
                                           @Param("taskUuid") String taskUuid,
+                                          @Param("jobUuid") String jobUuid,
+                                          @Param("taskName") String taskName,
+                                          @Param("taskSubType") Integer taskSubType,
+                                          @Param("sourceKind") String sourceKind,
                                           @Param("createdFrom") String createdFrom,
                                           @Param("createdTo") String createdTo,
                                           @Param("limit") int limit,
@@ -89,6 +103,10 @@ public interface AdminFetchTaskDao {
             "<if test='status != null and status != \"\"'> AND status = #{status}</if>" +
             "<if test='templateKey != null and templateKey != \"\"'> AND template_key = #{templateKey}</if>" +
             "<if test='taskUuid != null and taskUuid != \"\"'> AND task_uuid = #{taskUuid}</if>" +
+            "<if test='jobUuid != null and jobUuid != \"\"'> AND job_uuid = #{jobUuid}</if>" +
+            "<if test='taskName != null and taskName != \"\"'> AND task_name = #{taskName}</if>" +
+            "<if test='taskSubType != null'> AND task_sub_type = #{taskSubType}</if>" +
+            "<if test='sourceKind != null and sourceKind != \"\"'> AND source_kind = #{sourceKind}</if>" +
             "<if test='createdFrom != null and createdFrom != \"\"'> AND created_at &gt;= CAST(#{createdFrom} AS TIMESTAMP WITH TIME ZONE)</if>" +
             "<if test='createdTo != null and createdTo != \"\"'> AND created_at &lt;= CAST(#{createdTo} AS TIMESTAMP WITH TIME ZONE)</if>" +
             "</where>" +
@@ -96,11 +114,31 @@ public interface AdminFetchTaskDao {
     int countByConditions(@Param("status") String status,
                           @Param("templateKey") String templateKey,
                           @Param("taskUuid") String taskUuid,
+                          @Param("jobUuid") String jobUuid,
+                          @Param("taskName") String taskName,
+                          @Param("taskSubType") Integer taskSubType,
+                          @Param("sourceKind") String sourceKind,
                           @Param("createdFrom") String createdFrom,
                           @Param("createdTo") String createdTo);
 
     @Select("SELECT COUNT(*) FROM alphafrog_admin_fetch_task WHERE status = 'RUNNING'")
     int countRunning();
+
+    @Select("SELECT COUNT(*) FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} AND status = 'RUNNING'")
+    int countRunningByJobUuid(@Param("jobUuid") String jobUuid);
+
+    @Select("SELECT COUNT(*) FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} AND status = #{status}")
+    int countByJobUuidAndStatus(@Param("jobUuid") String jobUuid,
+                                @Param("status") String status);
+
+    @Select("SELECT * FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} ORDER BY created_at DESC LIMIT #{limit} OFFSET #{offset}")
+    @ResultMap("adminFetchTaskResultMap")
+    List<AdminFetchTask> listByJobUuid(@Param("jobUuid") String jobUuid,
+                                       @Param("limit") int limit,
+                                       @Param("offset") int offset);
+
+    @Select("SELECT task_uuid FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} AND status = 'FAILURE' ORDER BY created_at DESC")
+    List<String> listFailureTaskUuidsByJobUuid(@Param("jobUuid") String jobUuid);
 
     @Select("SELECT COUNT(*) FROM alphafrog_admin_fetch_task WHERE status = #{status} AND created_at >= #{startOfDay} AND created_at < #{endOfDay}")
     int countTodayByStatus(@Param("status") String status,

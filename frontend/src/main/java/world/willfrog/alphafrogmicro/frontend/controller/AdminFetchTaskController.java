@@ -70,6 +70,10 @@ public class AdminFetchTaskController {
                                        @RequestParam(required = false) String status,
                                        @RequestParam(required = false) String templateKey,
                                        @RequestParam(required = false) String taskUuid,
+                                       @RequestParam(required = false) String jobUuid,
+                                       @RequestParam(required = false) String taskName,
+                                       @RequestParam(required = false) Integer taskSubType,
+                                       @RequestParam(required = false) String sourceKind,
                                        @RequestParam(required = false) String createdFrom,
                                        @RequestParam(required = false) String createdTo,
                                        @RequestParam(required = false, defaultValue = "1") Integer page,
@@ -81,7 +85,8 @@ public class AdminFetchTaskController {
         int actualPageSize = pageSize == null || pageSize < 1 ? 20 : Math.min(pageSize, 100);
 
         Map<String, Object> result = adminFetchTaskService.listTasks(
-                status, templateKey, taskUuid, createdFrom, createdTo, actualPage, actualPageSize);
+                status, templateKey, taskUuid, jobUuid, taskName, taskSubType, sourceKind,
+                createdFrom, createdTo, actualPage, actualPageSize);
 
         @SuppressWarnings("unchecked")
         List<AdminFetchTask> items = (List<AdminFetchTask>) result.get("items");
@@ -149,6 +154,10 @@ public class AdminFetchTaskController {
         map.put("updatedAt", formatOffsetDateTime(task.getUpdatedAt()));
         map.put("finishedAt", formatOffsetDateTime(task.getFinishedAt()));
         map.put("retryOfTaskUuid", task.getRetryOfTaskUuid());
+        map.put("jobUuid", task.getJobUuid());
+        map.put("sourceKind", task.getSourceKind());
+        map.put("sourceIndex", task.getSourceIndex());
+        map.put("taskSetMode", task.getTaskSetMode());
 
         if (includeDetail) {
             map.put("inputParams", parseJson(task.getInputParams()));

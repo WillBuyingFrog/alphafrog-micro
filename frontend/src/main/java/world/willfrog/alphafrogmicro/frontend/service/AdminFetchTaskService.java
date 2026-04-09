@@ -9,7 +9,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import world.willfrog.alphafrogmicro.common.dao.agent.AdminFetchTaskDao;
 import world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask;
-import world.willfrog.alphafrogmicro.domestic.idl.*;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticTradeCalendarFetchByDateRangeRequest;
+import world.willfrog.alphafrogmicro.domestic.idl.DomesticTradeCalendarFetchService;
 import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
 
 import java.time.LocalDate;
@@ -18,7 +19,7 @@ import java.time.ZoneId;
 import java.util.*;
 
 /**
- * admin 抓取任务服务
+ * admin 抓取任务服务（叶子任务级别）
  */
 @Service
 @RequiredArgsConstructor
@@ -46,7 +47,7 @@ public class AdminFetchTaskService {
     );
 
     /**
-     * 创建任务
+     * 创建任务（v1 兼容）
      */
     @Transactional
     public AdminFetchTask createTask(String templateKey, Map<String, Object> inputParams, String createdBy) {
@@ -94,11 +95,13 @@ public class AdminFetchTaskService {
      * 分页查询 + 概览
      */
     public Map<String, Object> listTasks(String status, String templateKey, String taskUuid,
+                                         String jobUuid, String taskName, Integer taskSubType, String sourceKind,
                                          String createdFrom, String createdTo, int page, int pageSize) {
         int offset = (page - 1) * pageSize;
         List<AdminFetchTask> items = adminFetchTaskDao.listByConditions(
-                status, templateKey, taskUuid, createdFrom, createdTo, pageSize, offset);
-        int total = adminFetchTaskDao.countByConditions(status, templateKey, taskUuid, createdFrom, createdTo);
+                status, templateKey, taskUuid, jobUuid, taskName, taskSubType, sourceKind, createdFrom, createdTo, pageSize, offset);
+        int total = adminFetchTaskDao.countByConditions(
+                status, templateKey, taskUuid, jobUuid, taskName, taskSubType, sourceKind, createdFrom, createdTo);
 
         FetchQueueService.FetchQueueStats stats = fetchQueueService.getFetchQueueStats();
         int runningCount = adminFetchTaskDao.countRunning();
@@ -172,6 +175,11 @@ public class AdminFetchTaskService {
             newTask.setCreatedAt(nowDateTime);
             newTask.setUpdatedAt(nowDateTime);
             newTask.setRetryOfTaskUuid(sourceTaskUuid);
+            // v2 字段继承
+            newTask.setJobUuid(sourceTask.getJobUuid());
+            newTask.setSourceKind(sourceTask.getSourceKind());
+            newTask.setSourceIndex(sourceTask.getSourceIndex());
+            newTask.setTaskSetMode(sourceTask.getTaskSetMode());
 
             adminFetchTaskDao.insert(newTask);
 

@@ -5,7 +5,7 @@ import lombok.Data;
 import java.time.OffsetDateTime;
 
 /**
- * admin 抓取任务记录
+ * admin 抓取任务记录（叶子任务）
  */
 @Data
 public class AdminFetchTask {
@@ -41,4 +41,12 @@ public class AdminFetchTask {
     private OffsetDateTime finishedAt;
 
     private String retryOfTaskUuid;
+
+    private String jobUuid;
+
+    private String sourceKind;
+
+    private Integer sourceIndex;
+
+    private String taskSetMode;
 }
