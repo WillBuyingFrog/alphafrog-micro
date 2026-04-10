@@ -154,55 +154,41 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         int _counter = 0;
 
+        int apiStart = request.getApiOffsetStart();
+        int apiEnd = request.getApiOffsetEnd();
+        int apiStep = request.getApiOffsetStep();
+        boolean hasApiRange = apiStep > 0 && apiEnd >= apiStart;
+
         for (String tsCode : allTsCode) {
-
-            // 对每个指数代码，爬取并储存指定日期的行情数据
-            Map<String, Object> params = new HashMap<>();
-            Map<String, Object> queryParams = new HashMap<>();
-
-            params.put("api_name", "index_daily");
-            queryParams.put("ts_code", tsCode);
-            queryParams.put("trade_date", DateConvertUtils.convertTimestampToString(tradeDateTimestamp, "yyyyMMdd"));
-            queryParams.put("offset", request.getOffset());
-            queryParams.put("limit", request.getLimit());
-            params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
-            params.put("params", queryParams);
-
-            // 爬取
-            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
-
-            if (response == null) {
-                log.warn("TuShare returned null response for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
-                continue;
-            }
-
-            JSONObject dataObj = response.getJSONObject("data");
-            if (dataObj == null) {
-                log.warn("TuShare response missing 'data' field for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
-                continue;
-            }
-            JSONArray data = dataObj.getJSONArray("items");
-            JSONArray fields = dataObj.getJSONArray("fields");
-            if (data == null) {
-                log.warn("TuShare response missing 'items' for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
-                continue;
-            }
-
-            // 储存
-            int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
-
-            if (_result < 0) {
-                log.error("Failed to store index daily data for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
-                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(_result).build();
-            }
-
-            _counter += _result;
-
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                log.error("Thread sleep interrupted.");
+            if (hasApiRange) {
+                for (int apiOff = apiStart; apiOff <= apiEnd; apiOff += apiStep) {
+                    int pageResult = fetchIndexDailyByTradeDateSinglePage(tsCode, tradeDateTimestamp, apiOff, apiStep);
+                    if (pageResult < 0) {
+                        log.error("Failed to fetch index_daily for ts_code {} on trade date {} with apiOffset={}", tsCode, tradeDateTimestamp, apiOff);
+                        return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                                .setFetchedItemsCount(pageResult).build();
+                    }
+                    _counter += pageResult;
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        log.error("Thread sleep interrupted.");
+                    }
+                }
+            } else {
+                // 向后兼容：使用旧的单页 offset/limit
+                int pageResult = fetchIndexDailyByTradeDateSinglePage(tsCode, tradeDateTimestamp, request.getOffset(), request.getLimit());
+                if (pageResult < 0) {
+                    log.error("Failed to fetch index_daily for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
+                    return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                            .setFetchedItemsCount(pageResult).build();
+                }
+                _counter += pageResult;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    log.error("Thread sleep interrupted.");
+                }
             }
         }
 
@@ -234,55 +220,42 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         int _counter = 0;
 
+        int apiStart2 = request.getApiOffsetStart();
+        int apiEnd2 = request.getApiOffsetEnd();
+        int apiStep2 = request.getApiOffsetStep();
+        boolean hasApiRange2 = apiStep2 > 0 && apiEnd2 >= apiStart2;
+
         for (String tsCode : allTsCode) {
-
-            Map<String, Object> params = new HashMap<>();
-            Map<String, Object> queryParams = new HashMap<>();
-
-            params.put("api_name", "index_daily");
-            queryParams.put("ts_code", tsCode);
-            queryParams.put("start_date", DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd"));
-            queryParams.put("end_date", DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd"));
-            queryParams.put("offset", request.getOffset());
-            queryParams.put("limit", request.getLimit());
-            params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
-            params.put("params", queryParams);
-
-            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
-
-            TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(
-                    response, "index_daily");
-            if (wrapper == null) {
-                log.warn("Failed to extract data for ts_code {} between {} and {}", 
-                        tsCode, startDateTimestamp, endDateTimestamp);
-                continue; // 跳过当前指数，继续处理下一个
-            }
-            
-            JSONArray data = wrapper.getItems();
-            JSONArray fields = wrapper.getFields();
-            
-            // 如果没有数据，跳过当前指数
-            if (!wrapper.hasData()) {
-                log.debug("No data returned for ts_code {} between {} and {}", 
-                        tsCode, startDateTimestamp, endDateTimestamp);
-                continue;
-            }
-
-            int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
-
-            if (_result < 0) {
-                log.error("Failed to store index daily data for ts_code {} between trade date {} and {}",
-                        tsCode, startDateTimestamp, endDateTimestamp);
-                return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(_result).build();
-            }
-
-            _counter += _result;
-
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                log.error("Thread sleep interrupted.");
+            if (hasApiRange2) {
+                for (int apiOff = apiStart2; apiOff <= apiEnd2; apiOff += apiStep2) {
+                    int pageResult = fetchIndexDailyAllByDateRangeSinglePage(tsCode, startDateTimestamp, endDateTimestamp, apiOff, apiStep2);
+                    if (pageResult < 0) {
+                        log.error("Failed to fetch index_daily all for ts_code {} between {} and {} with apiOffset={}",
+                                tsCode, startDateTimestamp, endDateTimestamp, apiOff);
+                        return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
+                                .setFetchedItemsCount(pageResult).build();
+                    }
+                    _counter += pageResult;
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        log.error("Thread sleep interrupted.");
+                    }
+                }
+            } else {
+                int pageResult = fetchIndexDailyAllByDateRangeSinglePage(tsCode, startDateTimestamp, endDateTimestamp, request.getOffset(), request.getLimit());
+                if (pageResult < 0) {
+                    log.error("Failed to fetch index_daily all for ts_code {} between {} and {}",
+                            tsCode, startDateTimestamp, endDateTimestamp);
+                    return DomesticIndexDailyFetchAllByDateRangeResponse.newBuilder().setStatus("failure")
+                            .setFetchedItemsCount(pageResult).build();
+                }
+                _counter += pageResult;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    log.error("Thread sleep interrupted.");
+                }
             }
         }
 
@@ -310,53 +283,42 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(indexOffset, indexLimit);
 
+        int apiStart3 = request.getApiOffsetStart();
+        int apiEnd3 = request.getApiOffsetEnd();
+        int apiStep3 = request.getApiOffsetStep();
+        boolean hasApiRange3 = apiStep3 > 0 && apiEnd3 >= apiStart3;
+
         for (String tsCode : allTsCode) {
-            Map<String, Object> params = new HashMap<>();
-            Map<String, Object> queryParams = new HashMap<>();
-
-            params.put("api_name", "index_weight");
-            queryParams.put("index_code", tsCode);
-            queryParams.put("start_date", startDate);
-            queryParams.put("end_date", endDate);
-            queryParams.put("offset", request.getOffset());
-            queryParams.put("limit", request.getLimit());
-            params.put("fields", "index_code,con_code,trade_date,weight");
-            params.put("params", queryParams);
-
-            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
-
-            if (response == null) {
-                log.warn("TuShare returned null response for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
-                continue;
-            }
-
-            JSONObject dataObj = response.getJSONObject("data");
-            if (dataObj == null) {
-                log.warn("TuShare response missing 'data' field for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
-                continue;
-            }
-            JSONArray data = dataObj.getJSONArray("items");
-            JSONArray fields = dataObj.getJSONArray("fields");
-            if (data == null) {
-                log.warn("TuShare response missing 'items' for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
-                continue;
-            }
-
-            int _result = domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
-
-            if (_result < 0) {
-                log.error("Failed to store index weight data for ts_code {} between trade date {} and {}",
-                        tsCode, startDate, endDate);
-                return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(_result).build();
-            }
-
-            _counter += _result;
-
-            try {
-                Thread.sleep(200);
-            } catch (InterruptedException e) {
-                log.error("Thread sleep interrupted.");
+            if (hasApiRange3) {
+                for (int apiOff = apiStart3; apiOff <= apiEnd3; apiOff += apiStep3) {
+                    int pageResult = fetchIndexWeightByDateRangeSinglePage(tsCode, startDate, endDate, apiOff, apiStep3);
+                    if (pageResult < 0) {
+                        log.error("Failed to fetch index_weight for ts_code {} between {} and {} with apiOffset={}",
+                                tsCode, startDate, endDate, apiOff);
+                        return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                                .setFetchedItemsCount(pageResult).build();
+                    }
+                    _counter += pageResult;
+                    try {
+                        Thread.sleep(200);
+                    } catch (InterruptedException e) {
+                        log.error("Thread sleep interrupted.");
+                    }
+                }
+            } else {
+                int pageResult = fetchIndexWeightByDateRangeSinglePage(tsCode, startDate, endDate, request.getOffset(), request.getLimit());
+                if (pageResult < 0) {
+                    log.error("Failed to store index weight data for ts_code {} between trade date {} and {}",
+                            tsCode, startDate, endDate);
+                    return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
+                            .setFetchedItemsCount(pageResult).build();
+                }
+                _counter += pageResult;
+                try {
+                    Thread.sleep(200);
+                } catch (InterruptedException e) {
+                    log.error("Thread sleep interrupted.");
+                }
             }
         }
 
@@ -1023,5 +985,83 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    // ==================== 私有辅助方法：单层 TuShare 请求 ====================
+
+    private int fetchIndexDailyByTradeDateSinglePage(String tsCode, long tradeDateTimestamp, int apiOffset, int apiLimit) {
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+        params.put("api_name", "index_daily");
+        queryParams.put("ts_code", tsCode);
+        queryParams.put("trade_date", DateConvertUtils.convertTimestampToString(tradeDateTimestamp, "yyyyMMdd"));
+        queryParams.put("offset", apiOffset);
+        queryParams.put("limit", apiLimit > 0 ? apiLimit : 5000);
+        params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        if (response == null) {
+            log.warn("TuShare returned null response for ts_code {} on trade date {} apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
+            return 0;
+        }
+        JSONObject dataObj = response.getJSONObject("data");
+        if (dataObj == null) {
+            log.warn("TuShare response missing 'data' for ts_code {} on trade date {} apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
+            return 0;
+        }
+        JSONArray data = dataObj.getJSONArray("items");
+        JSONArray fields = dataObj.getJSONArray("fields");
+        if (data == null) {
+            return 0;
+        }
+        return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
+    }
+
+    private int fetchIndexDailyAllByDateRangeSinglePage(String tsCode, long startDateTimestamp, long endDateTimestamp, int apiOffset, int apiLimit) {
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+        params.put("api_name", "index_daily");
+        queryParams.put("ts_code", tsCode);
+        queryParams.put("start_date", DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd"));
+        queryParams.put("end_date", DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd"));
+        queryParams.put("offset", apiOffset);
+        queryParams.put("limit", apiLimit > 0 ? apiLimit : 5000);
+        params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(response, "index_daily");
+        if (wrapper == null || !wrapper.hasData()) {
+            return 0;
+        }
+        return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
+    }
+
+    private int fetchIndexWeightByDateRangeSinglePage(String tsCode, String startDate, String endDate, int apiOffset, int apiLimit) {
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+        params.put("api_name", "index_weight");
+        queryParams.put("index_code", tsCode);
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("offset", apiOffset);
+        queryParams.put("limit", apiLimit > 0 ? apiLimit : 5000);
+        params.put("fields", "index_code,con_code,trade_date,weight");
+        params.put("params", queryParams);
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        if (response == null) {
+            return 0;
+        }
+        JSONObject dataObj = response.getJSONObject("data");
+        if (dataObj == null) {
+            return 0;
+        }
+        JSONArray data = dataObj.getJSONArray("items");
+        JSONArray fields = dataObj.getJSONArray("fields");
+        if (data == null) {
+            return 0;
+        }
+        return domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
+    }
 
 }

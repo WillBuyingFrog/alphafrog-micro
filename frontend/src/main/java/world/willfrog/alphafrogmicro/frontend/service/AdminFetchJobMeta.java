@@ -256,6 +256,8 @@ public final class AdminFetchJobMeta {
                         "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
             }
         }
+        fields.add(field("index_count_limit", "本地指数总数限制", "number", always(), never(), null, never(), null,
+                "控制从本地指数库中总共要抓取多少指数代码。配合 offset 和 limit 使用，用于计算需要展开多少个叶子任务。例如：offset=0, limit=5000, index_count_limit=20000 表示从第 0 条开始，每次处理 5000 条，共展开 4 个叶子任务。"));
         return fields;
     }
 
@@ -280,6 +282,8 @@ public final class AdminFetchJobMeta {
                         "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
             }
         }
+        fields.add(field("index_count_limit", "本地指数总数限制", "number", always(), never(), null, never(), null,
+                "控制从本地指数库中总共要抓取多少指数代码。配合 offset 和 limit 使用，用于计算需要展开多少个叶子任务。例如：offset=0, limit=5000, index_count_limit=20000 表示从第 0 条开始，每次处理 5000 条，共展开 4 个叶子任务。"));
         return fields;
     }
 

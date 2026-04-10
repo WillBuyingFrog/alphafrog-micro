@@ -198,10 +198,13 @@ message DomesticIndexDailyFetchByDateRangeResponse {
 // 按照指定交易日爬取所有指数行情
 message DomesticIndexDailyFetchByTradeDateRequest {
   int64 tradeDate = 1;
-  int32 offset = 2;      // TuShare 分页偏移（当前按 ts_code 查询时暂不支持）
-  int32 limit = 3;       // TuShare 分页限制（当前按 ts_code 查询时暂不支持）
-  int32 indexOffset = 4; // 本地指数库分批偏移
-  int32 indexLimit = 5;  // 本地指数库分批大小
+  int32 offset = 2;         // TuShare 分页偏移（向后兼容）
+  int32 limit = 3;          // TuShare 分页限制（向后兼容）
+  int32 indexOffset = 4;    // 本地指数库分批偏移
+  int32 indexLimit = 5;     // 本地指数库分批大小
+  int32 apiOffsetStart = 6; // TuShare 分页起始 offset
+  int32 apiOffsetEnd = 7;   // TuShare 分页结束 offset
+  int32 apiOffsetStep = 8;  // TuShare 分页步长
 }
 
 message DomesticIndexDailyFetchByTradeDateResponse {
@@ -213,10 +216,13 @@ message DomesticIndexDailyFetchByTradeDateResponse {
 message DomesticindexDailyFetchAllByDateRangeRequest {
   int64 startDate = 1;
   int64 endDate = 2;
-  int32 offset = 3;      // TuShare 分页偏移（当前按 ts_code 查询时暂不支持）
-  int32 limit = 4;       // TuShare 分页限制（当前按 ts_code 查询时暂不支持）
-  int32 indexOffset = 5; // 本地指数库分批偏移
-  int32 indexLimit = 6;  // 本地指数库分批大小
+  int32 offset = 3;         // TuShare 分页偏移（向后兼容）
+  int32 limit = 4;          // TuShare 分页限制（向后兼容）
+  int32 indexOffset = 5;    // 本地指数库分批偏移
+  int32 indexLimit = 6;     // 本地指数库分批大小
+  int32 apiOffsetStart = 7; // TuShare 分页起始 offset
+  int32 apiOffsetEnd = 8;   // TuShare 分页结束 offset
+  int32 apiOffsetStep = 9;  // TuShare 分页步长
 }
 
 message DomesticIndexDailyFetchAllByDateRangeResponse {
@@ -228,10 +234,13 @@ message DomesticIndexDailyFetchAllByDateRangeResponse {
 message DomesticIndexWeightFetchByDateRangeRequest {
   int64 startDate = 1;
   int64 endDate = 2;
-  int32 offset = 3;      // TuShare 分页偏移（当前按 index_code 查询时暂不支持）
-  int32 limit = 4;       // TuShare 分页限制（当前按 index_code 查询时暂不支持）
-  int32 indexOffset = 5; // 本地指数库分批偏移
-  int32 indexLimit = 6;  // 本地指数库分批大小
+  int32 offset = 3;         // TuShare 分页偏移（向后兼容）
+  int32 limit = 4;          // TuShare 分页限制（向后兼容）
+  int32 indexOffset = 5;    // 本地指数库分批偏移
+  int32 indexLimit = 6;     // 本地指数库分批大小
+  int32 apiOffsetStart = 7; // TuShare 分页起始 offset
+  int32 apiOffsetEnd = 8;   // TuShare 分页结束 offset
+  int32 apiOffsetStep = 9;  // TuShare 分页步长
 }
 
 message DomesticIndexWeightFetchByDateRangeResponse {

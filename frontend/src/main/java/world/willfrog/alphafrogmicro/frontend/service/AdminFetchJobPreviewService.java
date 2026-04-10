@@ -365,10 +365,10 @@ public class AdminFetchJobPreviewService {
         boolean isIndexBatchTask = "index_quote".equals(taskName) || "index_weight".equals(taskName);
         if (isIndexBatchTask) {
             switch (mode) {
-                case "trade_dates" -> sb.append("，按交易日逐日展开，每个叶子任务处理一批指数代码。");
-                case "offsets" -> sb.append("，按指数批次步进展开，每个叶子任务处理一批指数代码。");
-                case "trade_dates_with_offsets" -> sb.append("，按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。");
-                case "date_range_with_offsets" -> sb.append("，按固定日期范围与指数批次步进展开，每个叶子任务处理一批指数代码。");
+                case "trade_dates" -> sb.append("，按交易日逐日展开，每个日期生成若干本地指数批次叶子任务。");
+                case "offsets" -> sb.append("，按本地指数批次展开，每个叶子任务处理一批指数代码。");
+                case "trade_dates_with_offsets" -> sb.append("，按交易日与本地指数批次笛卡尔积展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。");
+                case "date_range_with_offsets" -> sb.append("，按固定日期范围与本地指数批次展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。");
                 default -> sb.append("，每个叶子任务处理一批指数代码。");
             }
             sb.append("（受 TuShare 接口限制，需逐个指数代码请求）");

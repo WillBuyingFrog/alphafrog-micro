@@ -183,29 +183,41 @@ public class FetchTopicConsumer {
                         long tradeDateTimestamp = taskParams.getLong("trade_date_timestamp");
                         int indexOffset = taskParams.getIntValue("offset");
                         int indexLimit = taskParams.getIntValue("limit");
-                        int apiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
-                        int apiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
-                        DomesticIndexDailyFetchByTradeDateRequest request =
-                                DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
-                                        .setTradeDate(tradeDateTimestamp)
-                                        .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
-                                        .setOffset(apiOffset).setLimit(apiLimit)
-                                        .build();
-                        result = domesticIndexFetchService.fetchDomesticIndexDailyByTradeDate(request).getFetchedItemsCount();
+                        int apiOffsetStart = taskParams.containsKey("api_offset_start") ? taskParams.getIntValue("api_offset_start") : 0;
+                        int apiOffsetEnd = taskParams.containsKey("api_offset_end") ? taskParams.getIntValue("api_offset_end") : 0;
+                        int apiOffsetStep = taskParams.containsKey("api_offset_step") ? taskParams.getIntValue("api_offset_step") : 0;
+                        int fallbackApiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
+                        int fallbackApiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
+                        DomesticIndexDailyFetchByTradeDateRequest.Builder builder1 = DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
+                                .setTradeDate(tradeDateTimestamp)
+                                .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
+                                .setApiOffsetStart(apiOffsetStart)
+                                .setApiOffsetEnd(apiOffsetEnd)
+                                .setApiOffsetStep(apiOffsetStep);
+                        if (apiOffsetStart == 0 && apiOffsetEnd == 0 && apiOffsetStep == 0) {
+                            builder1.setOffset(fallbackApiOffset).setLimit(fallbackApiLimit);
+                        }
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyByTradeDate(builder1.build()).getFetchedItemsCount();
                     } else if (taskSubType == 2){
                         long startDateTimestamp = taskParams.getLong("start_date_timestamp");
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int indexOffset = taskParams.getIntValue("offset");
                         int indexLimit = taskParams.getIntValue("limit");
-                        int apiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
-                        int apiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
-                        DomesticindexDailyFetchAllByDateRangeRequest request =
-                                DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
-                                        .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
-                                        .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
-                                        .setOffset(apiOffset).setLimit(apiLimit)
-                                        .build();
-                        result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(request).getFetchedItemsCount();
+                        int apiOffsetStart = taskParams.containsKey("api_offset_start") ? taskParams.getIntValue("api_offset_start") : 0;
+                        int apiOffsetEnd = taskParams.containsKey("api_offset_end") ? taskParams.getIntValue("api_offset_end") : 0;
+                        int apiOffsetStep = taskParams.containsKey("api_offset_step") ? taskParams.getIntValue("api_offset_step") : 0;
+                        int fallbackApiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
+                        int fallbackApiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
+                        DomesticindexDailyFetchAllByDateRangeRequest.Builder builder2 = DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
+                                .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
+                                .setApiOffsetStart(apiOffsetStart)
+                                .setApiOffsetEnd(apiOffsetEnd)
+                                .setApiOffsetStep(apiOffsetStep);
+                        if (apiOffsetStart == 0 && apiOffsetEnd == 0 && apiOffsetStep == 0) {
+                            builder2.setOffset(fallbackApiOffset).setLimit(fallbackApiLimit);
+                        }
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(builder2.build()).getFetchedItemsCount();
                     } else if (taskSubType == 3) {
                         String tsCode = taskParams.getString("ts_code");
                         long startDateTimestamp = taskParams.getLong("start_date_timestamp");
@@ -228,15 +240,21 @@ public class FetchTopicConsumer {
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int indexOffset = taskParams.getIntValue("offset");
                         int indexLimit = taskParams.getIntValue("limit");
-                        int apiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
-                        int apiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
-                        DomesticIndexWeightFetchByDateRangeRequest request =
-                                DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
-                                        .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
-                                        .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
-                                        .setOffset(apiOffset).setLimit(apiLimit)
-                                        .build();
-                        result = domesticIndexFetchService.fetchDomesticIndexWeightByDateRange(request).getFetchedItemsCount();
+                        int apiOffsetStart = taskParams.containsKey("api_offset_start") ? taskParams.getIntValue("api_offset_start") : 0;
+                        int apiOffsetEnd = taskParams.containsKey("api_offset_end") ? taskParams.getIntValue("api_offset_end") : 0;
+                        int apiOffsetStep = taskParams.containsKey("api_offset_step") ? taskParams.getIntValue("api_offset_step") : 0;
+                        int fallbackApiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
+                        int fallbackApiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
+                        DomesticIndexWeightFetchByDateRangeRequest.Builder builder3 = DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
+                                .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
+                                .setApiOffsetStart(apiOffsetStart)
+                                .setApiOffsetEnd(apiOffsetEnd)
+                                .setApiOffsetStep(apiOffsetStep);
+                        if (apiOffsetStart == 0 && apiOffsetEnd == 0 && apiOffsetStep == 0) {
+                            builder3.setOffset(fallbackApiOffset).setLimit(fallbackApiLimit);
+                        }
+                        result = domesticIndexFetchService.fetchDomesticIndexWeightByDateRange(builder3.build()).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
