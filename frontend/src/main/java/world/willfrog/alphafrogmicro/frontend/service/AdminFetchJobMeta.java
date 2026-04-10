@@ -243,7 +243,7 @@ public final class AdminFetchJobMeta {
                 fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
                         "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_daily 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
             } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), never(), f.defaultValue(),
                         "控制从本地指数库中选取指数代码的起始偏移量。"));
             } else if ("offset_range.start".equals(f.name())) {
                 fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
@@ -269,7 +269,7 @@ public final class AdminFetchJobMeta {
                 fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
                         "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_weight 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
             } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), never(), f.defaultValue(),
                         "控制从本地指数库中选取指数代码的起始偏移量。"));
             } else if ("offset_range.start".equals(f.name())) {
                 fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
