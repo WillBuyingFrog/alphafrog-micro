@@ -243,6 +243,7 @@ public class AdminFetchJobService {
         for (LeafTask leaf : leafTasks) {
             String taskUuid = UUID.randomUUID().toString();
             leaf.taskUuid = taskUuid;
+            leaf.dispatchPayload = expansionService.buildDispatchPayload(taskUuid, leaf.taskName, leaf.taskSubType, leaf.taskParams);
 
             var task = new world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask();
             task.setTaskUuid(taskUuid);
@@ -453,7 +454,14 @@ public class AdminFetchJobService {
             newTask.setTaskSetMode(sourceTask.getTaskSetMode());
             newTask.setParamsSummary(sourceTask.getParamsSummary());
             newTask.setInputParams(sourceTask.getInputParams());
-            newTask.setDispatchPayload(sourceTask.getDispatchPayload());
+            // 重新生成 dispatchPayload，确保包含新的 task_uuid
+            Map<String, Object> oldPayloadMap = parseJsonToMap(sourceTask.getDispatchPayload());
+            Object tp = oldPayloadMap.get("task_params");
+            Map<String, Object> params = new LinkedHashMap<>();
+            if (tp instanceof Map<?, ?> m) {
+                params = new LinkedHashMap<>((Map<String, Object>) m);
+            }
+            newTask.setDispatchPayload(expansionService.buildDispatchPayload(newTaskUuid, sourceTask.getTaskName(), sourceTask.getTaskSubType(), params));
             newTask.setCreatedBy(sourceTask.getCreatedBy());
             newTask.setCreatedAt(now);
             newTask.setUpdatedAt(now);

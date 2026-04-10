@@ -168,8 +168,14 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                         .setFetchedItemsCount(-1).build();
             }
 
-            JSONArray data = response.getJSONObject("data").getJSONArray("items");
-            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+            JSONObject dataObj = response.getJSONObject("data");
+            if (dataObj == null) {
+                log.error("TuShare response missing 'data' field for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
+                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
+                        .setFetchedItemsCount(-1).build();
+            }
+            JSONArray data = dataObj.getJSONArray("items");
+            JSONArray fields = dataObj.getJSONArray("fields");
 
 
             // 储存
