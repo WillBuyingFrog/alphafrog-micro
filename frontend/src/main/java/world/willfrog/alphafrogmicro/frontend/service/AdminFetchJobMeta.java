@@ -240,17 +240,22 @@ public final class AdminFetchJobMeta {
         for (int i = 0; i < fields.size(); i++) {
             FieldMeta f = fields.get(i);
             if ("limit".equals(f.name())) {
-                fields.set(i, field("limit", "指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "由于 TuShare index_daily 接口要求逐个指数代码请求，limit 表示每个叶子任务从本地指数库中取出的指数数量上限。"));
+                fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_daily 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
             } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
+                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "控制从本地指数库中选取指数代码的起始偏移量。"));
+            } else if ("offset_range.start".equals(f.name())) {
+                fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页起始 offset。"));
+            } else if ("offset_range.end".equals(f.name())) {
+                fields.set(i, field("offset_range.end", "TuShare 分页结束 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页结束 offset。"));
+            } else if ("offset_range.step".equals(f.name())) {
+                fields.set(i, field("offset_range.step", "TuShare 分页步长", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
             }
         }
-        fields.add(field("api_limit", "TuShare 分页限制", "number", always(), never(), null, never(), 0,
-                "预留字段：当 TuShare index_daily 接口支持按 ts_code 维度分页时生效，当前暂不起作用。"));
-        fields.add(field("api_offset", "TuShare 分页偏移", "number", always(), never(), null, never(), 0,
-                "预留字段：当 TuShare index_daily 接口支持按 ts_code 维度分页时生效，当前暂不起作用。"));
         return fields;
     }
 
@@ -259,17 +264,22 @@ public final class AdminFetchJobMeta {
         for (int i = 0; i < fields.size(); i++) {
             FieldMeta f = fields.get(i);
             if ("limit".equals(f.name())) {
-                fields.set(i, field("limit", "指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "由于 TuShare index_weight 接口要求逐个指数代码请求，limit 表示每个叶子任务从本地指数库中取出的指数数量上限。"));
+                fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_weight 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
             } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
+                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "控制从本地指数库中选取指数代码的起始偏移量。"));
+            } else if ("offset_range.start".equals(f.name())) {
+                fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页起始 offset。"));
+            } else if ("offset_range.end".equals(f.name())) {
+                fields.set(i, field("offset_range.end", "TuShare 分页结束 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页结束 offset。"));
+            } else if ("offset_range.step".equals(f.name())) {
+                fields.set(i, field("offset_range.step", "TuShare 分页步长", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
             }
         }
-        fields.add(field("api_limit", "TuShare 分页限制", "number", always(), never(), null, never(), 0,
-                "预留字段：当 TuShare index_weight 接口支持按 index_code 维度分页时生效，当前暂不起作用。"));
-        fields.add(field("api_offset", "TuShare 分页偏移", "number", always(), never(), null, never(), 0,
-                "预留字段：当 TuShare index_weight 接口支持按 index_code 维度分页时生效，当前暂不起作用。"));
         return fields;
     }
 

@@ -163,6 +163,8 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             params.put("api_name", "index_daily");
             queryParams.put("ts_code", tsCode);
             queryParams.put("trade_date", DateConvertUtils.convertTimestampToString(tradeDateTimestamp, "yyyyMMdd"));
+            queryParams.put("offset", request.getOffset());
+            queryParams.put("limit", request.getLimit());
             params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
             params.put("params", queryParams);
 
@@ -241,6 +243,8 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             queryParams.put("ts_code", tsCode);
             queryParams.put("start_date", DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd"));
             queryParams.put("end_date", DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd"));
+            queryParams.put("offset", request.getOffset());
+            queryParams.put("limit", request.getLimit());
             params.put("fields", "ts_code,trade_date,close,open,high,low,pre_close,change,pct_chg,vol,amount");
             params.put("params", queryParams);
 
@@ -314,6 +318,8 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             queryParams.put("index_code", tsCode);
             queryParams.put("start_date", startDate);
             queryParams.put("end_date", endDate);
+            queryParams.put("offset", request.getOffset());
+            queryParams.put("limit", request.getLimit());
             params.put("fields", "index_code,con_code,trade_date,weight");
             params.put("params", queryParams);
 

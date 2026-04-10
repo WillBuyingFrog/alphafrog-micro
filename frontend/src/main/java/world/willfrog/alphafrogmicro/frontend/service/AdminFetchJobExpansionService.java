@@ -56,6 +56,11 @@ public class AdminFetchJobExpansionService {
             "index", "index_info"
     );
 
+    // 以下任务因 TuShare 接口限制，需先按 offset/limit 从本地库取 ts_code，再逐个请求。
+    // 此时 offset_range 控制的是 TuShare 层分页（api_offset/api_limit），
+    // 而 task_params.limit/offset 控制的是本地指数库分批（indexLimit/indexOffset）。
+    private static final Set<String> TUSHARE_SECONDARY_PAGING_TASKS = Set.of("index_quote", "index_weight");
+
     // ==================== 展开逻辑 ====================
 
     public List<LeafTask> expandJobBody(Map<String, Object> body, String mode) {
@@ -163,7 +168,15 @@ public class AdminFetchJobExpansionService {
                 List<Integer> offsets = expandOffsets(rawTask, index);
                 for (int off : offsets) {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                    p.put("offset", off);
+                    if (TUSHARE_SECONDARY_PAGING_TASKS.contains(taskName)) {
+                        p.put("api_offset", off);
+                        if (!p.containsKey("api_limit")) {
+                            int step = computeStep(rawTask);
+                            p.put("api_limit", step > 0 ? step : off + 1);
+                        }
+                    } else {
+                        p.put("offset", off);
+                    }
                     expandedParamsList.add(p);
                 }
             }
@@ -183,9 +196,17 @@ public class AdminFetchJobExpansionService {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
                     p.put("start_date", String.valueOf(startDateRaw));
                     p.put("end_date", String.valueOf(endDateRaw));
-                    p.put("offset", off);
-                    if (!p.containsKey("limit")) {
-                        p.put("limit", 3000);
+                    if (TUSHARE_SECONDARY_PAGING_TASKS.contains(taskName)) {
+                        p.put("api_offset", off);
+                        if (!p.containsKey("api_limit")) {
+                            int step = computeStep(rawTask);
+                            p.put("api_limit", step > 0 ? step : off + 1);
+                        }
+                    } else {
+                        p.put("offset", off);
+                        if (!p.containsKey("limit")) {
+                            p.put("limit", 3000);
+                        }
                     }
                     expandedParamsList.add(p);
                 }
@@ -209,7 +230,15 @@ public class AdminFetchJobExpansionService {
                         } else {
                             p.put("trade_date_timestamp", dateToTimestampMs(d));
                         }
-                        p.put("offset", off);
+                        if (TUSHARE_SECONDARY_PAGING_TASKS.contains(taskName)) {
+                            p.put("api_offset", off);
+                            if (!p.containsKey("api_limit")) {
+                                int step = computeStep(rawTask);
+                                p.put("api_limit", step > 0 ? step : off + 1);
+                            }
+                        } else {
+                            p.put("offset", off);
+                        }
                         expandedParamsList.add(p);
                     }
                 }
@@ -327,6 +356,24 @@ public class AdminFetchJobExpansionService {
             current = current.plusDays(1);
         }
         return dates;
+    }
+
+    private int computeStep(Map<String, Object> rawTask) {
+        @SuppressWarnings("unchecked")
+        Map<String, Object> offsetRange = rawTask.get("offset_range") == null ? null : (Map<String, Object>) rawTask.get("offset_range");
+        Object step = offsetRange != null ? offsetRange.get("step") : rawTask.get("offset_step");
+        if (step == null && offsetRange != null) {
+            step = offsetRange.get("offset_step");
+        }
+        if (step == null) {
+            return 0;
+        }
+        try {
+            if (step instanceof Number n) return n.intValue();
+            return Integer.parseInt(step.toString().trim());
+        } catch (NumberFormatException e) {
+            return 0;
+        }
     }
 
     private List<Integer> expandOffsets(Map<String, Object> rawTask, int index) {
