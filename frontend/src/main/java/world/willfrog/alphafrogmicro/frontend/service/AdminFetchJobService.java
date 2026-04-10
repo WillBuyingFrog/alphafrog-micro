@@ -247,6 +247,7 @@ public class AdminFetchJobService {
             var task = new world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask();
             task.setTaskUuid(taskUuid);
             task.setJobUuid(jobUuid);
+            task.setTemplateKey(leaf.taskName);
             task.setTaskName(leaf.taskName);
             task.setTaskSubType(leaf.taskSubType);
             task.setStatus("PENDING");
@@ -443,6 +444,7 @@ public class AdminFetchJobService {
             var newTask = new world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask();
             newTask.setTaskUuid(newTaskUuid);
             newTask.setJobUuid(jobUuid);
+            newTask.setTemplateKey(sourceTask.getTemplateKey() != null ? sourceTask.getTemplateKey() : sourceTask.getTaskName());
             newTask.setTaskName(sourceTask.getTaskName());
             newTask.setTaskSubType(sourceTask.getTaskSubType());
             newTask.setStatus("PENDING");
