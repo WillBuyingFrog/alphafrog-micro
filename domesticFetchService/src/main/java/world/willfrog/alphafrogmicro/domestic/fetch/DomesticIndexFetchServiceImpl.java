@@ -164,19 +164,21 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
             if (response == null) {
-                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(-1).build();
+                log.warn("TuShare returned null response for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
+                continue;
             }
 
             JSONObject dataObj = response.getJSONObject("data");
             if (dataObj == null) {
-                log.error("TuShare response missing 'data' field for ts_code {} on trade date {}", tsCode, tradeDateTimestamp);
-                return DomesticIndexDailyFetchByTradeDateResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(-1).build();
+                log.warn("TuShare response missing 'data' field for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
+                continue;
             }
             JSONArray data = dataObj.getJSONArray("items");
             JSONArray fields = dataObj.getJSONArray("fields");
-
+            if (data == null) {
+                log.warn("TuShare response missing 'items' for ts_code {} on trade date {}, skipping", tsCode, tradeDateTimestamp);
+                continue;
+            }
 
             // 储存
             int _result = domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
@@ -189,8 +191,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
             _counter += _result;
 
-
-            try{
+            try {
                 Thread.sleep(200);
             } catch (InterruptedException e) {
                 log.error("Thread sleep interrupted.");
@@ -305,12 +306,21 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
             if (response == null) {
-                return DomesticIndexWeightFetchByDateRangeResponse.newBuilder().setStatus("failure")
-                        .setFetchedItemsCount(-1).build();
+                log.warn("TuShare returned null response for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
+                continue;
             }
 
-            JSONArray data = response.getJSONObject("data").getJSONArray("items");
-            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+            JSONObject dataObj = response.getJSONObject("data");
+            if (dataObj == null) {
+                log.warn("TuShare response missing 'data' field for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
+                continue;
+            }
+            JSONArray data = dataObj.getJSONArray("items");
+            JSONArray fields = dataObj.getJSONArray("fields");
+            if (data == null) {
+                log.warn("TuShare response missing 'items' for index_weight ts_code {} between {} and {}, skipping", tsCode, startDate, endDate);
+                continue;
+            }
 
             int _result = domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
 

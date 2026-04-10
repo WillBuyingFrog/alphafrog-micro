@@ -102,12 +102,12 @@ public final class AdminFetchJobMeta {
                 commonRangeFields(false, true), "股票行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
 
         list.add(vm("index_quote", 1, "指数行情（明细）", "按日期或 offset 抓取指数行情", all4Modes,
-                commonRangeFields(false, true), "指数行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+                indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
         list.add(vm("index_quote", 2, "指数行情（汇总）", "按日期或 offset 抓取指数行情汇总", all4Modes,
-                commonRangeFields(false, true), "指数行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+                indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
 
         list.add(vm("index_weight", 1, "指数权重", "按日期或 offset 抓取指数权重", all4Modes,
-                commonRangeFields(false, true), "指数权重将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
+                indexWeightFields(false, true), "指数权重将按日期范围与指数批次展开，每个叶子任务处理一批指数代码。"));
 
         list.add(vm("index_daily_basic", 1, "指数日线指标（明细）", "按日期或 offset 抓取指数日线指标", all4Modes,
                 commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
@@ -171,6 +171,12 @@ public final class AdminFetchJobMeta {
         return new FieldMeta(name, label, inputType, defaultValue, "", false, effectiveWhen, requiredWhen, ignoredWhen, validation);
     }
 
+    public static FieldMeta field(String name, String label, String inputType,
+                                   RuleCondition effectiveWhen, RuleCondition requiredWhen,
+                                   FieldValidation validation, RuleCondition ignoredWhen, Object defaultValue, String description) {
+        return new FieldMeta(name, label, inputType, defaultValue, description, false, effectiveWhen, requiredWhen, ignoredWhen, validation);
+    }
+
     public static List<FieldMeta> commonRangeFields(boolean useStringDate, boolean hasDateStrParams) {
         List<FieldMeta> fields = new ArrayList<>();
         RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
@@ -226,6 +232,36 @@ public final class AdminFetchJobMeta {
                 pathIn("task_set_mode", "date_range_with_offsets"), null));
         fields.add(field("end_date_timestamp", "结束日期时间戳", "number", always(), never(), null,
                 pathIn("task_set_mode", "date_range_with_offsets"), null));
+        return fields;
+    }
+
+    public static List<FieldMeta> indexQuoteFields(boolean useStringDate, boolean hasDateStrParams) {
+        List<FieldMeta> fields = new ArrayList<>(commonRangeFields(useStringDate, hasDateStrParams));
+        for (int i = 0; i < fields.size(); i++) {
+            FieldMeta f = fields.get(i);
+            if ("limit".equals(f.name())) {
+                fields.set(i, field("limit", "指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "由于 TuShare index_daily 接口要求逐个指数代码请求，limit 表示每个叶子任务从本地指数库中取出的指数数量上限。"));
+            } else if ("offset".equals(f.name())) {
+                fields.set(i, field("offset", "指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
+            }
+        }
+        return fields;
+    }
+
+    public static List<FieldMeta> indexWeightFields(boolean useStringDate, boolean hasDateStrParams) {
+        List<FieldMeta> fields = new ArrayList<>(commonRangeFields(useStringDate, hasDateStrParams));
+        for (int i = 0; i < fields.size(); i++) {
+            FieldMeta f = fields.get(i);
+            if ("limit".equals(f.name())) {
+                fields.set(i, field("limit", "指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "由于 TuShare index_weight 接口要求逐个指数代码请求，limit 表示每个叶子任务从本地指数库中取出的指数数量上限。"));
+            } else if ("offset".equals(f.name())) {
+                fields.set(i, field("offset", "指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
+                        "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
+            }
+        }
         return fields;
     }
 
