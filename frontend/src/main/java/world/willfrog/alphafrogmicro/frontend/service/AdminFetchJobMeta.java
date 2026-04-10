@@ -105,9 +105,13 @@ public final class AdminFetchJobMeta {
                 indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
         list.add(vm("index_quote", 2, "指数行情（汇总）", "按日期或 offset 抓取指数行情汇总", all4Modes,
                 indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
+        list.add(vm("index_quote", 3, "指数行情（历史初始化）", "按固定日期范围批量抓取指数行情，适合历史数据初始化", List.of("date_range_with_offsets"),
+                indexQuoteFields(false, true), "指数行情历史初始化将按固定日期范围与本地指数批次笛卡尔积展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。"));
 
         list.add(vm("index_weight", 1, "指数权重", "按日期或 offset 抓取指数权重", all4Modes,
                 indexWeightFields(false, true), "指数权重将按日期范围与指数批次展开，每个叶子任务处理一批指数代码。"));
+        list.add(vm("index_weight", 3, "指数权重（历史初始化）", "按固定日期范围批量抓取指数权重，适合历史数据初始化", List.of("date_range_with_offsets"),
+                indexWeightFields(false, true), "指数权重历史初始化将按固定日期范围与本地指数批次笛卡尔积展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。"));
 
         list.add(vm("index_daily_basic", 1, "指数日线指标（明细）", "按日期或 offset 抓取指数日线指标", all4Modes,
                 commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));

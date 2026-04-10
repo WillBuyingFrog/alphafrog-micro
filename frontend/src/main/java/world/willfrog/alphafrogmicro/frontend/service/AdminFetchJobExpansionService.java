@@ -218,10 +218,19 @@ public class AdminFetchJobExpansionService {
                     if (startDateRaw == null || endDateRaw == null) {
                         throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 start_date 和 end_date");
                     }
+                    LocalDate startDate = parseDateValue(startDateRaw);
+                    LocalDate endDate = parseDateValue(endDateRaw);
+                    if (startDate == null || endDate == null) {
+                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式的 start_date 或 end_date 格式不正确");
+                    }
+                    long startDateTs = dateToTimestampMs(startDate);
+                    long endDateTs = dateToTimestampMs(endDate);
                     for (int b = 0; b < batchCount; b++) {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
                         p.put("start_date", String.valueOf(startDateRaw));
                         p.put("end_date", String.valueOf(endDateRaw));
+                        p.put("start_date_timestamp", startDateTs);
+                        p.put("end_date_timestamp", endDateTs);
                         p.put("offset", baseOffset + b * batchSize);
                         p.put("limit", batchSize);
                         p.put("api_offset_start", apiStart);

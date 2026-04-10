@@ -219,23 +219,32 @@ public class FetchTopicConsumer {
                         }
                         result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(builder2.build()).getFetchedItemsCount();
                     } else if (taskSubType == 3) {
-                        String tsCode = taskParams.getString("ts_code");
                         long startDateTimestamp = taskParams.getLong("start_date_timestamp");
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
-                        int offset = taskParams.getIntValue("offset");
-                        int limit = taskParams.getIntValue("limit");
-                        DomesticIndexDailyFetchByDateRangeRequest request =
-                                DomesticIndexDailyFetchByDateRangeRequest.newBuilder()
-                                        .setTsCode(tsCode).setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
-                                        .setOffset(offset).setLimit(limit).build();
-                        result = domesticIndexFetchService.fetchDomesticIndexDailyByDateRange(request).getFetchedItemsCount();
+                        int indexOffset = taskParams.getIntValue("offset");
+                        int indexLimit = taskParams.getIntValue("limit");
+                        int apiOffsetStart = taskParams.containsKey("api_offset_start") ? taskParams.getIntValue("api_offset_start") : 0;
+                        int apiOffsetEnd = taskParams.containsKey("api_offset_end") ? taskParams.getIntValue("api_offset_end") : 0;
+                        int apiOffsetStep = taskParams.containsKey("api_offset_step") ? taskParams.getIntValue("api_offset_step") : 0;
+                        int fallbackApiOffset = taskParams.containsKey("api_offset") ? taskParams.getIntValue("api_offset") : 0;
+                        int fallbackApiLimit = taskParams.containsKey("api_limit") ? taskParams.getIntValue("api_limit") : 0;
+                        DomesticindexDailyFetchAllByDateRangeRequest.Builder builder3 = DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
+                                .setStartDate(startDateTimestamp).setEndDate(endDateTimestamp)
+                                .setIndexOffset(indexOffset).setIndexLimit(indexLimit)
+                                .setApiOffsetStart(apiOffsetStart)
+                                .setApiOffsetEnd(apiOffsetEnd)
+                                .setApiOffsetStep(apiOffsetStep);
+                        if (apiOffsetStart == 0 && apiOffsetEnd == 0 && apiOffsetStep == 0) {
+                            builder3.setOffset(fallbackApiOffset).setLimit(fallbackApiLimit);
+                        }
+                        result = domesticIndexFetchService.fetchDomesticIndexDailyAllByDateRange(builder3.build()).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }
                     break;
 
                 case "index_weight":
-                    if (taskSubType == 1) {
+                    if (taskSubType == 1 || taskSubType == 3) {
                         long startDateTimestamp = taskParams.getLong("start_date_timestamp");
                         long endDateTimestamp = taskParams.getLong("end_date_timestamp");
                         int indexOffset = taskParams.getIntValue("offset");
