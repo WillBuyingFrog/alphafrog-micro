@@ -408,6 +408,37 @@ public class AdminFetchJobService {
         return map;
     }
 
+    // ==================== 取消 ====================
+
+    @Transactional
+    public Map<String, Object> cancelJob(String jobUuid) {
+        AdminFetchJob job = adminFetchJobDao.getByJobUuid(jobUuid);
+        if (job == null) {
+            throw new IllegalArgumentException("Job not found");
+        }
+        OffsetDateTime now = OffsetDateTime.now();
+        int cancelledTasks = adminFetchTaskDao.cancelByJobUuid(jobUuid, "Cancelled by user", now, now);
+        adminFetchJobDao.updateStatus(jobUuid, "CANCELLED", now, now);
+
+        Map<String, Object> res = new LinkedHashMap<>();
+        res.put("jobUuid", jobUuid);
+        res.put("cancelledTasks", cancelledTasks);
+        res.put("status", "CANCELLED");
+        return res;
+    }
+
+    // ==================== 删除 ====================
+
+    @Transactional
+    public void deleteJob(String jobUuid) {
+        AdminFetchJob job = adminFetchJobDao.getByJobUuid(jobUuid);
+        if (job == null) {
+            throw new IllegalArgumentException("Job not found");
+        }
+        adminFetchTaskDao.deleteByJobUuid(jobUuid);
+        adminFetchJobDao.deleteByJobUuid(jobUuid);
+    }
+
     // ==================== 重试 ====================
 
     @Transactional

@@ -150,4 +150,14 @@ public interface AdminFetchTaskDao {
     List<AdminFetchTask> listPendingByJobUuid(@Param("jobUuid") String jobUuid,
                                               @Param("limit") int limit,
                                               @Param("offset") int offset);
+
+    @Update("UPDATE alphafrog_admin_fetch_task SET status = 'CANCELLED', message = #{message}, updated_at = #{updatedAt}, finished_at = #{finishedAt} " +
+            "WHERE job_uuid = #{jobUuid} AND status IN ('PENDING', 'RUNNING')")
+    int cancelByJobUuid(@Param("jobUuid") String jobUuid,
+                        @Param("message") String message,
+                        @Param("updatedAt") OffsetDateTime updatedAt,
+                        @Param("finishedAt") OffsetDateTime finishedAt);
+
+    @Delete("DELETE FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid}")
+    int deleteByJobUuid(@Param("jobUuid") String jobUuid);
 }

@@ -104,4 +104,13 @@ public interface AdminFetchJobDao {
     int countTodayByStatus(@Param("status") String status,
                            @Param("startOfDay") OffsetDateTime startOfDay,
                            @Param("endOfDay") OffsetDateTime endOfDay);
+
+    @Update("UPDATE alphafrog_admin_fetch_job SET status = #{status}, updated_at = #{updatedAt}, finished_at = #{finishedAt} WHERE job_uuid = #{jobUuid}")
+    int updateStatus(@Param("jobUuid") String jobUuid,
+                     @Param("status") String status,
+                     @Param("updatedAt") OffsetDateTime updatedAt,
+                     @Param("finishedAt") OffsetDateTime finishedAt);
+
+    @Delete("DELETE FROM alphafrog_admin_fetch_job WHERE job_uuid = #{jobUuid}")
+    int deleteByJobUuid(@Param("jobUuid") String jobUuid);
 }

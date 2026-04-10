@@ -119,6 +119,48 @@ public class AdminFetchJobController {
         return ResponseEntity.ok(detail);
     }
 
+    @PostMapping("/fetch-jobs/{jobUuid}:cancel")
+    public ResponseEntity<?> cancelJob(Authentication authentication,
+                                       @PathVariable String jobUuid) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (jobUuid == null || jobUuid.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "jobUuid is required"));
+        }
+        try {
+            Map<String, Object> result = adminFetchJobService.cancelJob(jobUuid);
+            return ResponseEntity.ok(result);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Failed to cancel job jobUuid={}", jobUuid, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to cancel: " + e.getMessage()));
+        }
+    }
+
+    @DeleteMapping("/fetch-jobs/{jobUuid}")
+    public ResponseEntity<?> deleteJob(Authentication authentication,
+                                       @PathVariable String jobUuid) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (jobUuid == null || jobUuid.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "jobUuid is required"));
+        }
+        try {
+            adminFetchJobService.deleteJob(jobUuid);
+            return ResponseEntity.ok(Map.of("jobUuid", jobUuid, "deleted", true));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("Failed to delete job jobUuid={}", jobUuid, e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(Map.of("error", "Failed to delete: " + e.getMessage()));
+        }
+    }
+
     @PostMapping("/fetch-jobs/{jobUuid}:retry-failures")
     public ResponseEntity<?> retryJobFailures(Authentication authentication,
                                               @PathVariable String jobUuid) {
