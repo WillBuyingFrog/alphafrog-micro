@@ -198,8 +198,10 @@ message DomesticIndexDailyFetchByDateRangeResponse {
 // 按照指定交易日爬取所有指数行情
 message DomesticIndexDailyFetchByTradeDateRequest {
   int64 tradeDate = 1;
-  int32 offset = 2;
-  int32 limit = 3;
+  int32 offset = 2;      // TuShare 分页偏移（当前按 ts_code 查询时暂不支持）
+  int32 limit = 3;       // TuShare 分页限制（当前按 ts_code 查询时暂不支持）
+  int32 indexOffset = 4; // 本地指数库分批偏移
+  int32 indexLimit = 5;  // 本地指数库分批大小
 }
 
 message DomesticIndexDailyFetchByTradeDateResponse {
@@ -208,12 +210,13 @@ message DomesticIndexDailyFetchByTradeDateResponse {
 }
 
 // 按照指定交易日范围爬取所有指数行情
-
 message DomesticindexDailyFetchAllByDateRangeRequest {
   int64 startDate = 1;
   int64 endDate = 2;
-  int32 offset = 3;
-  int32 limit = 4;
+  int32 offset = 3;      // TuShare 分页偏移（当前按 ts_code 查询时暂不支持）
+  int32 limit = 4;       // TuShare 分页限制（当前按 ts_code 查询时暂不支持）
+  int32 indexOffset = 5; // 本地指数库分批偏移
+  int32 indexLimit = 6;  // 本地指数库分批大小
 }
 
 message DomesticIndexDailyFetchAllByDateRangeResponse {
@@ -225,8 +228,10 @@ message DomesticIndexDailyFetchAllByDateRangeResponse {
 message DomesticIndexWeightFetchByDateRangeRequest {
   int64 startDate = 1;
   int64 endDate = 2;
-  int32 offset = 3;
-  int32 limit = 4;
+  int32 offset = 3;      // TuShare 分页偏移（当前按 index_code 查询时暂不支持）
+  int32 limit = 4;       // TuShare 分页限制（当前按 index_code 查询时暂不支持）
+  int32 indexOffset = 5; // 本地指数库分批偏移
+  int32 indexLimit = 6;  // 本地指数库分批大小
 }
 
 message DomesticIndexWeightFetchByDateRangeResponse {

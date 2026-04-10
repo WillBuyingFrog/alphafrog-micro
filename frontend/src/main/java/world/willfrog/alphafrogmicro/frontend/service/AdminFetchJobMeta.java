@@ -247,6 +247,10 @@ public final class AdminFetchJobMeta {
                         "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
             }
         }
+        fields.add(field("api_limit", "TuShare 分页限制", "number", always(), never(), null, never(), 0,
+                "预留字段：当 TuShare index_daily 接口支持按 ts_code 维度分页时生效，当前暂不起作用。"));
+        fields.add(field("api_offset", "TuShare 分页偏移", "number", always(), never(), null, never(), 0,
+                "预留字段：当 TuShare index_daily 接口支持按 ts_code 维度分页时生效，当前暂不起作用。"));
         return fields;
     }
 
@@ -262,6 +266,10 @@ public final class AdminFetchJobMeta {
                         "指数列表的起始偏移量，配合 offset_range 可实现指数维度分批。"));
             }
         }
+        fields.add(field("api_limit", "TuShare 分页限制", "number", always(), never(), null, never(), 0,
+                "预留字段：当 TuShare index_weight 接口支持按 index_code 维度分页时生效，当前暂不起作用。"));
+        fields.add(field("api_offset", "TuShare 分页偏移", "number", always(), never(), null, never(), 0,
+                "预留字段：当 TuShare index_weight 接口支持按 index_code 维度分页时生效，当前暂不起作用。"));
         return fields;
     }
 

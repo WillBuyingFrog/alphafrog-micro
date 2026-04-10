@@ -135,8 +135,14 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             DomesticIndexDailyFetchByTradeDateRequest request
     ) {
 
-        // 从本地数据源中获得所有要爬取的指数
-        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(request.getOffset(), request.getLimit());
+        // 从本地数据源中获得所有要爬取的指数（优先使用 indexOffset/indexLimit，兼容旧字段）
+        int indexOffset = request.getIndexOffset();
+        int indexLimit = request.getIndexLimit();
+        if (indexLimit <= 0) {
+            indexOffset = request.getOffset();
+            indexLimit = request.getLimit();
+        }
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(indexOffset, indexLimit);
 
         if (allTsCode.isEmpty()) {
             log.error("No index info found in the database.");
@@ -209,10 +215,14 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         long startDateTimestamp = request.getStartDate();
         long endDateTimestamp = request.getEndDate();
-        int limit = request.getLimit();
-        int offset = request.getOffset();
+        int indexOffset = request.getIndexOffset();
+        int indexLimit = request.getIndexLimit();
+        if (indexLimit <= 0) {
+            indexOffset = request.getOffset();
+            indexLimit = request.getLimit();
+        }
 
-        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(offset, limit);
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(indexOffset, indexLimit);
 
         if (allTsCode.isEmpty()) {
             log.error("No index info found in the database.");
@@ -282,15 +292,19 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         long startDateTimestamp = request.getStartDate();
         long endDateTimestamp = request.getEndDate();
-        int limit = request.getLimit();
-        int offset = request.getOffset();
+        int indexOffset = request.getIndexOffset();
+        int indexLimit = request.getIndexLimit();
+        if (indexLimit <= 0) {
+            indexOffset = request.getOffset();
+            indexLimit = request.getLimit();
+        }
 
         int _counter = 0;
 
         String startDate = DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd");
         String endDate = DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd");
 
-        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(offset, limit);
+        List<String> allTsCode = indexInfoDao.getAllIndexInfoTsCodes(indexOffset, indexLimit);
 
         for (String tsCode : allTsCode) {
             Map<String, Object> params = new HashMap<>();
