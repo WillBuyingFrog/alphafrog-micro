@@ -277,16 +277,26 @@ public class AdminFetchJobPreviewService {
     }
 
     private Object getFieldValue(Map<String, Object> raw, String fieldName) {
-        String[] parts = fieldName.split("\\.");
-        Object current = raw;
-        for (String part : parts) {
-            if (current instanceof Map<?, ?> map) {
-                current = map.get(part);
-            } else {
-                return null;
+        if (fieldName.contains(".")) {
+            String[] parts = fieldName.split("\\.");
+            Object current = raw;
+            for (String part : parts) {
+                if (current instanceof Map<?, ?> map) {
+                    current = map.get(part);
+                } else {
+                    return null;
+                }
             }
+            return current;
+        } else {
+            // 无点号的字段默认在 task_params 下查找，回退到顶层
+            Object taskParams = raw.get("task_params");
+            if (taskParams instanceof Map<?, ?> tp) {
+                Object value = tp.get(fieldName);
+                if (value != null) return value;
+            }
+            return raw.get(fieldName);
         }
-        return current;
     }
 
     private boolean evaluateCondition(RuleCondition condition, Map<String, Object> context) {

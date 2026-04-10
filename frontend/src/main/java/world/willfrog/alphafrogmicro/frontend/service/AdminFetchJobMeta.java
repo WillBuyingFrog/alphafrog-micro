@@ -146,9 +146,9 @@ public final class AdminFetchJobMeta {
 
         // Info tasks
         List<FieldMeta> infoFields = List.of(
-                field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0),
-                field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000),
-                field("task_params.market", "市场", "string", always(), never(), null, never(), "E")
+                field("offset", "偏移量", "number", always(), never(), null, never(), 0),
+                field("limit", "每页条数", "number", always(), never(), null, never(), 5000),
+                field("market", "市场", "string", always(), never(), null, never(), "E")
         );
         list.add(vm("fund_info", 1, "基金基本信息", "抓取基金基本信息", List.of(),
                 infoFields, "基金基本信息将按市场过滤一次性抓取。"));
@@ -176,6 +176,8 @@ public final class AdminFetchJobMeta {
         RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
         RuleCondition offsetModes = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
         RuleCondition fixedDateModes = pathIn("task_set_mode", "date_range_with_offsets");
+        RuleCondition offsetFieldIgnored = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
+        RuleCondition stringDateIgnoredModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets");
 
         fields.add(field("trade_dates.start_timestamp", "开始日期时间戳", "number", dateModes, dateModes, null, never(), null));
         fields.add(field("trade_dates.end_timestamp", "结束日期时间戳", "number", dateModes, dateModes, null, never(), null));
@@ -185,21 +187,19 @@ public final class AdminFetchJobMeta {
         fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
         fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
                 new FieldValidation(1, null, true, null), never(), null));
-        fields.add(field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000));
-        fields.add(field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0));
+        fields.add(field("limit", "每页条数", "number", always(), never(), null, never(), 5000));
+        fields.add(field("offset", "偏移量", "number", always(), never(), null, offsetFieldIgnored, 0));
 
         if (useStringDate) {
-            fields.add(field("task_params.trade_date", "交易日(YYYYMMDD)", "string", always(), never(), null,
+            fields.add(field("trade_date", "交易日(YYYYMMDD)", "string", always(), never(), null,
                     pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
         } else {
-            fields.add(field("task_params.trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
+            fields.add(field("trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
                     pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
         }
         if (hasDateStrParams && !useStringDate) {
-            fields.add(field("task_params.start_date", "开始日期", "string", always(), never(), null,
-                    pathIn("task_set_mode", "date_range_with_offsets"), null));
-            fields.add(field("task_params.end_date", "结束日期", "string", always(), never(), null,
-                    pathIn("task_set_mode", "date_range_with_offsets"), null));
+            fields.add(field("start_date", "开始日期", "string", always(), never(), null, stringDateIgnoredModes, null));
+            fields.add(field("end_date", "结束日期", "string", always(), never(), null, stringDateIgnoredModes, null));
         }
         return fields;
     }
@@ -218,13 +218,13 @@ public final class AdminFetchJobMeta {
         fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
         fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
                 new FieldValidation(1, null, true, null), never(), null));
-        fields.add(field("task_params.limit", "每页条数", "number", always(), never(), null, never(), 5000));
-        fields.add(field("task_params.offset", "偏移量", "number", always(), never(), null, never(), 0));
-        fields.add(field("task_params.trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
+        fields.add(field("limit", "每页条数", "number", always(), never(), null, never(), 5000));
+        fields.add(field("offset", "偏移量", "number", always(), never(), null, offsetModes, 0));
+        fields.add(field("trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
                 pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
-        fields.add(field("task_params.start_date_timestamp", "开始日期时间戳", "number", always(), never(), null,
+        fields.add(field("start_date_timestamp", "开始日期时间戳", "number", always(), never(), null,
                 pathIn("task_set_mode", "date_range_with_offsets"), null));
-        fields.add(field("task_params.end_date_timestamp", "结束日期时间戳", "number", always(), never(), null,
+        fields.add(field("end_date_timestamp", "结束日期时间戳", "number", always(), never(), null,
                 pathIn("task_set_mode", "date_range_with_offsets"), null));
         return fields;
     }
