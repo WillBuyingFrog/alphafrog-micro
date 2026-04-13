@@ -3,14 +3,22 @@
   "label": "指数权重",
   "description": "通过 TuShare index_weight 接口抓取指数成分股权重。由于该接口要求逐个指数代码请求，系统采用本地指数分批 + TuShare 分页的双层机制。",
   "serviceModule": "domesticIndexFetchService",
-
   "taskVariants": [
     {
       "subType": 1,
       "label": "按日期范围抓取",
       "description": "按日期范围抓取指数成分股权重。先从本地指数库取一批 ts_code，再逐个代码请求该日期范围内的权重数据。",
-      "requiredParams": ["start_date", "end_date"],
-      "optionalParams": ["offset", "limit", "api_offset_start", "api_offset_end", "api_offset_step"],
+      "requiredParams": [
+        "start_date",
+        "end_date"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
       "paramDefs": {
         "start_date": {
           "label": "开始日期",
@@ -26,13 +34,13 @@
           "format": "yyyyMMdd",
           "default": null
         },
-        "offset": {
+        "index_offset": {
           "label": "本地指数起始偏移",
           "description": "从本地指数库选取指数代码的起始偏移量",
           "type": "number",
           "default": 0
         },
-        "limit": {
+        "index_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量上限",
           "type": "number",
@@ -57,14 +65,25 @@
           "default": 0
         }
       },
-      "specialFlags": ["secondary_paging"]
+      "specialFlags": [
+        "secondary_paging"
+      ]
     },
     {
-      "subType": 2,
+      "subType": 3,
       "label": "历史初始化",
       "description": "按固定日期范围做历史数据初始化。逻辑与按日期范围抓取相同。",
-      "requiredParams": ["start_date", "end_date"],
-      "optionalParams": ["offset", "limit", "api_offset_start", "api_offset_end", "api_offset_step"],
+      "requiredParams": [
+        "start_date",
+        "end_date"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
       "paramDefs": {
         "start_date": {
           "label": "开始日期",
@@ -80,13 +99,13 @@
           "format": "yyyyMMdd",
           "default": null
         },
-        "offset": {
+        "index_offset": {
           "label": "本地指数起始偏移",
           "description": "从本地指数库选取指数代码的起始偏移量",
           "type": "number",
           "default": 0
         },
-        "limit": {
+        "index_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量上限",
           "type": "number",
@@ -111,10 +130,12 @@
           "default": 0
         }
       },
-      "specialFlags": ["secondary_paging", "historical_init"]
+      "specialFlags": [
+        "secondary_paging",
+        "historical_init"
+      ]
     }
   ],
-
   "taskSetVariants": [
     {
       "subType": 1,
@@ -124,15 +145,22 @@
       "expandDescription": "根据 offset、limit 和 index_count_limit 计算本地指数批次数量，每批生成一个叶子任务，内部再按 TuShare 分页参数逐页请求",
       "expandStrategy": "index_batches",
       "requiredParams": [],
-      "optionalParams": ["offset", "limit", "index_count_limit", "api_offset_start", "api_offset_end", "api_offset_step"],
+      "optionalParams": [
+        "index_offset",
+        "index_limit",
+        "index_count_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
       "paramDefs": {
-        "offset": {
+        "index_offset": {
           "label": "本地指数起始偏移",
           "description": "从本地指数库选取指数代码的起始偏移量",
           "type": "number",
           "default": 0
         },
-        "limit": {
+        "index_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量",
           "type": "number",
@@ -163,7 +191,9 @@
           "default": 0
         }
       },
-      "specialFlags": ["secondary_paging"],
+      "specialFlags": [
+        "secondary_paging"
+      ],
       "outputTaskVariantSubType": 1
     },
     {
@@ -173,8 +203,17 @@
       "expandParam": "date_range",
       "expandDescription": "将固定的 start_date/end_date 与本地指数批次做笛卡尔积，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求",
       "expandStrategy": "date_range_with_index_batches",
-      "requiredParams": ["date_range"],
-      "optionalParams": ["offset", "limit", "index_count_limit", "api_offset_start", "api_offset_end", "api_offset_step"],
+      "requiredParams": [
+        "date_range"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_limit",
+        "index_count_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
       "paramDefs": {
         "date_range.start_date": {
           "label": "开始日期",
@@ -190,13 +229,13 @@
           "format": "yyyyMMdd",
           "default": null
         },
-        "offset": {
+        "index_offset": {
           "label": "本地指数起始偏移",
           "description": "从本地指数库选取指数代码的起始偏移量",
           "type": "number",
           "default": 0
         },
-        "limit": {
+        "index_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量",
           "type": "number",
@@ -227,8 +266,11 @@
           "default": 0
         }
       },
-      "specialFlags": ["secondary_paging", "historical_init"],
-      "outputTaskVariantSubType": 2
+      "specialFlags": [
+        "secondary_paging",
+        "historical_init"
+      ],
+      "outputTaskVariantSubType": 3
     }
   ]
 }

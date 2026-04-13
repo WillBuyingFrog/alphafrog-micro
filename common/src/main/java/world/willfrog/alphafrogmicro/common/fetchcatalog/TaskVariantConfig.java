@@ -6,12 +6,20 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * tasks 场景下的参数组合配置（对应 task_sub_type）。
+ * tasks 场景下的参数组合配置（对应 {@code task_sub_type}）。
+ * <p>
+ * 每个 taskVariant 代表一种任务执行方式，通过 {@link #subType} 区分。
+ * 例如 {@code index_quote} 有 subType=1（按交易日）、subType=2（按日期范围）、subType=3（历史初始化）。
+ * </p>
+ *
+ * @see FetchDataTypeConfig
+ * @see TaskSetVariantConfig
  */
 public class TaskVariantConfig {
 
+    /** task_sub_type 编号，使用包装类型以便区分"未设置"和"值为0" */
     @JsonProperty("subType")
-    private int subType;
+    private Integer subType;
 
     @JsonProperty("label")
     private String label;
@@ -34,10 +42,10 @@ public class TaskVariantConfig {
     // ==================== Getters & Setters ====================
 
     public int getSubType() {
-        return subType;
+        return subType != null ? subType : 0;
     }
 
-    public void setSubType(int subType) {
+    public void setSubType(Integer subType) {
         this.subType = subType;
     }
 

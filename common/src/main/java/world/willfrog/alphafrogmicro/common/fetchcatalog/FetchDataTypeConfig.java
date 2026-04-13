@@ -5,7 +5,13 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import java.util.List;
 
 /**
- * 单个数据类型的完整 JSON 配置。
+ * 单个数据类型的完整 JSON 配置，对应 fetch-catalog/ 目录下的一个 JSON 文件。
+ * <p>包含数据类型标识、中文标签、描述、归属的服务模块，以及全量的 taskVariants（单任务变体）
+ * 和 taskSetVariants（任务集展开变体）定义。</p>
+ *
+ * @see FetchCatalogConfigLoader
+ * @see TaskVariantConfig
+ * @see TaskSetVariantConfig
  */
 public class FetchDataTypeConfig {
 

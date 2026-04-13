@@ -57,13 +57,14 @@ test-secrets.yml
 
 # Coding Agent configs
 
-/.qwen
-/.qoder
-/.kimi
+.qwen/
+.qoder/
+.kimi/
 .mcp.json
-/.cursor
-/.codex
-/.kilocode
+.cursor/
+.codex/
+.kilocode/
+.github/
 
 # Coding Agent Files
 

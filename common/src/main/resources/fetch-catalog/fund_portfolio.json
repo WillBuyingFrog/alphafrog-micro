@@ -9,7 +9,7 @@
       "label": "按日期范围抓取",
       "description": "按指定的日期范围抓取基金持仓数据，内部会逐个 fundTsCode 请求",
       "requiredParams": ["start_date", "end_date"],
-      "optionalParams": ["offset", "limit"],
+      "optionalParams": ["ts_code", "offset", "limit"],
       "paramDefs": {
         "start_date": {
           "label": "开始日期",
@@ -23,6 +23,12 @@
           "description": "日期范围的结束日期，格式 yyyyMMdd",
           "type": "string",
           "format": "yyyyMMdd",
+          "default": null
+        },
+        "ts_code": {
+          "label": "基金代码",
+          "description": "TS 格式基金代码，如 000001.OF；为空则抓取全部基金",
+          "type": "string",
           "default": null
         },
         "offset": {

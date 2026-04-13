@@ -20,6 +20,7 @@ import world.willfrog.alphafrogmicro.domestic.idl.*;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * RabbitMQ 抓取任务消费端。
@@ -73,10 +74,10 @@ public class FetchTopicConsumer {
                 2, 4, 60, TimeUnit.SECONDS,
                 new LinkedBlockingQueue<>(100),
                 new ThreadFactory() {
-                    private int count = 0;
+                    private final AtomicInteger count = new AtomicInteger(0);
                     @Override
                     public Thread newThread(Runnable r) {
-                        return new Thread(r, "fetch-task-executor-" + (++count));
+                        return new Thread(r, "fetch-task-executor-" + count.incrementAndGet());
                     }
                 },
                 new ThreadPoolExecutor.CallerRunsPolicy()
@@ -107,7 +108,7 @@ public class FetchTopicConsumer {
     public void listenFetchTask(String message,
                                 Channel channel,
                                 @Header(AmqpHeaders.DELIVERY_TAG) long tag){
-        log.info("Received fetch task [V2-DEBUG]: {}", message);
+        log.debug("Received fetch task: {}", message);
 
         String taskUuid = null;
         
@@ -741,7 +742,7 @@ public class FetchTopicConsumer {
         }
     }
 
-    /** 将 yyyyMMdd 字符串或已有的 long/Number 转换为毫秒时间戳。 */
+    /** 将 yyyyMMdd 字符串或已有的 long/Number 转换为毫秒时间戳。解析失败时记录警告并返回 0L。 */
     private long dateToTs(Object value) {
         if (value == null) return 0L;
         if (value instanceof Number n) return n.longValue();
@@ -749,11 +750,14 @@ public class FetchTopicConsumer {
         if (s.isEmpty()) return 0L;
         if (s.matches("\\d{8}")) {
             Long ts = DateConvertUtils.convertDateStrToLong(s, "yyyyMMdd");
-            return ts != null && ts >= 0 ? ts : 0L;
+            if (ts != null && ts >= 0) return ts;
+            log.warn("dateToTs 解析失败: yyyyMMdd 格式转换异常, 输入='{}'", s);
+            return 0L;
         }
         try {
             return Long.parseLong(s);
         } catch (NumberFormatException e) {
+            log.warn("dateToTs 解析失败: 无法将 '{}' 转换为时间戳", s);
             return 0L;
         }
     }

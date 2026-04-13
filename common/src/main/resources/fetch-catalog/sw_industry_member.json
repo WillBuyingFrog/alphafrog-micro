@@ -14,22 +14,26 @@
         "l1_code": {
           "label": "一级行业代码",
           "description": "申万一级行业代码",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "l2_code": {
           "label": "二级行业代码",
           "description": "申万二级行业代码",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "l3_code": {
           "label": "三级行业代码",
           "description": "申万三级行业代码",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "ts_code": {
           "label": "股票代码",
           "description": "股票代码，如000001.SZ",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "is_new": {
           "label": "是否最新",

@@ -47,6 +47,8 @@ public class AdminFetchJobExpansionService {
     private DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
 
     private static final int DEFAULT_LIMIT = 5000;
+    /** 单次展开的叶子任务数量上限，防止内存溢出 */
+    static final int MAX_EXPAND_LEAF_TASKS = 5000;
 
     @PostConstruct
     public void init() {
@@ -233,6 +235,11 @@ public class AdminFetchJobExpansionService {
                 }
                 List<LocalDate> dates = expandTradeDates(tradeDates, index);
                 List<Integer> offsets = expandOffsets(rawTask, index);
+                // 笛卡尔积预估检查
+                long estimated = (long) dates.size() * offsets.size();
+                if (estimated > MAX_EXPAND_LEAF_TASKS) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] 笛卡尔积预估任务数 " + estimated + " 超过上限 " + MAX_EXPAND_LEAF_TASKS);
+                }
                 for (LocalDate d : dates) {
                     for (int off : offsets) {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
@@ -243,24 +250,26 @@ public class AdminFetchJobExpansionService {
                 }
             }
             case "index_batches" -> {
-                int baseOffset = getIntValue(baseParams.get("offset"), 0);
-                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                // index_batches: 按本地指数分批展开，使用 index_offset/index_limit 区分于 TuShare 分页的 offset/limit
+                int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
+                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
                 for (int b = 0; b < batchCount; b++) {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                    p.put("offset", baseOffset + b * batchSize);
-                    p.put("limit", batchSize);
+                    p.put("index_offset", baseOffset + b * batchSize);
+                    p.put("index_limit", batchSize);
                     expandedParamsList.add(p);
                 }
             }
             case "trade_dates_with_index_batches" -> {
+                // trade_dates_with_index_batches: 交易日 x 本地指数批次笛卡尔积展开
                 @SuppressWarnings("unchecked")
                 Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
                 List<LocalDate> dates = expandTradeDates(tradeDates, index);
-                int baseOffset = getIntValue(baseParams.get("offset"), 0);
-                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
+                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
@@ -268,13 +277,14 @@ public class AdminFetchJobExpansionService {
                     for (int b = 0; b < batchCount; b++) {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
                         p.put("trade_date", dateToString(d));
-                        p.put("offset", baseOffset + b * batchSize);
-                        p.put("limit", batchSize);
+                        p.put("index_offset", baseOffset + b * batchSize);
+                        p.put("index_limit", batchSize);
                         expandedParamsList.add(p);
                     }
                 }
             }
             case "date_range_with_index_batches" -> {
+                // date_range_with_index_batches: 固定日期范围 x 本地指数批次笛卡尔积展开
                 @SuppressWarnings("unchecked")
                 Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
                 if (dateRange == null) {
@@ -285,8 +295,8 @@ public class AdminFetchJobExpansionService {
                 if (startDateRaw == null || endDateRaw == null) {
                     throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_index_batches 模式需要 start_date 和 end_date");
                 }
-                int baseOffset = getIntValue(baseParams.get("offset"), 0);
-                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
+                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
@@ -294,12 +304,19 @@ public class AdminFetchJobExpansionService {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
                     p.put("start_date", String.valueOf(startDateRaw));
                     p.put("end_date", String.valueOf(endDateRaw));
-                    p.put("offset", baseOffset + b * batchSize);
-                    p.put("limit", batchSize);
+                    p.put("index_offset", baseOffset + b * batchSize);
+                    p.put("index_limit", batchSize);
                     expandedParamsList.add(p);
                 }
             }
             default -> throw new IllegalArgumentException("不支持的 expandStrategy: " + expandStrategy);
+        }
+
+        // 早期中止：如果展开结果超出上限，立即抛出异常避免 OOM
+        if (expandedParamsList.size() > MAX_EXPAND_LEAF_TASKS) {
+            throw new IllegalArgumentException(
+                    "task_sets[" + index + "] 展开后任务数 " + expandedParamsList.size()
+                            + " 超过上限 " + MAX_EXPAND_LEAF_TASKS);
         }
 
         List<LeafTask> result = new ArrayList<>();

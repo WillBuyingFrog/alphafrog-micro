@@ -1021,7 +1021,11 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     // ==================== 私有辅助方法：单层 TuShare 请求 ====================
 
-    /** 抓取单个 tsCode 在某一交易日的单页 index_daily 数据 */
+    /**
+     * 抓取单个 tsCode 在某一交易日的单页 index_daily 数据。
+     *
+     * @return 实际写入条数；请求失败返回 {@code -1}，数据为空返回 {@code 0}
+     */
     private int fetchIndexDailyByTradeDateSinglePage(String tsCode, long tradeDateTimestamp, int apiOffset, int apiLimit) {
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -1035,17 +1039,17 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
         if (response == null) {
-            log.warn("TuShare returned null response for ts_code {} on trade date {} apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
-            return 0;
+            log.warn("TuShare 返回 null，请求失败: ts_code={}, trade_date={}, apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
+            return -1;
         }
         JSONObject dataObj = response.getJSONObject("data");
         if (dataObj == null) {
-            log.warn("TuShare response missing 'data' for ts_code {} on trade date {} apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
-            return 0;
+            log.warn("TuShare 响应缺少 'data' 字段: ts_code={}, trade_date={}, apiOffset={}", tsCode, tradeDateTimestamp, apiOffset);
+            return -1;
         }
         JSONArray data = dataObj.getJSONArray("items");
         JSONArray fields = dataObj.getJSONArray("fields");
-        if (data == null) {
+        if (data == null || data.isEmpty()) {
             return 0;
         }
         return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
@@ -1072,7 +1076,11 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
     }
 
-    /** 抓取单个 tsCode 在某一日期范围内的单页 index_weight 数据 */
+    /**
+     * 抓取单个 tsCode 在某一日期范围内的单页 index_weight 数据。
+     *
+     * @return 实际写入条数；请求失败返回 {@code -1}，数据为空返回 {@code 0}
+     */
     private int fetchIndexWeightByDateRangeSinglePage(String tsCode, String startDate, String endDate, int apiOffset, int apiLimit) {
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -1087,15 +1095,17 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
         JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
         if (response == null) {
-            return 0;
+            log.warn("TuShare 返回 null，请求失败: index_weight ts_code={}, startDate={}, endDate={}", tsCode, startDate, endDate);
+            return -1;
         }
         JSONObject dataObj = response.getJSONObject("data");
         if (dataObj == null) {
-            return 0;
+            log.warn("TuShare 响应缺少 'data' 字段: index_weight ts_code={}, startDate={}, endDate={}", tsCode, startDate, endDate);
+            return -1;
         }
         JSONArray data = dataObj.getJSONArray("items");
         JSONArray fields = dataObj.getJSONArray("fields");
-        if (data == null) {
+        if (data == null || data.isEmpty()) {
             return 0;
         }
         return domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);

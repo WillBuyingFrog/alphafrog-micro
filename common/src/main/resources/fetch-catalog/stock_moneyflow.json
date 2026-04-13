@@ -48,7 +48,7 @@
       "specialFlags": []
     },
     {
-      "subType": 2,
+      "subType": 3,
       "label": "历史初始化",
       "description": "按固定的日期范围批量抓取股票资金流向数据，专用于历史数据初始化",
       "requiredParams": [],
@@ -275,7 +275,7 @@
         }
       },
       "specialFlags": ["historical_init"],
-      "outputTaskVariantSubType": 2
+      "outputTaskVariantSubType": 3
     }
   ]
 }

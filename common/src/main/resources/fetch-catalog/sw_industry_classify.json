@@ -14,7 +14,8 @@
         "level": {
           "label": "行业层级",
           "description": "行业分类层级，如L1、L2、L3",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "src": {
           "label": "数据来源",

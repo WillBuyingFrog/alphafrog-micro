@@ -14,7 +14,8 @@
         "market": {
           "label": "市场代码",
           "description": "交易所或市场标识，如E、O等",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "offset": {
           "label": "偏移量",

@@ -469,14 +469,3 @@ jest compactJsonUtils.test.js
 ## 许可证
 
 MIT License - 详见项目根目录的LICENSE文件
-
-## 支持
-
-如有问题或建议，请通过以下方式联系：
-- 提交GitHub Issue
-- 发送邮件至：support@alphafrog.com
-
----
-
-**AlphaFrog Team**  
-*让金融数据处理更简单、更高效*

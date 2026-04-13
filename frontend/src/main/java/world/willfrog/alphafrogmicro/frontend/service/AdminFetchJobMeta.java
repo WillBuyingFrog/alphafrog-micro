@@ -56,6 +56,10 @@ public final class AdminFetchJobMeta {
     // 缓存：从 JSON 配置动态构建
     private static List<TaskVariantMeta> TASK_VARIANT_METAS = List.of();
     private static List<TaskVariantMeta> TASK_SET_VARIANT_METAS = List.of();
+    /** 任务名称到中文标签的缓存，由 refresh() 时从 JSON label 字段构建 */
+    private static Map<String, String> TASK_LABEL_CACHE = Map.of();
+    /** 所有已注册的 expandStrategy 集合，由 refresh() 从全量 JSON 配置中收集 */
+    private static List<String> ALL_EXPAND_STRATEGIES = List.of();
 
     /**
      * 由 FetchCatalogConfigLoader 在启动完成后调用，将 JSON 配置转换为内存中的元数据。
@@ -63,9 +67,22 @@ public final class AdminFetchJobMeta {
     public static synchronized void refresh(FetchCatalogConfigLoader loader) {
         List<TaskVariantMeta> taskList = new ArrayList<>();
         List<TaskVariantMeta> taskSetList = new ArrayList<>();
+        Map<String, String> labelMap = new HashMap<>();
+
+        // 先收集所有 expandStrategy，供后续 buildFieldsFromVariant 使用
+        Set<String> strategySet = new LinkedHashSet<>();
+        for (FetchDataTypeConfig cfg : loader.getAllConfigs().values()) {
+            if (cfg.getTaskSetVariants() != null) {
+                for (TaskSetVariantConfig tsc : cfg.getTaskSetVariants()) {
+                    if (tsc.getExpandStrategy() != null) strategySet.add(tsc.getExpandStrategy());
+                }
+            }
+        }
+        ALL_EXPAND_STRATEGIES = List.copyOf(strategySet);
 
         for (FetchDataTypeConfig config : loader.getAllConfigs().values()) {
             String dataType = config.getDataType();
+            labelMap.put(dataType, config.getLabel() != null ? config.getLabel() : dataType);
 
             // tasks 场景变体
             if (config.getTaskVariants() != null) {
@@ -112,6 +129,7 @@ public final class AdminFetchJobMeta {
 
         TASK_VARIANT_METAS = Collections.unmodifiableList(taskList);
         TASK_SET_VARIANT_METAS = Collections.unmodifiableList(taskSetList);
+        TASK_LABEL_CACHE = Collections.unmodifiableMap(labelMap);
     }
 
     /**
@@ -139,12 +157,9 @@ public final class AdminFetchJobMeta {
                 List<String> activeModes = computeActiveModes(paramName, taskSetExpandStrategy);
                 if (activeModes != null && !activeModes.isEmpty()) {
                     effectiveWhen = pathIn("task_set_mode", activeModes.toArray(new String[0]));
-                    // ignoredWhen = 不在 activeModes 中的其他模式
-                    List<String> allModes = List.of("trade_dates", "offsets", "trade_dates_with_offsets",
-                            "date_range_with_offsets", "index_batches", "trade_dates_with_index_batches",
-                            "date_range_with_index_batches");
+                    // ignoredWhen = 不在 activeModes 中的其他模式（从已加载配置动态获取）
                     List<String> ignoredModes = new ArrayList<>();
-                    for (String m : allModes) {
+                    for (String m : ALL_EXPAND_STRATEGIES) {
                         if (!activeModes.contains(m)) ignoredModes.add(m);
                     }
                     if (!ignoredModes.isEmpty()) {
@@ -243,41 +258,10 @@ public final class AdminFetchJobMeta {
         return null;
     }
 
-    /** 任务名称到中文标签的映射（优先从 JSON 配置读取） */
+    /** 任务名称到中文标签的映射（从 JSON 配置的 label 字段动态读取，缓存未命中时回退到原始 taskName） */
     public static String taskLabel(String taskName) {
-        // 这里简单保留原映射，实际运行时也可以从 FetchCatalogConfigLoader 读取
-        return switch (taskName) {
-            case "stock_daily" -> "股票日线";
-            case "stock_quote" -> "股票行情";
-            case "index_quote" -> "指数行情";
-            case "index_weight" -> "指数权重";
-            case "index_daily_basic" -> "指数日线指标";
-            case "fund_nav" -> "基金净值";
-            case "fund_portfolio" -> "基金持仓";
-            case "fund_share" -> "基金份额";
-            case "etf_share_size" -> "ETF 份额规模";
-            case "trade_calendar" -> "交易日历";
-            case "sw_industry_daily" -> "申万行业日线";
-            case "sw_industry_classify" -> "申万行业分类";
-            case "sw_industry_member" -> "申万行业成分";
-            case "ci_industry_daily" -> "中信行业日线";
-            case "ci_index_member" -> "中信行业成分";
-            case "fund_manager" -> "基金经理";
-            case "fund_company" -> "基金管理人";
-            case "fund_info" -> "基金基本信息";
-            case "stock_info" -> "股票基本信息";
-            case "index_info" -> "指数基本信息";
-            case "stock_income" -> "股票利润表";
-            case "stock_balancesheet" -> "股票资产负债表";
-            case "stock_cashflow" -> "股票现金流量表";
-            case "stock_forecast" -> "业绩预告";
-            case "stock_express" -> "业绩快报";
-            case "stock_report_rc" -> "卖方盈利预测";
-            case "stock_moneyflow" -> "个股资金流向";
-            case "stock_top10_holders" -> "前十大股东";
-            case "stock_share_float" -> "限售股解禁";
-            default -> taskName;
-        };
+        String label = TASK_LABEL_CACHE.get(taskName);
+        return label != null ? label : taskName;
     }
 
     // ==================== 辅助工厂方法（保留兼容） ====================

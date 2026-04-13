@@ -35,7 +35,7 @@
       "specialFlags": []
     },
     {
-      "subType": 2,
+      "subType": 3,
       "label": "历史初始化",
       "description": "按固定的日期范围批量抓取全部股票日线数据",
       "requiredParams": ["start_date", "end_date"],
@@ -235,7 +235,7 @@
         }
       },
       "specialFlags": ["historical_init"],
-      "outputTaskVariantSubType": 2
+      "outputTaskVariantSubType": 3
     }
   ]
 }

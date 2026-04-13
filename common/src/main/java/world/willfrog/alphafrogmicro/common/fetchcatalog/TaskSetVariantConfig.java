@@ -6,12 +6,21 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * task_sets 场景下的展开配置（对应 task_set_sub_type）。
+ * task_sets 场景下的展开配置（对应 {@code task_set_sub_type}）。
+ * <p>
+ * 描述一种任务集展开策略：如何将前端传入的参数（日期范围、offset 范围等）
+ * 展开成多条扁平的叶子任务。每条叶子任务对应一个 taskVariant，由
+ * {@link #outputTaskVariantSubType} 指定。
+ * </p>
+ *
+ * @see FetchDataTypeConfig
+ * @see TaskVariantConfig
  */
 public class TaskSetVariantConfig {
 
+    /** task_set_sub_type 编号，使用包装类型以便区分"未设置"和"值为0" */
     @JsonProperty("subType")
-    private int subType;
+    private Integer subType;
 
     @JsonProperty("label")
     private String label;
@@ -40,16 +49,17 @@ public class TaskSetVariantConfig {
     @JsonProperty("specialFlags")
     private List<String> specialFlags;
 
+    /** 展开后生成的叶子任务应使用的 taskVariant subType，使用包装类型 */
     @JsonProperty("outputTaskVariantSubType")
-    private int outputTaskVariantSubType;
+    private Integer outputTaskVariantSubType;
 
     // ==================== Getters & Setters ====================
 
     public int getSubType() {
-        return subType;
+        return subType != null ? subType : 0;
     }
 
-    public void setSubType(int subType) {
+    public void setSubType(Integer subType) {
         this.subType = subType;
     }
 
@@ -126,10 +136,10 @@ public class TaskSetVariantConfig {
     }
 
     public int getOutputTaskVariantSubType() {
-        return outputTaskVariantSubType;
+        return outputTaskVariantSubType != null ? outputTaskVariantSubType : 0;
     }
 
-    public void setOutputTaskVariantSubType(int outputTaskVariantSubType) {
+    public void setOutputTaskVariantSubType(Integer outputTaskVariantSubType) {
         this.outputTaskVariantSubType = outputTaskVariantSubType;
     }
 

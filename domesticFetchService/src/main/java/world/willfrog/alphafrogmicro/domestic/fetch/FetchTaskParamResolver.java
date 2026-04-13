@@ -8,7 +8,11 @@ import java.util.*;
 
 /**
  * 基于 JSON Catalog 配置的任务参数解析器。
- * 负责从 taskParams 中按 paramDefs 提取参数、应用默认值、做类型转换。
+ * <p>负责根据 {@link TaskVariantConfig#getParamDefs()} 从原始 taskParams 中提取参数、
+ * 应用默认值、做类型转换（string/number/boolean）。
+ * 对于带点号的参数名（如 trade_dates.start_date），支持嵌套 Map 取值。</p>
+ *
+ * @see FetchCatalogConfigLoader
  */
 @Component
 @Slf4j
@@ -60,6 +64,10 @@ public class FetchTaskParamResolver {
         return result;
     }
 
+    /**
+     * 从可能的嵌套 Map 中按点号分隔的键路径取值。
+     * <p>例如 key="trade_dates.start_date" 会从 map.get("trade_dates")、2级 map 中取 "start_date"。</p>
+     */
     private Object getNestedValue(Map<String, Object> map, String key) {
         if (map == null) return null;
         if (key.contains(".")) {
@@ -77,6 +85,13 @@ public class FetchTaskParamResolver {
         return map.get(key);
     }
 
+    /**
+     * 根据 paramDef 中的 type 字段将值转为目标类型。
+     *
+     * @param value 待转换的原始值
+     * @param type  目标类型，可为 number / boolean / string
+     * @return 转换后的值，转换失败时原样返回
+     */
     private Object convertType(Object value, String type) {
         if (value == null) return null;
         if (type == null) return value;

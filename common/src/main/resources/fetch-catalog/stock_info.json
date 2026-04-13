@@ -14,7 +14,8 @@
         "market": {
           "label": "交易所代码",
           "description": "交易所标识，映射API的exchange参数，如SSE、SZSE、BSE等",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "offset": {
           "label": "偏移量",

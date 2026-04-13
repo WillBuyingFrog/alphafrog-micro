@@ -14,18 +14,21 @@
         "ts_code": {
           "label": "基金代码",
           "description": "基金代码，如000001.OF",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "ann_date": {
           "label": "公告日期",
           "description": "公告日期，格式yyyyMMdd",
           "type": "string",
-          "format": "yyyyMMdd"
+          "format": "yyyyMMdd",
+          "default": null
         },
         "name": {
           "label": "基金经理姓名",
           "description": "基金经理姓名",
-          "type": "string"
+          "type": "string",
+          "default": null
         },
         "offset": {
           "label": "偏移量",
