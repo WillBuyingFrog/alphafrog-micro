@@ -1,0 +1,18 @@
+{
+  "dataType": "fund_company",
+  "label": "基金公司",
+  "description": "获取公募基金公司基本信息，包含公司名称、成立日期、注册资本、总经理等。",
+  "serviceModule": "domesticFundFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "全量抓取",
+      "description": "无参数，一次性全量抓取所有基金公司基本信息。",
+      "requiredParams": [],
+      "optionalParams": [],
+      "paramDefs": {},
+      "specialFlags": ["empty_params_allowed"]
+    }
+  ],
+  "taskSetVariants": []
+}

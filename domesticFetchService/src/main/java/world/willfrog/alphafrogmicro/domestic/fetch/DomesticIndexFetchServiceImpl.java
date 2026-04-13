@@ -17,6 +17,11 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * 国内指数数据抓取 Dubbo 服务实现。
+ * 负责通过 TuShare 接口获取指数基本信息、日线行情、成分股权重、估值指标、申万/中信行业数据等，
+ * 并调用 DomesticIndexStoreUtils 持久化到数据库。
+ */
 @Service
 @DubboService
 @Slf4j
@@ -35,6 +40,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
     }
 
 
+    /**
+     * 按市场分页抓取指数基本信息（api_name=index_basic）。
+     */
     @Override
     public DomesticIndexInfoFetchByMarketResponse fetchDomesticIndexInfoByMarket(
             DomesticIndexInfoFetchByMarketRequest request) {
@@ -77,6 +85,10 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         }
     }
 
+    /**
+     * 按日期范围抓取单个指数的日线行情（api_name=index_daily）。
+     * 对应 FetchTopicConsumer 中旧的 subType=3 逻辑（按 ts_code + 日期范围）。
+     */
     @Override
     public DomesticIndexDailyFetchByDateRangeResponse fetchDomesticIndexDailyByDateRange(
             DomesticIndexDailyFetchByDateRangeRequest request) {
@@ -130,6 +142,11 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     }
 
+    /**
+     * 按单个交易日抓取所有指数日线行情（subType=1）。
+     * 先从本地 index_info 分批取 tsCode，再逐个代码请求 TuShare，
+     * 支持 apiOffsetStart/End/Step 的内部分页循环。
+     */
     @Override
     public DomesticIndexDailyFetchByTradeDateResponse fetchDomesticIndexDailyByTradeDate(
             DomesticIndexDailyFetchByTradeDateRequest request
@@ -197,6 +214,10 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     }
 
+    /**
+     * 按日期范围批量抓取所有指数日线行情（subType=2/3）。
+     * 同样采用"本地指数分批 + 逐个 tsCode 内循环分页"的双层机制。
+     */
     @Override
     public DomesticIndexDailyFetchAllByDateRangeResponse fetchDomesticIndexDailyAllByDateRange(
             DomesticindexDailyFetchAllByDateRangeRequest request) {
@@ -263,6 +284,10 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(_counter).build();
     }
 
+    /**
+     * 按日期范围抓取指数成分股权重（api_name=index_weight）。
+     * 逻辑与 index_daily 类似：本地指数分批 + 逐个 tsCode 内循环分页。
+     */
     @Override
     public DomesticIndexWeightFetchByDateRangeResponse fetchDomesticIndexWeightByDateRange(
             DomesticIndexWeightFetchByDateRangeRequest request) {
@@ -329,6 +354,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     // ==================== 新增：大盘指数每日估值指标 ====================
 
+    /**
+     * 按指数代码和日期范围抓取大盘指数每日估值指标（api_name=index_dailybasic）。
+     */
     @Override
     public DomesticIndexDailyBasicFetchByTsCodeResponse fetchIndexDailyBasicByTsCode(
             DomesticIndexDailyBasicFetchByTsCodeRequest request) {
@@ -376,6 +404,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    /**
+     * 按单个交易日抓取全部大盘指数估值指标（api_name=index_dailybasic）。
+     */
     @Override
     public DomesticIndexDailyBasicFetchByTradeDateResponse fetchIndexDailyBasicByTradeDate(
             DomesticIndexDailyBasicFetchByTradeDateRequest request) {
@@ -421,6 +452,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    /**
+     * 按日期范围批量抓取全部大盘指数估值指标（历史数据初始化）。
+     */
     @Override
     public DomesticIndexDailyBasicFetchAllByDateRangeResponse fetchIndexDailyBasicAllByDateRange(
             DomesticIndexDailyBasicFetchAllByDateRangeRequest request) {
@@ -987,6 +1021,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
 
     // ==================== 私有辅助方法：单层 TuShare 请求 ====================
 
+    /** 抓取单个 tsCode 在某一交易日的单页 index_daily 数据 */
     private int fetchIndexDailyByTradeDateSinglePage(String tsCode, long tradeDateTimestamp, int apiOffset, int apiLimit) {
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -1016,6 +1051,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(data, fields);
     }
 
+    /** 抓取单个 tsCode 在某一日期范围内的单页 index_daily 数据 */
     private int fetchIndexDailyAllByDateRangeSinglePage(String tsCode, long startDateTimestamp, long endDateTimestamp, int apiOffset, int apiLimit) {
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
@@ -1036,6 +1072,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         return domesticIndexStoreUtils.storeIndexDailyByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
     }
 
+    /** 抓取单个 tsCode 在某一日期范围内的单页 index_weight 数据 */
     private int fetchIndexWeightByDateRangeSinglePage(String tsCode, String startDate, String endDate, int apiOffset, int apiLimit) {
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();

@@ -14,7 +14,8 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
- * Admin Fetch Job 预览与参数分析服务
+ * Admin Fetch Job 预览与参数分析服务。
+ * 前端调用 /admin/fetch-jobs/preview 时，后端做展开校验、参数状态分析和行为摘要生成。
  */
 @Service
 @Slf4j
@@ -27,6 +28,10 @@ public class AdminFetchJobPreviewService {
     private static final int DEFAULT_WORKER_THREADS = 4;
     private static final int DEFAULT_TASK_INTERVAL_MS = 200;
 
+    /**
+     * 预览入口：校验 mode → 展开叶子任务 → 参数分析 → 行为摘要 → 组装响应。
+     * 返回的 valid 字段决定前端提交按钮是否可用。
+     */
     public Map<String, Object> previewJob(Map<String, Object> body) {
         List<PreviewError> errors = new ArrayList<>();
         List<PreviewWarning> warnings = new ArrayList<>();
@@ -92,6 +97,7 @@ public class AdminFetchJobPreviewService {
         return plan;
     }
 
+    /** 解析 execution_options，提供 workerThreads / taskIntervalMs 默认值及范围校验 */
     private Map<String, Object> parseExecutionOptions(Map<String, Object> body) {
         Map<String, Object> defaults = new LinkedHashMap<>();
         defaults.put("workerThreads", DEFAULT_WORKER_THREADS);
@@ -121,6 +127,7 @@ public class AdminFetchJobPreviewService {
         return defaults;
     }
 
+    /** 对 body 中的每个任务源（tasks / task_sets / fetch_info）做参数分析 */
     private List<Map<String, Object>> analyzeBodyParameters(Map<String, Object> body, String mode,
                                                             List<PreviewError> errors, List<PreviewWarning> warnings) {
         List<Map<String, Object>> result = new ArrayList<>();
@@ -128,15 +135,14 @@ public class AdminFetchJobPreviewService {
             for (int i = 0; i < tasksRaw.size(); i++) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> raw = (Map<String, Object>) tasksRaw.get(i);
-                result.add(analyzeSourceItem(raw, "tasks[" + i + "]", null, errors, warnings));
+                result.add(analyzeSourceItem(raw, "tasks[" + i + "]", false, errors, warnings));
             }
         }
         if (("task_sets".equals(mode) || "all".equals(mode)) && body.get("task_sets") instanceof List<?> setsRaw) {
             for (int i = 0; i < setsRaw.size(); i++) {
                 @SuppressWarnings("unchecked")
                 Map<String, Object> raw = (Map<String, Object>) setsRaw.get(i);
-                String tsm = expansionService.normalizeTaskSetMode(raw);
-                result.add(analyzeSourceItem(raw, "task_sets[" + i + "]", tsm, errors, warnings));
+                result.add(analyzeSourceItem(raw, "task_sets[" + i + "]", true, errors, warnings));
             }
         }
         if (("fetch_info".equals(mode) || "all".equals(mode)) && body.get("fetch_info") instanceof Map<?, ?> fiRaw) {
@@ -149,21 +155,46 @@ public class AdminFetchJobPreviewService {
                 String taskName = Map.of("fund", "fund_info", "stock", "stock_info", "index", "index_info").get(entry.getKey());
                 TaskVariantMeta meta = AdminFetchJobMeta.findVariantMeta(taskName, 1);
                 if (meta != null) {
-                    result.add(analyzeSourceItemWithMeta(raw, "fetch_info." + entry.getKey(), null, meta, errors, warnings));
+                    String tsm = meta.allowedTaskSetModes().isEmpty() ? null : meta.allowedTaskSetModes().get(0);
+                    result.add(analyzeSourceItemWithMeta(raw, "fetch_info." + entry.getKey(), tsm, meta, errors, warnings));
                 }
             }
         }
         return result;
     }
 
-    private Map<String, Object> analyzeSourceItem(Map<String, Object> raw, String scope, String taskSetMode,
+    /**
+     * 分析单个任务源：先通过 taskName + subType 查找 Catalog 元数据，
+     * 若找不到或 taskSetMode 不被支持则报错，否则进入字段级分析。
+     */
+    private Map<String, Object> analyzeSourceItem(Map<String, Object> raw, String scope, boolean isTaskSet,
                                                   List<PreviewError> errors, List<PreviewWarning> warnings) {
         String taskName = expansionService.getTaskName(raw);
-        int taskSubType = expansionService.getIntValue(raw.get("task_sub_type"), 1);
-        TaskVariantMeta meta = AdminFetchJobMeta.findVariantMeta(taskName, taskSubType);
+        TaskVariantMeta meta;
+        String taskSetMode = null;
+        if (isTaskSet) {
+            int taskSetSubType = expansionService.getIntValue(raw.get("task_set_sub_type"), 1);
+            // 兼容旧协议
+            if (raw.get("task_set_sub_type") == null && raw.get("task_sub_type") != null) {
+                taskSetSubType = expansionService.getIntValue(raw.get("task_sub_type"), 1);
+            }
+            meta = AdminFetchJobMeta.findTaskSetVariantMeta(taskName, taskSetSubType);
+            if (meta != null) {
+                taskSetMode = meta.allowedTaskSetModes().isEmpty() ? null : meta.allowedTaskSetModes().get(0);
+            }
+            if (meta == null) {
+                errors.add(new PreviewError(scope + ".task_name", "UNKNOWN_TASK",
+                        "未知的任务类型: " + taskName + " (taskSetSubType=" + taskSetSubType + ")"));
+            }
+        } else {
+            int taskSubType = expansionService.getIntValue(raw.get("task_sub_type"), 1);
+            meta = AdminFetchJobMeta.findVariantMeta(taskName, taskSubType);
+            if (meta == null) {
+                errors.add(new PreviewError(scope + ".task_name", "UNKNOWN_TASK",
+                        "未知的任务类型: " + taskName + " (subType=" + taskSubType + ")"));
+            }
+        }
         if (meta == null) {
-            errors.add(new PreviewError(scope + ".task_name", "UNKNOWN_TASK",
-                    "未知的任务类型: " + taskName + " (subType=" + taskSubType + ")"));
             Map<String, Object> empty = new LinkedHashMap<>();
             empty.put("scope", scope);
             empty.put("effective", List.of());
@@ -173,13 +204,14 @@ public class AdminFetchJobPreviewService {
             empty.put("invalid", List.of());
             return empty;
         }
-        if (taskSetMode != null && !meta.allowedTaskSetModes().contains(taskSetMode)) {
-            errors.add(new PreviewError(scope + ".task_set_mode", "UNSUPPORTED_TASK_SET_MODE",
-                    "该任务子类型不支持 " + taskSetMode + " 模式"));
-        }
         return analyzeSourceItemWithMeta(raw, scope, taskSetMode, meta, errors, warnings);
     }
 
+    /**
+     * 字段级参数分析：遍历 Catalog 中定义的所有字段，
+     * 根据 effectiveWhen / requiredWhen / ignoredWhen 判断字段状态，
+     * 输出 effective、requiredMissing、optionalEffectiveEmpty、ignored、invalid 五类列表。
+     */
     private Map<String, Object> analyzeSourceItemWithMeta(Map<String, Object> raw, String scope, String taskSetMode,
                                                           TaskVariantMeta meta,
                                                           List<PreviewError> errors, List<PreviewWarning> warnings) {
@@ -247,6 +279,7 @@ public class AdminFetchJobPreviewService {
         return analysis;
     }
 
+    /** 构建字段取值上下文：把嵌套 Map 扁平化，并注入 task_set_mode 等变量 */
     private Map<String, Object> buildContext(Map<String, Object> rawItem, String taskSetMode) {
         Map<String, Object> context = new java.util.HashMap<>();
         flattenMap("", rawItem, context);
@@ -263,6 +296,7 @@ public class AdminFetchJobPreviewService {
         return context;
     }
 
+    /** 递归扁平化嵌套 Map，键名用点号连接 */
     private void flattenMap(String prefix, Map<String, Object> source, Map<String, Object> target) {
         for (Map.Entry<String, Object> entry : source.entrySet()) {
             String key = prefix.isEmpty() ? entry.getKey() : prefix + "." + entry.getKey();
@@ -276,6 +310,10 @@ public class AdminFetchJobPreviewService {
         }
     }
 
+    /**
+     * 按字段名从 raw 任务对象中取值。
+     * 带点的路径直接按层级查找；无点号的字段优先在 task_params 下查找，回退到顶层。
+     */
     private Object getFieldValue(Map<String, Object> raw, String fieldName) {
         if (fieldName.contains(".")) {
             String[] parts = fieldName.split("\\.");
@@ -289,7 +327,6 @@ public class AdminFetchJobPreviewService {
             }
             return current;
         } else {
-            // 无点号的字段默认在 task_params 下查找，回退到顶层
             Object taskParams = raw.get("task_params");
             if (taskParams instanceof Map<?, ?> tp) {
                 Object value = tp.get(fieldName);
@@ -299,6 +336,7 @@ public class AdminFetchJobPreviewService {
         }
     }
 
+    /** 解析 RuleCondition：Always / Never / PathIn / PathEquals / And / Or */
     private boolean evaluateCondition(RuleCondition condition, Map<String, Object> context) {
         if (condition instanceof RuleCondition.Always) {
             return true;
@@ -323,6 +361,7 @@ public class AdminFetchJobPreviewService {
         return false;
     }
 
+    /** 根据展开后的 LeafTask 分组生成行为摘要 */
     private List<Map<String, Object>> buildBehaviorSummary(List<LeafTask> leafTasks) {
         Map<String, List<LeafTask>> grouped = leafTasks.stream()
                 .collect(Collectors.groupingBy(l -> l.sourceScope != null ? l.sourceScope : (l.sourceKind + "[" + l.sourceIndex + "]")));
@@ -356,6 +395,7 @@ public class AdminFetchJobPreviewService {
         return summary;
     }
 
+    /** 生成人类可读的行为描述，对 index_quote / index_weight 有特殊文案 */
     private String buildBehaviorDescription(LeafTask first, int count) {
         String mode = first.taskSetMode != null ? first.taskSetMode : "";
         String taskName = first.taskName != null ? first.taskName : "";

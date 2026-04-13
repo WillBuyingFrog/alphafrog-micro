@@ -1,16 +1,19 @@
 package world.willfrog.alphafrogmicro.frontend.service;
 
-import java.util.ArrayList;
-import java.util.Collections;
-import java.util.List;
+import world.willfrog.alphafrogmicro.common.fetchcatalog.*;
+
+import java.util.*;
 
 /**
- * Admin Fetch Job 结构化元数据定义
+ * Admin Fetch Job 结构化元数据定义（Catalog）。
+ * 从 JSON 配置动态加载，维护所有支持的任务名称、子类型、允许的任务组模式、字段列表及校验规则。
+ * 前端通过 /admin/fetch-catalog 拉取此处定义，用于渲染表单和参数校验。
  */
 public final class AdminFetchJobMeta {
 
     private AdminFetchJobMeta() {}
 
+    /** 任务变体元数据：一个 taskName + taskSubType 的唯一描述 */
     public record TaskVariantMeta(
             String taskName,
             int taskSubType,
@@ -21,6 +24,7 @@ public final class AdminFetchJobMeta {
             String executionSummaryTemplate
     ) {}
 
+    /** 字段元数据：描述表单中一个输入项的校验与展示规则 */
     public record FieldMeta(
             String name,
             String label,
@@ -34,6 +38,7 @@ public final class AdminFetchJobMeta {
             FieldValidation validation
     ) {}
 
+    /** 规则条件：用于描述字段在何种 task_set_mode 下生效、必填或被忽略 */
     public sealed interface RuleCondition {
         record Always() implements RuleCondition {}
         record Never() implements RuleCondition {}
@@ -48,14 +53,179 @@ public final class AdminFetchJobMeta {
     public record PreviewError(String path, String code, String message) {}
     public record PreviewWarning(String path, String code, String message) {}
 
-    private static final List<TaskVariantMeta> VARIANT_METAS = buildVariantMetas();
+    // 缓存：从 JSON 配置动态构建
+    private static List<TaskVariantMeta> TASK_VARIANT_METAS = List.of();
+    private static List<TaskVariantMeta> TASK_SET_VARIANT_METAS = List.of();
 
-    public static List<TaskVariantMeta> getVariantMetas() {
-        return VARIANT_METAS;
+    /**
+     * 由 FetchCatalogConfigLoader 在启动完成后调用，将 JSON 配置转换为内存中的元数据。
+     */
+    public static synchronized void refresh(FetchCatalogConfigLoader loader) {
+        List<TaskVariantMeta> taskList = new ArrayList<>();
+        List<TaskVariantMeta> taskSetList = new ArrayList<>();
+
+        for (FetchDataTypeConfig config : loader.getAllConfigs().values()) {
+            String dataType = config.getDataType();
+
+            // tasks 场景变体
+            if (config.getTaskVariants() != null) {
+                for (TaskVariantConfig tvc : config.getTaskVariants()) {
+                    List<String> allowedModes = new ArrayList<>();
+                    // 查找哪些 taskSetVariants 会输出到这个 taskVariant
+                    if (config.getTaskSetVariants() != null) {
+                        for (TaskSetVariantConfig tsc : config.getTaskSetVariants()) {
+                            if (tsc.getOutputTaskVariantSubType() == tvc.getSubType()) {
+                                allowedModes.add(tsc.getExpandStrategy());
+                            }
+                        }
+                    }
+                    List<FieldMeta> fields = buildFieldsFromVariant(tvc.getRequiredParams(), tvc.getOptionalParams(), tvc.getParamDefs(), null);
+                    taskList.add(new TaskVariantMeta(
+                            dataType,
+                            tvc.getSubType(),
+                            tvc.getLabel(),
+                            tvc.getDescription(),
+                            Collections.unmodifiableList(allowedModes),
+                            Collections.unmodifiableList(fields),
+                            tvc.getDescription()
+                    ));
+                }
+            }
+
+            // task_sets 场景变体
+            if (config.getTaskSetVariants() != null) {
+                for (TaskSetVariantConfig tsc : config.getTaskSetVariants()) {
+                    List<String> allowedModes = List.of(tsc.getExpandStrategy());
+                    List<FieldMeta> fields = buildFieldsFromVariant(tsc.getRequiredParams(), tsc.getOptionalParams(), tsc.getParamDefs(), tsc.getExpandStrategy());
+                    taskSetList.add(new TaskVariantMeta(
+                            dataType,
+                            tsc.getSubType(),
+                            tsc.getLabel(),
+                            tsc.getDescription(),
+                            allowedModes,
+                            Collections.unmodifiableList(fields),
+                            tsc.getExpandDescription()
+                    ));
+                }
+            }
+        }
+
+        TASK_VARIANT_METAS = Collections.unmodifiableList(taskList);
+        TASK_SET_VARIANT_METAS = Collections.unmodifiableList(taskSetList);
     }
 
+    /**
+     * 根据参数定义和任务变体上下文构建 FieldMeta 列表。
+     * taskSetExpandStrategy 仅在构建 task_sets 变体时传入，用于推导 effectiveWhen/ignoredWhen。
+     */
+    private static List<FieldMeta> buildFieldsFromVariant(List<String> requiredParams, List<String> optionalParams,
+                                                          Map<String, ParamDef> paramDefs, String taskSetExpandStrategy) {
+        List<FieldMeta> fields = new ArrayList<>();
+        if (paramDefs == null) return fields;
+
+        Set<String> requiredSet = requiredParams != null ? new HashSet<>(requiredParams) : Set.of();
+        Set<String> optionalSet = optionalParams != null ? new HashSet<>(optionalParams) : Set.of();
+
+        for (Map.Entry<String, ParamDef> entry : paramDefs.entrySet()) {
+            String paramName = entry.getKey();
+            ParamDef def = entry.getValue();
+            String inputType = "string".equals(def.getType()) ? "string" : "number";
+
+            RuleCondition effectiveWhen = always();
+            RuleCondition ignoredWhen = never();
+
+            if (taskSetExpandStrategy != null) {
+                // 根据参数路径和当前 expandStrategy 推导生效条件
+                List<String> activeModes = computeActiveModes(paramName, taskSetExpandStrategy);
+                if (activeModes != null && !activeModes.isEmpty()) {
+                    effectiveWhen = pathIn("task_set_mode", activeModes.toArray(new String[0]));
+                    // ignoredWhen = 不在 activeModes 中的其他模式
+                    List<String> allModes = List.of("trade_dates", "offsets", "trade_dates_with_offsets",
+                            "date_range_with_offsets", "index_batches", "trade_dates_with_index_batches",
+                            "date_range_with_index_batches");
+                    List<String> ignoredModes = new ArrayList<>();
+                    for (String m : allModes) {
+                        if (!activeModes.contains(m)) ignoredModes.add(m);
+                    }
+                    if (!ignoredModes.isEmpty()) {
+                        ignoredWhen = pathIn("task_set_mode", ignoredModes.toArray(new String[0]));
+                    } else {
+                        ignoredWhen = never();
+                    }
+                }
+            }
+
+            RuleCondition requiredWhen = requiredSet.contains(paramName) ? always() : never();
+
+            // 步长校验：对于 offset_range.step 或 api_offset_step，要求 > 0
+            FieldValidation validation = null;
+            if (paramName.endsWith(".step") || paramName.endsWith("_step")) {
+                validation = new FieldValidation(1, null, true, null);
+            }
+
+            fields.add(new FieldMeta(
+                    paramName,
+                    def.getLabel() != null ? def.getLabel() : paramName,
+                    inputType,
+                    def.getDefaultValue(),
+                    def.getDescription() != null ? def.getDescription() : "",
+                    false,
+                    effectiveWhen,
+                    requiredWhen,
+                    ignoredWhen,
+                    validation
+            ));
+        }
+        return fields;
+    }
+
+    /**
+     * 根据参数路径和当前变体的 expandStrategy，推断该字段在哪些 task_set_mode 下生效。
+     */
+    private static List<String> computeActiveModes(String paramName, String currentExpandStrategy) {
+        // 当前模式本身一定生效
+        List<String> modes = new ArrayList<>();
+        modes.add(currentExpandStrategy);
+
+        // trade_dates 相关参数：在 trade_dates、trade_dates_with_offsets、trade_dates_with_index_batches 下生效
+        if (paramName.startsWith("trade_dates.")) {
+            return List.of("trade_dates", "trade_dates_with_offsets", "trade_dates_with_index_batches");
+        }
+        // date_range 相关参数：在 date_range_with_offsets、date_range_with_index_batches 下生效
+        if (paramName.startsWith("date_range.")) {
+            return List.of("date_range_with_offsets", "date_range_with_index_batches");
+        }
+        // offset_range 相关参数：在 offsets、trade_dates_with_offsets、date_range_with_offsets 下生效
+        if (paramName.startsWith("offset_range.")) {
+            return List.of("offsets", "trade_dates_with_offsets", "date_range_with_offsets");
+        }
+        // index_batches 相关参数：在 index_batches、trade_dates_with_index_batches、date_range_with_index_batches 下生效
+        if (paramName.equals("index_count_limit")) {
+            return List.of("index_batches", "trade_dates_with_index_batches", "date_range_with_index_batches");
+        }
+        // 通用参数（offset, limit, api_offset_* 等）：在当前模式下总是生效
+        return List.of(currentExpandStrategy);
+    }
+
+    // ==================== 公共查询 API ====================
+
+    /**
+     * 获取 tasks 场景下的所有变体元数据。
+     */
+    public static List<TaskVariantMeta> getVariantMetas() {
+        return TASK_VARIANT_METAS;
+    }
+
+    /**
+     * 获取 task_sets 场景下的所有变体元数据。
+     */
+    public static List<TaskVariantMeta> getTaskSetVariantMetas() {
+        return TASK_SET_VARIANT_METAS;
+    }
+
+    /** 按 taskName + taskSubType 查找 tasks 变体元数据，找不到返回 null */
     public static TaskVariantMeta findVariantMeta(String taskName, int taskSubType) {
-        for (TaskVariantMeta vm : VARIANT_METAS) {
+        for (TaskVariantMeta vm : TASK_VARIANT_METAS) {
             if (vm.taskName().equals(taskName) && vm.taskSubType() == taskSubType) {
                 return vm;
             }
@@ -63,7 +233,19 @@ public final class AdminFetchJobMeta {
         return null;
     }
 
+    /** 按 taskName + taskSetSubType 查找 task_sets 变体元数据，找不到返回 null */
+    public static TaskVariantMeta findTaskSetVariantMeta(String taskName, int taskSetSubType) {
+        for (TaskVariantMeta vm : TASK_SET_VARIANT_METAS) {
+            if (vm.taskName().equals(taskName) && vm.taskSubType() == taskSetSubType) {
+                return vm;
+            }
+        }
+        return null;
+    }
+
+    /** 任务名称到中文标签的映射（优先从 JSON 配置读取） */
     public static String taskLabel(String taskName) {
+        // 这里简单保留原映射，实际运行时也可以从 FetchCatalogConfigLoader 读取
         return switch (taskName) {
             case "stock_daily" -> "股票日线";
             case "stock_quote" -> "股票行情";
@@ -78,217 +260,32 @@ public final class AdminFetchJobMeta {
             case "sw_industry_daily" -> "申万行业日线";
             case "sw_industry_classify" -> "申万行业分类";
             case "sw_industry_member" -> "申万行业成分";
-            case "ci_index_member" -> "中证指数成分";
+            case "ci_industry_daily" -> "中信行业日线";
+            case "ci_index_member" -> "中信行业成分";
             case "fund_manager" -> "基金经理";
+            case "fund_company" -> "基金管理人";
             case "fund_info" -> "基金基本信息";
             case "stock_info" -> "股票基本信息";
             case "index_info" -> "指数基本信息";
+            case "stock_income" -> "股票利润表";
+            case "stock_balancesheet" -> "股票资产负债表";
+            case "stock_cashflow" -> "股票现金流量表";
+            case "stock_forecast" -> "业绩预告";
+            case "stock_express" -> "业绩快报";
+            case "stock_report_rc" -> "卖方盈利预测";
+            case "stock_moneyflow" -> "个股资金流向";
+            case "stock_top10_holders" -> "前十大股东";
+            case "stock_share_float" -> "限售股解禁";
             default -> taskName;
         };
     }
 
-    private static List<TaskVariantMeta> buildVariantMetas() {
-        List<TaskVariantMeta> list = new ArrayList<>();
-        List<String> all4Modes = List.of("trade_dates", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
-
-        list.add(vm("stock_daily", 1, "股票日线（明细）", "按日期或 offset 抓取股票日线明细", all4Modes,
-                stockDailyFields(false), "股票日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-        list.add(vm("stock_daily", 2, "股票日线（汇总）", "按日期或 offset 抓取股票日线汇总", all4Modes,
-                stockDailyFields(false), "股票日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("stock_quote", 1, "股票行情（明细）", "按日期或 offset 抓取股票行情", all4Modes,
-                commonRangeFields(false, true), "股票行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-        list.add(vm("stock_quote", 2, "股票行情（汇总）", "按日期或 offset 抓取股票行情汇总", all4Modes,
-                commonRangeFields(false, true), "股票行情将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("index_quote", 1, "指数行情（明细）", "按日期或 offset 抓取指数行情", all4Modes,
-                indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
-        list.add(vm("index_quote", 2, "指数行情（汇总）", "按日期或 offset 抓取指数行情汇总", all4Modes,
-                indexQuoteFields(false, true), "指数行情将按交易日与指数批次笛卡尔积展开，每个叶子任务处理一批指数代码。"));
-        list.add(vm("index_quote", 3, "指数行情（历史初始化）", "按固定日期范围批量抓取指数行情，适合历史数据初始化", List.of("date_range_with_offsets"),
-                indexQuoteFields(false, true), "指数行情历史初始化将按固定日期范围与本地指数批次笛卡尔积展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。"));
-
-        list.add(vm("index_weight", 1, "指数权重", "按日期或 offset 抓取指数权重", all4Modes,
-                indexWeightFields(false, true), "指数权重将按日期范围与指数批次展开，每个叶子任务处理一批指数代码。"));
-        list.add(vm("index_weight", 3, "指数权重（历史初始化）", "按固定日期范围批量抓取指数权重，适合历史数据初始化", List.of("date_range_with_offsets"),
-                indexWeightFields(false, true), "指数权重历史初始化将按固定日期范围与本地指数批次笛卡尔积展开，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求。"));
-
-        list.add(vm("index_daily_basic", 1, "指数日线指标（明细）", "按日期或 offset 抓取指数日线指标", all4Modes,
-                commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-        list.add(vm("index_daily_basic", 2, "指数日线指标（汇总）", "按日期或 offset 抓取指数日线指标汇总", all4Modes,
-                commonRangeFields(true, false), "指数日线指标将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("fund_nav", 1, "基金净值（明细）", "按日期或 offset 抓取基金净值", all4Modes,
-                commonRangeFields(false, true), "基金净值将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-        list.add(vm("fund_nav", 2, "基金净值（汇总）", "按日期或 offset 抓取基金净值汇总", all4Modes,
-                commonRangeFields(false, true), "基金净值将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("fund_portfolio", 1, "基金持仓", "按日期或 offset 抓取基金持仓", all4Modes,
-                commonRangeFields(false, true), "基金持仓将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("fund_share", 1, "基金份额", "按日期抓取基金份额", all4Modes,
-                commonRangeFields(true, false), "基金份额将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("etf_share_size", 1, "ETF 份额规模", "按日期抓取 ETF 份额规模", all4Modes,
-                commonRangeFields(true, false), "ETF 份额规模将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        list.add(vm("trade_calendar", 1, "交易日历", "按日期范围抓取交易日历", List.of("date_range_with_offsets"),
-                commonRangeFields(false, true), "交易日历将按 offset 步进逐条抓取指定日期范围的数据。"));
-
-        list.add(vm("sw_industry_daily", 1, "申万行业日线", "按日期抓取申万行业日线", all4Modes,
-                commonRangeFields(true, false), "申万行业日线将按交易日逐日展开，每个日期生成一条叶子抓取任务。"));
-
-        // Empty params tasks
-        list.add(vm("sw_industry_classify", 1, "申万行业分类", "抓取申万行业分类", List.of(),
-                List.of(), "申万行业分类将一次性抓取全部数据。"));
-        list.add(vm("sw_industry_member", 1, "申万行业成分", "抓取申万行业成分", List.of(),
-                List.of(), "申万行业成分将一次性抓取全部数据。"));
-        list.add(vm("ci_index_member", 1, "中证指数成分", "抓取中证指数成分", List.of(),
-                List.of(), "中证指数成分将一次性抓取全部数据。"));
-        list.add(vm("fund_manager", 1, "基金经理", "抓取基金经理信息", List.of(),
-                List.of(), "基金经理信息将一次性抓取全部数据。"));
-
-        // Info tasks
-        List<FieldMeta> infoFields = List.of(
-                field("offset", "偏移量", "number", always(), never(), null, never(), 0),
-                field("limit", "每页条数", "number", always(), never(), null, never(), 5000),
-                field("market", "市场", "string", always(), never(), null, never(), "E")
-        );
-        list.add(vm("fund_info", 1, "基金基本信息", "抓取基金基本信息", List.of(),
-                infoFields, "基金基本信息将按市场过滤一次性抓取。"));
-        list.add(vm("stock_info", 1, "股票基本信息", "抓取股票基本信息", List.of(),
-                infoFields, "股票基本信息将按市场过滤一次性抓取。"));
-        list.add(vm("index_info", 1, "指数基本信息", "抓取指数基本信息", List.of(),
-                infoFields, "指数基本信息将按市场过滤一次性抓取。"));
-
-        return Collections.unmodifiableList(list);
-    }
-
-    private static TaskVariantMeta vm(String taskName, int taskSubType, String label, String description,
-                                      List<String> allowedModes, List<FieldMeta> fields, String summary) {
-        return new TaskVariantMeta(taskName, taskSubType, label, description, allowedModes, fields, summary);
-    }
+    // ==================== 辅助工厂方法（保留兼容） ====================
 
     public static FieldMeta field(String name, String label, String inputType,
                                    RuleCondition effectiveWhen, RuleCondition requiredWhen,
                                    FieldValidation validation, RuleCondition ignoredWhen, Object defaultValue) {
         return new FieldMeta(name, label, inputType, defaultValue, "", false, effectiveWhen, requiredWhen, ignoredWhen, validation);
-    }
-
-    public static FieldMeta field(String name, String label, String inputType,
-                                   RuleCondition effectiveWhen, RuleCondition requiredWhen,
-                                   FieldValidation validation, RuleCondition ignoredWhen, Object defaultValue, String description) {
-        return new FieldMeta(name, label, inputType, defaultValue, description, false, effectiveWhen, requiredWhen, ignoredWhen, validation);
-    }
-
-    public static List<FieldMeta> commonRangeFields(boolean useStringDate, boolean hasDateStrParams) {
-        List<FieldMeta> fields = new ArrayList<>();
-        RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
-        RuleCondition offsetModes = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
-        RuleCondition fixedDateModes = pathIn("task_set_mode", "date_range_with_offsets");
-        RuleCondition offsetFieldIgnored = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
-        RuleCondition stringDateIgnoredModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets");
-
-        fields.add(field("trade_dates.start_timestamp", "开始日期时间戳", "number", dateModes, dateModes, null, never(), null));
-        fields.add(field("trade_dates.end_timestamp", "结束日期时间戳", "number", dateModes, dateModes, null, never(), null));
-        fields.add(field("date_range.start_date", "开始日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
-        fields.add(field("date_range.end_date", "结束日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
-        fields.add(field("offset_range.start", "Offset 起始", "number", offsetModes, offsetModes, null, never(), null));
-        fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
-        fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
-                new FieldValidation(1, null, true, null), never(), null));
-        fields.add(field("limit", "每页条数", "number", always(), never(), null, never(), 5000));
-        fields.add(field("offset", "偏移量", "number", always(), never(), null, offsetFieldIgnored, 0));
-
-        if (useStringDate) {
-            fields.add(field("trade_date", "交易日(YYYYMMDD)", "string", always(), never(), null,
-                    pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
-        } else {
-            fields.add(field("trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
-                    pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
-        }
-        if (hasDateStrParams && !useStringDate) {
-            fields.add(field("start_date", "开始日期", "string", always(), never(), null, stringDateIgnoredModes, null));
-            fields.add(field("end_date", "结束日期", "string", always(), never(), null, stringDateIgnoredModes, null));
-        }
-        return fields;
-    }
-
-    public static List<FieldMeta> stockDailyFields(boolean useStringDate) {
-        List<FieldMeta> fields = new ArrayList<>();
-        RuleCondition dateModes = pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets");
-        RuleCondition offsetModes = pathIn("task_set_mode", "offsets", "trade_dates_with_offsets", "date_range_with_offsets");
-        RuleCondition fixedDateModes = pathIn("task_set_mode", "date_range_with_offsets");
-
-        fields.add(field("trade_dates.start_timestamp", "开始日期时间戳", "number", dateModes, dateModes, null, never(), null));
-        fields.add(field("trade_dates.end_timestamp", "结束日期时间戳", "number", dateModes, dateModes, null, never(), null));
-        fields.add(field("date_range.start_date", "开始日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
-        fields.add(field("date_range.end_date", "结束日期", "string", fixedDateModes, fixedDateModes, null, never(), null));
-        fields.add(field("offset_range.start", "Offset 起始", "number", offsetModes, offsetModes, null, never(), null));
-        fields.add(field("offset_range.end", "Offset 结束", "number", offsetModes, offsetModes, null, never(), null));
-        fields.add(field("offset_range.step", "Offset 步长", "number", offsetModes, offsetModes,
-                new FieldValidation(1, null, true, null), never(), null));
-        fields.add(field("limit", "每页条数", "number", always(), never(), null, never(), 5000));
-        fields.add(field("offset", "偏移量", "number", always(), never(), null, offsetModes, 0));
-        fields.add(field("trade_date_timestamp", "交易日时间戳", "number", always(), never(), null,
-                pathIn("task_set_mode", "trade_dates", "trade_dates_with_offsets", "date_range_with_offsets"), null));
-        fields.add(field("start_date_timestamp", "开始日期时间戳", "number", always(), never(), null,
-                pathIn("task_set_mode", "date_range_with_offsets"), null));
-        fields.add(field("end_date_timestamp", "结束日期时间戳", "number", always(), never(), null,
-                pathIn("task_set_mode", "date_range_with_offsets"), null));
-        return fields;
-    }
-
-    public static List<FieldMeta> indexQuoteFields(boolean useStringDate, boolean hasDateStrParams) {
-        List<FieldMeta> fields = new ArrayList<>(commonRangeFields(useStringDate, hasDateStrParams));
-        for (int i = 0; i < fields.size(); i++) {
-            FieldMeta f = fields.get(i);
-            if ("limit".equals(f.name())) {
-                fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_daily 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
-            } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), never(), f.defaultValue(),
-                        "控制从本地指数库中选取指数代码的起始偏移量。"));
-            } else if ("offset_range.start".equals(f.name())) {
-                fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页起始 offset。"));
-            } else if ("offset_range.end".equals(f.name())) {
-                fields.set(i, field("offset_range.end", "TuShare 分页结束 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页结束 offset。"));
-            } else if ("offset_range.step".equals(f.name())) {
-                fields.set(i, field("offset_range.step", "TuShare 分页步长", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
-            }
-        }
-        fields.add(field("index_count_limit", "本地指数总数限制", "number", always(), never(), null, never(), null,
-                "控制从本地指数库中总共要抓取多少指数代码。配合 offset 和 limit 使用，用于计算需要展开多少个叶子任务。例如：offset=0, limit=5000, index_count_limit=20000 表示从第 0 条开始，每次处理 5000 条，共展开 4 个叶子任务。"));
-        return fields;
-    }
-
-    public static List<FieldMeta> indexWeightFields(boolean useStringDate, boolean hasDateStrParams) {
-        List<FieldMeta> fields = new ArrayList<>(commonRangeFields(useStringDate, hasDateStrParams));
-        for (int i = 0; i < fields.size(); i++) {
-            FieldMeta f = fields.get(i);
-            if ("limit".equals(f.name())) {
-                fields.set(i, field("limit", "本地指数批次大小", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "控制从本地指数库中选取的指数代码数量上限。由于 TuShare index_weight 接口要求逐个指数代码请求，系统会按此值分批拉取指数列表。"));
-            } else if ("offset".equals(f.name())) {
-                fields.set(i, field("offset", "本地指数起始偏移", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), never(), f.defaultValue(),
-                        "控制从本地指数库中选取指数代码的起始偏移量。"));
-            } else if ("offset_range.start".equals(f.name())) {
-                fields.set(i, field("offset_range.start", "TuShare 分页起始 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页起始 offset。"));
-            } else if ("offset_range.end".equals(f.name())) {
-                fields.set(i, field("offset_range.end", "TuShare 分页结束 offset", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页结束 offset。"));
-            } else if ("offset_range.step".equals(f.name())) {
-                fields.set(i, field("offset_range.step", "TuShare 分页步长", "number", f.effectiveWhen(), f.requiredWhen(), f.validation(), f.ignoredWhen(), f.defaultValue(),
-                        "对每个指数代码向 TuShare 发起请求时的分页步长，也作为每次请求的 limit。"));
-            }
-        }
-        fields.add(field("index_count_limit", "本地指数总数限制", "number", always(), never(), null, never(), null,
-                "控制从本地指数库中总共要抓取多少指数代码。配合 offset 和 limit 使用，用于计算需要展开多少个叶子任务。例如：offset=0, limit=5000, index_count_limit=20000 表示从第 0 条开始，每次处理 5000 条，共展开 4 个叶子任务。"));
-        return fields;
     }
 
     public static RuleCondition always() { return new RuleCondition.Always(); }

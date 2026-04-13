@@ -12,11 +12,13 @@ import world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticTradeCalendarFetchByDateRangeRequest;
 import world.willfrog.alphafrogmicro.domestic.idl.DomesticTradeCalendarFetchService;
 import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
+import world.willfrog.alphafrogmicro.common.fetchcatalog.FetchCatalogConfigLoader;
+import world.willfrog.alphafrogmicro.common.fetchcatalog.TaskSetVariantConfig;
+import world.willfrog.alphafrogmicro.common.fetchcatalog.TaskVariantConfig;
 
-import java.time.Instant;
+import jakarta.annotation.PostConstruct;
 import java.time.LocalDate;
 import java.time.OffsetDateTime;
-import java.time.ZoneId;
 import java.time.format.DateTimeFormatter;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
@@ -24,7 +26,9 @@ import java.util.concurrent.Executor;
 import java.util.concurrent.Semaphore;
 
 /**
- * Admin Fetch Job 任务展开与异步派发服务
+ * Admin Fetch Job 任务展开与异步派发服务。
+ * 负责把前端提交的 tasks / task_sets / fetch_info 展开成扁平的 LeafTask，
+ * 并在创建 Job 后通过 RabbitMQ 异步派发。
  */
 @Service
 @Slf4j
@@ -37,29 +41,24 @@ public class AdminFetchJobExpansionService {
     private final FetchTaskStatusService fetchTaskStatusService;
     private final RateLimitingService rateLimitingService;
     private final Executor fetchJobDispatchExecutor;
+    private final FetchCatalogConfigLoader catalogLoader;
 
     @DubboReference
     private DomesticTradeCalendarFetchService domesticTradeCalendarFetchService;
 
-    private static final ZoneId ZONE_SHANGHAI = ZoneId.of("Asia/Shanghai");
     private static final int DEFAULT_LIMIT = 5000;
 
-    private static final Set<String> STRING_DATE_TASKS = Set.of(
-            "index_daily_basic", "sw_industry_daily", "fund_share", "etf_share_size"
-    );
-    private static final Set<String> EMPTY_PARAMS_TASKS = Set.of(
-            "sw_industry_classify", "sw_industry_member", "ci_index_member", "fund_manager"
-    );
+    @PostConstruct
+    public void init() {
+        AdminFetchJobMeta.refresh(catalogLoader);
+    }
+
+    // fetch_info 里的类型到任务名的映射
     private static final Map<String, String> INFO_TASK_NAME = Map.of(
             "fund", "fund_info",
             "stock", "stock_info",
             "index", "index_info"
     );
-
-    // 以下任务因 TuShare 接口限制，需先按 offset/limit 从本地库取 ts_code，再逐个请求。
-    // 此时 offset_range 控制的是 TuShare 层分页（api_offset/api_limit），
-    // 而 task_params.limit/offset 控制的是本地指数库分批（indexLimit/indexOffset）。
-    private static final Set<String> TUSHARE_SECONDARY_PAGING_TASKS = Set.of("index_quote", "index_weight");
 
     // ==================== 展开逻辑 ====================
 
@@ -121,14 +120,29 @@ public class AdminFetchJobExpansionService {
         return result;
     }
 
+    /**
+     * 核心展开逻辑：基于 JSON 配置的 expandStrategy 做通用展开。
+     */
     private List<LeafTask> expandSingleTaskSet(Map<String, Object> rawTask, int index) {
         String taskName = getTaskName(rawTask);
         if (taskName == null || taskName.isBlank()) {
             throw new IllegalArgumentException("task_sets[" + index + "] 缺少 task_name");
         }
 
-        String mode = normalizeTaskSetMode(rawTask);
-        int taskSubType = getIntValue(rawTask.get("task_sub_type"), 1);
+        int taskSetSubType = getIntValue(rawTask.get("task_set_sub_type"), 1);
+        // 兼容旧协议：如果传的是 task_sub_type 且没有 task_set_sub_type
+        if (rawTask.get("task_set_sub_type") == null && rawTask.get("task_sub_type") != null) {
+            taskSetSubType = getIntValue(rawTask.get("task_sub_type"), 1);
+        }
+
+        TaskSetVariantConfig config = catalogLoader.findTaskSetVariant(taskName, taskSetSubType);
+        if (config == null) {
+            throw new IllegalArgumentException("task_sets[" + index + "] 不支持的任务类型或 task_set_sub_type: " + taskName + "/" + taskSetSubType);
+        }
+
+        String expandStrategy = config.getExpandStrategy();
+        int outputTaskSubType = config.getOutputTaskVariantSubType();
+
         Map<String, Object> baseParams = new LinkedHashMap<>();
         @SuppressWarnings("unchecked")
         Map<String, Object> taskParams = (Map<String, Object>) rawTask.get("task_params");
@@ -136,211 +150,156 @@ public class AdminFetchJobExpansionService {
             baseParams.putAll(taskParams);
         }
         Set<String> skipKeys = Set.of("task_name", "task_type", "task_sub_type", "task_subtype", "taskSubType",
-                "task_params", "trade_dates", "date_range", "task_set_mode", "expand_mode",
-                "offset_range", "offset_start", "offset_end", "offset_step", "ingest_token", "execution_options");
+                "task_set_sub_type", "task_params", "trade_dates", "date_range",
+                "task_set_mode", "expand_mode", "offset_range", "offset_start", "offset_end", "offset_step",
+                "ingest_token", "execution_options");
         for (Map.Entry<String, Object> entry : rawTask.entrySet()) {
             if (skipKeys.contains(entry.getKey())) continue;
             if (!baseParams.containsKey(entry.getKey())) {
                 baseParams.put(entry.getKey(), entry.getValue());
             }
         }
-        normalizeParamsInPlace(baseParams);
 
-        List<Map<String, Object>> expandedParamsList = new ArrayList<>();
-        boolean useStringDate = STRING_DATE_TASKS.contains(taskName);
-
-        // 对 index_quote / index_weight 使用双层分页语义：日期 × 本地指数批次
-        if (TUSHARE_SECONDARY_PAGING_TASKS.contains(taskName)) {
-            int baseOffset = getIntValue(baseParams.get("offset"), 0);
-            int batchSize = getIntValue(baseParams.get("limit"), 5000);
-            int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
-            if (indexCountLimit <= 0) {
-                indexCountLimit = batchSize;
-            }
-            int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
-
-            int apiStart = 0, apiEnd = 0, apiStep = 0;
+        // 处理双层分页参数：如果 JSON 配置了 api_offset_start/end/step，从 offset_range 或顶层读取
+        if (config.hasFlag("secondary_paging")) {
             @SuppressWarnings("unchecked")
             Map<String, Object> offsetRange = rawTask.get("offset_range") == null ? null : (Map<String, Object>) rawTask.get("offset_range");
+            int apiStart = 0, apiEnd = 0, apiStep = 0;
             if (offsetRange != null) {
                 Object startObj = offsetRange.get("start");
-                if (startObj == null) startObj = rawTask.get("offset_start");
+                if (startObj == null) startObj = offsetRange.get("offset_start");
                 Object endObj = offsetRange.get("end");
-                if (endObj == null) endObj = rawTask.get("offset_end");
+                if (endObj == null) endObj = offsetRange.get("offset_end");
                 Object stepObj = offsetRange.get("step");
-                if (stepObj == null) stepObj = rawTask.get("offset_step");
+                if (stepObj == null) stepObj = offsetRange.get("offset_step");
                 apiStart = startObj != null ? getIntValue(startObj, 0) : 0;
                 apiEnd = endObj != null ? getIntValue(endObj, 0) : 0;
                 apiStep = stepObj != null ? getIntValue(stepObj, 0) : 0;
             }
+            if (!baseParams.containsKey("api_offset_start")) baseParams.put("api_offset_start", apiStart);
+            if (!baseParams.containsKey("api_offset_end")) baseParams.put("api_offset_end", apiEnd);
+            if (!baseParams.containsKey("api_offset_step")) baseParams.put("api_offset_step", apiStep);
+        }
 
-            switch (mode) {
-                case "trade_dates" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
-                    List<LocalDate> dates = expandTradeDates(tradeDates, index);
-                    for (LocalDate d : dates) {
-                        for (int b = 0; b < batchCount; b++) {
-                            Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                            if (useStringDate) {
-                                p.put("trade_date", dateToString(d));
-                            } else {
-                                p.put("trade_date_timestamp", dateToTimestampMs(d));
-                            }
-                            p.put("offset", baseOffset + b * batchSize);
-                            p.put("limit", batchSize);
-                            p.put("api_offset_start", apiStart);
-                            p.put("api_offset_end", apiEnd);
-                            p.put("api_offset_step", apiStep);
-                            expandedParamsList.add(p);
-                        }
-                    }
+        List<Map<String, Object>> expandedParamsList = new ArrayList<>();
+
+        switch (expandStrategy) {
+            case "trade_dates" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
+                List<LocalDate> dates = expandTradeDates(tradeDates, index);
+                for (LocalDate d : dates) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("trade_date", dateToString(d));
+                    expandedParamsList.add(p);
                 }
-                case "offsets" -> {
-                    for (int b = 0; b < batchCount; b++) {
-                        Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                        p.put("offset", baseOffset + b * batchSize);
-                        p.put("limit", batchSize);
-                        p.put("api_offset_start", apiStart);
-                        p.put("api_offset_end", apiEnd);
-                        p.put("api_offset_step", apiStep);
-                        expandedParamsList.add(p);
-                    }
-                }
-                case "date_range_with_offsets" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
-                    if (dateRange == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 date_range 配置");
-                    }
-                    Object startDateRaw = dateRange.get("start_date");
-                    Object endDateRaw = dateRange.get("end_date");
-                    if (startDateRaw == null || endDateRaw == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 start_date 和 end_date");
-                    }
-                    LocalDate startDate = parseDateValue(startDateRaw);
-                    LocalDate endDate = parseDateValue(endDateRaw);
-                    if (startDate == null || endDate == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式的 start_date 或 end_date 格式不正确");
-                    }
-                    long startDateTs = dateToTimestampMs(startDate);
-                    long endDateTs = dateToTimestampMs(endDate);
-                    for (int b = 0; b < batchCount; b++) {
-                        Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                        p.put("start_date", String.valueOf(startDateRaw));
-                        p.put("end_date", String.valueOf(endDateRaw));
-                        p.put("start_date_timestamp", startDateTs);
-                        p.put("end_date_timestamp", endDateTs);
-                        p.put("offset", baseOffset + b * batchSize);
-                        p.put("limit", batchSize);
-                        p.put("api_offset_start", apiStart);
-                        p.put("api_offset_end", apiEnd);
-                        p.put("api_offset_step", apiStep);
-                        expandedParamsList.add(p);
-                    }
-                    if (rawTask.get("task_sub_type") == null) {
-                        taskSubType = 3;
-                    }
-                }
-                case "trade_dates_with_offsets" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
-                    if (tradeDates == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] trade_dates_with_offsets 模式需要 trade_dates 配置");
-                    }
-                    List<LocalDate> dates = expandTradeDates(tradeDates, index);
-                    for (LocalDate d : dates) {
-                        for (int b = 0; b < batchCount; b++) {
-                            Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                            if (useStringDate) {
-                                p.put("trade_date", dateToString(d));
-                            } else {
-                                p.put("trade_date_timestamp", dateToTimestampMs(d));
-                            }
-                            p.put("offset", baseOffset + b * batchSize);
-                            p.put("limit", batchSize);
-                            p.put("api_offset_start", apiStart);
-                            p.put("api_offset_end", apiEnd);
-                            p.put("api_offset_step", apiStep);
-                            expandedParamsList.add(p);
-                        }
-                    }
-                }
-                default -> throw new IllegalArgumentException("不支持的 task_set_mode: " + mode);
             }
-        } else {
-            switch (mode) {
-                case "trade_dates" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
-                    List<LocalDate> dates = expandTradeDates(tradeDates, index);
-                    for (LocalDate d : dates) {
-                        Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                        if (useStringDate) {
-                            p.put("trade_date", dateToString(d));
-                        } else {
-                            p.put("trade_date_timestamp", dateToTimestampMs(d));
-                        }
-                        expandedParamsList.add(p);
-                    }
+            case "offsets" -> {
+                List<Integer> offsets = expandOffsets(rawTask, index);
+                for (int off : offsets) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("offset", off);
+                    expandedParamsList.add(p);
                 }
-                case "offsets" -> {
-                    List<Integer> offsets = expandOffsets(rawTask, index);
+            }
+            case "date_range_with_offsets" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
+                if (dateRange == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 date_range 配置");
+                }
+                Object startDateRaw = dateRange.get("start_date");
+                Object endDateRaw = dateRange.get("end_date");
+                if (startDateRaw == null || endDateRaw == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 start_date 和 end_date");
+                }
+                List<Integer> offsets = expandOffsets(rawTask, index);
+                for (int off : offsets) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("start_date", String.valueOf(startDateRaw));
+                    p.put("end_date", String.valueOf(endDateRaw));
+                    p.put("offset", off);
+                    if (!p.containsKey("limit")) {
+                        p.put("limit", 3000);
+                    }
+                    expandedParamsList.add(p);
+                }
+            }
+            case "trade_dates_with_offsets" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
+                if (tradeDates == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] trade_dates_with_offsets 模式需要 trade_dates 配置");
+                }
+                List<LocalDate> dates = expandTradeDates(tradeDates, index);
+                List<Integer> offsets = expandOffsets(rawTask, index);
+                for (LocalDate d : dates) {
                     for (int off : offsets) {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                        p.put("trade_date", dateToString(d));
                         p.put("offset", off);
                         expandedParamsList.add(p);
                     }
                 }
-                case "date_range_with_offsets" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
-                    if (dateRange == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 date_range 配置");
-                    }
-                    Object startDateRaw = dateRange.get("start_date");
-                    Object endDateRaw = dateRange.get("end_date");
-                    if (startDateRaw == null || endDateRaw == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_offsets 模式需要 start_date 和 end_date");
-                    }
-                    List<Integer> offsets = expandOffsets(rawTask, index);
-                    for (int off : offsets) {
+            }
+            case "index_batches" -> {
+                int baseOffset = getIntValue(baseParams.get("offset"), 0);
+                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
+                if (indexCountLimit <= 0) indexCountLimit = batchSize;
+                int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
+                for (int b = 0; b < batchCount; b++) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("offset", baseOffset + b * batchSize);
+                    p.put("limit", batchSize);
+                    expandedParamsList.add(p);
+                }
+            }
+            case "trade_dates_with_index_batches" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
+                List<LocalDate> dates = expandTradeDates(tradeDates, index);
+                int baseOffset = getIntValue(baseParams.get("offset"), 0);
+                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
+                if (indexCountLimit <= 0) indexCountLimit = batchSize;
+                int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
+                for (LocalDate d : dates) {
+                    for (int b = 0; b < batchCount; b++) {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                        p.put("start_date", String.valueOf(startDateRaw));
-                        p.put("end_date", String.valueOf(endDateRaw));
-                        p.put("offset", off);
-                        if (!p.containsKey("limit")) {
-                            p.put("limit", 3000);
-                        }
+                        p.put("trade_date", dateToString(d));
+                        p.put("offset", baseOffset + b * batchSize);
+                        p.put("limit", batchSize);
                         expandedParamsList.add(p);
                     }
-                    if (rawTask.get("task_sub_type") == null) {
-                        taskSubType = 3;
-                    }
                 }
-                case "trade_dates_with_offsets" -> {
-                    @SuppressWarnings("unchecked")
-                    Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
-                    if (tradeDates == null) {
-                        throw new IllegalArgumentException("task_sets[" + index + "] trade_dates_with_offsets 模式需要 trade_dates 配置");
-                    }
-                    List<LocalDate> dates = expandTradeDates(tradeDates, index);
-                    List<Integer> offsets = expandOffsets(rawTask, index);
-                    for (LocalDate d : dates) {
-                        for (int off : offsets) {
-                            Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                            if (useStringDate) {
-                                p.put("trade_date", dateToString(d));
-                            } else {
-                                p.put("trade_date_timestamp", dateToTimestampMs(d));
-                            }
-                            p.put("offset", off);
-                            expandedParamsList.add(p);
-                        }
-                    }
-                }
-                default -> throw new IllegalArgumentException("不支持的 task_set_mode: " + mode);
             }
+            case "date_range_with_index_batches" -> {
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
+                if (dateRange == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_index_batches 模式需要 date_range 配置");
+                }
+                Object startDateRaw = dateRange.get("start_date");
+                Object endDateRaw = dateRange.get("end_date");
+                if (startDateRaw == null || endDateRaw == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_index_batches 模式需要 start_date 和 end_date");
+                }
+                int baseOffset = getIntValue(baseParams.get("offset"), 0);
+                int batchSize = getIntValue(baseParams.get("limit"), 5000);
+                int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
+                if (indexCountLimit <= 0) indexCountLimit = batchSize;
+                int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
+                for (int b = 0; b < batchCount; b++) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("start_date", String.valueOf(startDateRaw));
+                    p.put("end_date", String.valueOf(endDateRaw));
+                    p.put("offset", baseOffset + b * batchSize);
+                    p.put("limit", batchSize);
+                    expandedParamsList.add(p);
+                }
+            }
+            default -> throw new IllegalArgumentException("不支持的 expandStrategy: " + expandStrategy);
         }
 
         List<LeafTask> result = new ArrayList<>();
@@ -348,14 +307,14 @@ public class AdminFetchJobExpansionService {
             Map<String, Object> p = expandedParamsList.get(i);
             LeafTask leaf = new LeafTask();
             leaf.taskName = taskName;
-            leaf.taskSubType = taskSubType;
+            leaf.taskSubType = outputTaskSubType;
             leaf.taskParams = p;
             leaf.sourceKind = "TASK_SET";
             leaf.sourceIndex = index;
-            leaf.taskSetMode = mode;
+            leaf.taskSetMode = expandStrategy;
             leaf.paramsSummary = buildParamsSummary(taskName, p);
             leaf.inputParams = JSONObject.toJSONString(rawTask);
-            leaf.dispatchPayload = buildDispatchPayload(leaf.taskUuid, taskName, taskSubType, p);
+            leaf.dispatchPayload = buildDispatchPayload(leaf.taskUuid, taskName, outputTaskSubType, p);
             result.add(leaf);
         }
         return result;
@@ -417,12 +376,24 @@ public class AdminFetchJobExpansionService {
                 taskParams.put(entry.getKey(), entry.getValue());
             }
         }
-        normalizeParamsInPlace(taskParams);
 
-        if (EMPTY_PARAMS_TASKS.contains(taskName)) {
+        TaskVariantConfig config = catalogLoader.findTaskVariant(taskName, taskSubType);
+        if (config == null) {
+            throw new IllegalArgumentException("tasks[" + index + "] 未知的任务类型或子类型: " + taskName + "/" + taskSubType);
+        }
+        if (config.hasFlag("empty_params_allowed")) {
             // 允许空参数
         } else if (taskParams.isEmpty()) {
             throw new IllegalArgumentException("tasks[" + index + "] task_params 不能为空");
+        }
+
+        // 校验必填参数
+        if (config.getRequiredParams() != null) {
+            for (String req : config.getRequiredParams()) {
+                if (isEmptyValue(taskParams.get(req))) {
+                    throw new IllegalArgumentException("tasks[" + index + "] 缺少必填参数: " + req);
+                }
+            }
         }
 
         LeafTask leaf = new LeafTask();
@@ -438,10 +409,15 @@ public class AdminFetchJobExpansionService {
         if (tradeDates == null) {
             throw new IllegalArgumentException("task_sets[" + index + "] trade_dates 不能为空");
         }
-        LocalDate start = parseDateValue(tradeDates.get("start_timestamp"));
-        LocalDate end = parseDateValue(tradeDates.get("end_timestamp"));
+        String startStr = tradeDates.get("start_date") != null ? tradeDates.get("start_date").toString().trim() : null;
+        String endStr = tradeDates.get("end_date") != null ? tradeDates.get("end_date").toString().trim() : null;
+        if (startStr == null || startStr.isBlank() || endStr == null || endStr.isBlank()) {
+            throw new IllegalArgumentException("task_sets[" + index + "] trade_dates 缺少 start_date 或 end_date");
+        }
+        LocalDate start = parseDateValue(startStr);
+        LocalDate end = parseDateValue(endStr);
         if (start == null || end == null) {
-            throw new IllegalArgumentException("task_sets[" + index + "] trade_dates 缺少 start_timestamp 或 end_timestamp");
+            throw new IllegalArgumentException("task_sets[" + index + "] trade_dates 日期格式不正确，应为 yyyyMMdd");
         }
         if (end.isBefore(start)) {
             throw new IllegalArgumentException("task_sets[" + index + "] 结束日期早于开始日期");
@@ -453,24 +429,6 @@ public class AdminFetchJobExpansionService {
             current = current.plusDays(1);
         }
         return dates;
-    }
-
-    private int computeStep(Map<String, Object> rawTask) {
-        @SuppressWarnings("unchecked")
-        Map<String, Object> offsetRange = rawTask.get("offset_range") == null ? null : (Map<String, Object>) rawTask.get("offset_range");
-        Object step = offsetRange != null ? offsetRange.get("step") : rawTask.get("offset_step");
-        if (step == null && offsetRange != null) {
-            step = offsetRange.get("offset_step");
-        }
-        if (step == null) {
-            return 0;
-        }
-        try {
-            if (step instanceof Number n) return n.intValue();
-            return Integer.parseInt(step.toString().trim());
-        } catch (NumberFormatException e) {
-            return 0;
-        }
     }
 
     private List<Integer> expandOffsets(Map<String, Object> rawTask, int index) {
@@ -520,29 +478,13 @@ public class AdminFetchJobExpansionService {
     }
 
     public LocalDate parseDateValue(Object value) {
-        if (value == null) {
-            return null;
-        }
+        if (value == null) return null;
         String raw = value.toString().trim();
-        if (raw.matches("\\d{8}")) {
-            return LocalDate.parse(raw, DateTimeFormatter.BASIC_ISO_DATE);
-        }
-        if (raw.matches("\\d+")) {
-            long ts = Long.parseLong(raw);
-            if (ts < 10_000_000_000L) {
-                ts *= 1000;
-            }
-            return Instant.ofEpochMilli(ts).atZone(ZONE_SHANGHAI).toLocalDate();
-        }
         try {
-            return LocalDate.parse(raw, DateTimeFormatter.ISO_LOCAL_DATE);
+            return LocalDate.parse(raw, DateTimeFormatter.BASIC_ISO_DATE);
         } catch (Exception e) {
             return null;
         }
-    }
-
-    public long dateToTimestampMs(LocalDate date) {
-        return date.atStartOfDay(ZONE_SHANGHAI).toInstant().toEpochMilli();
     }
 
     public String dateToString(LocalDate date) {
@@ -580,42 +522,7 @@ public class AdminFetchJobExpansionService {
             }
             return "trade_dates";
         }
-        String mode = modeRaw.toString().trim().toLowerCase();
-        return switch (mode) {
-            case "trade_dates", "trade_date", "date", "dates" -> "trade_dates";
-            case "offsets", "offset", "offset_range", "range" -> "offsets";
-            case "trade_dates_with_offsets", "dates_with_offsets", "combined" -> "trade_dates_with_offsets";
-            case "date_range_with_offsets", "date_range_offset", "fixed_date_range" -> "date_range_with_offsets";
-            default -> throw new IllegalArgumentException("不支持的 task_set_mode: " + modeRaw);
-        };
-    }
-
-    private void normalizeParamsInPlace(Map<String, Object> params) {
-        for (Map.Entry<String, Object> entry : params.entrySet()) {
-            String key = entry.getKey();
-            Object value = entry.getValue();
-            if (key.toLowerCase().contains("timestamp") && value != null) {
-                Long ts = convertDateToTimestampMs(value);
-                if (ts != null) {
-                    entry.setValue(ts);
-                }
-            }
-        }
-    }
-
-    public Long convertDateToTimestampMs(Object value) {
-        if (value == null) {
-            return null;
-        }
-        String raw = value.toString().trim();
-        if (raw.matches("\\d{8}")) {
-            LocalDate d = LocalDate.parse(raw, DateTimeFormatter.BASIC_ISO_DATE);
-            return d.atStartOfDay(ZONE_SHANGHAI).toInstant().toEpochMilli();
-        }
-        if (raw.matches("\\d+")) {
-            return Long.parseLong(raw);
-        }
-        return null;
+        return modeRaw.toString().trim().toLowerCase();
     }
 
     public String getTaskName(Map<String, Object> raw) {
@@ -669,6 +576,12 @@ public class AdminFetchJobExpansionService {
     public String getString(Map<String, Object> map, String key) {
         Object value = map.get(key);
         return value == null ? null : value.toString().trim();
+    }
+
+    private boolean isEmptyValue(Object value) {
+        if (value == null) return true;
+        if (value instanceof String s) return s.isBlank();
+        return false;
     }
 
     // ==================== 异步派发 ====================
@@ -760,15 +673,21 @@ public class AdminFetchJobExpansionService {
         if ("trade_calendar".equals(leaf.taskName)) {
             @SuppressWarnings("unchecked")
             Map<String, Object> params = leaf.taskParams;
-            long startDateTimestamp = parseLongParam(params.get("start_date_timestamp"), 0);
-            long endDateTimestamp = parseLongParam(params.get("end_date_timestamp"), 0);
-            if (startDateTimestamp == 0 && params.containsKey("start_date")) {
-                LocalDate d = parseDateValue(params.get("start_date"));
-                if (d != null) startDateTimestamp = dateToTimestampMs(d);
+            long startDateTimestamp = 0;
+            long endDateTimestamp = 0;
+            String startDate = params.get("start_date") != null ? params.get("start_date").toString() : null;
+            String endDate = params.get("end_date") != null ? params.get("end_date").toString() : null;
+            if (startDate != null && !startDate.isBlank()) {
+                LocalDate d = parseDateValue(startDate);
+                if (d != null) {
+                    startDateTimestamp = d.atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli();
+                }
             }
-            if (endDateTimestamp == 0 && params.containsKey("end_date")) {
-                LocalDate d = parseDateValue(params.get("end_date"));
-                if (d != null) endDateTimestamp = dateToTimestampMs(d);
+            if (endDate != null && !endDate.isBlank()) {
+                LocalDate d = parseDateValue(endDate);
+                if (d != null) {
+                    endDateTimestamp = d.atStartOfDay(java.time.ZoneId.of("Asia/Shanghai")).toInstant().toEpochMilli();
+                }
             }
             int offset = getIntValue(params.get("offset"), 0);
             int limit = getIntValue(params.get("limit"), DEFAULT_LIMIT);
@@ -815,16 +734,6 @@ public class AdminFetchJobExpansionService {
                 fetchTaskStatusService.markFailure(leaf.taskUuid, leaf.taskName, leaf.taskSubType, -1, e.getMessage());
                 markTaskFailure(leaf.taskUuid, -1, e.getMessage());
             }
-        }
-    }
-
-    private long parseLongParam(Object value, long defaultValue) {
-        if (value == null) return defaultValue;
-        if (value instanceof Number n) return n.longValue();
-        try {
-            return Long.parseLong(value.toString().trim());
-        } catch (NumberFormatException e) {
-            return defaultValue;
         }
     }
 

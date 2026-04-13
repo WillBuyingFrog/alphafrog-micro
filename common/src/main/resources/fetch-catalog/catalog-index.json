@@ -1,0 +1,33 @@
+{
+  "version": "1.0.0",
+  "dataTypes": [
+    { "name": "index_quote", "file": "fetch-catalog/index_quote.json" },
+    { "name": "index_weight", "file": "fetch-catalog/index_weight.json" },
+    { "name": "index_daily_basic", "file": "fetch-catalog/index_daily_basic.json" },
+    { "name": "index_info", "file": "fetch-catalog/index_info.json" },
+    { "name": "sw_industry_classify", "file": "fetch-catalog/sw_industry_classify.json" },
+    { "name": "sw_industry_member", "file": "fetch-catalog/sw_industry_member.json" },
+    { "name": "sw_industry_daily", "file": "fetch-catalog/sw_industry_daily.json" },
+    { "name": "ci_industry_daily", "file": "fetch-catalog/ci_industry_daily.json" },
+    { "name": "fund_info", "file": "fetch-catalog/fund_info.json" },
+    { "name": "fund_nav", "file": "fetch-catalog/fund_nav.json" },
+    { "name": "fund_portfolio", "file": "fetch-catalog/fund_portfolio.json" },
+    { "name": "fund_share", "file": "fetch-catalog/fund_share.json" },
+    { "name": "etf_share_size", "file": "fetch-catalog/etf_share_size.json" },
+    { "name": "fund_company", "file": "fetch-catalog/fund_company.json" },
+    { "name": "fund_manager", "file": "fetch-catalog/fund_manager.json" },
+    { "name": "stock_info", "file": "fetch-catalog/stock_info.json" },
+    { "name": "stock_daily", "file": "fetch-catalog/stock_daily.json" },
+    { "name": "stock_quote", "file": "fetch-catalog/stock_quote.json" },
+    { "name": "stock_income", "file": "fetch-catalog/stock_income.json" },
+    { "name": "stock_balancesheet", "file": "fetch-catalog/stock_balancesheet.json" },
+    { "name": "stock_cashflow", "file": "fetch-catalog/stock_cashflow.json" },
+    { "name": "stock_forecast", "file": "fetch-catalog/stock_forecast.json" },
+    { "name": "stock_express", "file": "fetch-catalog/stock_express.json" },
+    { "name": "stock_report_rc", "file": "fetch-catalog/stock_report_rc.json" },
+    { "name": "stock_moneyflow", "file": "fetch-catalog/stock_moneyflow.json" },
+    { "name": "stock_top10_holders", "file": "fetch-catalog/stock_top10_holders.json" },
+    { "name": "stock_share_float", "file": "fetch-catalog/stock_share_float.json" },
+    { "name": "trade_calendar", "file": "fetch-catalog/trade_calendar.json" }
+  ]
+}

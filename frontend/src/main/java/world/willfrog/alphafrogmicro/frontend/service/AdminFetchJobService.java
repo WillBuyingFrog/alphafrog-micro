@@ -43,15 +43,24 @@ public class AdminFetchJobService {
     public Map<String, Object> buildCatalog() {
         Map<String, Object> catalog = new LinkedHashMap<>();
         catalog.put("taskCatalog", buildTaskCatalog());
+        catalog.put("taskSetCatalog", buildTaskSetCatalog());
         catalog.put("fetchInfoCatalog", buildFetchInfoCatalog());
         catalog.put("quickPresets", buildQuickPresets());
         return catalog;
     }
 
     private List<Map<String, Object>> buildTaskCatalog() {
+        return buildCatalogFromMetas(AdminFetchJobMeta.getVariantMetas(), "taskSubType");
+    }
+
+    private List<Map<String, Object>> buildTaskSetCatalog() {
+        return buildCatalogFromMetas(AdminFetchJobMeta.getTaskSetVariantMetas(), "taskSetSubType");
+    }
+
+    private List<Map<String, Object>> buildCatalogFromMetas(List<TaskVariantMeta> metas, String subTypeKey) {
         List<Map<String, Object>> result = new ArrayList<>();
         Map<String, List<TaskVariantMeta>> grouped = new LinkedHashMap<>();
-        for (TaskVariantMeta vm : AdminFetchJobMeta.getVariantMetas()) {
+        for (TaskVariantMeta vm : metas) {
             grouped.computeIfAbsent(vm.taskName(), k -> new ArrayList<>()).add(vm);
         }
         for (Map.Entry<String, List<TaskVariantMeta>> entry : grouped.entrySet()) {
@@ -60,7 +69,7 @@ public class AdminFetchJobService {
             taskMap.put("label", AdminFetchJobMeta.taskLabel(entry.getKey()));
             List<Map<String, Object>> variants = new ArrayList<>();
             for (TaskVariantMeta vm : entry.getValue()) {
-                variants.add(convertVariantMetaToMap(vm));
+                variants.add(convertVariantMetaToMap(vm, subTypeKey));
             }
             taskMap.put("variants", variants);
             result.add(taskMap);
@@ -68,9 +77,9 @@ public class AdminFetchJobService {
         return result;
     }
 
-    private Map<String, Object> convertVariantMetaToMap(TaskVariantMeta vm) {
+    private Map<String, Object> convertVariantMetaToMap(TaskVariantMeta vm, String subTypeKey) {
         Map<String, Object> map = new LinkedHashMap<>();
-        map.put("taskSubType", vm.taskSubType());
+        map.put(subTypeKey, vm.taskSubType());
         map.put("label", vm.label());
         map.put("description", vm.description());
         map.put("allowedTaskSetModes", vm.allowedTaskSetModes());
@@ -148,21 +157,21 @@ public class AdminFetchJobService {
     private List<Map<String, Object>> buildQuickPresets() {
         List<Map<String, Object>> list = new ArrayList<>();
         list.add(preset("stock_quote_range", "股票行情范围", "task_sets",
-                List.of(Map.of("task_name", "stock_quote", "task_sub_type", 1, "task_set_mode", "date_range_with_offsets",
-                        "task_params", Map.of("limit", 5000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 5000)))));
+                List.of(Map.of("task_name", "stock_quote", "task_set_sub_type", 4, "task_set_mode", "date_range_with_offsets",
+                        "task_params", Map.of("limit", 6000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 6000)))));
         list.add(preset("index_quote_trade_date", "指数行情单日", "tasks",
-                List.of(Map.of("task_name", "index_quote", "task_sub_type", 1, "task_params", Map.of("trade_date_timestamp", "", "offset", 0, "limit", 5000)))));
+                List.of(Map.of("task_name", "index_quote", "task_sub_type", 1, "task_params", Map.of("trade_date", "", "offset", 0, "limit", 5000)))));
         list.add(preset("index_quote_range", "指数行情范围", "task_sets",
-                List.of(Map.of("task_name", "index_quote", "task_sub_type", 2, "task_set_mode", "date_range_with_offsets",
-                        "task_params", Map.of("limit", 5000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 5000)))));
+                List.of(Map.of("task_name", "index_quote", "task_set_sub_type", 3, "task_set_mode", "date_range_with_index_batches",
+                        "task_params", Map.of("offset", 0, "limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("index_weight_range", "指数权重范围", "task_sets",
-                List.of(Map.of("task_name", "index_weight", "task_sub_type", 1, "task_set_mode", "date_range_with_offsets",
-                        "task_params", Map.of("limit", 5000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 5000)))));
+                List.of(Map.of("task_name", "index_weight", "task_set_sub_type", 2, "task_set_mode", "date_range_with_index_batches",
+                        "task_params", Map.of("offset", 0, "limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("fund_portfolio_range", "基金持仓范围", "task_sets",
-                List.of(Map.of("task_name", "fund_portfolio", "task_sub_type", 1, "task_set_mode", "date_range_with_offsets",
-                        "task_params", Map.of("limit", 5000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 5000)))));
+                List.of(Map.of("task_name", "fund_portfolio", "task_set_sub_type", 1, "task_set_mode", "trade_dates",
+                        "task_params", Map.of("offset", 0, "limit", 5000), "trade_dates", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("trade_calendar_range", "交易日历范围", "task_sets",
-                List.of(Map.of("task_name", "trade_calendar", "task_sub_type", 1, "task_set_mode", "date_range_with_offsets",
+                List.of(Map.of("task_name", "trade_calendar", "task_set_sub_type", 1, "task_set_mode", "date_range_with_offsets",
                         "task_params", Map.of("limit", 5000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 5000)))));
         return list;
     }

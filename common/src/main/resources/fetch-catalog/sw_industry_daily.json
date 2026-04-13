@@ -1,0 +1,232 @@
+{
+  "dataType": "sw_industry_daily",
+  "label": "申万行业行情",
+  "description": "获取申万行业指数日线行情数据，包含开盘价、收盘价、涨跌幅、成交量等。",
+  "serviceModule": "domesticIndexFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日抓取",
+      "description": "指定单个交易日（yyyyMMdd），抓取当日全部申万行业行情数据。",
+      "requiredParams": ["trade_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_date": {
+          "label": "交易日期",
+          "description": "交易日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": ["string_date"]
+    },
+    {
+      "subType": 2,
+      "label": "按代码和日期范围抓取",
+      "description": "指定行业代码及起止日期范围（yyyyMMdd），抓取对应行情数据。",
+      "requiredParams": ["ts_code"],
+      "optionalParams": ["start_date", "end_date", "offset", "limit"],
+      "paramDefs": {
+        "ts_code": {
+          "label": "行业指数代码",
+          "description": "申万行业指数代码",
+          "type": "string"
+        },
+        "start_date": {
+          "label": "开始日期",
+          "description": "查询开始日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "查询结束日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": ["string_date"]
+    },
+    {
+      "subType": 3,
+      "label": "历史初始化",
+      "description": "按日期范围进行全量历史初始化抓取，不指定行业代码时抓取全部。",
+      "requiredParams": ["start_date", "end_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "description": "历史初始化开始日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "历史初始化结束日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": ["string_date", "historical_init"]
+    }
+  ],
+  "taskSetVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日展开",
+      "description": "将多个交易日期逐个展开为单日抓取任务",
+      "expandParam": "trade_dates",
+      "expandDescription": "把一组交易日期拆分为多个按trade_date执行的单日任务",
+      "expandStrategy": "trade_dates",
+      "requiredParams": ["trade_dates"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_dates": {
+          "label": "交易日期列表",
+          "description": "待抓取的交易日期数组，元素格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 2,
+      "label": "按偏移量展开",
+      "description": "将偏移量范围展开为多个分页任务",
+      "expandParam": "offset_range",
+      "expandDescription": "把偏移量范围拆分为多个带offset和limit的分页任务",
+      "expandStrategy": "offsets",
+      "requiredParams": ["offset_range"],
+      "optionalParams": ["limit"],
+      "paramDefs": {
+        "offset_range": {
+          "label": "偏移量范围",
+          "description": "偏移量起始值（含）",
+          "type": "number"
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 3,
+      "label": "按交易日和偏移量展开",
+      "description": "将每个交易日期与偏移量范围组合展开",
+      "expandParam": "trade_dates",
+      "expandDescription": "先按交易日期拆分，每个日期再按offset_range拆分为多个分页任务",
+      "expandStrategy": "trade_dates_with_offsets",
+      "requiredParams": ["trade_dates"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_dates": {
+          "label": "交易日期列表",
+          "description": "待抓取的交易日期数组，元素格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 4,
+      "label": "按日期范围和偏移量展开",
+      "description": "将日期范围与偏移量组合展开为多个任务",
+      "expandParam": "date_range",
+      "expandDescription": "把日期范围拆分为多个带start_date、end_date及分页参数的任务",
+      "expandStrategy": "date_range_with_offsets",
+      "requiredParams": ["date_range"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "date_range": {
+          "label": "日期范围",
+          "description": "日期范围对象，包含start_date和end_date，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 2
+    }
+  ]
+}
