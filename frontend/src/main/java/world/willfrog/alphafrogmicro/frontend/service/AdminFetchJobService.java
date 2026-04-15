@@ -340,6 +340,48 @@ public class AdminFetchJobService {
 
     // ==================== 查询 ====================
 
+    public Map<String, Object> getJobStatusSummary(String jobUuid) {
+        AdminFetchJob job = adminFetchJobDao.getByJobUuid(jobUuid);
+        if (job == null) {
+            return null;
+        }
+
+        List<Map<String, Object>> rows = adminFetchTaskDao.countStatusGroupByJobUuid(jobUuid);
+        int pendingCount = 0;
+        int runningCount = 0;
+        int successCount = 0;
+        int failureCount = 0;
+        int cancelledCount = 0;
+        for (Map<String, Object> row : rows) {
+            String status = row.get("status") instanceof String s ? s : "";
+            Number count = row.get("count") instanceof Number n ? n : 0;
+            int c = count.intValue();
+            switch (status) {
+                case "PENDING" -> pendingCount = c;
+                case "RUNNING" -> runningCount = c;
+                case "SUCCESS" -> successCount = c;
+                case "FAILURE" -> failureCount = c;
+                case "CANCELLED" -> cancelledCount = c;
+                default -> {
+                    // 忽略未知状态
+                }
+            }
+        }
+        int expandedTaskCount = pendingCount + runningCount + successCount + failureCount + cancelledCount;
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("jobUuid", jobUuid);
+        result.put("status", job.getStatus());
+        result.put("expandedTaskCount", expandedTaskCount);
+        result.put("pendingCount", pendingCount);
+        result.put("runningCount", runningCount);
+        result.put("successCount", successCount);
+        result.put("failureCount", failureCount);
+        result.put("cancelledCount", cancelledCount);
+        result.put("updatedAt", formatDateTime(job.getUpdatedAt()));
+        return result;
+    }
+
     public Map<String, Object> listJobs(String status, String mode, String jobUuid,
                                         String createdFrom, String createdTo, int page, int pageSize) {
         int offset = (page - 1) * pageSize;

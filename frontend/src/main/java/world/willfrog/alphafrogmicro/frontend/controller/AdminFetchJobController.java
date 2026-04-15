@@ -119,6 +119,22 @@ public class AdminFetchJobController {
         return ResponseEntity.ok(detail);
     }
 
+    @GetMapping("/fetch-jobs/{jobUuid}/status-summary")
+    public ResponseEntity<?> getJobStatusSummary(Authentication authentication,
+                                                 @PathVariable String jobUuid) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        if (jobUuid == null || jobUuid.isBlank()) {
+            return ResponseEntity.badRequest().body(Map.of("error", "jobUuid is required"));
+        }
+        Map<String, Object> summary = adminFetchJobService.getJobStatusSummary(jobUuid);
+        if (summary == null) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Job not found"));
+        }
+        return ResponseEntity.ok(summary);
+    }
+
     @PostMapping("/fetch-jobs/{jobUuid}:cancel")
     public ResponseEntity<?> cancelJob(Authentication authentication,
                                        @PathVariable String jobUuid) {

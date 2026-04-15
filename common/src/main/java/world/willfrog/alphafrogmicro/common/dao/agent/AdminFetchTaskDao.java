@@ -5,6 +5,7 @@ import world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 @Mapper
 public interface AdminFetchTaskDao {
@@ -160,4 +161,7 @@ public interface AdminFetchTaskDao {
 
     @Delete("DELETE FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid}")
     int deleteByJobUuid(@Param("jobUuid") String jobUuid);
+
+    @Select("SELECT status, COUNT(*) as count FROM alphafrog_admin_fetch_task WHERE job_uuid = #{jobUuid} GROUP BY status")
+    List<Map<String, Object>> countStatusGroupByJobUuid(@Param("jobUuid") String jobUuid);
 }
