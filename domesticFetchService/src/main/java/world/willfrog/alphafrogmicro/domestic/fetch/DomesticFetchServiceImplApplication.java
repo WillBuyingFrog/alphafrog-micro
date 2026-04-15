@@ -7,7 +7,10 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.scheduling.annotation.EnableScheduling;
 
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {
+        "world.willfrog.alphafrogmicro.domestic.fetch",
+        "world.willfrog.alphafrogmicro.common"
+})
 @EnableDubbo
 @EnableScheduling
 @MapperScan("world.willfrog.alphafrogmicro.common.dao")

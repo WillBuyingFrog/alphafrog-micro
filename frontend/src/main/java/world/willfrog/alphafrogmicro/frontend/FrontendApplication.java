@@ -5,7 +5,10 @@ import org.mybatis.spring.annotation.MapperScan;
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
 
-@SpringBootApplication
+@SpringBootApplication(scanBasePackages = {
+        "world.willfrog.alphafrogmicro.frontend",
+        "world.willfrog.alphafrogmicro.common"
+})
 @EnableDubbo
 @MapperScan("world.willfrog.alphafrogmicro.common.dao")
 public class FrontendApplication {
