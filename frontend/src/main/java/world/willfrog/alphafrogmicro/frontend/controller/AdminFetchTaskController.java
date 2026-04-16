@@ -13,6 +13,7 @@ import world.willfrog.alphafrogmicro.common.pojo.agent.AdminFetchTask;
 import world.willfrog.alphafrogmicro.common.pojo.user.User;
 import world.willfrog.alphafrogmicro.frontend.service.AdminFetchTaskService;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
+import world.willfrog.alphafrogmicro.frontend.service.FetchTaskDebugService;
 
 import java.util.*;
 
@@ -32,6 +33,7 @@ public class AdminFetchTaskController {
     private final AdminFetchTaskService adminFetchTaskService;
     private final AuthService authService;
     private final UserDao userDao;
+    private final FetchTaskDebugService fetchTaskDebugService;
 
     @PostMapping
     public ResponseEntity<?> createTask(Authentication authentication,
@@ -116,7 +118,12 @@ public class AdminFetchTaskController {
         if (task == null) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).body(Map.of("error", "Task not found"));
         }
-        return ResponseEntity.ok(convertTaskToMap(task, true));
+        Map<String, Object> map = convertTaskToMap(task, true);
+        String debugBase64 = fetchTaskDebugService.getDebugRequestsBase64(taskUuid);
+        if (debugBase64 != null) {
+            map.put("debugRequestsBase64", debugBase64);
+        }
+        return ResponseEntity.ok(map);
     }
 
     @PostMapping(":retry")

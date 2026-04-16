@@ -19,6 +19,7 @@ import com.alibaba.fastjson.JSONArray;
 
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.domestic.fetch.TushareRequestTraceService;
 
 @Component
 @Slf4j
@@ -28,7 +29,13 @@ public class TuShareRequestUtils {
     @Value("${tushare.token}")
     private String tushareToken;
 
+    private final TushareRequestTraceService traceService;
+
     private static final int MAX_LOG_BODY_LENGTH = 8000;
+
+    public TuShareRequestUtils(TushareRequestTraceService traceService) {
+        this.traceService = traceService;
+    }
 
     public JSONObject createTusharePostRequest(Map<String, Object> params) {
         try ( CloseableHttpClient httpClient = HttpClients.createDefault() ) {
@@ -39,6 +46,7 @@ public class TuShareRequestUtils {
             jsonParams.put("token", tushareToken);
             jsonParams.putAll(params);
             String jsonParamsString = jsonParams.toString();
+            traceService.record(jsonParamsString);
 //            if (log.isDebugEnabled()) {
 //                JSONObject safeParams = new JSONObject(jsonParams);
 //                safeParams.put("token", maskToken(tushareToken));

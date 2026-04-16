@@ -43,6 +43,7 @@ public class FetchTopicConsumer {
     private final RagResearchReportFetchJob reportJob;
     private final RabbitTemplate rabbitTemplate;
     private final FetchTaskParamResolver paramResolver;
+    private final TushareRequestTraceService traceService;
 
     // 异步任务执行线程池
     private ExecutorService taskExecutor;
@@ -56,7 +57,8 @@ public class FetchTopicConsumer {
                               RagAnnouncementFetchJob annJob,
                               RagResearchReportFetchJob reportJob,
                               RabbitTemplate rabbitTemplate,
-                              FetchTaskParamResolver paramResolver) {
+                              FetchTaskParamResolver paramResolver,
+                              TushareRequestTraceService traceService) {
         this.domesticIndexFetchService = domesticIndexFetchService;
         this.domesticFundFetchService = domesticFundFetchService;
         this.domesticStockFetchService = domesticStockFetchService;
@@ -65,6 +67,7 @@ public class FetchTopicConsumer {
         this.reportJob = reportJob;
         this.rabbitTemplate = rabbitTemplate;
         this.paramResolver = paramResolver;
+        this.traceService = traceService;
     }
 
     @PostConstruct
@@ -154,6 +157,7 @@ public class FetchTopicConsumer {
         boolean success = false;
 
         try {
+            traceService.start(taskUuid);
             JSONObject rawMessageJSON = JSONObject.parseObject(message);
             if (rawMessageJSON == null) {
                 throw new IllegalArgumentException("Invalid message JSON payload");
@@ -744,8 +748,11 @@ public class FetchTopicConsumer {
                 sendTaskResult(taskUuid, taskName, taskSubTypeValue, -1, e.getMessage());
             }
         } finally {
-            // 任务执行完成，从运行中任务列表移除
             if (taskUuid != null) {
+                if (!success) {
+                    traceService.persistOnFailure(taskUuid);
+                }
+                traceService.clear();
                 runningTasks.remove(taskUuid);
             }
             log.info("Task [{}] execution completed, success={}", taskUuid, success);
