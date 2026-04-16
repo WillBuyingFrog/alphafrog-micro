@@ -120,7 +120,7 @@ public class AdminFetchJobPreviewService {
         Object ti = eo.get("task_interval_ms");
         if (ti != null) {
             int t = expansionService.getIntValue(ti, DEFAULT_TASK_INTERVAL_MS);
-            if (t >= 0 && t <= 5000) {
+            if (t >= 0 && t <= 300000) {
                 defaults.put("taskIntervalMs", t);
             }
         }

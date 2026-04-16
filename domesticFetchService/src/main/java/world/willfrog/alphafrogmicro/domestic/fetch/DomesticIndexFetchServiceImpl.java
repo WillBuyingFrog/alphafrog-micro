@@ -1085,9 +1085,7 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
         params.put("api_name", "index_weight");
-        if (tsCode != null && !tsCode.isBlank()) {
-            queryParams.put("index_code", tsCode);
-        }
+        queryParams.put("index_code", tsCode != null ? tsCode : "");
         queryParams.put("start_date", startDate);
         queryParams.put("end_date", endDate);
         queryParams.put("offset", apiOffset);
