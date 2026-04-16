@@ -167,6 +167,9 @@ public class AdminFetchJobService {
         list.add(preset("index_weight_range", "指数权重范围", "task_sets",
                 List.of(Map.of("task_name", "index_weight", "task_set_sub_type", 2, "task_set_mode", "date_range_with_index_batches",
                         "task_params", Map.of("offset", 0, "limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
+        list.add(preset("index_weight_range_direct", "指数权重范围（直接分页）", "task_sets",
+                List.of(Map.of("task_name", "index_weight", "task_set_sub_type", 3, "task_set_mode", "date_range_with_api_offsets",
+                        "task_params", Map.of("offset", 0, "limit", 2000, "task_count", 5), "date_range", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("fund_portfolio_range", "基金持仓范围", "task_sets",
                 List.of(Map.of("task_name", "fund_portfolio", "task_set_sub_type", 1, "task_set_mode", "trade_dates",
                         "task_params", Map.of("offset", 0, "limit", 5000), "trade_dates", Map.of("start_date", "", "end_date", "")))));

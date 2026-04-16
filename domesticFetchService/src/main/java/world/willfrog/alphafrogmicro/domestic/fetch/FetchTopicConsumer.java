@@ -241,6 +241,16 @@ public class FetchTopicConsumer {
                                         .setApiOffsetStep(num(p, "api_offset_step"))
                                         .build();
                         result = domesticIndexFetchService.fetchDomesticIndexWeightByDateRange(request).getFetchedItemsCount();
+                    } else if (taskSubType == 4) {
+                        long startDate = dateToTs(p.get("start_date"));
+                        long endDate = dateToTs(p.get("end_date"));
+                        DomesticIndexWeightFetchByDateRangeRequest request =
+                                DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
+                                        .setStartDate(startDate).setEndDate(endDate)
+                                        .setOffset(num(p, "offset"))
+                                        .setLimit(num(p, "limit"))
+                                        .build();
+                        result = domesticIndexFetchService.fetchDomesticIndexWeightDirectByDateRange(request).getFetchedItemsCount();
                     } else {
                         result = -1;
                     }

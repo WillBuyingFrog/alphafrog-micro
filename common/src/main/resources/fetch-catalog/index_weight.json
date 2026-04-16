@@ -1,7 +1,7 @@
 {
   "dataType": "index_weight",
   "label": "指数权重",
-  "description": "通过 TuShare index_weight 接口抓取指数成分股权重。由于该接口要求逐个指数代码请求，系统采用本地指数分批 + TuShare 分页的双层机制。",
+  "description": "通过 TuShare index_weight 接口抓取指数成分股权重。支持本地指数分批 + TuShare 分页的双层机制，以及纯 TuShare 直接分页两种模式。",
   "serviceModule": "domesticIndexFetchService",
   "taskVariants": [
     {
@@ -134,6 +134,44 @@
         "secondary_paging",
         "historical_init"
       ]
+    },
+    {
+      "subType": 4,
+      "label": "按日期范围直接TuShare分页抓取",
+      "description": "不通过本地指数库分批，直接将 offset/limit 传给 TuShare 的 index_weight 接口。",
+      "requiredParams": [
+        "start_date",
+        "end_date"
+      ],
+      "optionalParams": [
+        "offset",
+        "limit"
+      ],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "end_date": {
+          "label": "结束日期",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "TuShare 起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "TuShare 每页大小",
+          "type": "number",
+          "default": 2000
+        }
+      },
+      "specialFlags": []
     }
   ],
   "taskSetVariants": [
@@ -271,6 +309,56 @@
         "historical_init"
       ],
       "outputTaskVariantSubType": 3
+    },
+    {
+      "subType": 3,
+      "label": "固定日期范围与TuShare分页展开",
+      "description": "使用固定的日期范围，按 offset/limit/task_count 生成多个直接调用 TuShare 的叶子任务",
+      "expandParam": "date_range",
+      "expandDescription": "根据 date_range 与 offset、limit、task_count 生成多个叶子任务，每个任务直接将 offset/limit 传给 TuShare，不经过本地指数分批",
+      "expandStrategy": "date_range_with_api_offsets",
+      "requiredParams": [
+        "date_range"
+      ],
+      "optionalParams": [
+        "offset",
+        "limit",
+        "task_count"
+      ],
+      "paramDefs": {
+        "date_range.start_date": {
+          "label": "开始日期",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "date_range.end_date": {
+          "label": "结束日期",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "起始 offset",
+          "type": "number",
+          "default": 0,
+          "description": "第一个叶子任务传给 TuShare 的 offset"
+        },
+        "limit": {
+          "label": "每页大小（步长）",
+          "type": "number",
+          "default": 2000,
+          "description": "每个叶子任务传给 TuShare 的 limit，同时也是 offset 递增步长"
+        },
+        "task_count": {
+          "label": "任务数量",
+          "type": "number",
+          "default": 1,
+          "description": "要生成多少个叶子任务"
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 4
     }
   ]
 }

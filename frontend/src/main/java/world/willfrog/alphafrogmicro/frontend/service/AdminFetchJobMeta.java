@@ -206,9 +206,9 @@ public final class AdminFetchJobMeta {
         if (paramName.startsWith("trade_dates.")) {
             return List.of("trade_dates", "trade_dates_with_offsets", "trade_dates_with_index_batches");
         }
-        // date_range 相关参数：在 date_range_with_offsets、date_range_with_index_batches 下生效
+        // date_range 相关参数：在 date_range_with_offsets、date_range_with_index_batches、date_range_with_api_offsets 下生效
         if (paramName.startsWith("date_range.")) {
-            return List.of("date_range_with_offsets", "date_range_with_index_batches");
+            return List.of("date_range_with_offsets", "date_range_with_index_batches", "date_range_with_api_offsets");
         }
         // offset_range 相关参数：在 offsets、trade_dates_with_offsets、date_range_with_offsets 下生效
         if (paramName.startsWith("offset_range.")) {

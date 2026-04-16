@@ -309,6 +309,32 @@ public class AdminFetchJobExpansionService {
                     expandedParamsList.add(p);
                 }
             }
+            case "date_range_with_api_offsets" -> {
+                // date_range_with_api_offsets: 固定日期范围 + 按 TuShare offset/limit 直接分页展开
+                @SuppressWarnings("unchecked")
+                Map<String, Object> dateRange = (Map<String, Object>) rawTask.get("date_range");
+                if (dateRange == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_api_offsets 模式需要 date_range 配置");
+                }
+                Object startDateRaw = dateRange.get("start_date");
+                Object endDateRaw = dateRange.get("end_date");
+                if (startDateRaw == null || endDateRaw == null) {
+                    throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_api_offsets 模式需要 start_date 和 end_date");
+                }
+                int baseOffset = getIntValue(baseParams.get("offset"), 0);
+                int step = getIntValue(baseParams.get("limit"), 2000);
+                int taskCount = getIntValue(baseParams.get("task_count"), 1);
+                if (step <= 0) step = 2000;
+                if (taskCount <= 0) taskCount = 1;
+                for (int i = 0; i < taskCount; i++) {
+                    Map<String, Object> p = new LinkedHashMap<>(baseParams);
+                    p.put("start_date", String.valueOf(startDateRaw));
+                    p.put("end_date", String.valueOf(endDateRaw));
+                    p.put("offset", baseOffset + i * step);
+                    p.put("limit", step);
+                    expandedParamsList.add(p);
+                }
+            }
             default -> throw new IllegalArgumentException("不支持的 expandStrategy: " + expandStrategy);
         }
 

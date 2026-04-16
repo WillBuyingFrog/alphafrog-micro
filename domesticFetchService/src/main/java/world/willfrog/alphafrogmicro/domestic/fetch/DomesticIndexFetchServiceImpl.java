@@ -1085,7 +1085,9 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
         params.put("api_name", "index_weight");
-        queryParams.put("index_code", tsCode);
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("index_code", tsCode);
+        }
         queryParams.put("start_date", startDate);
         queryParams.put("end_date", endDate);
         queryParams.put("offset", apiOffset);
@@ -1109,6 +1111,23 @@ public class DomesticIndexFetchServiceImpl extends DomesticIndexFetchServiceImpl
             return 0;
         }
         return domesticIndexStoreUtils.storeIndexWeightByRawTuShareOutput(data, fields);
+    }
+
+    /**
+     * 按日期范围直接抓取指数成分股权重（不经过本地指数分批，直接将 offset/limit 传给 TuShare）。
+     * 对应 taskSubType = 4 的直接分页模式。
+     */
+    public DomesticIndexWeightFetchByDateRangeResponse fetchDomesticIndexWeightDirectByDateRange(
+            DomesticIndexWeightFetchByDateRangeRequest request) {
+        String startDate = DateConvertUtils.convertTimestampToString(request.getStartDate(), "yyyyMMdd");
+        String endDate = DateConvertUtils.convertTimestampToString(request.getEndDate(), "yyyyMMdd");
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+        int result = fetchIndexWeightByDateRangeSinglePage(null, startDate, endDate, offset, limit);
+        return DomesticIndexWeightFetchByDateRangeResponse.newBuilder()
+                .setStatus(result >= 0 ? "success" : "failure")
+                .setFetchedItemsCount(result)
+                .build();
     }
 
 }
