@@ -740,8 +740,14 @@ public class FetchTopicConsumer {
                     break;
             }
             log.info("Task [{}] result: {}", taskUuid, result);
-            sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, null);
-            success = true;
+            if (result < 0) {
+                String failMsg = "Task execution failed with result code " + result;
+                sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, failMsg);
+                success = false;
+            } else {
+                sendTaskResult(taskUuid, taskName, taskSubTypeValue, result, null);
+                success = true;
+            }
         } catch (Exception e) {
             log.error("Failed to execute task [{}]: {}", taskUuid, message, e);
             if (taskUuid != null && !taskUuid.isBlank()) {
