@@ -160,13 +160,13 @@ public class AdminFetchJobService {
                 List.of(Map.of("task_name", "stock_quote", "task_set_sub_type", 4, "task_set_mode", "date_range_with_offsets",
                         "task_params", Map.of("limit", 6000), "date_range", Map.of("start_date", "", "end_date", ""), "offset_range", Map.of("start", 0, "end", 10000, "step", 6000)))));
         list.add(preset("index_quote_trade_date", "指数行情单日", "tasks",
-                List.of(Map.of("task_name", "index_quote", "task_sub_type", 1, "task_params", Map.of("trade_date", "", "offset", 0, "limit", 5000)))));
+                List.of(Map.of("task_name", "index_quote", "task_sub_type", 1, "task_params", Map.of("trade_date", "", "index_offset", 0, "index_batch_limit", 5000)))));
         list.add(preset("index_quote_range", "指数行情范围", "task_sets",
                 List.of(Map.of("task_name", "index_quote", "task_set_sub_type", 3, "task_set_mode", "date_range_with_index_batches",
-                        "task_params", Map.of("offset", 0, "limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
+                        "task_params", Map.of("index_offset", 0, "index_batch_limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("index_weight_range", "指数权重范围", "task_sets",
                 List.of(Map.of("task_name", "index_weight", "task_set_sub_type", 2, "task_set_mode", "date_range_with_index_batches",
-                        "task_params", Map.of("offset", 0, "limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
+                        "task_params", Map.of("index_offset", 0, "index_batch_limit", 5000, "index_count_limit", 5000), "date_range", Map.of("start_date", "", "end_date", "")))));
         list.add(preset("index_weight_range_direct", "指数权重范围（直接分页）", "task_sets",
                 List.of(Map.of("task_name", "index_weight", "task_set_sub_type", 3, "task_set_mode", "date_range_with_api_offsets",
                         "task_params", Map.of("offset", 0, "limit", 2000, "task_count", 5), "date_range", Map.of("start_date", "", "end_date", "")))));

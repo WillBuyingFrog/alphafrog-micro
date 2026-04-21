@@ -250,16 +250,16 @@ public class AdminFetchJobExpansionService {
                 }
             }
             case "index_batches" -> {
-                // index_batches: 按本地指数分批展开，使用 index_offset/index_limit 区分于 TuShare 分页的 offset/limit
+                // index_batches: 按本地指数分批展开，使用 index_offset/index_batch_limit 区分于 TuShare 分页的 offset/limit
                 int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
-                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
+                int batchSize = readIndexBatchSize(baseParams);
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
                 for (int b = 0; b < batchCount; b++) {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
                     p.put("index_offset", baseOffset + b * batchSize);
-                    p.put("index_limit", batchSize);
+                    p.put("index_batch_limit", batchSize);
                     expandedParamsList.add(p);
                 }
             }
@@ -269,7 +269,7 @@ public class AdminFetchJobExpansionService {
                 Map<String, Object> tradeDates = (Map<String, Object>) rawTask.get("trade_dates");
                 List<LocalDate> dates = expandTradeDates(tradeDates, index);
                 int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
-                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
+                int batchSize = readIndexBatchSize(baseParams);
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
@@ -278,7 +278,7 @@ public class AdminFetchJobExpansionService {
                         Map<String, Object> p = new LinkedHashMap<>(baseParams);
                         p.put("trade_date", dateToString(d));
                         p.put("index_offset", baseOffset + b * batchSize);
-                        p.put("index_limit", batchSize);
+                        p.put("index_batch_limit", batchSize);
                         expandedParamsList.add(p);
                     }
                 }
@@ -296,7 +296,7 @@ public class AdminFetchJobExpansionService {
                     throw new IllegalArgumentException("task_sets[" + index + "] date_range_with_index_batches 模式需要 start_date 和 end_date");
                 }
                 int baseOffset = getIntValue(baseParams.get("index_offset"), getIntValue(baseParams.get("offset"), 0));
-                int batchSize = getIntValue(baseParams.get("index_limit"), getIntValue(baseParams.get("limit"), 5000));
+                int batchSize = readIndexBatchSize(baseParams);
                 int indexCountLimit = getIntValue(baseParams.get("index_count_limit"), batchSize);
                 if (indexCountLimit <= 0) indexCountLimit = batchSize;
                 int batchCount = (indexCountLimit + batchSize - 1) / batchSize;
@@ -305,7 +305,7 @@ public class AdminFetchJobExpansionService {
                     p.put("start_date", String.valueOf(startDateRaw));
                     p.put("end_date", String.valueOf(endDateRaw));
                     p.put("index_offset", baseOffset + b * batchSize);
-                    p.put("index_limit", batchSize);
+                    p.put("index_batch_limit", batchSize);
                     expandedParamsList.add(p);
                 }
             }
@@ -614,6 +614,16 @@ public class AdminFetchJobExpansionService {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    /**
+     * task_sets 中与「本地指数每批条数」对应的参数：{@code index_batch_limit}；
+     * 兼容旧字段 {@code index_limit} 以及与 TuShare 分页同名的 {@code limit}（旧 YAML）。
+     */
+    private int readIndexBatchSize(Map<String, Object> baseParams) {
+        return getIntValue(baseParams.get("index_batch_limit"),
+                getIntValue(baseParams.get("index_limit"),
+                        getIntValue(baseParams.get("limit"), 5000)));
     }
 
     public String getString(Map<String, Object> map, String key) {

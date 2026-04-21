@@ -14,7 +14,7 @@
       ],
       "optionalParams": [
         "index_offset",
-        "index_limit",
+        "index_batch_limit",
         "api_offset_start",
         "api_offset_end",
         "api_offset_step"
@@ -40,7 +40,7 @@
           "type": "number",
           "default": 0
         },
-        "index_limit": {
+        "index_batch_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量上限",
           "type": "number",
@@ -79,7 +79,7 @@
       ],
       "optionalParams": [
         "index_offset",
-        "index_limit",
+        "index_batch_limit",
         "api_offset_start",
         "api_offset_end",
         "api_offset_step"
@@ -105,7 +105,7 @@
           "type": "number",
           "default": 0
         },
-        "index_limit": {
+        "index_batch_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量上限",
           "type": "number",
@@ -180,12 +180,12 @@
       "label": "按本地指数批次展开",
       "description": "不叠加日期，仅按本地指数分批展开，每批生成一个叶子任务",
       "expandParam": "index_batches",
-      "expandDescription": "根据 offset、limit 和 index_count_limit 计算本地指数批次数量，每批生成一个叶子任务，内部再按 TuShare 分页参数逐页请求",
+      "expandDescription": "根据 index_offset、index_batch_limit 和 index_count_limit 计算本地指数批次数量，每批生成一个叶子任务，内部再按 TuShare 分页参数逐页请求",
       "expandStrategy": "index_batches",
       "requiredParams": [],
       "optionalParams": [
         "index_offset",
-        "index_limit",
+        "index_batch_limit",
         "index_count_limit",
         "api_offset_start",
         "api_offset_end",
@@ -198,7 +198,7 @@
           "type": "number",
           "default": 0
         },
-        "index_limit": {
+        "index_batch_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量",
           "type": "number",
@@ -246,7 +246,7 @@
       ],
       "optionalParams": [
         "index_offset",
-        "index_limit",
+        "index_batch_limit",
         "index_count_limit",
         "api_offset_start",
         "api_offset_end",
@@ -273,7 +273,7 @@
           "type": "number",
           "default": 0
         },
-        "index_limit": {
+        "index_batch_limit": {
           "label": "本地指数批次大小",
           "description": "每批从本地指数库选取的指数代码数量",
           "type": "number",

@@ -207,7 +207,7 @@ public class FetchTopicConsumer {
                                 DomesticIndexDailyFetchByTradeDateRequest.newBuilder()
                                         .setTradeDate(tradeDate)
                                         .setIndexOffset(num(p, "index_offset"))
-                                        .setIndexLimit(num(p, "index_limit"))
+                                        .setIndexLimit(indexBatchLimit(p))
                                         .setApiOffsetStart(num(p, "api_offset_start"))
                                         .setApiOffsetEnd(num(p, "api_offset_end"))
                                         .setApiOffsetStep(num(p, "api_offset_step"))
@@ -220,7 +220,7 @@ public class FetchTopicConsumer {
                                 DomesticindexDailyFetchAllByDateRangeRequest.newBuilder()
                                         .setStartDate(startDate).setEndDate(endDate)
                                         .setIndexOffset(num(p, "index_offset"))
-                                        .setIndexLimit(num(p, "index_limit"))
+                                        .setIndexLimit(indexBatchLimit(p))
                                         .setApiOffsetStart(num(p, "api_offset_start"))
                                         .setApiOffsetEnd(num(p, "api_offset_end"))
                                         .setApiOffsetStep(num(p, "api_offset_step"))
@@ -239,7 +239,7 @@ public class FetchTopicConsumer {
                                 DomesticIndexWeightFetchByDateRangeRequest.newBuilder()
                                         .setStartDate(startDate).setEndDate(endDate)
                                         .setIndexOffset(num(p, "index_offset"))
-                                        .setIndexLimit(num(p, "index_limit"))
+                                        .setIndexLimit(indexBatchLimit(p))
                                         .setApiOffsetStart(num(p, "api_offset_start"))
                                         .setApiOffsetEnd(num(p, "api_offset_end"))
                                         .setApiOffsetStep(num(p, "api_offset_step"))
@@ -783,6 +783,20 @@ public class FetchTopicConsumer {
             log.warn("dateToTs 解析失败: 无法将 '{}' 转换为时间戳", s);
             return 0L;
         }
+    }
+
+    /**
+     * 本地指数每批条数：与 Catalog / 展开层字段名 {@code index_batch_limit} 一致；
+     * 兼容历史 payload 中的 {@code index_limit} 以及与 TuShare 分页同名的 {@code limit}（旧任务）。
+     */
+    private int indexBatchLimit(Map<String, Object> p) {
+        if (p.get("index_batch_limit") != null) {
+            return num(p, "index_batch_limit");
+        }
+        if (p.get("index_limit") != null) {
+            return num(p, "index_limit");
+        }
+        return num(p, "limit");
     }
 
     /** 安全获取字符串，null 时返回空串。 */

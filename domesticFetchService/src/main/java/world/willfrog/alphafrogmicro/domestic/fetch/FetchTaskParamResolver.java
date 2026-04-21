@@ -46,6 +46,12 @@ public class FetchTaskParamResolver {
                 String key = entry.getKey();
                 ParamDef def = entry.getValue();
                 Object value = getNestedValue(taskParams, key);
+                if (value == null && "index_batch_limit".equals(key)) {
+                    value = getNestedValue(taskParams, "index_limit");
+                }
+                if (value == null && "index_batch_limit".equals(key)) {
+                    value = getNestedValue(taskParams, "limit");
+                }
                 if (value == null) {
                     value = def.getDefaultValue();
                 }

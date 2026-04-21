@@ -215,7 +215,7 @@ public final class AdminFetchJobMeta {
             return List.of("offsets", "trade_dates_with_offsets", "date_range_with_offsets");
         }
         // index_batches 相关参数：在 index_batches、trade_dates_with_index_batches、date_range_with_index_batches 下生效
-        if (paramName.equals("index_count_limit")) {
+        if (paramName.equals("index_count_limit") || paramName.equals("index_batch_limit")) {
             return List.of("index_batches", "trade_dates_with_index_batches", "date_range_with_index_batches");
         }
         // 通用参数（offset, limit, api_offset_* 等）：在当前模式下总是生效
