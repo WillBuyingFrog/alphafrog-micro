@@ -142,6 +142,52 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
     }
 
     @Override
+    public DomesticFundNavFetchByDateRangeResponse fetchDomesticFundNavByDateRange(DomesticFundNavFetchByDateRangeRequest request) {
+        long startTs = request.getStartDateTimestamp();
+        long endTs = request.getEndDateTimestamp();
+        String startDate = DateConvertUtils.convertTimestampToString(startTs, "yyyyMMdd");
+        String endDate = DateConvertUtils.convertTimestampToString(endTs, "yyyyMMdd");
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_nav");
+        queryParams.put("start_date", startDate);
+        queryParams.put("end_date", endDate);
+        queryParams.put("offset", offset);
+        queryParams.put("limit", limit);
+
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,ann_date,nav_date,unit_nav,accum_nav,accum_div,net_asset,total_netasset,adj_nav");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+
+        if (response == null) {
+            return DomesticFundNavFetchByDateRangeResponse.newBuilder()
+                    .setStatus("failure")
+                    .setFetchedItemsCount(0)
+                    .build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+
+        int affectedRows = domesticFundStoreUtils.storeFundNavsByRawFullTuShareOutput(data);
+
+        if (affectedRows < 0) {
+            return DomesticFundNavFetchByDateRangeResponse.newBuilder()
+                    .setStatus("failure")
+                    .setFetchedItemsCount(affectedRows)
+                    .build();
+        }
+        return DomesticFundNavFetchByDateRangeResponse.newBuilder()
+                .setStatus("success")
+                .setFetchedItemsCount(affectedRows)
+                .build();
+    }
+
+    @Override
     public DomesticFundPortfolioFetchByDateRangeResponse fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest request) {
 
         long startDateTimestamp = request.getStartDateTimestamp();

@@ -433,6 +433,18 @@ public class FetchTopicConsumer {
                                         .build();
                         result = domesticFundFetchService.fetchDomesticFundNavByTradeDate(request).getFetchedItemsCount();
                         Thread.sleep(200);
+                    } else if (taskSubType == 2) {
+                        long startDate = dateToTs(p.get("start_date"));
+                        long endDate = dateToTs(p.get("end_date"));
+                        DomesticFundNavFetchByDateRangeRequest request =
+                                DomesticFundNavFetchByDateRangeRequest.newBuilder()
+                                        .setStartDateTimestamp(startDate)
+                                        .setEndDateTimestamp(endDate)
+                                        .setOffset(num(p, "offset"))
+                                        .setLimit(num(p, "limit"))
+                                        .build();
+                        result = domesticFundFetchService.fetchDomesticFundNavByDateRange(request).getFetchedItemsCount();
+                        Thread.sleep(200);
                     } else {
                         result = -1;
                     }

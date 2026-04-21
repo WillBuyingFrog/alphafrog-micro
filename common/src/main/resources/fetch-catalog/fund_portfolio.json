@@ -133,6 +133,52 @@
       },
       "specialFlags": [],
       "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 3,
+      "label": "固定日期范围与 offset 步进展开",
+      "description": "使用 date_range 与 offset_range，每个叶子任务对同一日期区间按 offset 分页抓取基金持仓（推荐默认）",
+      "expandParam": "date_range",
+      "expandDescription": "使用 date_range 与 offset_range，每个叶子任务携带 start_date、end_date、offset、limit",
+      "expandStrategy": "date_range_with_offsets",
+      "requiredParams": ["date_range", "offset_range"],
+      "optionalParams": [],
+      "paramDefs": {
+        "date_range.start_date": {
+          "label": "开始日期",
+          "description": "固定的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "date_range.end_date": {
+          "label": "结束日期",
+          "description": "固定的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset_range.start": {
+          "label": "Offset 起始",
+          "description": "分页起始偏移量（基金列表 offset）",
+          "type": "number",
+          "default": 0
+        },
+        "offset_range.end": {
+          "label": "Offset 结束",
+          "description": "分页结束偏移量",
+          "type": "number",
+          "default": null
+        },
+        "offset_range.step": {
+          "label": "Offset 步长",
+          "description": "每次步进的偏移量",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
     }
   ]
 }

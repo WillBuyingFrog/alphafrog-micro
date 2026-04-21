@@ -184,6 +184,19 @@ message DomesticFundNavFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 根据日期范围一次性爬取基金净值（TuShare fund_nav 支持 start_date/end_date）
+message DomesticFundNavFetchByDateRangeRequest {
+  int64 startDateTimestamp = 1;
+  int64 endDateTimestamp = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticFundNavFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
 // 根据公告时间范围爬取基金持仓
 message DomesticFundPortfolioFetchByDateRangeRequest {
   int64 startDateTimestamp = 1;
@@ -281,6 +294,7 @@ message DomesticEtfShareSizeFetchByTradeDateResponse {
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
+  rpc fetchDomesticFundNavByDateRange(DomesticFundNavFetchByDateRangeRequest) returns (DomesticFundNavFetchByDateRangeResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
   rpc fetchFundCompany(DomesticFundCompanyFetchRequest) returns (DomesticFundCompanyFetchResponse);
   rpc fetchFundManagerByTsCode(DomesticFundManagerFetchByTsCodeRequest) returns (DomesticFundManagerFetchByTsCodeResponse);

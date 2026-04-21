@@ -322,7 +322,7 @@
         "string_date",
         "historical_init"
       ],
-      "outputTaskVariantSubType": 2
+      "outputTaskVariantSubType": 3
     }
   ]
 }

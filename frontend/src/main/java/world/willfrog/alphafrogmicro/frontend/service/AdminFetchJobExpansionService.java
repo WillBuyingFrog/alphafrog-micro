@@ -192,7 +192,11 @@ public class AdminFetchJobExpansionService {
                 List<LocalDate> dates = expandTradeDates(tradeDates, index);
                 for (LocalDate d : dates) {
                     Map<String, Object> p = new LinkedHashMap<>(baseParams);
-                    p.put("trade_date", dateToString(d));
+                    String dateStr = dateToString(d);
+                    p.put("trade_date", dateStr);
+                    // 同时设置 start_date 和 end_date，供按日期范围抓取的任务（如 fund_portfolio）使用
+                    p.put("start_date", dateStr);
+                    p.put("end_date", dateStr);
                     expandedParamsList.add(p);
                 }
             }
