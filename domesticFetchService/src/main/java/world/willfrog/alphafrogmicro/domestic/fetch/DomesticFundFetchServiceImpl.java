@@ -192,11 +192,19 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         int offset = request.getOffset();
         int limit = request.getLimit();
 
-        // TuShare fund_portfolio：可不指定 ts_code，按 start_date/end_date 与 offset/limit 全市场分页
+        // TuShare fund_portfolio：全市场时需与 pro_api 一致，显式传 ts_code/ann_date/period 空串（见错误码 50101）
         Map<String, Object> params = new HashMap<>();
         Map<String, Object> queryParams = new HashMap<>();
 
         params.put("api_name", "fund_portfolio");
+        String filterTs = request.getTsCode();
+        if (filterTs != null && !filterTs.isBlank()) {
+            queryParams.put("ts_code", filterTs);
+        } else {
+            queryParams.put("ts_code", "");
+            queryParams.put("ann_date", "");
+            queryParams.put("period", "");
+        }
         queryParams.put("start_date", startDate);
         queryParams.put("end_date", endDate);
         queryParams.put("offset", offset);
