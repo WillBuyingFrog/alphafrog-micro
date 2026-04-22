@@ -209,11 +209,35 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
         if (response == null) {
             return DomesticFundPortfolioFetchByDateRangeResponse.newBuilder()
                     .setStatus("failure")
-                    .setFetchedItemsCount(0)
+                    .setFetchedItemsCount(-1)
                     .build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        Integer tushareCode = response.getInteger("code");
+        if (tushareCode != null && tushareCode != 0) {
+            String msg = response.getString("msg");
+            log.error("TuShare fund_portfolio 返回错误: code={} msg={} start={} end={} offset={} limit={}",
+                    tushareCode, msg, startDate, endDate, offset, limit);
+            return DomesticFundPortfolioFetchByDateRangeResponse.newBuilder()
+                    .setStatus("failure")
+                    .setFetchedItemsCount(-4)
+                    .build();
+        }
+
+        JSONObject dataObj = response.getJSONObject("data");
+        if (dataObj == null) {
+            log.warn("TuShare fund_portfolio 响应 data 为空: start={} end={} offset={} limit={}",
+                    startDate, endDate, offset, limit);
+            return DomesticFundPortfolioFetchByDateRangeResponse.newBuilder()
+                    .setStatus("failure")
+                    .setFetchedItemsCount(-2)
+                    .build();
+        }
+
+        JSONArray data = dataObj.getJSONArray("items");
+        if (data == null) {
+            data = new JSONArray();
+        }
 
         int affectedRows = domesticFundStoreUtils.storeFundPortfoliosByRawTuShareOutput(data);
 
