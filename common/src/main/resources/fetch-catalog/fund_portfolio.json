@@ -1,13 +1,13 @@
 {
   "dataType": "fund_portfolio",
   "label": "基金持仓",
-  "description": "通过 fund_portfolio 接口按日期范围抓取基金持仓数据，内部会逐个 fundTsCode 请求",
+  "description": "通过 fund_portfolio 按 start_date、end_date 与 offset、limit 分页拉取，可不填 ts_code",
   "serviceModule": "domesticFundFetchService",
   "taskVariants": [
     {
       "subType": 1,
       "label": "按日期范围抓取",
-      "description": "按指定的日期范围抓取基金持仓数据，内部会逐个 fundTsCode 请求",
+      "description": "按指定日期范围，使用 TuShare fund_portfolio 全市场分页（start/end + offset + limit）",
       "requiredParams": ["start_date", "end_date"],
       "optionalParams": ["ts_code", "offset", "limit"],
       "paramDefs": {

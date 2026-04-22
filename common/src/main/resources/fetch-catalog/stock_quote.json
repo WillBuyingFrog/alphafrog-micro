@@ -1,13 +1,13 @@
 {
   "dataType": "stock_quote",
   "label": "股票日线行情",
-  "description": "通过 TuShare daily 接口按日期范围抓取股票日线行情数据，内部逐个 stockTsCode 请求",
+  "description": "通过 TuShare daily 按 start_date、end_date 与 offset、limit 分页拉取，可不填 ts_code",
   "serviceModule": "domesticStockFetchService",
   "taskVariants": [
     {
       "subType": 1,
       "label": "按日期范围抓取",
-      "description": "按指定的日期范围抓取股票日线行情数据，内部逐个 stockTsCode 请求",
+      "description": "按指定日期范围，使用 daily 全市场分页（start/end + offset + limit）",
       "requiredParams": ["start_date", "end_date"],
       "optionalParams": ["offset", "limit"],
       "paramDefs": {

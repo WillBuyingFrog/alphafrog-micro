@@ -5,7 +5,6 @@ import com.alibaba.fastjson.JSONObject;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.stereotype.Service;
-import world.willfrog.alphafrogmicro.common.dao.domestic.stock.StockInfoDao;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticStockStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
@@ -13,7 +12,6 @@ import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticStockFetchServiceTriple.*;
 
 import java.util.HashMap;
-import java.util.List;
 import java.util.Map;
 
 @Service
@@ -23,14 +21,11 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
 
     private final TuShareRequestUtils tuShareRequestUtils;
     private final DomesticStockStoreUtils domesticStockStoreUtils;
-    private final StockInfoDao stockInfoDao;
 
     public DomesticStockFetchServiceImpl(TuShareRequestUtils tuShareRequestUtils,
-                                         DomesticStockStoreUtils domesticStockStoreUtils,
-                                         StockInfoDao stockInfoDao) {
+                                         DomesticStockStoreUtils domesticStockStoreUtils) {
         this.tuShareRequestUtils = tuShareRequestUtils;
         this.domesticStockStoreUtils = domesticStockStoreUtils;
-        this.stockInfoDao = stockInfoDao;
     }
 
     @Override
@@ -129,56 +124,43 @@ public class DomesticStockFetchServiceImpl extends DomesticStockFetchServiceImpl
     }
 
     public int fetchStockDailyByDateRange(long startDateTimestamp, long endDateTimestamp, int offset, int limit) {
-        int affectedRows = 0;
-
         String startDate = DateConvertUtils.convertTimestampToString(startDateTimestamp, "yyyyMMdd");
         String endDate = DateConvertUtils.convertTimestampToString(endDateTimestamp, "yyyyMMdd");
 
-        List<String> stockTsCodeList = stockInfoDao.getStockTsCode(offset, limit);
-
+        // TuShare daily：可不指定 ts_code，仅 start_date、end_date 与 offset、limit 分页
         try {
-            for (String stockTsCode : stockTsCodeList) {
-                Map<String, Object> params = new HashMap<>();
-                Map<String, Object> queryParams = new HashMap<>();
+            Map<String, Object> params = new HashMap<>();
+            Map<String, Object> queryParams = new HashMap<>();
 
-                params.put("api_name", "daily");
-                queryParams.put("ts_code", stockTsCode);
-                queryParams.put("start_date", startDate);
-                queryParams.put("end_date", endDate);
-                params.put("fields", "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg," +
-                        "vol,amount");
-                params.put("params", queryParams);
+            params.put("api_name", "daily");
+            queryParams.put("start_date", startDate);
+            queryParams.put("end_date", endDate);
+            queryParams.put("offset", offset);
+            queryParams.put("limit", limit);
+            params.put("fields", "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg," +
+                    "vol,amount");
+            params.put("params", queryParams);
 
-                JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+            JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
 
-                if (response == null) {
-                    continue;
-                }
-
-                JSONArray data = response.getJSONObject("data").getJSONArray("items");
-                JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
-
-                int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
-
-                if (result < 0) {
-                    log.error("Failed to store stock daily data for ts_code: {}", stockTsCode);
-                    return -2;
-                } else {
-                    affectedRows += result;
-                }
-
-                try {
-                    Thread.sleep(200);
-                } catch (InterruptedException e) {
-                    log.error("Thread sleep interrupted", e);
-                }
+            if (response == null) {
+                return -1;
             }
+
+            JSONArray data = response.getJSONObject("data").getJSONArray("items");
+            JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+
+            int result = domesticStockStoreUtils.storeStockDailyByRawTuShareOutput(data, fields);
+
+            if (result < 0) {
+                log.error("Failed to store stock daily data for date range {}..{}", startDate, endDate);
+                return -2;
+            }
+            return result;
         } catch (Exception e) {
             log.error("Failed to fetch stock daily data by date range", e);
             return -1;
         }
-
-        return affectedRows;
     }
 
     // ==================== PR #35 新增：股票财务数据爬取方法 ====================
