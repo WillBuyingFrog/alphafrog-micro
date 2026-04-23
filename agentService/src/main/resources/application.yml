@@ -294,8 +294,9 @@ alphafrog:
     nacos:
       enabled: ${AF_CONFIG_NACOS_ENABLED:false}
       server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
       data-id: ${AF_CONFIG_NACOS_DATA_ID:}
-      group: alphafrog-config
+      group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
 
 langchain4j:
   open-ai:

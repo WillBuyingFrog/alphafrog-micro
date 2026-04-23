@@ -7,11 +7,13 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigConflictException;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigNotFoundException;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigPublishException;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigSnapshot;
 import world.willfrog.alphafrogmicro.common.service.config.ConfigProfileService;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
-import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -36,8 +38,13 @@ public class AdminConfigController {
         try {
             Map<String, Object> result = configProfileService.getActiveWithReplicas(type);
             return ResponseEntity.ok(result);
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("查询激活配置失败 type={}", type, e);
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 
@@ -49,8 +56,13 @@ public class AdminConfigController {
         try {
             List<ConfigSnapshot> snapshots = configProfileService.listSnapshots(type);
             return ResponseEntity.ok(Map.of("snapshots", snapshots));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("查询配置快照列表失败 type={}", type, e);
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 
@@ -66,8 +78,13 @@ public class AdminConfigController {
                 return ResponseEntity.status(404).body(Map.of("error", "Snapshot not found"));
             }
             return ResponseEntity.ok(snapshot);
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (IllegalArgumentException e) {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("查询配置快照详情失败 type={} version={}", type, version, e);
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 
@@ -85,9 +102,14 @@ public class AdminConfigController {
 
             ConfigSnapshot snapshot = configProfileService.createFromScratch(type, fullConfig, comment, operatorId);
             return ResponseEntity.ok(Map.of("snapshot", snapshot));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("创建配置快照失败 type={}", type, e);
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            if (e instanceof IllegalArgumentException) {
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 
@@ -108,9 +130,16 @@ public class AdminConfigController {
 
             ConfigSnapshot snapshot = configProfileService.derive(type, baseVersion, patchType, patch, comment, operatorId, force);
             return ResponseEntity.ok(Map.of("snapshot", snapshot));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (ConfigConflictException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("派生配置快照失败 type={}", type, e);
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            if (e instanceof IllegalArgumentException) {
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 
@@ -130,9 +159,18 @@ public class AdminConfigController {
 
             configProfileService.activate(type, version, expectedSnapshotId, operatorId);
             return ResponseEntity.ok(Map.of("message", "Activated " + version));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (ConfigConflictException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (ConfigPublishException e) {
+            return ResponseEntity.status(500).body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("激活配置失败 type={}", type, e);
-            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            if (e instanceof IllegalArgumentException) {
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
 

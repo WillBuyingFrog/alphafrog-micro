@@ -12,7 +12,6 @@ import world.willfrog.agent.config.CodeRefineProperties;
 import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 
 import java.io.InputStream;
-import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
@@ -35,6 +34,9 @@ public class CodeRefineLocalConfigLoader {
 
     @Value("${spring.application.name:agent-service}")
     private String serviceName;
+
+    @Value("${spring.application.instance-id:${HOSTNAME:unknown}}")
+    private String instanceId;
 
     private volatile CodeRefineProperties localConfig;
     private volatile String loadedConfigPath = "";
@@ -125,7 +127,7 @@ public class CodeRefineLocalConfigLoader {
         try {
             String md5 = DigestUtils.md5DigestAsHex(contentBytes);
             String dataId = "code-refine.json";
-            String key = String.format("config:state:%s:%s", serviceName, dataId);
+            String key = String.format("config:state:%s:%s:%s", serviceName, instanceId, dataId);
             String value = String.format("{\"md5\":\"%s\",\"loadedAt\":\"%s\"}",
                     md5, Instant.now().toString());
             redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(30));

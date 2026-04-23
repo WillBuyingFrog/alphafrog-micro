@@ -610,6 +610,7 @@ services:
       # 可选：覆盖 JWT 密钥（默认值在 frontend 的 application.yml 里）
       # AF_JWT_SECRET: ${AF_JWT_SECRET}
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
+      AF_CONFIG_NACOS_ENABLED: "true"
       # Memory Optimization (Medium)
       JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:

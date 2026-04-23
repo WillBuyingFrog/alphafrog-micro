@@ -15,9 +15,16 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionSynchronization;
+import org.springframework.transaction.support.TransactionSynchronizationManager;
+import world.willfrog.alphafrogmicro.common.dao.config.ConfigAuditLogDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigActiveDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigSnapshotDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigTypeDao;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigConflictException;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigNotFoundException;
+import world.willfrog.alphafrogmicro.common.exception.config.ConfigPublishException;
+import world.willfrog.alphafrogmicro.common.pojo.config.ConfigAuditLog;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigActive;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigSnapshot;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigType;
@@ -39,11 +46,10 @@ public class ConfigProfileService {
     private final ConfigTypeDao configTypeDao;
     private final ConfigSnapshotDao configSnapshotDao;
     private final ConfigActiveDao configActiveDao;
+    private final ConfigAuditLogDao configAuditLogDao;
     private final ObjectMapper objectMapper;
     private final ConfigService nacosConfigService;
     private final StringRedisTemplate redisTemplate;
-
-    private static final String DEFAULT_GROUP = "alphafrog-config";
 
     /**
      * 基于已有版本派生新版本。
@@ -51,21 +57,14 @@ public class ConfigProfileService {
     @Transactional
     public ConfigSnapshot derive(String typeName, String baseVersion, String patchType,
                                   JsonNode patch, String comment, String operatorId, boolean force) throws Exception {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
-
-        ConfigSnapshot baseSnapshot = configSnapshotDao.getByTypeAndVersion(type.getId(), baseVersion);
-        if (baseSnapshot == null) {
-            throw new IllegalArgumentException("基础版本不存在: " + baseVersion);
-        }
+        ConfigType type = getTypeOrThrow(typeName);
+        ConfigSnapshot baseSnapshot = getSnapshotOrThrow(type, baseVersion, "基础版本不存在: " + baseVersion);
 
         // 校验 baseVersion 是否为最新（除非 force=true）
         if (!force) {
             List<ConfigSnapshot> allSnapshots = configSnapshotDao.listByType(type.getId());
             if (!allSnapshots.isEmpty() && !baseVersion.equals(allSnapshots.get(0).getVersion())) {
-                throw new IllegalStateException("baseVersion 不是最新版本，请传 force=true 强制派生");
+                throw new ConfigConflictException("baseVersion 不是最新版本，请传 force=true 强制派生");
             }
         }
 
@@ -96,6 +95,8 @@ public class ConfigProfileService {
 
         // 重新读取以获取 id
         ConfigSnapshot saved = configSnapshotDao.getByTypeAndVersion(type.getId(), newVersion);
+        insertAuditLog(type.getId(), "DERIVE", saved == null ? null : saved.getId(), baseVersion,
+                operatorId, comment);
         log.info("[ConfigProfileService] 派生配置成功 type={} base={} new={} operator={}",
                 typeName, baseVersion, newVersion, operatorId);
         return saved;
@@ -107,10 +108,7 @@ public class ConfigProfileService {
     @Transactional
     public ConfigSnapshot createFromScratch(String typeName, JsonNode fullConfig,
                                              String comment, String operatorId) throws Exception {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
+        ConfigType type = getTypeOrThrow(typeName);
 
         validateSchema(type, fullConfig);
 
@@ -132,6 +130,8 @@ public class ConfigProfileService {
         configSnapshotDao.insert(snapshot);
 
         ConfigSnapshot saved = configSnapshotDao.getByTypeAndVersion(type.getId(), newVersion);
+        insertAuditLog(type.getId(), "CREATE", saved == null ? null : saved.getId(), null,
+                operatorId, comment);
         log.info("[ConfigProfileService] 创建配置成功 type={} version={} operator={}",
                 typeName, newVersion, operatorId);
         return saved;
@@ -142,41 +142,29 @@ public class ConfigProfileService {
      */
     @Transactional
     public void activate(String typeName, String version, Integer expectedSnapshotId,
-                         String operatorId) throws Exception {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
+                         String operatorId) {
+        ConfigType type = getTypeOrThrow(typeName);
+        ConfigSnapshot target = getSnapshotOrThrow(type, version, "目标版本不存在: " + version);
 
-        ConfigSnapshot target = configSnapshotDao.getByTypeAndVersion(type.getId(), version);
-        if (target == null) {
-            throw new IllegalArgumentException("目标版本不存在: " + version);
-        }
-
-        // 乐观锁校验
-        ConfigActive currentActive = configActiveDao.getByType(type.getId());
-        if (currentActive != null && !currentActive.getSnapshotId().equals(expectedSnapshotId)) {
-            throw new IllegalStateException("配置已被他人修改，expectedSnapshotId 不匹配，请刷新后重试");
-        }
-
-        // publish 到 Nacos
-        try {
-            boolean success = nacosConfigService.publishConfig(
-                    type.getDataId(), type.getConfigGroup(), target.getContentJson());
-            if (!success) {
-                throw new RuntimeException("Nacos publishConfig 返回 false");
-            }
-        } catch (NacosException e) {
-            throw new RuntimeException("Nacos 发布配置失败", e);
-        }
-
-        // 更新激活版本
         ConfigActive active = new ConfigActive();
         active.setTypeId(type.getId());
         active.setSnapshotId(target.getId());
         active.setActivatedAt(OffsetDateTime.now());
         active.setActivatedBy(operatorId);
-        configActiveDao.upsert(active);
+
+        int updatedRows = expectedSnapshotId == null
+                ? configActiveDao.insertIfAbsent(active)
+                : configActiveDao.updateIfSnapshotMatches(
+                        type.getId(),
+                        target.getId(),
+                        expectedSnapshotId,
+                        active.getActivatedAt(),
+                        operatorId);
+        if (updatedRows != 1) {
+            throw new ConfigConflictException("配置已被他人修改，expectedSnapshotId 不匹配，请刷新后重试");
+        }
+
+        registerAfterCommitPublish(type, target, operatorId);
 
         log.info("[ConfigProfileService] 激活配置成功 type={} version={} snapshotId={} operator={}",
                 typeName, version, target.getId(), operatorId);
@@ -186,10 +174,7 @@ public class ConfigProfileService {
      * 获取当前激活配置 + 各副本生效状态。
      */
     public Map<String, Object> getActiveWithReplicas(String typeName) {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
+        ConfigType type = getTypeOrThrow(typeName);
 
         ConfigActive active = configActiveDao.getByType(type.getId());
         ConfigSnapshot snapshot = null;
@@ -201,7 +186,7 @@ public class ConfigProfileService {
         List<Map<String, Object>> replicas = new ArrayList<>();
         if (redisTemplate != null) {
             try {
-                String pattern = String.format("config:state:*:%s", type.getDataId());
+                String pattern = String.format("config:state:*:*:%s", type.getDataId());
                 var keys = redisTemplate.keys(pattern);
                 if (keys != null) {
                     for (String key : keys) {
@@ -211,6 +196,7 @@ public class ConfigProfileService {
                             Map<String, Object> replica = new LinkedHashMap<>();
                             String[] parts = key.split(":");
                             replica.put("serviceName", parts.length > 2 ? parts[2] : "");
+                            replica.put("instanceId", parts.length > 3 ? parts[3] : "");
                             replica.put("md5", node.path("md5").asText());
                             replica.put("loadedAt", node.path("loadedAt").asText());
                             replicas.add(replica);
@@ -222,30 +208,26 @@ public class ConfigProfileService {
             }
         }
 
-        boolean synced = snapshot != null && replicas.stream()
-                .allMatch(r -> snapshot.getContentMd5().equals(r.get("md5")));
+        String activeSnapshotMd5 = snapshot == null ? null : snapshot.getContentMd5();
+        boolean synced = activeSnapshotMd5 != null && !replicas.isEmpty() && replicas.stream()
+                .allMatch(r -> activeSnapshotMd5.equals(r.get("md5")));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", type);
         result.put("activeSnapshot", snapshot);
         result.put("replicas", replicas);
+        result.put("replicaCount", replicas.size());
         result.put("synced", synced);
         return result;
     }
 
     public List<ConfigSnapshot> listSnapshots(String typeName) {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
+        ConfigType type = getTypeOrThrow(typeName);
         return configSnapshotDao.listByType(type.getId());
     }
 
     public ConfigSnapshot getSnapshot(String typeName, String version) {
-        ConfigType type = configTypeDao.getByName(typeName);
-        if (type == null) {
-            throw new IllegalArgumentException("配置类型不存在: " + typeName);
-        }
+        ConfigType type = getTypeOrThrow(typeName);
         return configSnapshotDao.getByTypeAndVersion(type.getId(), version);
     }
 
@@ -406,6 +388,78 @@ public class ConfigProfileService {
             return sb.toString();
         } catch (Exception e) {
             throw new RuntimeException("MD5 计算失败", e);
+        }
+    }
+
+    private ConfigType getTypeOrThrow(String typeName) {
+        ConfigType type = configTypeDao.getByName(typeName);
+        if (type == null) {
+            throw new ConfigNotFoundException("配置类型不存在: " + typeName);
+        }
+        return type;
+    }
+
+    private ConfigSnapshot getSnapshotOrThrow(ConfigType type, String version, String message) {
+        ConfigSnapshot snapshot = configSnapshotDao.getByTypeAndVersion(type.getId(), version);
+        if (snapshot == null) {
+            throw new ConfigNotFoundException(message);
+        }
+        return snapshot;
+    }
+
+    private void registerAfterCommitPublish(ConfigType type, ConfigSnapshot target, String operatorId) {
+        if (!TransactionSynchronizationManager.isSynchronizationActive()) {
+            publishToNacos(type, target, operatorId);
+            insertAuditLog(type.getId(), "ACTIVATE", target.getId(), target.getVersion(), operatorId, null);
+            return;
+        }
+
+        TransactionSynchronizationManager.registerSynchronization(new TransactionSynchronization() {
+            @Override
+            public void afterCommit() {
+                publishToNacos(type, target, operatorId);
+                insertAuditLog(type.getId(), "ACTIVATE", target.getId(), target.getVersion(), operatorId, null);
+            }
+
+            @Override
+            public void afterCompletion(int status) {
+                if (status != STATUS_COMMITTED) {
+                    insertAuditLog(type.getId(), "ACTIVATE_ROLLBACK", target.getId(),
+                            target.getVersion(), operatorId, "数据库事务未提交，激活已回滚");
+                }
+            }
+        });
+    }
+
+    private void publishToNacos(ConfigType type, ConfigSnapshot target, String operatorId) {
+        try {
+            boolean success = nacosConfigService.publishConfig(
+                    type.getDataId(), type.getConfigGroup(), target.getContentJson());
+            if (!success) {
+                insertAuditLog(type.getId(), "ACTIVATE_PUBLISH_FAILED", target.getId(),
+                        target.getVersion(), operatorId, "Nacos publishConfig 返回 false");
+                throw new ConfigPublishException("Nacos publishConfig 返回 false");
+            }
+        } catch (NacosException e) {
+            insertAuditLog(type.getId(), "ACTIVATE_PUBLISH_FAILED", target.getId(),
+                    target.getVersion(), operatorId, "Nacos 发布配置失败: " + e.getMessage());
+            throw new ConfigPublishException("Nacos 发布配置失败", e);
+        }
+    }
+
+    private void insertAuditLog(Integer typeId, String action, Integer snapshotId,
+                                String baseVersion, String operatorId, String reason) {
+        try {
+            ConfigAuditLog auditLog = new ConfigAuditLog();
+            auditLog.setTypeId(typeId);
+            auditLog.setAction(action);
+            auditLog.setSnapshotId(snapshotId);
+            auditLog.setBaseVersion(baseVersion);
+            auditLog.setOperatorId(operatorId);
+            auditLog.setReason(reason);
+            configAuditLogDao.insert(auditLog);
+        } catch (Exception e) {
+            log.warn("[ConfigProfileService] 审计日志写入失败 action={} snapshotId={}", action, snapshotId, e);
         }
     }
 }
