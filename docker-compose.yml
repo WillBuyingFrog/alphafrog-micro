@@ -436,6 +436,12 @@ services:
       AF_AGENT_REASONING_ENABLED: ${AF_AGENT_REASONING_ENABLED:-}
       AF_AGENT_REASONING_EXCLUDE: ${AF_AGENT_REASONING_EXCLUDE:-false}
       LOGGING_LEVEL_AGENT: ${LOGGING_LEVEL_AGENT:-INFO}
+      # Nacos 动态配置订阅（试点 code-refine）
+      AF_CONFIG_NACOS_ENABLED: "true"
+      AF_CONFIG_NACOS_DATA_ID: "code-refine.json"
+      AF_CONFIG_NACOS_GROUP: "alphafrog-config"
+      # code-refine 配置文件路径（动态配置目录，Nacos 推送后可写）
+      AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE: "/app/config-dynamic/code-refine.local.json"
       # Memory Optimization (Heavy)
       JAVA_TOOL_OPTIONS: "-Xms512m -Xmx1g"
       # HTTP/HTTPS 代理（访问 OpenRouter 等境外服务时使用）
@@ -448,6 +454,7 @@ services:
     volumes:
       - ./data/agent_datasets:/data/agent_datasets
       - ./agentService/config:/app/config:ro
+      - ./data/agent-configs:/app/config-dynamic
     ports:
       - "50058:50058"
     deploy:
