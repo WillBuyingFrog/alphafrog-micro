@@ -19,6 +19,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import world.willfrog.agent.context.AgentContext;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -32,6 +34,8 @@ import java.util.Map;
  * DashScope OpenAI 兼容 ChatModel 实现 (ALP-28)
  *
  * <p>与 OpenRouterProviderRoutedChatModel 分离，避免 provider 路由冲突。</p>
+ * <p>默认启用流式输出（stream=true），内部聚合 SSE 流为完整响应。</p>
+ * <p>支持 thinking 模式开关（enable_thinking），默认开启。</p>
  */
 @RequiredArgsConstructor
 @Slf4j
@@ -51,6 +55,8 @@ public class DashScopeChatModel implements ChatModel {
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
     private final String endpointName;
+    private final boolean enableThinking;
+    private final AgentLlmLocalConfigLoader localConfigLoader;
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
@@ -84,14 +90,27 @@ public class DashScopeChatModel implements ChatModel {
                     new TypeReference<Map<String, Object>>() {
                     }
             );
+
+            // 默认启用流式输出
+            boolean useStream = true;
+            // DashScope 不支持 tools + stream 同时使用
+            if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
+                useStream = false;
+            }
+            requestJsonMap.put("stream", useStream);
+            if (useStream) {
+                requestJsonMap.put("stream_options", Map.of("include_usage", true));
+            }
+
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (structuredOutputSpec != null) {
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
             }
-            if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
-                requestJsonMap.put("stream", false);
+
+            // DashScope 深度思考模型多数仅支持流式输出，stream=false 时不应开启 thinking
+            if (useStream) {
+                applyThinkingConfig(requestJsonMap, messages);
             }
-            applyThinkingConfig(requestJsonMap, messages);
 
             requestJson = objectMapper.writeValueAsString(requestJsonMap);
             String requestUrl = OpenAiCompatibleChatModelSupport.buildChatCompletionsUrl(baseUrl);
@@ -109,47 +128,108 @@ public class DashScopeChatModel implements ChatModel {
                 requestRecord = httpLogger.recordRequest(requestUrl, "POST", requestHeaders, requestJson);
             }
 
-            HttpResponse<String> httpResponse = HTTP_CLIENT.send(
+            // Debug curl 日志（热加载配置）
+            if (isDebugCurlEnabled()) {
+                curlCommand = buildCurlCommand(requestUrl, requestHeaders, requestJson);
+                log.info("[LLM Debug CURL] endpoint={} model={}\n{}", endpointName, modelName, curlCommand);
+            }
+
+            HttpResponse<java.io.InputStream> httpResponse = HTTP_CLIENT.send(
                     httpRequestBuilder.build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+                    HttpResponse.BodyHandlers.ofInputStream()
             );
 
             int statusCode = httpResponse.statusCode();
-            String responseJson = httpResponse.body();
             long durationMs = System.currentTimeMillis() - requestStartedAt;
 
-            if (shouldCapture) {
-                Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
-                responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, responseJson, durationMs);
-                curlCommand = httpLogger.toCurlCommand(requestRecord);
-            }
+            ChatCompletionResponse completion;
+            String reasoningContent = null;
+            StreamingProgressTracker.StreamingProgressSnapshot progressSnapshot = null;
 
-            if (statusCode < 200 || statusCode >= 300) {
-                if (shouldCapture && observabilityService != null) {
-                    reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs,
-                            "HTTP_ERROR_" + statusCode);
+            if (useStream && statusCode >= 200 && statusCode < 300) {
+                // 流式响应：解析 SSE
+                StreamingProgressTracker tracker = new StreamingProgressTracker(log, modelName, endpointName);
+                OpenAiCompatibleChatModelSupport.SseAggregateResult aggregateResult =
+                        OpenAiCompatibleChatModelSupport.aggregateSseStream(
+                                httpResponse.body(), objectMapper, log, tracker
+                        );
+                tracker.onStreamComplete(durationMs);
+                completion = aggregateResult.completionResponse();
+                reasoningContent = aggregateResult.reasoningContent();
+                progressSnapshot = aggregateResult.progressSnapshot();
+
+                // 为了 HTTP 捕获，将聚合后的响应体序列化
+                String aggregatedBody = objectMapper.writeValueAsString(
+                        objectMapper.convertValue(completion, new TypeReference<Map<String, Object>>() {
+                        })
+                );
+                if (shouldCapture) {
+                    Map<String, String> responseHeaders = new java.util.HashMap<>();
+                    responseHeaders.put("Content-Type", "application/json");
+                    responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, aggregatedBody, durationMs);
+                    curlCommand = httpLogger.toCurlCommand(requestRecord);
                 }
-                String detail = "DashScope chat completion failed"
-                        + " (http=" + statusCode
-                        + ", model=" + OpenAiCompatibleChatModelSupport.nvl(modelName)
-                        + ", error=" + OpenAiCompatibleChatModelSupport.shorten(responseJson)
-                        + ", request=" + OpenAiCompatibleChatModelSupport.shorten(requestJson) + ")";
-                log.warn(detail);
-                throw new IllegalStateException(detail);
+            } else {
+                // 非流式响应或错误：读取完整 body
+                String responseJson;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(httpResponse.body(), StandardCharsets.UTF_8))) {
+                    responseJson = reader.lines().collect(java.util.stream.Collectors.joining("\n"));
+                }
+
+                if (shouldCapture) {
+                    Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
+                    responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, responseJson, durationMs);
+                    curlCommand = httpLogger.toCurlCommand(requestRecord);
+                }
+
+                if (statusCode < 200 || statusCode >= 300) {
+                    if (shouldCapture && observabilityService != null) {
+                        reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs,
+                                "HTTP_ERROR_" + statusCode, null, null);
+                    }
+                    String detail = "DashScope chat completion failed"
+                            + " (http=" + statusCode
+                            + ", model=" + OpenAiCompatibleChatModelSupport.nvl(modelName)
+                            + ", error=" + OpenAiCompatibleChatModelSupport.shorten(responseJson)
+                            + ", request=" + OpenAiCompatibleChatModelSupport.shorten(requestJson) + ")";
+                    log.warn(detail);
+                    throw new IllegalStateException(detail);
+                }
+
+                completion = objectMapper.readValue(responseJson, ChatCompletionResponse.class);
+                // 非流式响应也可能包含 reasoning_content
+                reasoningContent = extractReasoningContentFromResponse(responseJson);
             }
 
-            ChatCompletionResponse completion = objectMapper.readValue(responseJson, ChatCompletionResponse.class);
             AiMessage aiMessage = OpenAiUtils.aiMessageFrom(completion);
-            ThinkingContent thinking = extractThinkingContent(aiMessage == null ? null : aiMessage.text());
-            if (aiMessage != null && thinking.hasThinking()) {
-                List<dev.langchain4j.agent.tool.ToolExecutionRequest> tools = aiMessage.toolExecutionRequests();
-                aiMessage = new AiMessage(thinking.content(), tools == null ? List.of() : tools);
+
+            // 从 reasoningContent 或 <think> 标签提取 thinking
+            String finalThinking = reasoningContent;
+            if (finalThinking == null || finalThinking.isBlank()) {
+                ThinkingContent thinking = extractThinkingContent(aiMessage == null ? null : aiMessage.text());
+                if (thinking.hasThinking()) {
+                    finalThinking = thinking.thinking();
+                    if (aiMessage != null && thinking.hasThinking()) {
+                        List<dev.langchain4j.agent.tool.ToolExecutionRequest> tools = aiMessage.toolExecutionRequests();
+                        aiMessage = new AiMessage(thinking.content(), tools == null ? List.of() : tools);
+                    }
+                }
             }
+
+            if (finalThinking != null && !finalThinking.isBlank()) {
+                AgentContext.setThinkingContent(finalThinking);
+            }
+            if (progressSnapshot != null) {
+                AgentContext.setStreamingProgress(progressSnapshot);
+            }
+
             TokenUsage tokenUsage = OpenAiUtils.tokenUsageFrom(completion.usage());
             FinishReason finishReason = OpenAiCompatibleChatModelSupport.extractFinishReason(completion);
 
             if (shouldCapture && observabilityService != null) {
-                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
+                        finalThinking, progressSnapshot);
             }
 
             return ChatResponse.builder()
@@ -162,12 +242,11 @@ public class DashScopeChatModel implements ChatModel {
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
-
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
-                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED");
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED",
+                        null, null);
             }
-
             String detail = "DashScope chat completion interrupted"
                     + " (model=" + OpenAiCompatibleChatModelSupport.nvl(modelName) + ")";
             throw new IllegalStateException(detail, e);
@@ -177,9 +256,8 @@ public class DashScopeChatModel implements ChatModel {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
                 String errorType = e.getClass().getSimpleName();
                 reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs,
-                        errorType + ": " + e.getMessage());
+                        errorType + ": " + e.getMessage(), null, null);
             }
-
             String detail = "DashScope chat completion failed"
                     + " (model=" + OpenAiCompatibleChatModelSupport.nvl(modelName)
                     + ", error=" + OpenAiCompatibleChatModelSupport.shorten(e.getMessage())
@@ -189,13 +267,41 @@ public class DashScopeChatModel implements ChatModel {
         }
     }
 
+    private String extractReasoningContentFromResponse(String responseJson) {
+        if (responseJson == null || responseJson.isBlank()) {
+            return null;
+        }
+        try {
+            Map<String, Object> json = objectMapper.readValue(responseJson, new TypeReference<>() {
+            });
+            Object choices = json.get("choices");
+            if (choices instanceof List<?> list && !list.isEmpty()) {
+                Object first = list.get(0);
+                if (first instanceof Map<?, ?> choice) {
+                    Object message = choice.get("message");
+                    if (message instanceof Map<?, ?> msg) {
+                        Object rc = msg.get("reasoning_content");
+                        if (rc instanceof String s && !s.isBlank()) {
+                            return s;
+                        }
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.debug("从非流式响应提取 reasoning_content 失败: {}", e.getMessage());
+        }
+        return null;
+    }
+
     private void reportLlmCall(
             RawHttpLogger.HttpRequestRecord request,
             RawHttpLogger.HttpResponseRecord response,
             String curlCommand,
             long startedAtMillis,
             long durationMs,
-            String errorMessage) {
+            String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress) {
 
         if (observabilityService == null) {
             return;
@@ -223,6 +329,8 @@ public class DashScopeChatModel implements ChatModel {
                 endpointName,
                 modelName,
                 errorMessage,
+                thinkingContent,
+                streamingProgress,
                 request,
                 response,
                 curlCommand
@@ -230,50 +338,14 @@ public class DashScopeChatModel implements ChatModel {
     }
 
     private void applyThinkingConfig(Map<String, Object> requestJsonMap, List<ChatMessage> messages) {
+        if (!enableThinking) {
+            return;
+        }
         if (!supportsThinking(modelName)) {
             return;
         }
-        boolean enableThinking = resolveThinkingFromLatestUserMessage(messages);
-        requestJsonMap.put("enable_thinking", enableThinking);
-        if (enableThinking) {
-            requestJsonMap.put("thinking_budget", DEFAULT_THINKING_BUDGET);
-        }
-    }
-
-    private boolean resolveThinkingFromLatestUserMessage(List<ChatMessage> messages) {
-        UserMessage latestUserMessage = findLatestUserMessage(messages);
-        if (latestUserMessage == null || latestUserMessage.singleText() == null) {
-            return true;
-        }
-        String text = latestUserMessage.singleText();
-        int noThinkIndex = text.lastIndexOf("/no_think");
-        int thinkIndex = text.lastIndexOf("/think");
-        if (noThinkIndex < 0 && thinkIndex < 0) {
-            return true;
-        }
-        if (noThinkIndex < 0) {
-            return true;
-        }
-        if (thinkIndex < 0) {
-            return false;
-        }
-        return thinkIndex > noThinkIndex;
-    }
-
-    private UserMessage findLatestUserMessage(List<ChatMessage> messages) {
-        if (messages == null || messages.isEmpty()) {
-            return null;
-        }
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            ChatMessage message = messages.get(i);
-            if (message == null) {
-                continue;
-            }
-            if (message instanceof UserMessage userMessage) {
-                return userMessage;
-            }
-        }
-        return null;
+        requestJsonMap.put("enable_thinking", true);
+        requestJsonMap.put("thinking_budget", DEFAULT_THINKING_BUDGET);
     }
 
     private boolean supportsThinking(String modelName) {
@@ -281,7 +353,7 @@ public class DashScopeChatModel implements ChatModel {
             return false;
         }
         String normalized = modelName.trim().toLowerCase();
-        return normalized.startsWith("qwen3") || normalized.startsWith("qwq");
+        return normalized.startsWith("qwen3.5") || normalized.startsWith("qwen3.6");
     }
 
     private ThinkingContent extractThinkingContent(String content) {
@@ -319,5 +391,42 @@ public class DashScopeChatModel implements ChatModel {
         private boolean hasThinking() {
             return thinking != null && !thinking.isBlank();
         }
+    }
+
+    /**
+     * 检查是否开启 curl debug 日志（热加载）。
+     */
+    private boolean isDebugCurlEnabled() {
+        if (localConfigLoader == null) {
+            return false;
+        }
+        return localConfigLoader.current()
+                .map(cfg -> cfg.getDebug())
+                .map(debug -> debug.getLogLlmCurl())
+                .orElse(false);
+    }
+
+    /**
+     * 构建 curl 命令字符串。
+     */
+    private String buildCurlCommand(String url, Map<String, String> headers, String body) {
+        StringBuilder curl = new StringBuilder();
+        curl.append("curl -X POST \\\n");
+        curl.append("  \"").append(url).append("\" \\\n");
+        if (headers != null) {
+            headers.forEach((key, value) -> {
+                String headerName = key.toLowerCase();
+                if (headerName.contains("authorization")) {
+                    curl.append("  -H \"").append(key).append(": Bearer $API_KEY\" \\\n");
+                } else {
+                    curl.append("  -H \"").append(key).append(": ").append(value).append("\" \\\n");
+                }
+            });
+        }
+        if (body != null && !body.isEmpty()) {
+            String escapedBody = body.replace("'", "'\"'\"'");
+            curl.append("  -d '").append(escapedBody).append("'");
+        }
+        return curl.toString();
     }
 }

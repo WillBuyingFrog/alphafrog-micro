@@ -7,6 +7,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.config.AgentLlmProperties;
 
 import java.util.HashMap;
 import java.util.List;
@@ -18,6 +19,7 @@ import java.util.Map;
 public class AgentAiServiceFactory {
 
     private final AgentLlmResolver llmResolver;
+    private final AgentLlmProperties llmProperties;
     private final ObjectMapper objectMapper;
     private final RawHttpLogger httpLogger;
     private final AgentObservabilityService observabilityService;
@@ -252,6 +254,7 @@ public class AgentAiServiceFactory {
     private ChatModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
                                                       String apiKey,
                                                       double finalTemperature) {
+        boolean enableThinking = resolveEnableThinking(resolved);
         return new DashScopeChatModel(
                 objectMapper,
                 resolveDashScopeBaseUrl(resolved),
@@ -261,8 +264,38 @@ public class AgentAiServiceFactory {
                 maxTokens,
                 httpLogger,
                 observabilityService,
-                resolved.endpointName()
+                resolved.endpointName(),
+                enableThinking,
+                localConfigLoader
         );
+    }
+
+    /**
+     * 从 endpoint 模型元数据中解析 thinking 开关。
+     * 默认开启；若模型 features 中不包含 "thinking" 则关闭。
+     */
+    private boolean resolveEnableThinking(AgentLlmResolver.ResolvedLlm resolved) {
+        if (resolved == null || isBlank(resolved.endpointName()) || isBlank(resolved.modelName())) {
+            return true; // 默认开启
+        }
+        AgentLlmProperties.Endpoint endpoint = null;
+        if (llmProperties != null && llmProperties.getEndpoints() != null) {
+            endpoint = llmProperties.getEndpoints().get(resolved.endpointName());
+        }
+        if (endpoint == null) {
+            // fallback: 尝试从热加载配置读取
+            endpoint = localConfigLoader.current()
+                    .map(cfg -> cfg.getEndpoints() != null ? cfg.getEndpoints().get(resolved.endpointName()) : null)
+                    .orElse(null);
+        }
+        if (endpoint == null || endpoint.getModels() == null) {
+            return true; // 默认开启
+        }
+        AgentLlmProperties.ModelMetadata meta = endpoint.getModels().get(resolved.modelName());
+        if (meta == null || meta.getFeatures() == null) {
+            return true; // 默认开启
+        }
+        return meta.getFeatures().contains("thinking");
     }
 
     /**

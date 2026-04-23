@@ -6,6 +6,7 @@ import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import world.willfrog.agent.config.AgentLlmProperties;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertInstanceOf;
@@ -24,6 +25,7 @@ class AgentAiServiceFactoryDashScopeTest {
     void buildChatModelWithProviderOrder_shouldResolveDashScopeRegionMapping(String region, String expectedBaseUrl) {
         AgentAiServiceFactory factory = new AgentAiServiceFactory(
                 mock(AgentLlmResolver.class),
+                mock(AgentLlmProperties.class),
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
                 mock(AgentObservabilityService.class),
@@ -54,6 +56,7 @@ class AgentAiServiceFactoryDashScopeTest {
     void buildChatModelWithProviderOrder_shouldPreferResolvedBaseUrlOverRegion() {
         AgentAiServiceFactory factory = new AgentAiServiceFactory(
                 mock(AgentLlmResolver.class),
+                mock(AgentLlmProperties.class),
                 new ObjectMapper(),
                 mock(RawHttpLogger.class),
                 mock(AgentObservabilityService.class),

@@ -288,7 +288,7 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
         return recordLlmCallWithRawHttp(runId, phase, tokenUsage, null, durationMs, 0, 0, endpointName, modelName,
-                errorMessage, httpRequest, httpResponse, curlCommand);
+                errorMessage, null, null, httpRequest, httpResponse, curlCommand);
     }
 
     public String recordLlmCallWithRawHttp(
@@ -305,7 +305,7 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
         return recordLlmCallWithRawHttp(runId, phase, tokenUsage, null, durationMs, startedAtMillis, completedAtMillis,
-                endpointName, modelName, errorMessage, httpRequest, httpResponse, curlCommand);
+                endpointName, modelName, errorMessage, null, null, httpRequest, httpResponse, curlCommand);
     }
 
     public String recordLlmCallWithRawHttp(
@@ -322,11 +322,34 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
+        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, cachedTokens, durationMs, startedAtMillis, completedAtMillis,
+                endpointName, modelName, errorMessage, null, null, httpRequest, httpResponse, curlCommand);
+    }
+
+    public String recordLlmCallWithRawHttp(
+            String runId,
+            String phase,
+            TokenUsage tokenUsage,
+            Integer cachedTokens,
+            long durationMs,
+            long startedAtMillis,
+            long completedAtMillis,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand) {
         String traceId = newTraceId();
         String stage = resolveStage(null);
         String rawResponseBody = httpResponse == null ? null : httpResponse.getBody();
         ReasoningExtraction reasoning = extractReasoning(rawResponseBody);
-        
+
+        // 若调用方显式传入了 thinkingContent，优先使用；否则从响应中提取
+        String effectiveThinking = thinkingContent != null ? thinkingContent : reasoning.text();
+
         // 写入 debug 文件
         if (log.isDebugEnabled()) {
             Map<String, Object> payload = new LinkedHashMap<>();
@@ -356,11 +379,20 @@ public class AgentObservabilityService {
                     "statusCode", httpResponse.getStatusCode(),
                     "bodyPreview", preview(httpResponse.getBody(), 500)
             ) : null);
-            payload.put("reasoningText", trim(reasoning.text(), 500));
+            payload.put("reasoningText", trim(effectiveThinking, 500));
             payload.put("reasoningTruncated", reasoning.truncated());
+            if (streamingProgress != null) {
+                payload.put("streamingProgress", Map.of(
+                        "contentCharCount", streamingProgress.contentCharCount(),
+                        "reasoningCharCount", streamingProgress.reasoningCharCount(),
+                        "chunkCount", streamingProgress.chunkCount(),
+                        "durationMs", streamingProgress.durationMs(),
+                        "charsPerSecond", streamingProgress.charsPerSecond()
+                ));
+            }
             debugFileWriter.write("OBS_LLM_RAW_HTTP", payload);
         }
-        
+
         // 更新观测状态
         mutate(runId, state -> {
             state.getSummary().setLlmCalls(state.getSummary().getLlmCalls() + 1);
@@ -369,7 +401,7 @@ public class AgentObservabilityService {
             phaseMetrics.setLlmCalls(phaseMetrics.getLlmCalls() + 1);
             phaseMetrics.setDurationMs(phaseMetrics.getDurationMs() + clampDuration(durationMs));
             applyTokens(state.getSummary(), phaseMetrics, tokenUsage, cachedTokens);
-            
+
             if (endpointName != null && !endpointName.isBlank()) {
                 state.getDiagnostics().setLastEndpoint(endpointName);
             }
@@ -381,22 +413,24 @@ public class AgentObservabilityService {
                 state.getDiagnostics().setLastErrorType("LLM_ERROR");
                 state.getDiagnostics().setLastErrorMessage(trim(errorMessage, 500));
             }
-            
+
             // 添加增强的 LLM Trace（包含原始 HTTP）
             appendLlmTraceWithRawHttp(
-                    state.getDiagnostics(), 
+                    state.getDiagnostics(),
                     traceId,
-                    runId, 
-                    phase, 
+                    runId,
+                    phase,
                     stage,
                     tokenUsage,
                     cachedTokens,
-                    durationMs, 
+                    durationMs,
                     startedAtMillis,
                     completedAtMillis,
-                    endpointName, 
-                    modelName, 
+                    endpointName,
+                    modelName,
                     errorMessage,
+                    effectiveThinking,
+                    streamingProgress,
                     httpRequest,
                     httpResponse,
                     curlCommand,
@@ -1044,19 +1078,21 @@ public class AgentObservabilityService {
             String endpointName,
             String modelName,
             String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress,
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand,
             ReasoningExtraction reasoning) {
-        
+
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
         }
-        
+
         if (diagnostics.getLlmTraces() == null) {
             diagnostics.setLlmTraces(new ArrayList<>());
         }
-        
+
         List<LlmTrace> traces = diagnostics.getLlmTraces();
         LlmTrace trace = new LlmTrace();
         trace.setTraceId(nvl(traceId));
@@ -1071,9 +1107,18 @@ public class AgentObservabilityService {
         trace.setModel(nvl(modelName));
         trace.setHasError(errorMessage != null && !errorMessage.isBlank());
         trace.setError(trim(errorMessage, 1000));
-        trace.setReasoningText(reasoning == null ? "" : reasoning.text());
+        trace.setReasoningText(thinkingContent != null ? thinkingContent : (reasoning == null ? "" : reasoning.text()));
         trace.setReasoningDetails(reasoning == null ? null : reasoning.details());
         trace.setReasoningTruncated(reasoning != null && reasoning.truncated());
+        if (streamingProgress != null) {
+            LlmTrace.StreamingProgress sp = new LlmTrace.StreamingProgress();
+            sp.setContentCharCount(streamingProgress.contentCharCount());
+            sp.setReasoningCharCount(streamingProgress.reasoningCharCount());
+            sp.setChunkCount(streamingProgress.chunkCount());
+            sp.setDurationMs(streamingProgress.durationMs());
+            sp.setCharsPerSecond(streamingProgress.charsPerSecond());
+            trace.setStreamingProgress(sp);
+        }
         // 设置 Token 统计
         if (tokenUsage != null) {
             trace.setInputTokens(tokenUsage.inputTokenCount() != null ? tokenUsage.inputTokenCount().longValue() : null);
@@ -1130,9 +1175,9 @@ public class AgentObservabilityService {
         trace.setOutputText(httpResponse != null ? preview(httpResponse.getBody(), llmTraceTextLimit()) : null);
         trace.setTodoId(nvl(AgentContext.getTodoId()));
         trace.setTodoSequence(AgentContext.getTodoSequence());
-        
+
         traces.add(trace);
-        
+
         int limit = llmTraceCallLimit();
         while (traces.size() > limit) {
             traces.remove(0);
@@ -1463,6 +1508,7 @@ public class AgentObservabilityService {
         private String reasoningText;
         private Object reasoningDetails;
         private boolean reasoningTruncated;
+        private StreamingProgress streamingProgress;
         
         // ========== 关联的 Todo/DAG 节点 ==========
         
@@ -1536,6 +1582,15 @@ public class AgentObservabilityService {
          */
         @Deprecated
         private String responsePreview;
+
+        @Data
+        public static class StreamingProgress {
+            private int contentCharCount;
+            private int reasoningCharCount;
+            private int chunkCount;
+            private long durationMs;
+            private double charsPerSecond;
+        }
     }
 
     @Data

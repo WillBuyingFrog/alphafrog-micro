@@ -18,6 +18,8 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import world.willfrog.agent.context.AgentContext;
 
+import java.io.BufferedReader;
+import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
 import java.net.http.HttpClient;
@@ -34,34 +36,11 @@ import java.util.Map;
  * 
  * <p>本类是 Agent LLM 调用的核心组件，支持：</p>
  * <ol>
- *   <li><b>Provider 优先级路由</b>：通过 providerOrder 指定优先使用的 Provider（如优先使用 moonshotai/int4）</li>
- *   <li><b>原始 HTTP 捕获</b>：完整记录请求/响应信息，用于问题诊断和 curl 复现</li>
+ *   <li><b>Provider 优先级路由</b>：通过 providerOrder 指定优先使用的 Provider</li>
+ *   <li><b>原始 HTTP 捕获</b>：完整记录请求/响应信息</li>
  *   <li><b>可观测性上报</b>：将 HTTP 观测数据上报到 AgentObservabilityService</li>
+ *   <li><b>默认流式输出</b>：对 LLM Provider 使用 stream=true，内部聚合 SSE 流</li>
  * </ol>
- * 
- * <p><b>使用场景：</b></p>
- * <p>当用户配置中指定了 providerOrder（如优先使用 Fireworks 提供的 Kimi K2.5）时，
- * AgentAiServiceFactory 会创建此类的实例，而非标准的 OpenAiChatModel。</p>
- * 
- * <p><b>HTTP 捕获流程（ALP-25）：</b></p>
- * <pre>
- * 1. 检查客户端是否要求捕获（captureLlmRequests=true）
- * 2. 检查 endpoint 是否在服务端白名单内（httpLogger.shouldCapture）
- * 3. 只有两者都满足时才记录 HTTP：
- *    - 记录请求：httpLogger.recordRequest(url, method, headers, body)
- *    - 发送 HTTP 请求
- *    - 记录响应：httpLogger.recordResponse(statusCode, headers, body, durationMs)
- *    - 生成 curl 命令：httpLogger.toCurlCommand(requestRecord)
- *    - 上报观测：observabilityService.recordLlmCallWithRawHttp(...)
- * </pre>
- * <p><b>注意：</b>压测时请确保 captureLlmRequests=false，避免存储爆炸。</p>
- * 
- * <p><b>与标准 OpenAiChatModel 的区别：</b></p>
- * <ul>
- *   <li>支持 providerOrder 参数（OpenRouter 特有）</li>
- *   <li>直接控制 HTTP 层，可捕获原始请求/响应</li>
- *   <li>集成可观测性上报</li>
- * </ul>
  * 
  * @see AgentAiServiceFactory
  * @see RawHttpLogger
@@ -96,29 +75,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     // Debug 配置加载器（热加载）
     private final AgentLlmLocalConfigLoader localConfigLoader;
 
-    /**
-     * 生成 AI 回复。
-     * 
-     * <p>核心方法，处理完整的 LLM 调用流程：</p>
-     * <ol>
-     *   <li>构建 ChatCompletionRequest（包含 providerOrder）</li>
-     *   <li>记录原始 HTTP 请求（如启用捕获）</li>
-     *   <li>发送 HTTP 请求到 LLM Provider</li>
-     *   <li>记录原始 HTTP 响应</li>
-     *   <li>解析响应，上报观测数据</li>
-     * </ol>
-     * 
-     * <p><b>HTTP 捕获决策（双重检查，ALP-25）：</b></p>
-     * <ol>
-     *   <li><b>客户端参数：</b>请求中 captureLlmRequests=true 时启用</li>
-     *   <li><b>服务端白名单：</b>endpoint 在 httpLogger.shouldCapture 白名单内</li>
-     * </ol>
-     * <p>只有两个条件同时满足时才记录 HTTP。压测时请设置 captureLlmRequests=false。</p>
-     * 
-     * @param chatRequest 聊天请求
-     * @return AI 回复响应
-     * @throws IllegalStateException 当 HTTP 请求失败或响应解析失败时抛出
-     */
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
         List<ChatMessage> messages = chatRequest.messages();
@@ -127,7 +83,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         long requestStartedAt = System.currentTimeMillis();
         
         // ALP-25：判断是否记录 HTTP（客户端参数 + 服务端白名单）
-        // 只有当客户端显式要求 captureLlmRequests=true 且 endpoint 在白名单内时才捕获
         boolean clientWantsCapture = observabilityService != null 
                 && observabilityService.isCaptureLlmRequestsEnabled(AgentContext.getRunId());
         boolean endpointAllowed = httpLogger != null && httpLogger.shouldCapture(endpointName);
@@ -154,16 +109,18 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     request,
                     new TypeReference<Map<String, Object>>() {}
             );
-            // OpenRouter 特有：添加 providerOrder 与结构化输出参数（仅 OpenRouter 端点）
+            // 默认启用流式输出
+            requestJsonMap.put("stream", true);
+            requestJsonMap.put("stream_options", Map.of("include_usage", true));
+
+            // OpenRouter 特有：添加 providerOrder 与结构化输出参数
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
                 Map<String, Object> provider = new LinkedHashMap<>();
-                // 总是发送 order（即使是空列表），这是 OpenRouter 的要求
                 provider.put("order", providerOrder == null ? List.of() : providerOrder);
                 if (structuredOutputSpec != null) {
                     requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
                     provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                    // 当有多个 provider 时，自动允许回退以兼容不支持结构化输出的 provider
                     boolean allowFallbacks = structuredOutputSpec.allowProviderFallbacks() 
                             || (providerOrder != null && providerOrder.size() > 1);
                     provider.put("allow_fallbacks", allowFallbacks);
@@ -178,7 +135,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     requestJsonMap.put("reasoning", reasoning);
                 }
             } else if (structuredOutputSpec != null) {
-                // 非 OpenRouter 端点也需要添加结构化输出参数
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
             }
 
@@ -193,7 +149,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             String requestUrl = OpenAiCompatibleChatModelSupport.buildChatCompletionsUrl(baseUrl);
             Map<String, String> requestHeaders = OpenAiCompatibleChatModelSupport.buildRequestHeaders(apiKey);
             
-            // 确保 requestHeaders 包含所有实际发送的 headers（用于 curl 命令和 HTTP 记录）
+            // 确保 requestHeaders 包含所有实际发送的 headers
             requestHeaders.put("Content-Type", "application/json");
             requestHeaders.put("Accept", "application/json");
             
@@ -205,7 +161,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     .header("Authorization", "Bearer " + OpenAiCompatibleChatModelSupport.nvl(apiKey))
                     .POST(HttpRequest.BodyPublishers.ofString(requestJson, StandardCharsets.UTF_8));
             
-            // 添加自定义 headers（如 OpenRouter 的 HTTP-Referer、X-Title）
+            // 添加自定义 headers
             if (customHeaders != null && !customHeaders.isEmpty()) {
                 for (Map.Entry<String, String> entry : customHeaders.entrySet()) {
                     if (entry.getKey() != null && entry.getValue() != null) {
@@ -227,30 +183,60 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                         endpointName, modelName, providerOrder, curlCommand);
             }
             
-            // ========== 2. 发送 HTTP 请求 ==========
-            HttpResponse<String> httpResponse = HTTP_CLIENT.send(
+            // ========== 2. 发送 HTTP 请求（流式） ==========
+            HttpResponse<java.io.InputStream> httpResponse = HTTP_CLIENT.send(
                     httpRequestBuilder.build(),
-                    HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8)
+                    HttpResponse.BodyHandlers.ofInputStream()
             );
             
             // ========== 3. 处理响应 ==========
             statusCode = httpResponse.statusCode();
-            responseJson = httpResponse.body();
             long durationMs = System.currentTimeMillis() - requestStartedAt;
             
-            // ALP-25：记录 HTTP 响应
-            if (shouldCapture) {
-                Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
-                responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, responseJson, durationMs);
-                curlCommand = httpLogger.toCurlCommand(requestRecord);
-            }
-            
-            // 处理 HTTP 错误状态码
-            if (statusCode < 200 || statusCode >= 300) {
-                // ALP-25：上报错误观测
+            ChatCompletionResponse completion;
+            String reasoningContent = null;
+            StreamingProgressTracker.StreamingProgressSnapshot progressSnapshot = null;
+
+            if (statusCode >= 200 && statusCode < 300) {
+                // 流式响应：解析 SSE
+                StreamingProgressTracker tracker = new StreamingProgressTracker(log, modelName, endpointName);
+                OpenAiCompatibleChatModelSupport.SseAggregateResult aggregateResult =
+                        OpenAiCompatibleChatModelSupport.aggregateSseStream(
+                                httpResponse.body(), objectMapper, log, tracker
+                        );
+                tracker.onStreamComplete(durationMs);
+                completion = aggregateResult.completionResponse();
+                reasoningContent = aggregateResult.reasoningContent();
+                progressSnapshot = aggregateResult.progressSnapshot();
+
+                // 为了 HTTP 捕获，将聚合后的响应体序列化
+                String aggregatedBody = objectMapper.writeValueAsString(
+                        objectMapper.convertValue(completion, new TypeReference<Map<String, Object>>() {
+                        })
+                );
+                if (shouldCapture) {
+                    Map<String, String> responseHeaders = new java.util.HashMap<>();
+                    responseHeaders.put("Content-Type", "application/json");
+                    responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, aggregatedBody, durationMs);
+                    curlCommand = httpLogger.toCurlCommand(requestRecord);
+                }
+            } else {
+                // 错误响应：读取完整 body
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(httpResponse.body(), StandardCharsets.UTF_8))) {
+                    responseJson = reader.lines().collect(java.util.stream.Collectors.joining("\n"));
+                }
+                
+                if (shouldCapture) {
+                    Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
+                    responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, responseJson, durationMs);
+                    curlCommand = httpLogger.toCurlCommand(requestRecord);
+                }
+                
+                // 处理 HTTP 错误状态码
                 if (shouldCapture && observabilityService != null) {
                     reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
-                                 "HTTP_ERROR_" + statusCode);
+                             "HTTP_ERROR_" + statusCode, null, null);
                 }
                 
                 String detail = "OpenRouter provider routed chat completion failed"
@@ -264,15 +250,22 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             }
             
             // 解析响应体
-            ChatCompletionResponse completion = objectMapper.readValue(responseJson, ChatCompletionResponse.class);
-
             AiMessage aiMessage = OpenAiUtils.aiMessageFrom(completion);
             TokenUsage tokenUsage = OpenAiUtils.tokenUsageFrom(completion.usage());
             FinishReason finishReason = OpenAiCompatibleChatModelSupport.extractFinishReason(completion);
+
+            // 保存 thinking 内容和进度
+            if (reasoningContent != null && !reasoningContent.isBlank()) {
+                AgentContext.setThinkingContent(reasoningContent);
+            }
+            if (progressSnapshot != null) {
+                AgentContext.setStreamingProgress(progressSnapshot);
+            }
             
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
-                String traceId = reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null);
+                String traceId = reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
+                        reasoningContent, progressSnapshot);
                 String runId = AgentContext.getRunId();
                 if (shouldEnrichOpenRouterCost(runId, traceId, completion.id())) {
                     openRouterCostService.enrichCostInfoAsync(runId, traceId, completion.id(), apiKey, baseUrl);
@@ -293,7 +286,8 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // ALP-25：上报中断错误
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
-                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED");
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED",
+                        null, null);
             }
             
             String detail = "OpenRouter provider routed chat completion interrupted"
@@ -307,7 +301,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
                 String errorType = e.getClass().getSimpleName();
                 reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
-                            errorType + ": " + e.getMessage());
+                            errorType + ": " + e.getMessage(), null, null);
             }
             
             String detail = "OpenRouter provider routed chat completion failed"
@@ -322,21 +316,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     
     /**
      * 上报 LLM 调用观测数据（ALP-25）。
-     * 
-     * <p>将 HTTP 请求/响应信息上报到 AgentObservabilityService，用于：</p>
-     * <ul>
-     *   <li>生成 curl 命令复现请求</li>
-     *   <li>分析 Provider 差异</li>
-     *   <li>故障诊断</li>
-     * </ul>
-     * 
-     * <p><b>注意：</b>只有在当前线程有 AgentContext（runId 不为空）时才会上报。</p>
-     * 
-     * @param request 请求记录
-     * @param response 响应记录
-     * @param curlCommand curl 命令
-     * @param durationMs 请求耗时
-     * @param errorMessage 错误信息（null 表示成功）
      */
     private String reportLlmCall(
             RawHttpLogger.HttpRequestRecord request,
@@ -344,22 +323,21 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             String curlCommand,
             long startedAtMillis,
             long durationMs,
-            String errorMessage) {
+            String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress) {
         
         if (observabilityService == null) {
             return null;
         }
         
-        // 从 ThreadLocal 获取当前 run 信息
         String runId = AgentContext.getRunId();
         String phase = AgentContext.getPhase();
         
         if (runId == null || runId.isBlank()) {
-            // 不在 Agent 执行上下文中，不上报（避免污染其他线程的数据）
             return null;
         }
         
-        // 从响应中提取 token usage
         TokenUsage tokenUsage = OpenAiCompatibleChatModelSupport.extractTokenUsageFromResponse(objectMapper, response, log);
         Integer cachedTokens = OpenAiCompatibleChatModelSupport.extractCachedTokensFromResponse(objectMapper, response, log);
         long completedAtMillis = startedAtMillis + durationMs;
@@ -375,6 +353,8 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 endpointName,
                 modelName,
                 errorMessage,
+                thinkingContent,
+                streamingProgress,
                 request,
                 response,
                 curlCommand
@@ -433,7 +413,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         curl.append("curl -X POST \\\n");
         curl.append("  \"").append(url).append("\" \\\n");
         
-        // 添加 headers（Authorization 脱敏）
         if (headers != null) {
             headers.forEach((key, value) -> {
                 String headerName = key.toLowerCase();
@@ -445,7 +424,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             });
         }
         
-        // 添加 body（转义单引号）
         if (body != null && !body.isEmpty()) {
             String escapedBody = body.replace("'", "'\"'\"'");
             curl.append("  -d '").append(escapedBody).append("'");

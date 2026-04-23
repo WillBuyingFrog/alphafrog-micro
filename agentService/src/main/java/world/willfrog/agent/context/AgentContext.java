@@ -35,6 +35,16 @@ public class AgentContext {
      */
     private static final ThreadLocal<RunStageConfig> STAGE_CONFIG_HOLDER = new ThreadLocal<>();
 
+    /**
+     * DashScope thinking 内容：从流式响应中提取的 reasoning_content。
+     */
+    private static final ThreadLocal<String> THINKING_CONTENT_HOLDER = new ThreadLocal<>();
+
+    /**
+     * 流式响应实时进度快照。
+     */
+    private static final ThreadLocal<world.willfrog.agent.service.StreamingProgressTracker.StreamingProgressSnapshot> STREAMING_PROGRESS_HOLDER = new ThreadLocal<>();
+
     public static void setRunId(String runId) {
         RUN_ID_HOLDER.set(runId);
     }
@@ -159,6 +169,30 @@ public class AgentContext {
         STAGE_CONFIG_HOLDER.remove();
     }
 
+    public static void setThinkingContent(String content) {
+        THINKING_CONTENT_HOLDER.set(content);
+    }
+
+    public static String getThinkingContent() {
+        return THINKING_CONTENT_HOLDER.get();
+    }
+
+    public static void clearThinkingContent() {
+        THINKING_CONTENT_HOLDER.remove();
+    }
+
+    public static void setStreamingProgress(world.willfrog.agent.service.StreamingProgressTracker.StreamingProgressSnapshot snapshot) {
+        STREAMING_PROGRESS_HOLDER.set(snapshot);
+    }
+
+    public static world.willfrog.agent.service.StreamingProgressTracker.StreamingProgressSnapshot getStreamingProgress() {
+        return STREAMING_PROGRESS_HOLDER.get();
+    }
+
+    public static void clearStreamingProgress() {
+        STREAMING_PROGRESS_HOLDER.remove();
+    }
+
     public static void clearPhase() {
         PHASE_HOLDER.remove();
     }
@@ -203,6 +237,8 @@ public class AgentContext {
         clearDebugMode();
         clearReasoningEffort();
         clearStageConfig();
+        clearThinkingContent();
+        clearStreamingProgress();
     }
 
     public static final class StructuredOutputSpec {
