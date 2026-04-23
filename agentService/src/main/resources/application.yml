@@ -288,6 +288,15 @@ agent:
     hitl:
       state-ttl-seconds: ${AF_AGENT_FLOW_HITL_STATE_TTL_SECONDS:3600}
 
+# Nacos 配置订阅（动态配置下发）
+alphafrog:
+  config:
+    nacos:
+      enabled: ${AF_CONFIG_NACOS_ENABLED:false}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      data-id: ${AF_CONFIG_NACOS_DATA_ID:}
+      group: alphafrog-config
+
 langchain4j:
   open-ai:
     api-key: ${AF_AGENT_API_KEY:demo}

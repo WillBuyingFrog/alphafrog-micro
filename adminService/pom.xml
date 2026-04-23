@@ -92,6 +92,18 @@
             <artifactId>protobuf-java-util</artifactId>
             <version>${protobuf-java.version}</version>
         </dependency>
+        <!-- JSON Schema 校验 -->
+        <dependency>
+            <groupId>com.networknt</groupId>
+            <artifactId>json-schema-validator</artifactId>
+            <version>1.5.1</version>
+        </dependency>
+        <!-- Nacos Config Client -->
+        <dependency>
+            <groupId>com.alibaba.nacos</groupId>
+            <artifactId>nacos-client</artifactId>
+            <version>2.4.3</version>
+        </dependency>
     </dependencies>
 
     <build>
