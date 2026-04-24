@@ -23,6 +23,7 @@ import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.tool.RagTools;
+import world.willfrog.agent.tool.SearchTools;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
@@ -48,6 +49,7 @@ public class AgentRunExecutor {
     private final MarketDataTools marketDataTools;
     private final PythonSandboxTools pythonSandboxTools;
     private final RagTools ragTools;
+    private final SearchTools searchTools;
     private final AgentRunStateStore stateStore;
     private final AgentObservabilityService observabilityService;
     private final AgentCreditService creditService;
@@ -187,14 +189,6 @@ public class AgentRunExecutor {
                     "codeInterpreterMaxCredits", runConfig.codeInterpreterMaxCredits(),
                     "smartRetrievalEnabled", runConfig.smartRetrievalEnabled()
             ));
-            if (runConfig.webSearchEnabled()) {
-                eventService.append(runId, userId, "RUN_CAPABILITY_PLACEHOLDER", mapOf(
-                        "capability", "webSearch",
-                        "requested", true,
-                        "available", false,
-                        "reason", "backend_tool_not_implemented_yet"
-                ));
-            }
             if (runConfig.smartRetrievalEnabled()) {
                 eventService.append(runId, userId, "RUN_CAPABILITY_PLACEHOLDER", mapOf(
                         "capability", "smartRetrieval",
@@ -207,6 +201,13 @@ public class AgentRunExecutor {
             List<ToolSpecification> toolSpecifications = new ArrayList<>();
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(marketDataTools));
             toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(ragTools));
+            if (runConfig.webSearchEnabled()) {
+                toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(searchTools));
+                eventService.append(runId, userId, "RUN_CAPABILITY_ENABLED", mapOf(
+                        "capability", "webSearch",
+                        "tools", List.of("searchWeb")
+                ));
+            }
             if (runConfig.codeInterpreterEnabled()) {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }

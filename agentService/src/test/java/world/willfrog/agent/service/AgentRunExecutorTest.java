@@ -19,6 +19,7 @@ import world.willfrog.agent.config.RunStageConfig;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.tool.RagTools;
+import world.willfrog.agent.tool.SearchTools;
 
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
@@ -56,6 +57,8 @@ class AgentRunExecutorTest {
     @Mock
     private RagTools ragTools;
     @Mock
+    private SearchTools searchTools;
+    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentObservabilityService observabilityService;
@@ -89,6 +92,7 @@ class AgentRunExecutorTest {
                 marketDataTools,
                 pythonSandboxTools,
                 ragTools,
+                searchTools,
                 stateStore,
                 observabilityService,
                 creditService,

@@ -9,6 +9,15 @@
       "connectTimeoutSeconds": 20,
       "requestTimeoutSeconds": 45
     },
+    "tavily": {
+      "baseUrl": "https://api.tavily.com",
+      "apiKey": "replace-with-your-tavily-api-key",
+      "searchPath": "/search",
+      "authHeader": "Authorization",
+      "authPrefix": "Bearer ",
+      "connectTimeoutSeconds": 20,
+      "requestTimeoutSeconds": 45
+    },
     "exa": {
       "baseUrl": "https://api.exa.ai",
       "apiKey": "replace-with-your-exa-api-key",
@@ -59,6 +68,60 @@
           "categoryHint": "global"
         }
       ]
+    },
+    "webSearch": {
+      "defaultPreset": "finance_default",
+      "presets": {
+        "finance_default": {
+          "scene": "finance",
+          "backend": "perplexity",
+          "strength": "standard",
+          "maxResults": 8,
+          "includeDomains": ["eastmoney.com", "cls.cn", "yicai.com"]
+        },
+        "finance_deep": {
+          "scene": "finance",
+          "backend": "tavily",
+          "strength": "deep",
+          "maxResults": 10
+        },
+        "news_fast": {
+          "scene": "news",
+          "backend": "exa",
+          "strength": "fast",
+          "maxResults": 10,
+          "timeRange": "day"
+        },
+        "general_default": {
+          "scene": "general",
+          "backend": "perplexity",
+          "strength": "standard",
+          "maxResults": 5
+        }
+      },
+      "backends": {
+        "perplexity": {
+          "baseUrl": "https://api.perplexity.ai",
+          "authHeader": "Authorization",
+          "authPrefix": "Bearer ",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        },
+        "tavily": {
+          "baseUrl": "https://api.tavily.com",
+          "authHeader": "Authorization",
+          "authPrefix": "Bearer ",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        },
+        "exa": {
+          "baseUrl": "https://api.exa.ai",
+          "authHeader": "x-api-key",
+          "authPrefix": "",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        }
+      }
     }
   },
   "prompts": {
