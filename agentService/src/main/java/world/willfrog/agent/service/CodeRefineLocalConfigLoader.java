@@ -41,6 +41,7 @@ public class CodeRefineLocalConfigLoader {
     private volatile CodeRefineProperties localConfig;
     private volatile String loadedConfigPath = "";
     private volatile long loadedConfigLastModified = -1;
+    private volatile byte[] loadedConfigBytes = new byte[0];
 
     public CodeRefineLocalConfigLoader(ObjectMapper objectMapper,
                                         StringRedisTemplate redisTemplate,
@@ -80,6 +81,7 @@ public class CodeRefineLocalConfigLoader {
             long currentModified = Files.getLastModifiedTime(path).toMillis();
             String normalizedPath = path.toString();
             if (!force && normalizedPath.equals(loadedConfigPath) && currentModified == loadedConfigLastModified) {
+                reportState(loadedConfigBytes);
                 return;
             }
 
@@ -93,6 +95,7 @@ public class CodeRefineLocalConfigLoader {
                 this.localConfig = sanitize(parsed);
                 this.loadedConfigPath = normalizedPath;
                 this.loadedConfigLastModified = currentModified;
+                this.loadedConfigBytes = bytes;
 
                 log.info("Loaded local code refine config from {} (maxAttempts={})",
                         path, this.localConfig.getMaxAttempts());

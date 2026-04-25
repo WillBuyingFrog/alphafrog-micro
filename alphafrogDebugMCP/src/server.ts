@@ -22,7 +22,7 @@ function loadEnv(): void {
   const repoRoot = path.resolve(__dirname, "..", "..");
   const dotenvPath = custom && existsSync(custom) ? custom : path.join(repoRoot, ".env");
   if (existsSync(dotenvPath)) {
-    dotenv.config({ path: dotenvPath });
+    dotenv.config({ path: dotenvPath, quiet: true });
   }
 }
 
