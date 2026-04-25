@@ -7,6 +7,7 @@ import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
 import world.willfrog.externalinfo.config.SearchLlmProperties;
 import world.willfrog.externalinfo.search.backend.SearchBackend;
 
+import java.util.ArrayList;
 import java.util.List;
 
 /**
@@ -18,52 +19,44 @@ import java.util.List;
 @Slf4j
 public class BackendRouter {
 
-    private final SearchLlmProperties properties;
+    private static final int DEFAULT_MAX_RESULTS = 5;
+
+    private final SearchLlmConfigResolver configResolver;
     private final List<SearchBackend> backends;
 
     /**
      * 解析并返回匹配的 backend 及 preset。
-     * 优先级：request.backend > scene 对应 preset > defaultPreset。
+     * 优先级：显式 backend / preset > defaultPreset。
      *
      * @param request WebSearchRequest
      * @return ResolvedBackend 包含 backend 实例和匹配的 preset
      * @throws IllegalStateException 找不到可用 backend 时抛出
      */
     public ResolvedBackend resolve(WebSearchRequest request) {
-        String targetBackend = null;
+        SearchLlmProperties.WebSearchFeature feature = getWebSearchFeature();
         SearchLlmProperties.WebSearchPreset matchedPreset = null;
+        String targetBackend = "";
 
-        // 优先级1：如果 request.backend 非空且对应 backend 存在
-        String reqBackend = request.getBackend();
-        if (hasText(reqBackend)) {
-            targetBackend = reqBackend.trim().toLowerCase();
-            matchedPreset = findPresetByBackend(targetBackend);
+        String reqBackendOrPreset = request.getBackend();
+        if (hasText(reqBackendOrPreset)) {
+            String candidate = reqBackendOrPreset.trim();
+            matchedPreset = findPresetByName(candidate);
+            targetBackend = matchedPreset != null && hasText(matchedPreset.getBackend())
+                    ? matchedPreset.getBackend().trim().toLowerCase()
+                    : candidate.toLowerCase();
         }
 
-        // 优先级2：按 scene 查找匹配的 preset
-        if (targetBackend == null) {
-            String scene = request.getScene();
-            if (hasText(scene)) {
-                matchedPreset = findPresetByScene(scene.trim());
-                if (matchedPreset != null && hasText(matchedPreset.getBackend())) {
-                    targetBackend = matchedPreset.getBackend().trim().toLowerCase();
-                }
-            }
-        }
-
-        // 优先级3：fallback 到 defaultPreset
-        if (targetBackend == null) {
-            SearchLlmProperties.WebSearchFeature feature = getWebSearchFeature();
+        if (!hasText(targetBackend)) {
             String defaultPresetName = feature.getDefaultPreset();
             if (hasText(defaultPresetName)) {
-                matchedPreset = feature.getPresets().get(defaultPresetName);
+                matchedPreset = findPresetByName(defaultPresetName);
                 if (matchedPreset != null && hasText(matchedPreset.getBackend())) {
                     targetBackend = matchedPreset.getBackend().trim().toLowerCase();
                 }
             }
         }
 
-        if (targetBackend == null) {
+        if (!hasText(targetBackend)) {
             throw new IllegalStateException(
                     "无法解析可用的搜索后端，request backend=" + request.getBackend()
                             + ", scene=" + request.getScene());
@@ -74,11 +67,8 @@ public class BackendRouter {
             throw new IllegalStateException("未找到名为 '" + targetBackend + "' 的搜索后端实现");
         }
 
-        // 验证 scene 和 strength 兼容性（仅打印警告，不阻断）
-        String scene = hasText(request.getScene()) ? request.getScene().trim()
-                : (matchedPreset != null ? matchedPreset.getScene() : "");
-        String strength = hasText(request.getStrength()) ? request.getStrength().trim()
-                : (matchedPreset != null ? matchedPreset.getStrength() : "");
+        String scene = firstText(request.getScene(), matchedPreset == null ? null : matchedPreset.getScene(), "general");
+        String strength = firstText(request.getStrength(), matchedPreset == null ? null : matchedPreset.getStrength(), "standard");
 
         if (hasText(scene) && !backend.supportsScene(scene)) {
             log.warn("后端 '{}' 不支持场景 '{}'", targetBackend, scene);
@@ -87,7 +77,20 @@ public class BackendRouter {
             log.warn("后端 '{}' 不支持强度档位 '{}'", targetBackend, strength);
         }
 
-        return new ResolvedBackend(backend, matchedPreset);
+        SearchLlmConfigResolver.ResolvedBackendConfig backendConfig = configResolver.resolveBackendConfig(targetBackend);
+        WebSearchExecutionContext context = new WebSearchExecutionContext(
+                request,
+                targetBackend,
+                scene,
+                strength,
+                resolveMaxResults(request, matchedPreset),
+                firstText(null, matchedPreset == null ? null : matchedPreset.getTimeRange(), ""),
+                mergeList(matchedPreset == null ? null : matchedPreset.getIncludeDomains()),
+                mergeList(matchedPreset == null ? null : matchedPreset.getExcludeDomains()),
+                matchedPreset,
+                backendConfig
+        );
+        return new ResolvedBackend(backend, matchedPreset, context);
     }
 
     private SearchBackend findBackendByName(String name) {
@@ -102,48 +105,64 @@ public class BackendRouter {
         return null;
     }
 
-    private SearchLlmProperties.WebSearchPreset findPresetByBackend(String backendName) {
+    private SearchLlmProperties.WebSearchPreset findPresetByName(String name) {
         SearchLlmProperties.WebSearchFeature feature = getWebSearchFeature();
         if (feature == null || feature.getPresets() == null) {
             return null;
         }
-        for (SearchLlmProperties.WebSearchPreset preset : feature.getPresets().values()) {
-            if (preset != null && hasText(preset.getBackend())
-                    && backendName.equalsIgnoreCase(preset.getBackend().trim())) {
-                return preset;
-            }
+        SearchLlmProperties.WebSearchPreset preset = feature.getPresets().get(name);
+        if (preset != null) {
+            return preset;
         }
-        return null;
-    }
-
-    private SearchLlmProperties.WebSearchPreset findPresetByScene(String scene) {
-        SearchLlmProperties.WebSearchFeature feature = getWebSearchFeature();
-        if (feature == null || feature.getPresets() == null) {
-            return null;
-        }
-        for (SearchLlmProperties.WebSearchPreset preset : feature.getPresets().values()) {
-            if (preset != null && hasText(preset.getScene())
-                    && scene.equalsIgnoreCase(preset.getScene().trim())) {
-                return preset;
-            }
-        }
-        return null;
+        return feature.getPresets().get(name.trim().toLowerCase());
     }
 
     private SearchLlmProperties.WebSearchFeature getWebSearchFeature() {
-        if (properties == null || properties.getFeatures() == null) {
-            return null;
-        }
-        return properties.getFeatures().getWebSearch();
+        return configResolver.webSearchFeature();
     }
 
     private boolean hasText(String value) {
         return value != null && !value.trim().isEmpty();
     }
 
+    private String firstText(String primary, String fallback, String defaultValue) {
+        if (hasText(primary)) {
+            return primary.trim();
+        }
+        if (hasText(fallback)) {
+            return fallback.trim();
+        }
+        return defaultValue;
+    }
+
+    private int resolveMaxResults(WebSearchRequest request, SearchLlmProperties.WebSearchPreset preset) {
+        if (request.getMaxResults() > 0) {
+            return request.getMaxResults();
+        }
+        if (preset != null && preset.getMaxResults() != null && preset.getMaxResults() > 0) {
+            return preset.getMaxResults();
+        }
+        return DEFAULT_MAX_RESULTS;
+    }
+
+    private List<String> mergeList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return List.of();
+        }
+        List<String> result = new ArrayList<>();
+        for (String value : values) {
+            if (hasText(value)) {
+                result.add(value.trim());
+            }
+        }
+        return List.copyOf(result);
+    }
+
     /**
      * 路由解析结果：包含选中的 backend 实例及对应 preset。
      */
-    public record ResolvedBackend(SearchBackend backend, SearchLlmProperties.WebSearchPreset preset) {
+    public record ResolvedBackend(SearchBackend backend,
+                                  SearchLlmProperties.WebSearchPreset preset,
+                                  WebSearchExecutionContext context) {
     }
 }

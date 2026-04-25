@@ -48,6 +48,14 @@ external-info:
         auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_EXA_AUTH_PREFIX:}
         connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_CONNECT_TIMEOUT_SECONDS:20}
         request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_REQUEST_TIMEOUT_SECONDS:45}
+      tavily:
+        base-url: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_BASE_URL:https://api.tavily.com}
+        api-key: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_API_KEY:}
+        search-path: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_SEARCH_PATH:/search}
+        auth-header: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_AUTH_HEADER:Authorization}
+        auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_AUTH_PREFIX:Bearer }
+        connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_CONNECT_TIMEOUT_SECONDS:20}
+        request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_REQUEST_TIMEOUT_SECONDS:45}
     features:
       market-news:
         default-provider: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_DEFAULT_PROVIDER:exa}
@@ -77,6 +85,45 @@ external-info:
             languages: [en]
             country: ${AF_EXTERNAL_INFO_SEARCH_MARKET_NEWS_US_COUNTRY:US}
             category-hint: global
+      web-search:
+        default-preset: ${AF_EXTERNAL_INFO_WEB_SEARCH_DEFAULT_PRESET:finance_default}
+        presets:
+          finance_default:
+            scene: finance
+            backend: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_BACKEND:perplexity}
+            strength: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_STRENGTH:standard}
+            max-results: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_MAX_RESULTS:8}
+            include-domains: [eastmoney.com, cls.cn, yicai.com]
+          news_fast:
+            scene: news
+            backend: ${AF_EXTERNAL_INFO_WEB_SEARCH_NEWS_BACKEND:exa}
+            strength: ${AF_EXTERNAL_INFO_WEB_SEARCH_NEWS_STRENGTH:fast}
+            max-results: ${AF_EXTERNAL_INFO_WEB_SEARCH_NEWS_MAX_RESULTS:10}
+            time-range: day
+          general_default:
+            scene: general
+            backend: ${AF_EXTERNAL_INFO_WEB_SEARCH_GENERAL_BACKEND:perplexity}
+            strength: ${AF_EXTERNAL_INFO_WEB_SEARCH_GENERAL_STRENGTH:standard}
+            max-results: ${AF_EXTERNAL_INFO_WEB_SEARCH_GENERAL_MAX_RESULTS:5}
+        backends:
+          perplexity:
+            base-url: ${AF_EXTERNAL_INFO_SEARCH_PPLX_BASE_URL:https://api.perplexity.ai}
+            auth-header: ${AF_EXTERNAL_INFO_SEARCH_PPLX_AUTH_HEADER:Authorization}
+            auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_PPLX_AUTH_PREFIX:Bearer }
+            connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_PPLX_CONNECT_TIMEOUT_SECONDS:20}
+            request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_PPLX_REQUEST_TIMEOUT_SECONDS:45}
+          exa:
+            base-url: ${AF_EXTERNAL_INFO_SEARCH_EXA_BASE_URL:https://api.exa.ai}
+            auth-header: ${AF_EXTERNAL_INFO_SEARCH_EXA_AUTH_HEADER:x-api-key}
+            auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_EXA_AUTH_PREFIX:}
+            connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_CONNECT_TIMEOUT_SECONDS:20}
+            request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_EXA_REQUEST_TIMEOUT_SECONDS:45}
+          tavily:
+            base-url: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_BASE_URL:https://api.tavily.com}
+            auth-header: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_AUTH_HEADER:Authorization}
+            auth-prefix: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_AUTH_PREFIX:Bearer }
+            connect-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_CONNECT_TIMEOUT_SECONDS:20}
+            request-timeout-seconds: ${AF_EXTERNAL_INFO_SEARCH_TAVILY_REQUEST_TIMEOUT_SECONDS:45}
     prompts:
       market-news-query-template: ${AF_EXTERNAL_INFO_SEARCH_PROMPTS_MARKET_NEWS_QUERY_TEMPLATE:}
 

@@ -3,6 +3,8 @@ package world.willfrog.externalinfo.search.slot;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.time.LocalDate;
+import java.time.ZoneId;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.List;
@@ -35,7 +37,7 @@ public class SlotExtractor {
 
     // 数值条件正则：匹配包含数字+%/亿/万 的短语
     private static final Pattern NUMERIC_CONDITION_PATTERN = Pattern.compile(
-            "(涨幅|市值|市盈率|市净率|成交量|成交额|价格|收益).{0,10}[大于|超过|低于|小于|等于|≥|≤|>|<|=].{0,10}\\d+[\\.\\d]*[%亿万亿万]?",
+            "(涨幅|市值|市盈率|市净率|成交量|成交额|价格|收益).{0,10}(大于|超过|高于|低于|小于|等于|不少于|不超过|≥|≤|>|<|=).{0,10}\\d+(?:\\.\\d+)?[%亿万]?",
             Pattern.CASE_INSENSITIVE
     );
 
@@ -54,17 +56,7 @@ public class SlotExtractor {
             "科创板", "上证", "深证", "沪深", "中证", "纳斯达克", "NYSE", "标普", "道琼斯"
     );
 
-    // 时间范围归一化映射
-    private static final Map<String, String> TIME_NORMALIZE_MAP = Map.ofEntries(
-            Map.entry("去年", "上年全年"),
-            Map.entry("前年", "前年全年"),
-            Map.entry("这周", "本周"),
-            Map.entry("本周", "本周"),
-            Map.entry("今天", "今日"),
-            Map.entry("今日", "今日"),
-            Map.entry("昨天", "昨日"),
-            Map.entry("昨日", "昨日")
-    );
+    private static final ZoneId SHANGHAI = ZoneId.of("Asia/Shanghai");
 
     /**
      * 从 query 中提取所有槽位。
@@ -97,8 +89,26 @@ public class SlotExtractor {
                 ? slots.assetCode()
                 : (slots.assetName() != null ? slots.assetName() : "");
         String time = normalizeTimeRange(slots.timeRange());
+        String numeric = computeNumericSignature(slots);
         String market = slots.marketScope() != null ? slots.marketScope() : "";
-        return "asset=" + asset + "|time_range=" + time + "|market=" + market;
+        return "asset=" + asset + "|time_range=" + time + "|numeric=" + numeric + "|market=" + market;
+    }
+
+    public String computeNumericSignature(SlotResult slots) {
+        if (slots == null || slots.numericConditions() == null || slots.numericConditions().isEmpty()) {
+            return "";
+        }
+        return String.join(",", slots.numericConditions().stream()
+                .map(this::normalizeNumericCondition)
+                .sorted()
+                .toList());
+    }
+
+    public String computeTimeBucket(SlotResult slots) {
+        if (slots == null) {
+            return "";
+        }
+        return normalizeTimeRange(slots.timeRange());
     }
 
     private String extractAssetCode(String query) {
@@ -153,7 +163,33 @@ public class SlotExtractor {
         if (timeRange == null || timeRange.isEmpty()) {
             return "";
         }
-        return TIME_NORMALIZE_MAP.getOrDefault(timeRange, timeRange);
+        LocalDate today = LocalDate.now(SHANGHAI);
+        return switch (timeRange) {
+            case "去年", "上年" -> (today.getYear() - 1) + "全年";
+            case "前年" -> (today.getYear() - 2) + "全年";
+            case "今年" -> today.getYear() + "全年";
+            case "这周", "本周" -> "week:" + today.minusDays(today.getDayOfWeek().getValue() - 1);
+            case "上周" -> "week:" + today.minusDays(today.getDayOfWeek().getValue() - 1L + 7);
+            case "今天", "今日" -> today.toString();
+            case "昨天", "昨日" -> today.minusDays(1).toString();
+            case "前天" -> today.minusDays(2).toString();
+            default -> timeRange;
+        };
+    }
+
+    private String normalizeNumericCondition(String condition) {
+        if (condition == null) {
+            return "";
+        }
+        return condition.replaceAll("\\s+", "")
+                .replace("超过", ">")
+                .replace("大于", ">")
+                .replace("高于", ">")
+                .replace("低于", "<")
+                .replace("小于", "<")
+                .replace("不少于", ">=")
+                .replace("不超过", "<=")
+                .replace("等于", "=");
     }
 
     /**

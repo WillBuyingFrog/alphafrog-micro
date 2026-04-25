@@ -4,6 +4,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRagPrefetch;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
 import world.willfrog.externalinfo.search.backend.BackendSearchResult;
 import world.willfrog.externalinfo.search.backend.SearchBackend;
@@ -12,7 +13,6 @@ import world.willfrog.externalinfo.search.cache.HotKeywordTtlStrategy;
 import world.willfrog.externalinfo.search.slot.QueryCanonicalizer;
 import world.willfrog.externalinfo.search.slot.SlotExtractor;
 
-import java.util.List;
 import java.util.Map;
 
 /**
@@ -50,27 +50,23 @@ public class WebSearchOrchestrator {
 
             // 2. 热点缓存检查（P2）
             String slotSignature = slotExtractor.computeSlotSignature(slots);
+            String cacheKey = buildCacheKey(canonicalQuery, slotSignature, slotExtractor.computeTimeBucket(slots));
             if (!request.getSkipHotCache()) {
                 HotKeywordCacheService.HotKeywordCacheResult cached =
-                        hotKeywordCacheService.findCluster(slotSignature, request.getQuery());
+                        hotKeywordCacheService.findCluster(cacheKey, request.getQuery());
                 if (cached != null && cached.hit()) {
-                    log.info("热点缓存命中: query={}, slotSignature={}", request.getQuery(), slotSignature);
-                    return WebSearchResponse.newBuilder()
-                            .setOk(true)
-                            .setAnswer(cached.aggregatedAnswer() != null ? cached.aggregatedAnswer() : cached.answer())
-                            .setCanonicalQuery(cached.canonicalQuery())
-                            .setSlotSignature(slotSignature)
-                            .setBackendMeta(WebSearchResponse.getDefaultInstance().getBackendMeta())
-                            .build();
+                    log.info("热点缓存命中: query={}, cacheKey={}", request.getQuery(), cacheKey);
+                    return cached.response();
                 }
             }
 
             WebSearchRequest effectiveRequest = request;
+            RagPrefetcher.RagPrefetchResult ragPrefetchResult = RagPrefetcher.RagPrefetchResult.noHit();
 
             // 3. RAG 预检（P1 实现）
             if (!request.getSkipRagPrefetch()) {
-                RagPrefetcher.RagPrefetchResult ragPrefetchResult = ragPrefetcher.prefetch(
-                        canonicalQuery, request.getScene(), request.getStrength());
+                ragPrefetchResult = ragPrefetcher.prefetch(
+                        request.getQuery(), request.getScene(), request.getStrength());
                 if (ragPrefetchResult.adjustedStrength() != null) {
                     effectiveRequest = request.toBuilder()
                             .setStrength(ragPrefetchResult.adjustedStrength())
@@ -83,35 +79,32 @@ public class WebSearchOrchestrator {
             // 4. Backend 选择与参数映射
             BackendRouter.ResolvedBackend resolved = backendRouter.resolve(effectiveRequest);
             SearchBackend backend = resolved.backend();
-
-            // 如果 request 中有 strength 覆盖，优先使用 request 的；否则使用 preset 的
-            WebSearchRequest.Builder requestBuilder = effectiveRequest.toBuilder();
-            if (!hasText(effectiveRequest.getStrength()) && resolved.preset() != null
-                    && hasText(resolved.preset().getStrength())) {
-                requestBuilder.setStrength(resolved.preset().getStrength());
-            }
-            WebSearchRequest finalRequest = requestBuilder.build();
+            WebSearchExecutionContext context = resolved.context();
 
             // 5. 调用具体 Backend
-            BackendSearchResult rawResult = backend.search(finalRequest);
+            BackendSearchResult rawResult = backend.search(context);
 
             // 6. 结果标准化映射
-            WebSearchResponse response = resultNormalizer.normalize(rawResult, finalRequest);
+            WebSearchResponse response = resultNormalizer.normalize(rawResult, effectiveRequest);
 
             // 7. 回填 P0 预埋字段
-            String resultHash = response.getResultHash();
             response = response.toBuilder()
                     .setCanonicalQuery(canonicalQuery)
                     .setSlotSignature(slotSignature)
+                    .setRagPrefetch(WebSearchRagPrefetch.newBuilder()
+                            .setUsed(ragPrefetchResult.used())
+                            .setRelevanceScore(ragPrefetchResult.relevanceScore())
+                            .setRagSummary(nvl(ragPrefetchResult.ragSummary()))
+                            .build())
                     .build();
 
             // 8. 热点缓存写入（P2）
             try {
                 hotKeywordCacheService.updateClusterStats(
-                        slotSignature, request.getRunId(), request.getUserId());
+                        cacheKey, request.getRunId(), request.getUserId());
 
                 boolean shouldForm = hotKeywordCacheService.shouldFormHotCluster(
-                        slotSignature, request.getQuery(), request.getRunId(), request.getUserId());
+                        cacheKey, request.getQuery(), request.getRunId(), request.getUserId());
                 if (shouldForm && response.getOk()) {
                     long ttlSeconds = hotKeywordTtlStrategy.computeTtl(
                             canonicalQuery, request.getScene(),
@@ -121,29 +114,17 @@ public class WebSearchOrchestrator {
                                     "timeRange", nvl(slots.timeRange()),
                                     "marketScope", nvl(slots.marketScope())
                             )));
-                    String intentTemplate = queryCanonicalizer.canonicalize(request.getQuery(), slots);
-                    String answer = response.getAnswer();
-                    String aggregatedAnswer = null;
-                    if (answer != null && !answer.isBlank()) {
-                        aggregatedAnswer = answer;
-                    }
                     hotKeywordCacheService.writeCluster(
+                            cacheKey,
                             canonicalQuery,
-                            intentTemplate,
-                            slotSignature,
+                            canonicalQuery,
+                            request.getQuery(),
                             request.getScene(),
-                            new world.willfrog.externalinfo.search.cache.AnswerAggregator.BackendAnswer(
-                                    response.getBackendMeta() != null ? response.getBackendMeta().getBackend() : "unknown",
-                                    answer,
-                                    List.of(),
-                                    resultHash,
-                                    java.time.Instant.now().toString()
-                            ),
-                            aggregatedAnswer,
+                            response,
                             ttlSeconds
                     );
-                    log.info("写入热点缓存: query={}, slotSignature={}, ttl={}s",
-                            canonicalQuery, slotSignature, ttlSeconds);
+                    log.info("写入热点缓存: query={}, cacheKey={}, ttl={}s",
+                            canonicalQuery, cacheKey, ttlSeconds);
                 }
             } catch (Exception cacheEx) {
                 log.warn("热点缓存写入失败，不影响主流程", cacheEx);
@@ -160,11 +141,13 @@ public class WebSearchOrchestrator {
         }
     }
 
-    private boolean hasText(String value) {
-        return value != null && !value.trim().isEmpty();
-    }
-
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private String buildCacheKey(String intentTemplate, String slotSignature, String timeBucket) {
+        return "intent=" + nvl(intentTemplate)
+                + "|slots=" + nvl(slotSignature)
+                + "|time_bucket=" + nvl(timeBucket);
     }
 }

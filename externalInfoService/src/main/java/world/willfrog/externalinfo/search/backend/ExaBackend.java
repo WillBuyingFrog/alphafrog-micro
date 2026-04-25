@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
-import world.willfrog.externalinfo.config.SearchLlmProperties;
+import world.willfrog.externalinfo.search.SearchLlmConfigResolver;
+import world.willfrog.externalinfo.search.WebSearchExecutionContext;
 import world.willfrog.externalinfo.search.profile.GlobalUserProfileInjector;
 import world.willfrog.externalinfo.search.profile.ProfileContext;
 
@@ -40,15 +40,13 @@ public class ExaBackend implements SearchBackend {
             "fast", "cheap", "standard", "default", "deep", "pro", "deep-research"
     );
 
-    private final SearchLlmProperties properties;
     private final ObjectMapper objectMapper;
     private final GlobalUserProfileInjector globalUserProfileInjector;
     private final ProfileContext profileContext;
 
-    public ExaBackend(SearchLlmProperties properties, ObjectMapper objectMapper,
+    public ExaBackend(ObjectMapper objectMapper,
                        GlobalUserProfileInjector globalUserProfileInjector,
                        ProfileContext profileContext) {
-        this.properties = properties;
         this.objectMapper = objectMapper;
         this.globalUserProfileInjector = globalUserProfileInjector;
         this.profileContext = profileContext;
@@ -70,22 +68,22 @@ public class ExaBackend implements SearchBackend {
     }
 
     @Override
-    public BackendSearchResult search(WebSearchRequest request) {
+    public BackendSearchResult search(WebSearchExecutionContext context) {
         long startMs = System.currentTimeMillis();
-        ResolvedConfig config = resolveConfig(name());
+        SearchLlmConfigResolver.ResolvedBackendConfig config = context.backendConfig();
         if (config == null || !hasText(config.baseUrl())) {
             log.error("Exa backend 配置缺失");
             return BackendSearchResult.error(name(), "CONFIG_MISSING", "Exa backend 配置缺失");
         }
 
         String url = resolveUrl(config.baseUrl(), API_PATH);
-        String strength = normalize(request.getStrength());
+        String strength = normalize(context.strength());
         if (!hasText(strength)) {
             strength = "standard";
         }
 
-        Map<String, Object> body = buildRequestBody(request, strength);
-        String rawQuery = request.getQuery();
+        Map<String, Object> body = buildRequestBody(context, strength);
+        String rawQuery = context.request().getQuery();
 
         try {
             String requestBody = objectMapper.writeValueAsString(body);
@@ -119,16 +117,26 @@ public class ExaBackend implements SearchBackend {
     /**
      * 构建 Exa /search 请求体
      */
-    private Map<String, Object> buildRequestBody(WebSearchRequest request, String strength) {
+    private Map<String, Object> buildRequestBody(WebSearchExecutionContext context, String strength) {
+        var request = context.request();
         Map<String, Object> body = new LinkedHashMap<>();
         // Exa 没有独立的 systemPrompt 字段，将全局画像注入到 query 前缀中
         String injectedQuery = globalUserProfileInjector.injectIntoQuery(request.getQuery(), profileContext.getGlobalProfile());
         body.put("query", injectedQuery);
         body.put("type", resolveSearchType(strength));
 
-        int maxResults = request.getMaxResults();
+        int maxResults = context.maxResults();
         if (maxResults > 0) {
             body.put("numResults", maxResults);
+        }
+        if ("news".equalsIgnoreCase(context.scene())) {
+            body.put("category", "news");
+        }
+        if (context.includeDomains() != null && !context.includeDomains().isEmpty()) {
+            body.put("includeDomains", context.includeDomains());
+        }
+        if (context.excludeDomains() != null && !context.excludeDomains().isEmpty()) {
+            body.put("excludeDomains", context.excludeDomains());
         }
 
         // 时间范围过滤
@@ -153,6 +161,14 @@ public class ExaBackend implements SearchBackend {
 
         contents.put("summary", true);
         body.put("contents", contents);
+
+        Map<String, Object> outputSchema = new LinkedHashMap<>();
+        outputSchema.put("type", "object");
+        outputSchema.put("properties", Map.of(
+                "answer", Map.of("type", "string")
+        ));
+        outputSchema.put("required", List.of("answer"));
+        body.put("outputSchema", outputSchema);
 
         return body;
     }
@@ -211,6 +227,9 @@ public class ExaBackend implements SearchBackend {
             JsonNode outputNode = root.path("output");
             if (!outputNode.isMissingNode()) {
                 String outputContent = outputNode.path("content").asText("");
+                if (!hasText(outputContent)) {
+                    outputContent = outputNode.path("answer").asText("");
+                }
                 if (hasText(outputContent)) {
                     answerBuilder.append(outputContent);
                 }
@@ -282,32 +301,9 @@ public class ExaBackend implements SearchBackend {
         }
     }
 
-    // ==================== 配置解析 ====================
-
-    private ResolvedConfig resolveConfig(String backendName) {
-        SearchLlmProperties.WebSearchFeature webSearch = properties.getFeatures().getWebSearch();
-        if (webSearch != null) {
-            SearchLlmProperties.BackendConfig bc = webSearch.getBackends().get(backendName);
-            if (bc != null) {
-                return new ResolvedConfig(
-                        bc.getBaseUrl(), bc.getApiKey(), bc.getAuthHeader(), bc.getAuthPrefix(),
-                        bc.getHeaders(), bc.getConnectTimeoutSeconds(), bc.getRequestTimeoutSeconds()
-                );
-            }
-        }
-        SearchLlmProperties.Provider p = properties.getProviders().get(backendName);
-        if (p != null) {
-            return new ResolvedConfig(
-                    p.getBaseUrl(), p.getApiKey(), p.getAuthHeader(), p.getAuthPrefix(),
-                    p.getHeaders(), p.getConnectTimeoutSeconds(), p.getRequestTimeoutSeconds()
-            );
-        }
-        return null;
-    }
-
     // ==================== HTTP 工具 ====================
 
-    private void applyAuthHeader(ResolvedConfig config, HttpRequest.Builder builder) {
+    private void applyAuthHeader(SearchLlmConfigResolver.ResolvedBackendConfig config, HttpRequest.Builder builder) {
         if (config == null) {
             return;
         }
@@ -318,7 +314,7 @@ public class ExaBackend implements SearchBackend {
         }
     }
 
-    private void applyExtraHeaders(ResolvedConfig config, HttpRequest.Builder builder) {
+    private void applyExtraHeaders(SearchLlmConfigResolver.ResolvedBackendConfig config, HttpRequest.Builder builder) {
         if (config == null || config.headers() == null) {
             return;
         }
@@ -341,14 +337,14 @@ public class ExaBackend implements SearchBackend {
         return normalizedBase + normalizedPath;
     }
 
-    private int resolveConnectTimeout(ResolvedConfig config) {
+    private int resolveConnectTimeout(SearchLlmConfigResolver.ResolvedBackendConfig config) {
         if (config == null || config.connectTimeoutSeconds() == null || config.connectTimeoutSeconds() <= 0) {
             return DEFAULT_CONNECT_TIMEOUT_SECONDS;
         }
         return config.connectTimeoutSeconds();
     }
 
-    private int resolveRequestTimeout(ResolvedConfig config) {
+    private int resolveRequestTimeout(SearchLlmConfigResolver.ResolvedBackendConfig config) {
         if (config == null || config.requestTimeoutSeconds() == null || config.requestTimeoutSeconds() <= 0) {
             return DEFAULT_REQUEST_TIMEOUT_SECONDS;
         }
@@ -363,8 +359,4 @@ public class ExaBackend implements SearchBackend {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ResolvedConfig(String baseUrl, String apiKey, String authHeader, String authPrefix,
-                                   Map<String, String> headers, Integer connectTimeoutSeconds,
-                                   Integer requestTimeoutSeconds) {
-    }
 }

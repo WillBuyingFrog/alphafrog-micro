@@ -182,6 +182,7 @@ public class AgentRunExecutor {
 
             String userGoal = resolveUserGoal(run);
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
+            AgentContext.setWebSearchEnabled(runConfig.webSearchEnabled());
 
             eventService.append(runId, userId, "RUN_CONFIG_APPLIED", mapOf(
                     "webSearchEnabled", runConfig.webSearchEnabled(),

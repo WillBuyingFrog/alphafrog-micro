@@ -163,6 +163,9 @@ public class SearchLlmLocalConfigLoader {
         if (cfg.getFeatures().getMarketNews() == null) {
             cfg.getFeatures().setMarketNews(new SearchLlmProperties.MarketNewsFeature());
         }
+        if (cfg.getFeatures().getWebSearch() == null) {
+            cfg.getFeatures().setWebSearch(new SearchLlmProperties.WebSearchFeature());
+        }
         if (cfg.getPrompts() == null) {
             cfg.setPrompts(new SearchLlmProperties.Prompts());
         }

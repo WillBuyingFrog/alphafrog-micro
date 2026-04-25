@@ -4,8 +4,8 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
-import world.willfrog.externalinfo.config.SearchLlmProperties;
+import world.willfrog.externalinfo.search.SearchLlmConfigResolver;
+import world.willfrog.externalinfo.search.WebSearchExecutionContext;
 import world.willfrog.externalinfo.search.profile.GlobalUserProfileInjector;
 import world.willfrog.externalinfo.search.profile.ProfileContext;
 
@@ -41,15 +41,13 @@ public class TavilyBackend implements SearchBackend {
             "fast", "cheap", "standard", "default", "deep", "pro", "ultra-fast"
     );
 
-    private final SearchLlmProperties properties;
     private final ObjectMapper objectMapper;
     private final GlobalUserProfileInjector globalUserProfileInjector;
     private final ProfileContext profileContext;
 
-    public TavilyBackend(SearchLlmProperties properties, ObjectMapper objectMapper,
+    public TavilyBackend(ObjectMapper objectMapper,
                           GlobalUserProfileInjector globalUserProfileInjector,
                           ProfileContext profileContext) {
-        this.properties = properties;
         this.objectMapper = objectMapper;
         this.globalUserProfileInjector = globalUserProfileInjector;
         this.profileContext = profileContext;
@@ -71,22 +69,22 @@ public class TavilyBackend implements SearchBackend {
     }
 
     @Override
-    public BackendSearchResult search(WebSearchRequest request) {
+    public BackendSearchResult search(WebSearchExecutionContext context) {
         long startMs = System.currentTimeMillis();
-        ResolvedConfig config = resolveConfig(name());
+        SearchLlmConfigResolver.ResolvedBackendConfig config = context.backendConfig();
         if (config == null || !hasText(config.baseUrl())) {
             log.error("Tavily backend 配置缺失");
             return BackendSearchResult.error(name(), "CONFIG_MISSING", "Tavily backend 配置缺失");
         }
 
         String url = resolveUrl(config.baseUrl(), API_PATH);
-        String strength = normalize(request.getStrength());
+        String strength = normalize(context.strength());
         if (!hasText(strength)) {
             strength = "standard";
         }
 
-        Map<String, Object> body = buildRequestBody(request, strength);
-        String rawQuery = request.getQuery();
+        Map<String, Object> body = buildRequestBody(context, strength);
+        String rawQuery = context.request().getQuery();
 
         try {
             String requestBody = objectMapper.writeValueAsString(body);
@@ -120,22 +118,31 @@ public class TavilyBackend implements SearchBackend {
     /**
      * 构建 Tavily /search 请求体
      */
-    private Map<String, Object> buildRequestBody(WebSearchRequest request, String strength) {
+    private Map<String, Object> buildRequestBody(WebSearchExecutionContext context, String strength) {
+        var request = context.request();
         Map<String, Object> body = new LinkedHashMap<>();
         // 将全局画像注入到 query 中
         String injectedQuery = globalUserProfileInjector.injectIntoQuery(request.getQuery(), profileContext.getGlobalProfile());
         body.put("query", injectedQuery);
         body.put("search_depth", resolveSearchDepth(strength));
-        body.put("topic", resolveTopic(request.getScene()));
+        body.put("topic", resolveTopic(context.scene()));
         body.put("include_answer", true);
 
-        int maxResults = request.getMaxResults();
+        int maxResults = context.maxResults();
         if (maxResults > 0) {
             body.put("max_results", maxResults);
         }
+        if (context.includeDomains() != null && !context.includeDomains().isEmpty()) {
+            body.put("include_domains", context.includeDomains());
+        }
+        if (context.excludeDomains() != null && !context.excludeDomains().isEmpty()) {
+            body.put("exclude_domains", context.excludeDomains());
+        }
 
         // 时间范围过滤
-        String timeRange = resolveTimeRange(request.getTimeRangeStart(), request.getTimeRangeEnd());
+        String timeRange = hasText(context.timeRange())
+                ? context.timeRange()
+                : resolveTimeRange(request.getTimeRangeStart(), request.getTimeRangeEnd());
         if (hasText(timeRange)) {
             body.put("time_range", timeRange);
         } else {
@@ -290,32 +297,9 @@ public class TavilyBackend implements SearchBackend {
         }
     }
 
-    // ==================== 配置解析 ====================
-
-    private ResolvedConfig resolveConfig(String backendName) {
-        SearchLlmProperties.WebSearchFeature webSearch = properties.getFeatures().getWebSearch();
-        if (webSearch != null) {
-            SearchLlmProperties.BackendConfig bc = webSearch.getBackends().get(backendName);
-            if (bc != null) {
-                return new ResolvedConfig(
-                        bc.getBaseUrl(), bc.getApiKey(), bc.getAuthHeader(), bc.getAuthPrefix(),
-                        bc.getHeaders(), bc.getConnectTimeoutSeconds(), bc.getRequestTimeoutSeconds()
-                );
-            }
-        }
-        SearchLlmProperties.Provider p = properties.getProviders().get(backendName);
-        if (p != null) {
-            return new ResolvedConfig(
-                    p.getBaseUrl(), p.getApiKey(), p.getAuthHeader(), p.getAuthPrefix(),
-                    p.getHeaders(), p.getConnectTimeoutSeconds(), p.getRequestTimeoutSeconds()
-            );
-        }
-        return null;
-    }
-
     // ==================== HTTP 工具 ====================
 
-    private void applyAuthHeader(ResolvedConfig config, HttpRequest.Builder builder) {
+    private void applyAuthHeader(SearchLlmConfigResolver.ResolvedBackendConfig config, HttpRequest.Builder builder) {
         if (config == null) {
             return;
         }
@@ -326,7 +310,7 @@ public class TavilyBackend implements SearchBackend {
         }
     }
 
-    private void applyExtraHeaders(ResolvedConfig config, HttpRequest.Builder builder) {
+    private void applyExtraHeaders(SearchLlmConfigResolver.ResolvedBackendConfig config, HttpRequest.Builder builder) {
         if (config == null || config.headers() == null) {
             return;
         }
@@ -349,14 +333,14 @@ public class TavilyBackend implements SearchBackend {
         return normalizedBase + normalizedPath;
     }
 
-    private int resolveConnectTimeout(ResolvedConfig config) {
+    private int resolveConnectTimeout(SearchLlmConfigResolver.ResolvedBackendConfig config) {
         if (config == null || config.connectTimeoutSeconds() == null || config.connectTimeoutSeconds() <= 0) {
             return DEFAULT_CONNECT_TIMEOUT_SECONDS;
         }
         return config.connectTimeoutSeconds();
     }
 
-    private int resolveRequestTimeout(ResolvedConfig config) {
+    private int resolveRequestTimeout(SearchLlmConfigResolver.ResolvedBackendConfig config) {
         if (config == null || config.requestTimeoutSeconds() == null || config.requestTimeoutSeconds() <= 0) {
             return DEFAULT_REQUEST_TIMEOUT_SECONDS;
         }
@@ -371,8 +355,4 @@ public class TavilyBackend implements SearchBackend {
         return value != null && !value.trim().isEmpty();
     }
 
-    private record ResolvedConfig(String baseUrl, String apiKey, String authHeader, String authPrefix,
-                                   Map<String, String> headers, Integer connectTimeoutSeconds,
-                                   Integer requestTimeoutSeconds) {
-    }
 }

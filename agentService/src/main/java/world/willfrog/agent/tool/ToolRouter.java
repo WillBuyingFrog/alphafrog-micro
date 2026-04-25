@@ -131,6 +131,23 @@ public class ToolRouter {
         long startedAt = System.currentTimeMillis();
         String result;
         try {
+            if ("searchWeb".equals(toolName) && !AgentContext.isWebSearchEnabled()) {
+                result = writeJson(Map.of(
+                        "ok", false,
+                        "tool", "searchWeb",
+                        "data", Map.of(),
+                        "error", Map.of(
+                                "code", "CAPABILITY_DISABLED",
+                                "message", "webSearch is disabled for this run",
+                                "details", Map.of()
+                        )
+                ));
+                return ToolResultCacheService.ToolExecutionOutcome.builder()
+                        .result(result)
+                        .durationMs(Math.max(0L, System.currentTimeMillis() - startedAt))
+                        .success(false)
+                        .build();
+            }
             // 统一入口负责兼容参数别名（ts_code/code 等），工具实现层只接收标准参数。
             result = switch (toolName) {
                 case "getStockInfo" -> marketDataTools.getStockInfo(

@@ -1,9 +1,11 @@
 package world.willfrog.agent.tool;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.agent.tool.P;
 import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.alphafrogmicro.externalinfo.idl.ExternalInfoDubboService;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
@@ -11,6 +13,7 @@ import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchHit;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchCitation;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchBackendMeta;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRagPrefetch;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchAnswerMeta;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -53,9 +56,15 @@ public class SearchTools {
           timeRangeEnd     - 时间范围结束（ISO 8601），可选
           maxResults       - 最大返回结果数（默认 5），可选
         """)
-    public String searchWeb(String query, String scene, String backend, String strength,
-                            boolean skipHotCache, boolean skipRagPrefetch,
-                            String timeRangeStart, String timeRangeEnd, int maxResults) {
+    public String searchWeb(@P(value = "搜索查询文本，必填", required = true) String query,
+                            @P(value = "搜索场景：general、finance 或 news，可选", required = false) String scene,
+                            @P(value = "后端或 preset 覆盖：perplexity、tavily、exa 或 preset 名，可选", required = false) String backend,
+                            @P(value = "搜索强度档位，可选", required = false) String strength,
+                            @P(value = "是否跳过热点缓存，可选，默认 false", required = false) boolean skipHotCache,
+                            @P(value = "是否跳过 RAG 预检，可选，默认 false", required = false) boolean skipRagPrefetch,
+                            @P(value = "时间范围起始 ISO 8601，可选", required = false) String timeRangeStart,
+                            @P(value = "时间范围结束 ISO 8601，可选", required = false) String timeRangeEnd,
+                            @P(value = "最大返回结果数，可选，默认 5", required = false) int maxResults) {
         try {
             int limit = maxResults <= 0 ? 5 : maxResults;
             WebSearchRequest req = WebSearchRequest.newBuilder()
@@ -68,6 +77,8 @@ public class SearchTools {
                     .setTimeRangeStart(nvl(timeRangeStart))
                     .setTimeRangeEnd(nvl(timeRangeEnd))
                     .setMaxResults(limit)
+                    .setRunId(nvl(AgentContext.getRunId()))
+                    .setUserId(nvl(AgentContext.getUserId()))
                     .build();
 
             WebSearchResponse resp = externalInfoDubboService.webSearch(req);
@@ -126,14 +137,25 @@ public class SearchTools {
                 ragPrefetch.put("rag_summary", rp.getRagSummary());
             }
 
+            Map<String, Object> answerMeta = new LinkedHashMap<>();
+            WebSearchAnswerMeta am = resp.getAnswerMeta();
+            if (am != null) {
+                answerMeta.put("answer_type", am.getAnswerType());
+                answerMeta.put("model_used", am.getModelUsed());
+            }
+
             Map<String, Object> data = new LinkedHashMap<>();
             data.put("query", nvl(query));
             data.put("scene", nvl(scene));
             data.put("hits", hits);
             data.put("answer", resp.getAnswer());
             data.put("citations", citations);
+            data.put("answer_meta", answerMeta);
             data.put("backend_meta", backendMeta);
             data.put("rag_prefetch", ragPrefetch);
+            data.put("canonical_query", resp.getCanonicalQuery());
+            data.put("slot_signature", resp.getSlotSignature());
+            data.put("result_hash", resp.getResultHash());
 
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("ok", true);
@@ -141,8 +163,14 @@ public class SearchTools {
             payload.put("data", data);
             return objectMapper.writeValueAsString(payload);
         } catch (Exception e) {
-            return "{\"ok\":false,\"tool\":\"searchWeb\",\"error\":{\"code\":\"TOOL_ERROR\",\"message\":\""
-                    + escapeJson(nvl(e.getMessage())) + "\"}}";
+            return writeJson(Map.of(
+                    "ok", false,
+                    "tool", "searchWeb",
+                    "error", Map.of(
+                            "code", "TOOL_ERROR",
+                            "message", nvl(e.getMessage())
+                    )
+            ));
         }
     }
 
@@ -150,11 +178,11 @@ public class SearchTools {
         return s == null ? "" : s;
     }
 
-    private String escapeJson(String text) {
-        return nvl(text)
-                .replace("\\", "\\\\")
-                .replace("\"", "\\\"")
-                .replace("\n", "\\n")
-                .replace("\r", "\\r");
+    private String writeJson(Object payload) {
+        try {
+            return objectMapper.writeValueAsString(payload);
+        } catch (Exception ignored) {
+            return "{\"ok\":false,\"tool\":\"searchWeb\",\"error\":{\"code\":\"JSON_SERIALIZE_ERROR\",\"message\":\"failed to serialize tool result\"}}";
+        }
     }
 }

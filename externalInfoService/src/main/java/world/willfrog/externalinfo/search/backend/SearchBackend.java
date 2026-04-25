@@ -1,6 +1,6 @@
 package world.willfrog.externalinfo.search.backend;
 
-import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
+import world.willfrog.externalinfo.search.WebSearchExecutionContext;
 
 /**
  * 统一搜索后端接口。
@@ -16,7 +16,7 @@ public interface SearchBackend {
     /**
      * 执行搜索
      */
-    BackendSearchResult search(WebSearchRequest request);
+    BackendSearchResult search(WebSearchExecutionContext context);
 
     /**
      * 是否支持指定场景

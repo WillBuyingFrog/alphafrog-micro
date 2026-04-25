@@ -6,6 +6,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchAnswerMeta;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchBackendMeta;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchCitation;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchHit;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRagPrefetch;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
+import world.willfrog.externalinfo.retrieval.EmbeddingApiClient;
 import world.willfrog.externalinfo.search.backend.BackendCitation;
 import world.willfrog.externalinfo.search.backend.BackendSearchResult;
 
@@ -13,7 +20,9 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 
 /**
@@ -27,316 +36,347 @@ public class HotKeywordCacheService {
     private final StringRedisTemplate redisTemplate;
     private final ObjectMapper objectMapper;
     private final AnswerAggregator answerAggregator;
+    private final EmbeddingApiClient embeddingApiClient;
 
     private static final String CLUSTER_KEY_PREFIX = "externalinfo:hot-cluster:";
-    private static final String QUERY_IDX_PREFIX = "externalinfo:hot-query-idx:";
     private static final String WINDOW_COUNT_PREFIX = "externalinfo:hot-window:";
+    private static final String LOCK_PREFIX = "externalinfo:hot-lock:";
     private static final String GLOBAL_WINDOW_COUNT_KEY = "externalinfo:hot-window:global:count";
 
     private static final int MIN_QUERY_COUNT = 3;
     private static final int MIN_UNIQUE_RUNS = 2;
     private static final int MIN_UNIQUE_USERS = 1;
     private static final double MIN_STABILITY = 0.6;
-    private static final int WINDOW_SECONDS = 300; // 5 分钟窗口
+    private static final double MIN_EMBEDDING_SIMILARITY = 0.86;
+    private static final int WINDOW_SECONDS = 300;
+    private static final int LOCK_SECONDS = 5;
 
-    /**
-     * 按槽位签名查 Redis 热点簇。
-     * 若命中，返回缓存的答案和元数据；未命中返回 null。
-     *
-     * @param slotSignature 槽位签名
-     * @param query         原始查询（用于更新 query 索引映射）
-     * @return 缓存结果，未命中返回 null
-     */
-    public HotKeywordCacheResult findCluster(String slotSignature, String query) {
+    public HotKeywordCacheResult findCluster(String cacheKey, String query) {
         try {
-            String sigHash = sha256(slotSignature);
-            String clusterKey = CLUSTER_KEY_PREFIX + sigHash;
-
+            String clusterKey = clusterKey(cacheKey);
             String payload = (String) redisTemplate.opsForHash().get(clusterKey, "payload");
             if (payload == null || payload.isBlank()) {
                 return null;
             }
-
             ClusterData cluster = objectMapper.readValue(payload, ClusterData.class);
-            if (cluster == null) {
+            if (cluster == null || cluster.getResponse() == null || cluster.getQueryEmbedding() == null) {
                 return null;
             }
-
-            // 更新最后访问时间
+            List<Float> queryEmbedding = embedForCache(query);
+            if (queryEmbedding == null || cosineSimilarity(queryEmbedding, cluster.getQueryEmbedding()) < MIN_EMBEDDING_SIMILARITY) {
+                return null;
+            }
             cluster.setLastAccessedAt(Instant.now().toString());
             redisTemplate.opsForHash().put(clusterKey, "payload", objectMapper.writeValueAsString(cluster));
-
-            // 可选：更新 query 索引
-            if (query != null && !query.isBlank()) {
-                try {
-                    String queryHash = sha256(query);
-                    String queryIdxKey = QUERY_IDX_PREFIX + queryHash;
-                    Long ttl = redisTemplate.getExpire(clusterKey, TimeUnit.SECONDS);
-                    if (ttl != null && ttl > 0) {
-                        redisTemplate.opsForValue().set(queryIdxKey, sigHash, ttl, TimeUnit.SECONDS);
-                    }
-                } catch (Exception ignored) {
-                    // query 索引更新失败不影响主流程
-                }
-            }
-
-            // 计算剩余 TTL
             Long ttlSeconds = redisTemplate.getExpire(clusterKey, TimeUnit.SECONDS);
-            long ttlRemaining = ttlSeconds == null ? -1 : Math.max(0, ttlSeconds);
-
-            // 优先取第一个 backend 的答案与引用
-            String answer = null;
-            List<BackendCitation> citations = List.of();
-            if (cluster.getAnswers() != null && !cluster.getAnswers().isEmpty()) {
-                AnswerAggregator.BackendAnswer first = cluster.getAnswers().get(0);
-                answer = first.answer();
-                citations = first.citations() != null ? first.citations() : List.of();
-            }
-
-            return new HotKeywordCacheResult(
-                    true,
-                    cluster.getCanonicalQuery(),
-                    answer,
-                    citations,
-                    cluster.getAggregatedAnswer(),
-                    ttlRemaining
-            );
+            return new HotKeywordCacheResult(true, toResponse(cluster.getResponse()), ttlSeconds == null ? -1 : Math.max(0, ttlSeconds));
         } catch (Exception e) {
-            log.warn("查找热点簇失败, slotSignature={}", slotSignature, e);
+            log.warn("查找热点簇失败, cacheKey={}", cacheKey, e);
             return null;
         }
     }
 
-    /**
-     * 多维度联合判定是否应形成热点簇。
-     * 四个维度同时满足返回 true：
-     * 1. 短时间窗口查询量 >= MIN_QUERY_COUNT
-     * 2. 不同 run 数 >= MIN_UNIQUE_RUNS
-     * 3. 不同 user 数 >= MIN_UNIQUE_USERS
-     * 4. 槽位稳定度（同一 signature 查询占比）>= MIN_STABILITY
-     *
-     * @param slotSignature 槽位签名
-     * @param query         原始查询
-     * @param runId         本次运行 ID
-     * @param userId        用户 ID
-     * @return 是否满足热点簇条件
-     */
-    public boolean shouldFormHotCluster(String slotSignature, String query, String runId, String userId) {
+    public boolean shouldFormHotCluster(String cacheKey, String query, String runId, String userId) {
         try {
-            String sigHash = sha256(slotSignature);
-
-            // 1. 短时间窗口查询量
-            String countKey = WINDOW_COUNT_PREFIX + sigHash + ":count";
-            String countStr = redisTemplate.opsForValue().get(countKey);
-            int queryCount = parseInt(countStr);
+            String keyHash = sha256(cacheKey);
+            int queryCount = parseInt(redisTemplate.opsForValue().get(WINDOW_COUNT_PREFIX + keyHash + ":count"));
             if (queryCount < MIN_QUERY_COUNT) {
                 return false;
             }
-
-            // 2. 不同 run 数
-            String runsKey = WINDOW_COUNT_PREFIX + sigHash + ":runs";
-            Long runSize = redisTemplate.opsForSet().size(runsKey);
-            int uniqueRuns = runSize == null ? 0 : runSize.intValue();
-            if (uniqueRuns < MIN_UNIQUE_RUNS) {
+            Long runSize = redisTemplate.opsForSet().size(WINDOW_COUNT_PREFIX + keyHash + ":runs");
+            if ((runSize == null ? 0 : runSize.intValue()) < MIN_UNIQUE_RUNS) {
                 return false;
             }
-
-            // 3. 不同 user 数
-            String usersKey = WINDOW_COUNT_PREFIX + sigHash + ":users";
-            Long userSize = redisTemplate.opsForSet().size(usersKey);
-            int uniqueUsers = userSize == null ? 0 : userSize.intValue();
-            if (uniqueUsers < MIN_UNIQUE_USERS) {
+            Long userSize = redisTemplate.opsForSet().size(WINDOW_COUNT_PREFIX + keyHash + ":users");
+            if ((userSize == null ? 0 : userSize.intValue()) < MIN_UNIQUE_USERS) {
                 return false;
             }
-
-            // 4. 槽位稳定度 = 该 signature 窗口查询量 / 全局窗口查询量
-            String globalCountStr = redisTemplate.opsForValue().get(GLOBAL_WINDOW_COUNT_KEY);
-            int globalCount = parseInt(globalCountStr);
-            if (globalCount <= 0) {
-                return false;
-            }
-            double stability = (double) queryCount / globalCount;
-            if (stability < MIN_STABILITY) {
-                return false;
-            }
-
-            return true;
+            int globalCount = parseInt(redisTemplate.opsForValue().get(GLOBAL_WINDOW_COUNT_KEY));
+            return globalCount > 0 && ((double) queryCount / globalCount) >= MIN_STABILITY;
         } catch (Exception e) {
-            log.warn("判定热点簇失败, slotSignature={}", slotSignature, e);
+            log.warn("判定热点簇失败, cacheKey={}", cacheKey, e);
             return false;
         }
     }
 
-    /**
-     * 将新热点簇写入 Redis。
-     *
-     * @param canonicalQuery    规范化查询
-     * @param intentTemplate    意图模板
-     * @param slotSignature     槽位签名
-     * @param scene             场景
-     * @param answer            首个 backend 答案
-     * @param aggregatedAnswer  聚合答案（可为 null）
-     * @param ttlSeconds        TTL（秒）
-     */
-    public void writeCluster(String canonicalQuery,
+    public void writeCluster(String cacheKey,
+                             String canonicalQuery,
                              String intentTemplate,
-                             String slotSignature,
+                             String query,
                              String scene,
-                             AnswerAggregator.BackendAnswer answer,
-                             String aggregatedAnswer,
+                             WebSearchResponse response,
                              long ttlSeconds) {
+        if (response == null || ttlSeconds <= 0) {
+            return;
+        }
+        List<Float> embedding = embedForCache(query);
+        if (embedding == null) {
+            log.debug("热点缓存写入跳过：embedding 不可用, cacheKey={}", cacheKey);
+            return;
+        }
+        String clusterKey = clusterKey(cacheKey);
+        String lockKey = LOCK_PREFIX + sha256(cacheKey);
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", LOCK_SECONDS, TimeUnit.SECONDS);
+        if (!Boolean.TRUE.equals(locked)) {
+            return;
+        }
         try {
-            String sigHash = sha256(slotSignature);
-            String clusterKey = CLUSTER_KEY_PREFIX + sigHash;
-            String queryHash = sha256(canonicalQuery);
-            String queryIdxKey = QUERY_IDX_PREFIX + queryHash;
-
             Instant now = Instant.now();
-            Instant expiresAt = now.plusSeconds(ttlSeconds);
-
-            ClusterData cluster = new ClusterData();
+            String payload = (String) redisTemplate.opsForHash().get(clusterKey, "payload");
+            ClusterData cluster = payload == null || payload.isBlank()
+                    ? new ClusterData()
+                    : objectMapper.readValue(payload, ClusterData.class);
+            if (cluster == null) {
+                cluster = new ClusterData();
+            }
+            if (cluster.getCreatedAt() == null) {
+                cluster.setCreatedAt(now.toString());
+            }
             cluster.setCanonicalQuery(canonicalQuery);
             cluster.setIntentTemplate(intentTemplate);
-            cluster.setSlotSignature(slotSignature);
+            cluster.setCacheKey(cacheKey);
             cluster.setScene(scene);
-            cluster.setCreatedAt(now.toString());
-            cluster.setExpiresAt(expiresAt.toString());
-            cluster.setQueryCount(1);
-            cluster.setUniqueRuns(new ArrayList<>());
-            cluster.setUniqueUsers(new ArrayList<>());
-            cluster.setAnswers(new ArrayList<>());
-            if (answer != null) {
+            cluster.setExpiresAt(now.plusSeconds(ttlSeconds).toString());
+            cluster.setLastAccessedAt(now.toString());
+            cluster.setQueryEmbedding(embedding);
+            cluster.setResponse(fromResponse(response));
+            cluster.setQueryCount(Math.max(1, cluster.getQueryCount()));
+            if (cluster.getUniqueRuns() == null) {
+                cluster.setUniqueRuns(new ArrayList<>());
+            }
+            if (cluster.getUniqueUsers() == null) {
+                cluster.setUniqueUsers(new ArrayList<>());
+            }
+            if (cluster.getAnswers() == null) {
+                cluster.setAnswers(new ArrayList<>());
+            }
+            seedClusterStatsFromWindow(cluster, cacheKey);
+            AnswerAggregator.BackendAnswer answer = new AnswerAggregator.BackendAnswer(
+                    response.getBackendMeta().getBackend(),
+                    response.getAnswer(),
+                    response.getCitationsList().stream()
+                            .map(c -> new BackendCitation(c.getIndex(), c.getUrl(), c.getTitle()))
+                            .toList(),
+                    response.getResultHash(),
+                    now.toString()
+            );
+            if (cluster.getAnswers().stream().noneMatch(a -> response.getResultHash().equals(a.resultHash()))) {
                 cluster.getAnswers().add(answer);
             }
-            cluster.setAggregatedAnswer(aggregatedAnswer);
-            cluster.setLastAccessedAt(now.toString());
-
-            String payload = objectMapper.writeValueAsString(cluster);
-            redisTemplate.opsForHash().put(clusterKey, "payload", payload);
+            if (cluster.getAnswers().size() > 1) {
+                CachedResponse cachedResponse = cluster.getResponse();
+                cachedResponse.setAnswer(answerAggregator.aggregate(canonicalQuery, cluster.getAnswers()));
+            }
+            redisTemplate.opsForHash().put(clusterKey, "payload", objectMapper.writeValueAsString(cluster));
             redisTemplate.expire(clusterKey, ttlSeconds, TimeUnit.SECONDS);
-
-            // 写入 query 索引，TTL 与簇保持一致
-            redisTemplate.opsForValue().set(queryIdxKey, sigHash, ttlSeconds, TimeUnit.SECONDS);
         } catch (Exception e) {
-            log.warn("写入热点簇失败, slotSignature={}", slotSignature, e);
+            log.warn("写入热点簇失败, cacheKey={}", cacheKey, e);
+        } finally {
+            redisTemplate.delete(lockKey);
         }
     }
 
-    /**
-     * 每次查询时更新统计信息。
-     * 同时更新 Redis 窗口计数器与已有的热点簇内部统计。
-     *
-     * @param slotSignature 槽位签名
-     * @param runId         本次运行 ID
-     * @param userId        用户 ID
-     */
-    public void updateClusterStats(String slotSignature, String runId, String userId) {
+    public void updateClusterStats(String cacheKey, String runId, String userId) {
         try {
-            String sigHash = sha256(slotSignature);
-            String countKey = WINDOW_COUNT_PREFIX + sigHash + ":count";
-            String runsKey = WINDOW_COUNT_PREFIX + sigHash + ":runs";
-            String usersKey = WINDOW_COUNT_PREFIX + sigHash + ":users";
+            String keyHash = sha256(cacheKey);
+            String countKey = WINDOW_COUNT_PREFIX + keyHash + ":count";
+            String runsKey = WINDOW_COUNT_PREFIX + keyHash + ":runs";
+            String usersKey = WINDOW_COUNT_PREFIX + keyHash + ":users";
 
-            // 增加 signature 窗口计数
-            Long count = redisTemplate.opsForValue().increment(countKey);
-            if (count != null && count == 1) {
-                redisTemplate.expire(countKey, WINDOW_SECONDS, TimeUnit.SECONDS);
-            }
-
-            // 增加全局窗口计数
-            Long globalCount = redisTemplate.opsForValue().increment(GLOBAL_WINDOW_COUNT_KEY);
-            if (globalCount != null && globalCount == 1) {
-                redisTemplate.expire(GLOBAL_WINDOW_COUNT_KEY, WINDOW_SECONDS, TimeUnit.SECONDS);
-            }
-
-            // 记录 runId
-            Long addedRun = redisTemplate.opsForSet().add(runsKey, nvl(runId));
-            if (addedRun != null && addedRun == 1) {
+            expireOnFirstIncrement(countKey, redisTemplate.opsForValue().increment(countKey));
+            expireOnFirstIncrement(GLOBAL_WINDOW_COUNT_KEY, redisTemplate.opsForValue().increment(GLOBAL_WINDOW_COUNT_KEY));
+            if (runId != null && !runId.isBlank()) {
+                redisTemplate.opsForSet().add(runsKey, runId);
                 redisTemplate.expire(runsKey, WINDOW_SECONDS, TimeUnit.SECONDS);
             }
-
-            // 记录 userId
-            Long addedUser = redisTemplate.opsForSet().add(usersKey, nvl(userId));
-            if (addedUser != null && addedUser == 1) {
+            if (userId != null && !userId.isBlank()) {
+                redisTemplate.opsForSet().add(usersKey, userId);
                 redisTemplate.expire(usersKey, WINDOW_SECONDS, TimeUnit.SECONDS);
             }
-
-            // 如果已有热点簇，同步更新簇内统计
-            String clusterKey = CLUSTER_KEY_PREFIX + sigHash;
-            String payload = (String) redisTemplate.opsForHash().get(clusterKey, "payload");
-            if (payload != null && !payload.isBlank()) {
-                ClusterData cluster = objectMapper.readValue(payload, ClusterData.class);
-                if (cluster != null) {
-                    cluster.setQueryCount(cluster.getQueryCount() + 1);
-                    if (runId != null && !runId.isBlank()
-                            && cluster.getUniqueRuns() != null
-                            && !cluster.getUniqueRuns().contains(runId)) {
-                        cluster.getUniqueRuns().add(runId);
-                    }
-                    if (userId != null && !userId.isBlank()
-                            && cluster.getUniqueUsers() != null
-                            && !cluster.getUniqueUsers().contains(userId)) {
-                        cluster.getUniqueUsers().add(userId);
-                    }
-                    cluster.setLastAccessedAt(Instant.now().toString());
-                    redisTemplate.opsForHash().put(clusterKey, "payload", objectMapper.writeValueAsString(cluster));
-                }
-            }
+            updateExistingClusterStats(cacheKey, runId, userId);
         } catch (Exception e) {
-            log.warn("更新热点簇统计失败, slotSignature={}", slotSignature, e);
+            log.warn("更新热点簇统计失败, cacheKey={}", cacheKey, e);
         }
     }
 
-    /**
-     * 为已有簇添加新答案（来自不同 backend）。
-     * 添加后会重新调用 AnswerAggregator 生成聚合答案。
-     *
-     * @param slotSignature 槽位签名
-     * @param result        backend 搜索结果
-     */
-    public void addAnswer(String slotSignature, BackendSearchResult result) {
-        try {
-            String sigHash = sha256(slotSignature);
-            String clusterKey = CLUSTER_KEY_PREFIX + sigHash;
+    public void addAnswer(String cacheKey, BackendSearchResult result) {
+        // 当前主流程在 writeCluster 中写入完整响应；保留方法兼容旧调用点。
+    }
 
+    private void updateExistingClusterStats(String cacheKey, String runId, String userId) throws Exception {
+        String clusterKey = clusterKey(cacheKey);
+        String lockKey = LOCK_PREFIX + sha256(cacheKey);
+        Boolean locked = redisTemplate.opsForValue().setIfAbsent(lockKey, "1", LOCK_SECONDS, TimeUnit.SECONDS);
+        if (!Boolean.TRUE.equals(locked)) {
+            return;
+        }
+        try {
             String payload = (String) redisTemplate.opsForHash().get(clusterKey, "payload");
             if (payload == null || payload.isBlank()) {
-                log.warn("添加答案失败，热点簇不存在, slotSignature={}", slotSignature);
                 return;
             }
-
             ClusterData cluster = objectMapper.readValue(payload, ClusterData.class);
             if (cluster == null) {
                 return;
             }
-
-            String backend = result.meta() != null ? result.meta().backend() : "unknown";
-            String citationsJson = safeWrite(result.citations());
-            String resultHash = sha256(nvl(result.answer()) + citationsJson);
-            String now = Instant.now().toString();
-
-            AnswerAggregator.BackendAnswer answer = new AnswerAggregator.BackendAnswer(
-                    backend,
-                    result.answer(),
-                    result.citations(),
-                    resultHash,
-                    now
-            );
-
-            if (cluster.getAnswers() == null) {
-                cluster.setAnswers(new ArrayList<>());
-            }
-            cluster.getAnswers().add(answer);
-
-            // 重新聚合答案
-            String aggregated = answerAggregator.aggregate(cluster.getCanonicalQuery(), cluster.getAnswers());
-            cluster.setAggregatedAnswer(aggregated);
-            cluster.setLastAccessedAt(now);
-
+            cluster.setQueryCount(cluster.getQueryCount() + 1);
+            addUnique(cluster.getUniqueRuns(), runId);
+            addUnique(cluster.getUniqueUsers(), userId);
+            cluster.setLastAccessedAt(Instant.now().toString());
             redisTemplate.opsForHash().put(clusterKey, "payload", objectMapper.writeValueAsString(cluster));
-        } catch (Exception e) {
-            log.warn("为热点簇添加答案失败, slotSignature={}", slotSignature, e);
+        } finally {
+            redisTemplate.delete(lockKey);
         }
+    }
+
+    private void expireOnFirstIncrement(String key, Long count) {
+        if (count != null && count == 1) {
+            redisTemplate.expire(key, WINDOW_SECONDS, TimeUnit.SECONDS);
+        }
+    }
+
+    private void addUnique(List<String> values, String value) {
+        if (values != null && value != null && !value.isBlank() && !values.contains(value)) {
+            values.add(value);
+        }
+    }
+
+    private void seedClusterStatsFromWindow(ClusterData cluster, String cacheKey) {
+        String keyHash = sha256(cacheKey);
+        int windowCount = parseInt(redisTemplate.opsForValue().get(WINDOW_COUNT_PREFIX + keyHash + ":count"));
+        cluster.setQueryCount(Math.max(cluster.getQueryCount(), Math.max(1, windowCount)));
+        mergeUnique(cluster.getUniqueRuns(), redisTemplate.opsForSet().members(WINDOW_COUNT_PREFIX + keyHash + ":runs"));
+        mergeUnique(cluster.getUniqueUsers(), redisTemplate.opsForSet().members(WINDOW_COUNT_PREFIX + keyHash + ":users"));
+    }
+
+    private void mergeUnique(List<String> target, Set<String> values) {
+        if (target == null || values == null || values.isEmpty()) {
+            return;
+        }
+        LinkedHashSet<String> merged = new LinkedHashSet<>(target);
+        for (String value : values) {
+            if (value != null && !value.isBlank()) {
+                merged.add(value);
+            }
+        }
+        target.clear();
+        target.addAll(merged);
+    }
+
+    private List<Float> embedForCache(String text) {
+        if (text == null || text.isBlank()) {
+            return null;
+        }
+        try {
+            return embeddingApiClient.embed(text);
+        } catch (Exception e) {
+            log.debug("热点缓存 embedding 不可用，跳过缓存路径: {}", e.getMessage());
+            return null;
+        }
+    }
+
+    private double cosineSimilarity(List<Float> a, List<Float> b) {
+        if (a == null || b == null || a.isEmpty() || b.isEmpty() || a.size() != b.size()) {
+            return 0.0;
+        }
+        double dot = 0.0;
+        double normA = 0.0;
+        double normB = 0.0;
+        for (int i = 0; i < a.size(); i++) {
+            double av = a.get(i);
+            double bv = b.get(i);
+            dot += av * bv;
+            normA += av * av;
+            normB += bv * bv;
+        }
+        if (normA <= 0 || normB <= 0) {
+            return 0.0;
+        }
+        return dot / (Math.sqrt(normA) * Math.sqrt(normB));
+    }
+
+    private CachedResponse fromResponse(WebSearchResponse response) {
+        CachedResponse cached = new CachedResponse();
+        cached.setHits(response.getHitsList().stream().map(h -> new CachedHit(
+                h.getTitle(), h.getUrl(), h.getSnippet(), h.getSource(), h.getPublishedDate(), h.getScore()
+        )).toList());
+        cached.setBackendMeta(new CachedBackendMeta(
+                response.getBackendMeta().getBackend(),
+                response.getBackendMeta().getModelOrStrength(),
+                response.getBackendMeta().getCostEstimateMs(),
+                response.getBackendMeta().getRawQuerySent()
+        ));
+        cached.setAnswer(response.getAnswer());
+        cached.setCitations(response.getCitationsList().stream().map(c -> new CachedCitation(
+                c.getIndex(), c.getUrl(), c.getTitle()
+        )).toList());
+        cached.setAnswerMeta(new CachedAnswerMeta(
+                response.getAnswerMeta().getAnswerType(),
+                response.getAnswerMeta().getModelUsed()
+        ));
+        cached.setRagPrefetch(new CachedRagPrefetch(
+                response.getRagPrefetch().getUsed(),
+                response.getRagPrefetch().getRelevanceScore(),
+                response.getRagPrefetch().getRagSummary()
+        ));
+        cached.setCanonicalQuery(response.getCanonicalQuery());
+        cached.setSlotSignature(response.getSlotSignature());
+        cached.setResultHash(response.getResultHash());
+        return cached;
+    }
+
+    private WebSearchResponse toResponse(CachedResponse cached) {
+        WebSearchResponse.Builder builder = WebSearchResponse.newBuilder().setOk(true);
+        if (cached.getHits() != null) {
+            for (CachedHit hit : cached.getHits()) {
+                builder.addHits(WebSearchHit.newBuilder()
+                        .setTitle(nvl(hit.title()))
+                        .setUrl(nvl(hit.url()))
+                        .setSnippet(nvl(hit.snippet()))
+                        .setSource(nvl(hit.source()))
+                        .setPublishedDate(nvl(hit.publishedDate()))
+                        .setScore(hit.score())
+                        .build());
+            }
+        }
+        CachedBackendMeta meta = cached.getBackendMeta();
+        if (meta != null) {
+            builder.setBackendMeta(WebSearchBackendMeta.newBuilder()
+                    .setBackend(nvl(meta.backend()))
+                    .setModelOrStrength(nvl(meta.modelOrStrength()))
+                    .setCostEstimateMs(meta.costEstimateMs())
+                    .setRawQuerySent(nvl(meta.rawQuerySent()))
+                    .build());
+        }
+        builder.setAnswer(nvl(cached.getAnswer()));
+        if (cached.getCitations() != null) {
+            for (CachedCitation citation : cached.getCitations()) {
+                builder.addCitations(WebSearchCitation.newBuilder()
+                        .setIndex(citation.index())
+                        .setUrl(nvl(citation.url()))
+                        .setTitle(nvl(citation.title()))
+                        .build());
+            }
+        }
+        CachedAnswerMeta answerMeta = cached.getAnswerMeta();
+        if (answerMeta != null) {
+            builder.setAnswerMeta(WebSearchAnswerMeta.newBuilder()
+                    .setAnswerType(nvl(answerMeta.answerType()))
+                    .setModelUsed(nvl(answerMeta.modelUsed()))
+                    .build());
+        }
+        CachedRagPrefetch rag = cached.getRagPrefetch();
+        if (rag != null) {
+            builder.setRagPrefetch(WebSearchRagPrefetch.newBuilder()
+                    .setUsed(rag.used())
+                    .setRelevanceScore(rag.relevanceScore())
+                    .setRagSummary(nvl(rag.ragSummary()))
+                    .build());
+        }
+        builder.setCanonicalQuery(nvl(cached.getCanonicalQuery()));
+        builder.setSlotSignature(nvl(cached.getSlotSignature()));
+        builder.setResultHash(nvl(cached.getResultHash()));
+        return builder.build();
     }
 
     private int parseInt(String value) {
@@ -348,6 +388,10 @@ public class HotKeywordCacheService {
         } catch (NumberFormatException e) {
             return 0;
         }
+    }
+
+    private String clusterKey(String cacheKey) {
+        return CLUSTER_KEY_PREFIX + sha256(cacheKey);
     }
 
     private String sha256(String input) {
@@ -369,42 +413,51 @@ public class HotKeywordCacheService {
         return text == null ? "" : text;
     }
 
-    private String safeWrite(Object value) {
-        try {
-            return objectMapper.writeValueAsString(value);
-        } catch (Exception e) {
-            return "";
-        }
+    public record HotKeywordCacheResult(boolean hit, WebSearchResponse response, long ttlRemainingSeconds) {
     }
 
-    /**
-     * 热点簇缓存查询结果
-     */
-    public record HotKeywordCacheResult(
-            boolean hit,
-            String canonicalQuery,
-            String answer,
-            List<BackendCitation> citations,
-            String aggregatedAnswer,
-            long ttlRemainingSeconds
-    ) {}
-
-    /**
-     * 热点簇内部数据结构（JSON 序列化后存储于 Redis Hash 的 payload 字段）
-     */
     @Data
     private static class ClusterData {
         private String canonicalQuery;
         private String intentTemplate;
-        private String slotSignature;
+        private String cacheKey;
         private String scene;
         private String createdAt;
         private String expiresAt;
         private int queryCount;
-        private List<String> uniqueRuns;
-        private List<String> uniqueUsers;
-        private List<AnswerAggregator.BackendAnswer> answers;
-        private String aggregatedAnswer;
+        private List<String> uniqueRuns = new ArrayList<>();
+        private List<String> uniqueUsers = new ArrayList<>();
+        private List<Float> queryEmbedding;
+        private List<AnswerAggregator.BackendAnswer> answers = new ArrayList<>();
+        private CachedResponse response;
         private String lastAccessedAt;
+    }
+
+    @Data
+    private static class CachedResponse {
+        private List<CachedHit> hits = new ArrayList<>();
+        private CachedBackendMeta backendMeta;
+        private String answer;
+        private List<CachedCitation> citations = new ArrayList<>();
+        private CachedAnswerMeta answerMeta;
+        private CachedRagPrefetch ragPrefetch;
+        private String canonicalQuery;
+        private String slotSignature;
+        private String resultHash;
+    }
+
+    private record CachedHit(String title, String url, String snippet, String source, String publishedDate, float score) {
+    }
+
+    private record CachedCitation(int index, String url, String title) {
+    }
+
+    private record CachedBackendMeta(String backend, String modelOrStrength, int costEstimateMs, String rawQuerySent) {
+    }
+
+    private record CachedAnswerMeta(String answerType, String modelUsed) {
+    }
+
+    private record CachedRagPrefetch(boolean used, float relevanceScore, String ragSummary) {
     }
 }

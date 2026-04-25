@@ -23,6 +23,7 @@ public class AgentContext {
      * 每个 run 在执行线程（含并行子线程）里独立保存，避免跨 run 串扰。
      */
     private static final ThreadLocal<Boolean> DEBUG_MODE_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<Boolean> WEB_SEARCH_ENABLED_HOLDER = new ThreadLocal<>();
 
     /**
      * OpenRouter reasoning (thinking) effort 配置：
@@ -141,6 +142,19 @@ public class AgentContext {
         return enabled != null && enabled;
     }
 
+    public static void setWebSearchEnabled(boolean enabled) {
+        WEB_SEARCH_ENABLED_HOLDER.set(enabled);
+    }
+
+    public static boolean isWebSearchEnabled() {
+        Boolean enabled = WEB_SEARCH_ENABLED_HOLDER.get();
+        return enabled != null && enabled;
+    }
+
+    public static void clearWebSearchEnabled() {
+        WEB_SEARCH_ENABLED_HOLDER.remove();
+    }
+
     public static void clearDebugMode() {
         DEBUG_MODE_HOLDER.remove();
     }
@@ -235,6 +249,7 @@ public class AgentContext {
         clearDecisionContext();
         clearStructuredOutputSpec();
         clearDebugMode();
+        clearWebSearchEnabled();
         clearReasoningEffort();
         clearStageConfig();
         clearThinkingContent();
