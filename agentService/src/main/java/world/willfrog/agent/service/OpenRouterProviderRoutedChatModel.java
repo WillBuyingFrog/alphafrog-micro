@@ -116,6 +116,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
+                normalizeOpenRouterTokenLimit(requestJsonMap);
                 Map<String, Object> provider = new LinkedHashMap<>();
                 provider.put("order", providerOrder == null ? List.of() : providerOrder);
                 if (structuredOutputSpec != null) {
@@ -390,6 +391,19 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
 
     private boolean isOpenRouterHost(String host) {
         return host != null && (host.equals("openrouter.ai") || host.endsWith(".openrouter.ai"));
+    }
+
+    static void normalizeOpenRouterTokenLimit(Map<String, Object> requestJsonMap) {
+        if (requestJsonMap == null) {
+            return;
+        }
+        Object maxCompletionTokens = requestJsonMap.remove("max_completion_tokens");
+        // OpenRouter 的 provider require_parameters 会按请求字段过滤供应商。
+        // 对 Kimi/Fireworks 等 OpenAI 兼容模型，max_completion_tokens 会导致供应商被过滤；
+        // 使用 OpenRouter Chat Completions 通用字段 max_tokens 更稳定。
+        if (maxCompletionTokens != null && !requestJsonMap.containsKey("max_tokens")) {
+            requestJsonMap.put("max_tokens", maxCompletionTokens);
+        }
     }
     
     /**
