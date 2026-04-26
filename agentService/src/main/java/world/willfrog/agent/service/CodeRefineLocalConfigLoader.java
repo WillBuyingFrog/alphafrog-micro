@@ -28,6 +28,8 @@ import java.util.Optional;
 @Slf4j
 public class CodeRefineLocalConfigLoader {
 
+    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
+
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
     private final CodeRefineProperties properties;
@@ -128,7 +130,7 @@ public class CodeRefineLocalConfigLoader {
             return;
         }
         try {
-            String md5 = DigestUtils.md5DigestAsHex(contentBytes);
+            String md5 = DigestUtils.md5DigestAsHex(canonicalBytes(contentBytes));
             String dataId = "code-refine.json";
             String key = String.format("config:state:%s:%s:%s", serviceName, instanceId, dataId);
             String value = String.format("{\"md5\":\"%s\",\"loadedAt\":\"%s\"}",
@@ -136,6 +138,14 @@ public class CodeRefineLocalConfigLoader {
             redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(30));
         } catch (Exception e) {
             log.warn("[CodeRefineLocalConfigLoader] Redis 状态上报失败", e);
+        }
+    }
+
+    private byte[] canonicalBytes(byte[] contentBytes) {
+        try {
+            return CANONICAL_OBJECT_MAPPER.writeValueAsBytes(CANONICAL_OBJECT_MAPPER.readTree(contentBytes));
+        } catch (Exception e) {
+            return contentBytes;
         }
     }
 }

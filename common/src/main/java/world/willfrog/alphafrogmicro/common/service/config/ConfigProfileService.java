@@ -43,6 +43,8 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class ConfigProfileService {
 
+    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
+
     private final ConfigTypeDao configTypeDao;
     private final ConfigSnapshotDao configSnapshotDao;
     private final ConfigActiveDao configActiveDao;
@@ -79,7 +81,7 @@ public class ConfigProfileService {
         int maxNum = configSnapshotDao.maxVersionNumberByType(type.getId());
         String newVersion = "v" + (maxNum + 1);
 
-        String contentJson = objectMapper.writeValueAsString(resultNode);
+        String contentJson = canonicalJson(resultNode);
         String md5 = md5Hex(contentJson);
 
         ConfigSnapshot snapshot = new ConfigSnapshot();
@@ -115,7 +117,7 @@ public class ConfigProfileService {
         int maxNum = configSnapshotDao.maxVersionNumberByType(type.getId());
         String newVersion = "v" + (maxNum + 1);
 
-        String contentJson = objectMapper.writeValueAsString(fullConfig);
+        String contentJson = canonicalJson(fullConfig);
         String md5 = md5Hex(contentJson);
 
         ConfigSnapshot snapshot = new ConfigSnapshot();
@@ -389,6 +391,10 @@ public class ConfigProfileService {
         } catch (Exception e) {
             throw new RuntimeException("MD5 计算失败", e);
         }
+    }
+
+    private String canonicalJson(JsonNode node) throws Exception {
+        return CANONICAL_OBJECT_MAPPER.writeValueAsString(node);
     }
 
     private ConfigType getTypeOrThrow(String typeName) {

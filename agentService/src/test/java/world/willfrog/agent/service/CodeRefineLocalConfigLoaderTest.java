@@ -37,7 +37,7 @@ class CodeRefineLocalConfigLoaderTest {
     @Test
     void loadShouldReportStateWithInstanceDimension() throws Exception {
         Path configFile = tempDir.resolve("code-refine.local.json");
-        Files.writeString(configFile, "{\"maxAttempts\":5}");
+        Files.writeString(configFile, "{\"maxAttempts\": 5}");
 
         CodeRefineProperties properties = new CodeRefineProperties();
         properties.setConfigFile(configFile.toString());
@@ -58,7 +58,8 @@ class CodeRefineLocalConfigLoaderTest {
         assertEquals(5, loader.current().orElseThrow().getMaxAttempts());
         verify(valueOperations).set(
                 eq("config:state:agent-service:pod-1:code-refine.json"),
-                argThat(value -> value.contains("\"md5\":\"") && value.contains("\"loadedAt\":\"")),
+                argThat(value -> value.contains("\"md5\":\"58bfc82ac4730befd74980d129b27375\"")
+                        && value.contains("\"loadedAt\":\"")),
                 eq(Duration.ofSeconds(30))
         );
     }
