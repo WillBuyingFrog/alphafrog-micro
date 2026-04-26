@@ -953,6 +953,7 @@ public class ReactTodoExecutor {
             case "getIndexInfo" -> "{\"ts_code\": \"<指数代码>\"}";
             case "getStockInfo" -> "{\"ts_code\": \"<股票代码>\"}";
             case "executePython" -> "{\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID，逗号分隔>\", \"libraries\": \"<可选：库名逗号分隔>\"}";
+            case "searchWeb" -> "{\"query\": \"<搜索查询文本>\", \"scene\": \"general|finance|news\", \"backend\": \"perplexity|tavily|exa|\", \"strength\": \"<可选>\", \"skipHotCache\": true, \"skipRagPrefetch\": true, \"timeRangeStart\": \"\", \"timeRangeEnd\": \"\", \"maxResults\": 5}";
             default -> "{...}";
         };
     }

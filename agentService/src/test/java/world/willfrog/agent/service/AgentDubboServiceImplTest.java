@@ -17,8 +17,10 @@ import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
@@ -64,6 +66,8 @@ class AgentDubboServiceImplTest {
     private UserDao userDao;
     @Mock
     private AgentMessageService messageService;
+    @Mock
+    private AgentToolCatalogService toolCatalogService;
 
     private AgentDubboServiceImpl service;
 
@@ -82,7 +86,8 @@ class AgentDubboServiceImplTest {
                 creditService,
                 userDao,
                 new ObjectMapper(),
-                messageService
+                messageService,
+                toolCatalogService
         );
         ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
         ReflectionTestUtils.setField(service, "artifactRetentionNormalDays", 7);
@@ -105,6 +110,19 @@ class AgentDubboServiceImplTest {
         GetAgentConfigResponse response = service.getConfig(GetAgentConfigRequest.newBuilder().setUserId("u1").build());
         assertEquals(false, response.getFeatures().getParallelExecution());
         assertEquals(true, response.getFeatures().getPauseResume());
+    }
+
+    @Test
+    void listTools_shouldUseToolCatalog() {
+        when(toolCatalogService.listToolMessages()).thenReturn(List.of(
+                AgentToolMessage.newBuilder().setName("searchWeb").setDescription("联网搜索").setParametersJson("{}").build()
+        ));
+
+        var response = service.listTools(ListAgentToolsRequest.newBuilder().setUserId("u1").build());
+
+        assertEquals(1, response.getItemsCount());
+        assertEquals("searchWeb", response.getItems(0).getName());
+        verify(toolCatalogService).listToolMessages();
     }
 
     @Test

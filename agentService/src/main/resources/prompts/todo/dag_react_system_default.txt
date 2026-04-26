@@ -16,6 +16,7 @@
 | getIndexInfo | `{"ts_code": "<指数代码>"}` |
 | getStockInfo | `{"ts_code": "<股票代码>"}` |
 | executePython | `{"code": "<Python代码>", "dataset_ids": "<数据集ID列表>"}` |
+| searchWeb | `{"query": "<搜索查询文本>", "scene": "general|finance|news", "backend": "perplexity|tavily|exa|", "strength": "<搜索强度，可空>", "skipHotCache": true|false, "skipRagPrefetch": true|false, "timeRangeStart": "<ISO8601，可空>", "timeRangeEnd": "<ISO8601，可空>", "maxResults": 5}` |
 
 ## 工具使用详细规则
 
@@ -28,6 +29,14 @@
 - 必须包含 `ts_code`、`start_date`、`end_date` 三个参数
 - 日期格式必须为 `YYYYMMDD`（例如：20250101）
 - `ts_code` 必须从搜索结果中获取，不要猜测
+
+### 2.1 联网搜索工具（searchWeb）
+- 用于查询互联网实时信息、新闻、政策变化、公司或行业最新公开信息。
+- 必须包含 `query` 参数。
+- `scene` 只能使用 `general`、`finance`、`news` 之一；财经和市场新闻优先使用 `finance`。
+- `backend` 可指定 `perplexity`、`tavily`、`exa`，也可以留空让系统自动选择。
+- 时间范围参数使用 ISO 8601 字符串；没有明确时间范围时传空字符串。
+- 若当前任务明确要求调用 searchWeb，不要用 searchStock、searchIndex、ragSearch 或其它工具替代。
 
 ### 3. Python执行工具（executePython） - **重点**
 

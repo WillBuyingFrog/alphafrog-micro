@@ -86,6 +86,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final UserDao userDao;
     private final ObjectMapper objectMapper;
     private final AgentMessageService messageService;
+    private final AgentToolCatalogService toolCatalogService;
 
     @Value("${agent.run.list.default-days:30}")
     private int listDefaultDays;
@@ -491,41 +492,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             throw new IllegalArgumentException("user_id is required");
         }
         return ListAgentToolsResponse.newBuilder()
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getStockInfo")
-                        .setDescription("Get basic information about a stock by its TS code (e.g., 000001.SZ)")
-                        .setParametersJson("{\"tsCode\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getStockDaily")
-                        .setDescription("Get daily stock market data for a specific stock within a date range")
-                        .setParametersJson("{\"tsCode\":\"string\",\"startDateStr\":\"YYYYMMDD\",\"endDateStr\":\"YYYYMMDD\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchStock")
-                        .setDescription("Search for a stock by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchFund")
-                        .setDescription("Search for a fund by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getIndexInfo")
-                        .setDescription("Get basic information about an index by its TS code (e.g., 000300.SH)")
-                        .setParametersJson("{\"tsCode\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getIndexDaily")
-                        .setDescription("Get daily index market data for a specific index within a date range")
-                        .setParametersJson("{\"tsCode\":\"string\",\"startDateStr\":\"YYYYMMDD\",\"endDateStr\":\"YYYYMMDD\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchIndex")
-                        .setDescription("Search for an index by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
+                .addAllItems(toolCatalogService.listToolMessages())
                 .build();
     }
 
