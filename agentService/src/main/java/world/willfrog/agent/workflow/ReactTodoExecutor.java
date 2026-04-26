@@ -816,6 +816,7 @@ public class ReactTodoExecutor {
         
         userMsg.append("请决定如何完成。\n");
         userMsg.append("需要调用工具时请直接使用系统提供的工具调用能力，不要手写 JSON。\n");
+        userMsg.append("如果当前任务要求调用工具，下一条消息必须是实际工具调用；不要只说明计划或展示参数。\n");
         userMsg.append("无需工具时，请直接输出最终回答内容。\n");
         userMsg.append("⚠️ 警告：工具参数名必须与工具规范完全一致。");
         
@@ -1110,17 +1111,63 @@ public class ReactTodoExecutor {
                         .build();
             }
             
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = (Map<String, Object>) map.getOrDefault("params", Map.of());
+            String toolName = firstNonBlankString(map.get("tool"), map.get("tool_name"), map.get("name"));
+            Object rawParams = firstNonNull(map.get("params"), map.get("parameters"), map.get("arguments"));
+            Map<String, Object> params = toParamMap(rawParams);
             
             return LlmDecision.builder()
-                    .toolName((String) map.get("tool"))
+                    .toolName(toolName)
                     .params(params)
                     .build();
             
         } catch (Exception e) {
             return LlmDecision.builder().answer(output).build();
         }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Map<String, Object> toParamMap(Object rawParams) {
+        if (rawParams instanceof Map<?, ?> rawMap) {
+            Map<String, Object> params = new LinkedHashMap<>();
+            rawMap.forEach((key, value) -> params.put(String.valueOf(key), value));
+            return params;
+        }
+        if (rawParams instanceof String text && !text.isBlank()) {
+            try {
+                return objectMapper.readValue(text, Map.class);
+            } catch (Exception ignored) {
+                return Map.of();
+            }
+        }
+        return Map.of();
+    }
+
+    private Object firstNonNull(Object... values) {
+        if (values == null) {
+            return null;
+        }
+        for (Object value : values) {
+            if (value != null) {
+                return value;
+            }
+        }
+        return null;
+    }
+
+    private String firstNonBlankString(Object... values) {
+        if (values == null) {
+            return null;
+        }
+        for (Object value : values) {
+            if (value == null) {
+                continue;
+            }
+            String text = String.valueOf(value).trim();
+            if (!text.isBlank()) {
+                return text;
+            }
+        }
+        return null;
     }
 
     private TodoExecutionRecord executeTool(LlmDecision decision, 

@@ -405,7 +405,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             requestJsonMap.put("max_tokens", maxCompletionTokens);
         }
     }
-    
+
     /**
      * 检查是否开启 curl debug 日志（热加载）。
      */

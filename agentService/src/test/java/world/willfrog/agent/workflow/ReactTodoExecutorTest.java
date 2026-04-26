@@ -189,6 +189,43 @@ class ReactTodoExecutorTest {
     }
 
     @Test
+    void executeWithObservability_shouldParseToolNameParametersTextFallback() {
+        ReactTodoExecutor.TodoExecutionContext nativeContext = ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("请必须调用 searchWeb 工具一次")
+                .availableTools(Set.of("searchWeb"))
+                .toolSpecifications(List.of(searchWebSpec()))
+                .completedTodos(List.of())
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("""
+                                ```json
+                                {"tool_name":"searchWeb","parameters":{"query":"今天A股市场有哪些重要新闻和政策变化","scene":"finance"}}
+                                ```
+                                """))
+                        .build())
+                .thenReturn(ChatResponse.builder().aiMessage(new AiMessage("{\"answer\":\"搜索完成\"}")).build());
+        when(toolRouter.invokeWithMeta(eq("searchWeb"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":true,\"tool\":\"searchWeb\",\"data\":{}}", true));
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "调用 searchWeb 工具查询今天A股市场的重要新闻和政策变化",
+                nativeContext,
+                model,
+                "run-web-text",
+                "dag_execution"
+        );
+
+        assertTrue(record.isSuccess());
+        assertEquals(1, record.getToolCallsUsed());
+        verify(toolRouter).invokeWithMeta(eq("searchWeb"), org.mockito.ArgumentMatchers.argThat(params ->
+                "今天A股市场有哪些重要新闻和政策变化".equals(params.get("query"))
+                        && "finance".equals(params.get("scene"))
+        ));
+    }
+
+    @Test
     void executeWithObservability_shouldDirectlyAnswerWithoutToolCall() {
         when(model.chat(any(List.class)))
                 .thenReturn(ChatResponse.builder()
@@ -329,6 +366,19 @@ class ReactTodoExecutorTest {
                 .success(success)
                 .durationMs(10L)
                 .cacheMeta(null)
+                .build();
+    }
+
+    private ToolSpecification searchWebSpec() {
+        return ToolSpecification.builder()
+                .name("searchWeb")
+                .description("联网搜索")
+                .parameters(JsonObjectSchema.builder()
+                        .addStringProperty("query")
+                        .addStringProperty("scene")
+                        .required("query")
+                        .additionalProperties(false)
+                        .build())
                 .build();
     }
 
