@@ -100,7 +100,6 @@ external-info:
             backend: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_BACKEND:perplexity}
             strength: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_STRENGTH:standard}
             max-results: ${AF_EXTERNAL_INFO_WEB_SEARCH_FINANCE_MAX_RESULTS:8}
-            include-domains: [eastmoney.com, cls.cn, yicai.com]
           news_fast:
             scene: news
             backend: ${AF_EXTERNAL_INFO_WEB_SEARCH_NEWS_BACKEND:exa}
