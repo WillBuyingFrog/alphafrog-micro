@@ -19,7 +19,7 @@ public class RagTools {
 
     private static final int MAX_TOP_K = 10;
 
-    @DubboReference
+    @DubboReference(timeout = 60000, retries = 0)
     private ExternalInfoDubboService externalInfoDubboService;
 
     private final ObjectMapper objectMapper;

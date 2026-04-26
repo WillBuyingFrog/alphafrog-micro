@@ -9,6 +9,11 @@ spring:
     url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT:5432}/${AF_DB_MAIN_DATABASE}
     username: ${AF_DB_MAIN_USER}
     password: ${AF_DB_MAIN_PASSWORD}
+  data:
+    redis:
+      host: ${AF_REDIS_HOST:${SPRING_DATA_REDIS_HOST:redis}}
+      port: ${AF_REDIS_PORT:${SPRING_DATA_REDIS_PORT:6379}}
+      password: ${AF_REDIS_PASSWORD:${SPRING_DATA_REDIS_PASSWORD:}}
 
 dubbo:
   application:
@@ -26,6 +31,8 @@ dubbo:
     use-as-config-center: false
     # 当前未使用 Nacos 作为 Dubbo 元数据中心，显式关闭默认兜底，避免启动时额外做 metadata-center 健康检查
     use-as-metadata-center: false
+  provider:
+    timeout: ${AF_EXTERNAL_INFO_DUBBO_PROVIDER_TIMEOUT_MS:60000}
 
 external-info:
   search-llm:

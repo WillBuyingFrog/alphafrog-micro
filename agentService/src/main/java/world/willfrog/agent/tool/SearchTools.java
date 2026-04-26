@@ -23,7 +23,7 @@ import java.util.Map;
 @Component
 public class SearchTools {
 
-    @DubboReference
+    @DubboReference(timeout = 60000, retries = 0)
     private ExternalInfoDubboService externalInfoDubboService;
 
     private final ObjectMapper objectMapper;
