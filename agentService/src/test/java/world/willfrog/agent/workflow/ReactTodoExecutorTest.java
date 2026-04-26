@@ -78,20 +78,20 @@ class ReactTodoExecutorTest {
 
     @Test
     void executeWithObservability_shouldClearDecisionContextAfterSuccessfulToolCall() {
-        // LLM first decides to call a tool, then returns answer
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}"))
+                        .aiMessage(toolCallMessage("call_1", "searchIndex", "{\"keyword\":\"沪深300\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"搜索完成\"}"))
+                        .aiMessage(new AiMessage("搜索完成"))
                         .build());
         when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
                 .thenReturn(invocationResult("{\"ok\":true}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "搜索指数",
-                context(),
+                ctx,
                 model,
                 "run-1",
                 "dag_execution"
@@ -106,16 +106,17 @@ class ReactTodoExecutorTest {
 
     @Test
     void executeWithObservability_shouldSupportMultiRoundReActLoop() {
-        // LLM calls tool A, then tool B, then returns answer — 3 rounds
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}"))
+                        .aiMessage(toolCallMessage("call_1", "searchIndex", "{\"keyword\":\"沪深300\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"getIndexDaily\",\"params\":{\"ts_code\":\"000300.SH\",\"start_date\":\"20250101\",\"end_date\":\"20251231\"}}"))
+                        .aiMessage(toolCallMessage("call_2", "getIndexDaily",
+                                "{\"ts_code\":\"000300.SH\",\"start_date\":\"20250101\",\"end_date\":\"20251231\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"沪深300指数2025年日线数据已获取\"}"))
+                        .aiMessage(new AiMessage("沪深300指数2025年日线数据已获取"))
                         .build());
         when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
                 .thenReturn(invocationResult("{\"ok\":true,\"data\":{\"ts_code\":\"000300.SH\"}}", true));
@@ -124,7 +125,7 @@ class ReactTodoExecutorTest {
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "获取沪深300指数2025年全年的日线行情数据",
-                context(),
+                ctx,
                 model,
                 "run-1",
                 "dag_execution"
@@ -134,7 +135,7 @@ class ReactTodoExecutorTest {
         assertEquals(2, record.getToolCallsUsed());
         assertEquals("沪深300指数2025年日线数据已获取", record.getOutput());
         // LLM was called 3 times (2 tool decisions + 1 answer)
-        verify(model, times(3)).chat(any(List.class));
+        verify(model, times(3)).chat(any(ChatRequest.class));
         // Tools were called 2 times
         verify(toolRouter, times(1)).invokeWithMeta(eq("searchIndex"), anyMap());
         verify(toolRouter, times(1)).invokeWithMeta(eq("getIndexDaily"), anyMap());
@@ -189,7 +190,7 @@ class ReactTodoExecutorTest {
     }
 
     @Test
-    void executeWithObservability_shouldParseToolNameParametersTextFallback() {
+    void executeWithObservability_shouldNotExecuteTextJsonToolCallFallback() {
         ReactTodoExecutor.TodoExecutionContext nativeContext = ReactTodoExecutor.TodoExecutionContext.builder()
                 .userGoal("请必须调用 searchWeb 工具一次")
                 .availableTools(Set.of("searchWeb"))
@@ -204,10 +205,7 @@ class ReactTodoExecutorTest {
                                 {"tool_name":"searchWeb","parameters":{"query":"今天A股市场有哪些重要新闻和政策变化","scene":"finance"}}
                                 ```
                                 """))
-                        .build())
-                .thenReturn(ChatResponse.builder().aiMessage(new AiMessage("{\"answer\":\"搜索完成\"}")).build());
-        when(toolRouter.invokeWithMeta(eq("searchWeb"), anyMap()))
-                .thenReturn(invocationResult("{\"ok\":true,\"tool\":\"searchWeb\",\"data\":{}}", true));
+                        .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "调用 searchWeb 工具查询今天A股市场的重要新闻和政策变化",
@@ -218,18 +216,16 @@ class ReactTodoExecutorTest {
         );
 
         assertTrue(record.isSuccess());
-        assertEquals(1, record.getToolCallsUsed());
-        verify(toolRouter).invokeWithMeta(eq("searchWeb"), org.mockito.ArgumentMatchers.argThat(params ->
-                "今天A股市场有哪些重要新闻和政策变化".equals(params.get("query"))
-                        && "finance".equals(params.get("scene"))
-        ));
+        assertEquals(0, record.getToolCallsUsed());
+        assertTrue(record.getOutput().contains("\"tool_name\":\"searchWeb\""));
+        verify(toolRouter, org.mockito.Mockito.never()).invokeWithMeta(anyString(), anyMap());
     }
 
     @Test
     void executeWithObservability_shouldDirectlyAnswerWithoutToolCall() {
         when(model.chat(any(List.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"无需工具调用，直接回答\"}"))
+                        .aiMessage(new AiMessage("无需工具调用，直接回答"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
@@ -248,18 +244,19 @@ class ReactTodoExecutorTest {
     @Test
     void executeWithObservability_shouldRespectMaxCallsPerTodo() {
         ReflectionTestUtils.setField(executor, "maxCallsPerTodo", 2);
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
 
         // LLM keeps wanting to call tools, never returns answer
-        when(model.chat(any(List.class)))
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"test\"}}"))
+                        .aiMessage(toolCallMessage("call_repeat", "searchIndex", "{\"keyword\":\"test\"}"))
                         .build());
         when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
                 .thenReturn(invocationResult("{\"ok\":true}", true));
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "无限循环测试",
-                context(),
+                ctx,
                 model,
                 "run-1",
                 "dag_execution"
@@ -272,16 +269,16 @@ class ReactTodoExecutorTest {
 
     @Test
     void executeWithObservability_shouldContinueAfterToolFailure() {
-        // LLM calls tool A (fails), then decides to try tool B (succeeds), then returns answer
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"bad\"}}"))
+                        .aiMessage(toolCallMessage("call_1", "searchIndex", "{\"keyword\":\"bad\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"good\"}}"))
+                        .aiMessage(toolCallMessage("call_2", "searchIndex", "{\"keyword\":\"good\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"找到了\"}"))
+                        .aiMessage(new AiMessage("找到了"))
                         .build());
         when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
                 .thenReturn(invocationResult("{\"ok\":false,\"error\":{\"message\":\"not found\"}}", false))
@@ -289,7 +286,7 @@ class ReactTodoExecutorTest {
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "搜索指数",
-                context(),
+                ctx,
                 model,
                 "run-1",
                 "dag_execution"
@@ -301,14 +298,15 @@ class ReactTodoExecutorTest {
 
     @Test
     void executeWithObservability_shouldClearDecisionContextWhenToolThrowsNonExceptionThrowable() {
-        when(model.chat(any(List.class))).thenReturn(ChatResponse.builder()
-                .aiMessage(new AiMessage("{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}"))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+        when(model.chat(any(ChatRequest.class))).thenReturn(ChatResponse.builder()
+                .aiMessage(toolCallMessage("call_1", "searchIndex", "{\"keyword\":\"沪深300\"}"))
                 .build());
         when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap())).thenThrow(new AssertionError("fatal"));
 
         assertThrows(AssertionError.class, () -> executor.executeWithObservability(
                 "搜索指数",
-                context(),
+                ctx,
                 model,
                 "run-1",
                 "dag_execution"
@@ -360,12 +358,68 @@ class ReactTodoExecutorTest {
                 .build();
     }
 
+    private ReactTodoExecutor.TodoExecutionContext contextWithMarketSpecs() {
+        return ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("分析指数")
+                .availableTools(Set.of("searchIndex", "getIndexDaily"))
+                .toolSpecifications(List.of(searchIndexSpec(), getIndexDailySpec()))
+                .completedTodos(List.of())
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+    }
+
+    private ReactTodoExecutor.TodoExecutionContext contextWithSubAgentTools() {
+        return ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("复杂任务")
+                .availableTools(Set.of("spawnSubAgent", "waitForSubAgent"))
+                .completedTodos(List.of())
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+    }
+
+    private AiMessage toolCallMessage(String id, String name, String arguments) {
+        return AiMessage.from(
+                "",
+                List.of(ToolExecutionRequest.builder()
+                        .id(id)
+                        .name(name)
+                        .arguments(arguments)
+                        .build())
+        );
+    }
+
     private ToolRouter.ToolInvocationResult invocationResult(String output, boolean success) {
         return ToolRouter.ToolInvocationResult.builder()
                 .output(output)
                 .success(success)
                 .durationMs(10L)
                 .cacheMeta(null)
+                .build();
+    }
+
+    private ToolSpecification searchIndexSpec() {
+        return ToolSpecification.builder()
+                .name("searchIndex")
+                .description("搜索指数")
+                .parameters(JsonObjectSchema.builder()
+                        .addStringProperty("keyword")
+                        .required("keyword")
+                        .additionalProperties(false)
+                        .build())
+                .build();
+    }
+
+    private ToolSpecification getIndexDailySpec() {
+        return ToolSpecification.builder()
+                .name("getIndexDaily")
+                .description("查询指数日线")
+                .parameters(JsonObjectSchema.builder()
+                        .addStringProperty("ts_code")
+                        .addStringProperty("start_date")
+                        .addStringProperty("end_date")
+                        .required("ts_code", "start_date", "end_date")
+                        .additionalProperties(false)
+                        .build())
                 .build();
     }
 
@@ -401,23 +455,22 @@ class ReactTodoExecutorTest {
                         .build();
         when(mockSubAgentRunner.run(any(), eq(model))).thenReturn(subAgentResult);
 
-        // LLM sequence: spawn sub-agent → wait for it → return answer
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"计算创新药指数A的月初定投收益\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn", "spawnSubAgent",
+                                "{\"goal\":\"计算创新药指数A的月初定投收益\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_0\"}}"))
+                        .aiMessage(toolCallMessage("call_wait", "waitForSubAgent", "{\"sub_agent_id\":\"sa_0\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"定投收益分析完成\"}"))
+                        .aiMessage(new AiMessage("定投收益分析完成"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "分析创新药指数定投收益",
-                context(),
+                ctx,
                 model,
                 "run-sub-agent",
                 "test"
@@ -434,18 +487,18 @@ class ReactTodoExecutorTest {
     @Test
     void spawnSubAgent_withoutSubAgentRunner_shouldReturnNotAvailable() {
         // executor has no SubAgentRunner set (null by default)
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"某子任务\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn", "spawnSubAgent", "{\"goal\":\"某子任务\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"跳过子代理，直接完成\"}"))
+                        .aiMessage(new AiMessage("跳过子代理，直接完成"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "测试无 SubAgentRunner 场景",
-                context(),
+                ctx,
                 model,
                 "run-no-runner",
                 "test"
@@ -477,15 +530,13 @@ class ReactTodoExecutorTest {
 
         when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn", "spawnSubAgent", "{\"goal\":\"子任务\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_0\"}}"))
+                        .aiMessage(toolCallMessage("call_wait", "waitForSubAgent", "{\"sub_agent_id\":\"sa_0\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"完成\"}"))
+                        .aiMessage(new AiMessage("完成"))
                         .build());
 
         executor.executeWithObservability("测试子代理白名单", ctx, model, "run-whitelist", "test");
@@ -510,18 +561,18 @@ class ReactTodoExecutorTest {
         executor.setSubAgentRunner(mockSubAgentRunner);
 
         // LLM tries to wait for an ID that was never spawned
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage(
-                                "{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_id\":\"sa_99\"}}"))
+                        .aiMessage(toolCallMessage("call_wait", "waitForSubAgent", "{\"sub_agent_id\":\"sa_99\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"处理了未知错误\"}"))
+                        .aiMessage(new AiMessage("处理了未知错误"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "未知子代理ID测试",
-                context(),
+                ctx,
                 model,
                 "run-unknown-id",
                 "test"
@@ -545,20 +596,21 @@ class ReactTodoExecutorTest {
                     .success(true).answer("ok").build();
         });
 
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务1\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_1", "spawnSubAgent", "{\"goal\":\"子任务1\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务2\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_2", "spawnSubAgent", "{\"goal\":\"子任务2\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"done\"}"))
+                        .aiMessage(new AiMessage("done"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "测试并发上限",
-                context(),
+                ctx,
                 model,
                 "run-max-count",
                 "test"
@@ -577,20 +629,21 @@ class ReactTodoExecutorTest {
                 world.willfrog.agent.graph.SubAgentRunner.SubAgentResult.builder()
                         .success(true).answer("ok").build());
 
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务A\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_1", "spawnSubAgent", "{\"goal\":\"子任务A\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务B\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_2", "spawnSubAgent", "{\"goal\":\"子任务B\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"done\"}"))
+                        .aiMessage(new AiMessage("done"))
                         .build());
 
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "测试子代理ID递增",
-                context(),
+                ctx,
                 model,
                 "run-id-increment",
                 "test"
@@ -621,24 +674,25 @@ class ReactTodoExecutorTest {
                     .build();
         });
 
-        when(model.chat(any(List.class)))
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithSubAgentTools();
+        when(model.chat(any(ChatRequest.class)))
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务1\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_1", "spawnSubAgent", "{\"goal\":\"子任务1\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"spawnSubAgent\",\"params\":{\"goal\":\"子任务2\"}}"))
+                        .aiMessage(toolCallMessage("call_spawn_2", "spawnSubAgent", "{\"goal\":\"子任务2\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"tool\":\"waitForSubAgent\",\"params\":{\"sub_agent_ids\":\"sa_0,sa_1\"}}"))
+                        .aiMessage(toolCallMessage("call_wait", "waitForSubAgent", "{\"sub_agent_ids\":\"sa_0,sa_1\"}"))
                         .build())
                 .thenReturn(ChatResponse.builder()
-                        .aiMessage(new AiMessage("{\"answer\":\"all done\"}"))
+                        .aiMessage(new AiMessage("all done"))
                         .build());
 
         long startedAt = System.nanoTime();
         ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
                 "测试并发等待",
-                context(),
+                ctx,
                 model,
                 "run-concurrent-wait",
                 "test"
