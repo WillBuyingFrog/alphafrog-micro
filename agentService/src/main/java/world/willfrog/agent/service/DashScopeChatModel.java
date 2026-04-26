@@ -17,6 +17,7 @@ import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 
 import java.io.BufferedReader;
@@ -148,15 +149,15 @@ public class DashScopeChatModel implements ChatModel {
 
             if (useStream && statusCode >= 200 && statusCode < 300) {
                 // 流式响应：解析 SSE
-                StreamingProgressTracker tracker = new StreamingProgressTracker(log, modelName, endpointName);
+                StreamingProgressTracker tracker = createStreamingProgressTracker();
                 OpenAiCompatibleChatModelSupport.SseAggregateResult aggregateResult =
                         OpenAiCompatibleChatModelSupport.aggregateSseStream(
                                 httpResponse.body(), objectMapper, log, tracker
                         );
-                tracker.onStreamComplete(durationMs);
+                durationMs = System.currentTimeMillis() - requestStartedAt;
+                progressSnapshot = tracker.onStreamComplete(durationMs);
                 completion = aggregateResult.completionResponse();
                 reasoningContent = aggregateResult.reasoningContent();
-                progressSnapshot = aggregateResult.progressSnapshot();
 
                 // 为了 HTTP 捕获，将聚合后的响应体序列化
                 String aggregatedBody = objectMapper.writeValueAsString(
@@ -403,6 +404,61 @@ public class DashScopeChatModel implements ChatModel {
         return localConfigLoader.current()
                 .map(cfg -> cfg.getDebug())
                 .map(debug -> debug.getLogLlmCurl())
+                .orElse(false);
+    }
+
+    private StreamingProgressTracker createStreamingProgressTracker() {
+        String runId = AgentContext.getRunId();
+        String phase = AgentContext.getPhase();
+        boolean reportEnabled = isStreamingProgressReportEnabled()
+                && observabilityService != null
+                && runId != null
+                && !runId.isBlank();
+        return new StreamingProgressTracker(
+                log,
+                modelName,
+                endpointName,
+                isSseProgressLogEnabled(),
+                reportEnabled,
+                streamingProgressUpdateIntervalMs(),
+                (snapshot, completed) -> observabilityService.recordStreamingProgress(
+                        runId,
+                        phase != null ? phase : "unknown",
+                        endpointName,
+                        modelName,
+                        snapshot,
+                        completed
+                )
+        );
+    }
+
+    private boolean isStreamingProgressReportEnabled() {
+        return localConfigLoader == null
+                || localConfigLoader.current()
+                .map(AgentLlmProperties::getObservability)
+                .map(AgentLlmProperties.Observability::getStreamingProgress)
+                .map(AgentLlmProperties.StreamingProgress::getEnabled)
+                .map(Boolean.TRUE::equals)
+                .orElse(true);
+    }
+
+    private long streamingProgressUpdateIntervalMs() {
+        return localConfigLoader == null ? 3000L
+                : localConfigLoader.current()
+                .map(AgentLlmProperties::getObservability)
+                .map(AgentLlmProperties.Observability::getStreamingProgress)
+                .map(AgentLlmProperties.StreamingProgress::getUpdateIntervalMs)
+                .filter(v -> v != null && v > 0)
+                .map(Integer::longValue)
+                .orElse(3000L);
+    }
+
+    private boolean isSseProgressLogEnabled() {
+        return localConfigLoader != null
+                && localConfigLoader.current()
+                .map(AgentLlmProperties::getDebug)
+                .map(AgentLlmProperties.Debug::getLogSseProgress)
+                .map(Boolean.TRUE::equals)
                 .orElse(false);
     }
 

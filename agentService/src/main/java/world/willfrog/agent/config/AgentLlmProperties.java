@@ -994,6 +994,7 @@ public class AgentLlmProperties {
 
     public static class Observability {
         private OpenRouter openrouter = new OpenRouter();
+        private StreamingProgress streamingProgress = new StreamingProgress();
 
         public OpenRouter getOpenrouter() {
             return openrouter;
@@ -1001,6 +1002,14 @@ public class AgentLlmProperties {
 
         public void setOpenrouter(OpenRouter openrouter) {
             this.openrouter = openrouter == null ? new OpenRouter() : openrouter;
+        }
+
+        public StreamingProgress getStreamingProgress() {
+            return streamingProgress;
+        }
+
+        public void setStreamingProgress(StreamingProgress streamingProgress) {
+            this.streamingProgress = streamingProgress == null ? new StreamingProgress() : streamingProgress;
         }
     }
 
@@ -1037,6 +1046,29 @@ public class AgentLlmProperties {
         }
     }
 
+    public static class StreamingProgress {
+        /** 是否把流式接收进度定期写入客户端可见的 observability */
+        private Boolean enabled = true;
+        /** 写入 observability 的最小间隔，避免压测时过度写 Redis */
+        private Integer updateIntervalMs = 3000;
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Integer getUpdateIntervalMs() {
+            return updateIntervalMs;
+        }
+
+        public void setUpdateIntervalMs(Integer updateIntervalMs) {
+            this.updateIntervalMs = updateIntervalMs;
+        }
+    }
+
     /**
      * Debug 配置（热加载）。
      * 用于控制运行时调试日志输出，默认全部关闭。
@@ -1046,6 +1078,8 @@ public class AgentLlmProperties {
         private Boolean logLlmCurl = false;
         /** 是否打印阶段级 LLM 配置解析日志 */
         private Boolean logStageConfig = false;
+        /** 是否打印 SSE 流式接收进度日志 */
+        private Boolean logSseProgress = false;
 
         public Boolean getLogLlmCurl() {
             return logLlmCurl;
@@ -1061,6 +1095,14 @@ public class AgentLlmProperties {
 
         public void setLogStageConfig(Boolean logStageConfig) {
             this.logStageConfig = logStageConfig;
+        }
+
+        public Boolean getLogSseProgress() {
+            return logSseProgress;
+        }
+
+        public void setLogSseProgress(Boolean logSseProgress) {
+            this.logSseProgress = logSseProgress;
         }
     }
 
