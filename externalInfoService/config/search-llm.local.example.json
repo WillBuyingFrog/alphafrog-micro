@@ -2,7 +2,7 @@
   "providers": {
     "perplexity": {
       "baseUrl": "https://api.perplexity.ai",
-      "apiKey": "replace-with-your-perplexity-api-key",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_PPLX_API_KEY}",
       "searchPath": "/search",
       "authHeader": "Authorization",
       "authPrefix": "Bearer ",
@@ -11,7 +11,7 @@
     },
     "tavily": {
       "baseUrl": "https://api.tavily.com",
-      "apiKey": "replace-with-your-tavily-api-key",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_TAVILY_API_KEY}",
       "searchPath": "/search",
       "authHeader": "Authorization",
       "authPrefix": "Bearer ",
@@ -20,7 +20,7 @@
     },
     "exa": {
       "baseUrl": "https://api.exa.ai",
-      "apiKey": "replace-with-your-exa-api-key",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_EXA_API_KEY}",
       "searchPath": "/search",
       "authHeader": "x-api-key",
       "authPrefix": "",
@@ -76,8 +76,7 @@
           "scene": "finance",
           "backend": "perplexity",
           "strength": "standard",
-          "maxResults": 8,
-          "includeDomains": ["eastmoney.com", "cls.cn", "yicai.com"]
+          "maxResults": 8
         },
         "finance_deep": {
           "scene": "finance",

@@ -4,12 +4,15 @@ import com.alibaba.fastjson2.JSON;
 import com.alibaba.fastjson2.JSONObject;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.common.config.ConfigLoadStateReporter;
+import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 
 import java.io.File;
-import java.io.FileInputStream;
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -31,6 +34,15 @@ public class FetchJobsConfig {
     
     @Value("${af.fetch.jobs.config-refresh-interval-ms:60000}")
     private long refreshIntervalMs;
+
+    @Value("${spring.application.name:domestic-fetch-service}")
+    private String serviceName;
+
+    @Value("${spring.application.instance-id:${HOSTNAME:unknown}}")
+    private String instanceId;
+
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
     
     // 配置数据
     private volatile JSONObject config;
@@ -93,12 +105,18 @@ public class FetchJobsConfig {
                 
                 // 加载新配置
                 try (InputStream is = Files.newInputStream(path)) {
-                    String content = new String(is.readAllBytes(), StandardCharsets.UTF_8);
+                    byte[] bytes = is.readAllBytes();
+                    String content = new String(bytes, StandardCharsets.UTF_8);
                     JSONObject newConfig = JSON.parseObject(content);
                     
+                    // 解析环境变量占位符
+                    PlaceholderResolver.resolveJsonObject(newConfig);
+
                     this.config = newConfig;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
+                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                            "fetch-jobs.json", normalizedPath, bytes);
                     
                     log.info("Loaded fetch jobs config from {} (scheduledJobs={})", 
                             path, 

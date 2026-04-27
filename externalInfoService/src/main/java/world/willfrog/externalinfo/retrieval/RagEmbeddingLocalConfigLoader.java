@@ -3,9 +3,13 @@ package world.willfrog.externalinfo.retrieval;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.common.config.ConfigLoadStateReporter;
+import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 
 import java.io.InputStream;
 import java.nio.file.Files;
@@ -27,6 +31,15 @@ public class RagEmbeddingLocalConfigLoader {
 
     @Value("${alphafrog.rag.embedding.config-file:}")
     private String configFile;
+
+    @Value("${spring.application.name:external-info-service}")
+    private String serviceName;
+
+    @Value("${spring.application.instance-id:${HOSTNAME:unknown}}")
+    private String instanceId;
+
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
 
     private final ObjectMapper objectMapper;
     private volatile RagEmbeddingProperties localConfig;
@@ -76,8 +89,13 @@ public class RagEmbeddingLocalConfigLoader {
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
-                    this.localConfig = objectMapper.readValue(in, RagEmbeddingProperties.class);
+                    byte[] bytes = in.readAllBytes();
+                    RagEmbeddingProperties parsed = objectMapper.readValue(bytes, RagEmbeddingProperties.class);
+                    PlaceholderResolver.resolve(parsed);
+                    this.localConfig = parsed;
                     this.loadedConfigLastModified = currentModified;
+                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                            "rag-embedding.json", path.toString(), bytes);
                     log.info("[RagEmbeddingLocalConfigLoader] 已加载 embedding 配置: {} model={} dimensions={}",
                             path,
                             localConfig.getModel().isBlank() ? "(默认)" : localConfig.getModel(),

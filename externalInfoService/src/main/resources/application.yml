@@ -37,6 +37,7 @@ dubbo:
 external-info:
   search-llm:
     config-file: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:}
+    prompt-base-dir: ${AF_EXTERNAL_INFO_SEARCH_LLM_PROMPT_BASE_DIR:}
     config-refresh-interval-ms: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_REFRESH_INTERVAL_MS:10000}
     providers:
       perplexity:
@@ -161,6 +162,20 @@ alphafrog:
       # 热加载 JSON 配置文件路径（本地 json 中的非空值覆盖上方环境变量默认值）
       config-file: ${AF_RAG_EMBEDDING_CONFIG_FILE:}
       config-refresh-interval-ms: ${AF_RAG_EMBEDDING_CONFIG_REFRESH_INTERVAL_MS:10000}
+
+  config:
+    nacos:
+      enabled: ${AF_CONFIG_NACOS_ENABLED:false}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
+      group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+      subscriptions:
+        - data-id: ${AF_CONFIG_NACOS_SEARCH_LLM_DATA_ID:search-llm.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:}
+        - data-id: ${AF_CONFIG_NACOS_RAG_EMBEDDING_DATA_ID:rag-embedding.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_RAG_EMBEDDING_CONFIG_FILE:}
 
 logging:
   level:

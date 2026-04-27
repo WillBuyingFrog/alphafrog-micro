@@ -92,6 +92,8 @@ agent:
   llm:
     # 本地 JSON 配置文件（可选，不存在则回退到当前 yml/env 配置）
     config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
+    # 动态配置文件写入目录与静态 prompt 目录分离时，file:prompt 相对该目录解析
+    prompt-base-dir: ${AF_AGENT_LLM_PROMPT_BASE_DIR:}
     # 本地 JSON 热更新轮询间隔（毫秒）
     config-refresh-interval-ms: ${AF_AGENT_LLM_CONFIG_REFRESH_INTERVAL_MS:10000}
     # 默认模型与端点（用于未指定 model/endpoint 的请求）
@@ -297,6 +299,13 @@ alphafrog:
       namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
       data-id: ${AF_CONFIG_NACOS_DATA_ID:}
       group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+      subscriptions:
+        - data-id: ${AF_CONFIG_NACOS_CODE_REFINE_DATA_ID:code-refine.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE:}
+        - data-id: ${AF_CONFIG_NACOS_AGENT_LLM_DATA_ID:agent-llm.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_AGENT_LLM_CONFIG_FILE:}
 
 langchain4j:
   open-ai:

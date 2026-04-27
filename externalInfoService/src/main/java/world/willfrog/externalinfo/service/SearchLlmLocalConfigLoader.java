@@ -5,9 +5,13 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.common.config.ConfigLoadStateReporter;
+import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 import world.willfrog.externalinfo.config.SearchLlmProperties;
 
 import java.io.InputStream;
@@ -28,6 +32,18 @@ public class SearchLlmLocalConfigLoader {
 
     @Value("${external-info.search-llm.config-file:}")
     private String configFile;
+
+    @Value("${external-info.search-llm.prompt-base-dir:}")
+    private String promptBaseDir;
+
+    @Value("${spring.application.name:external-info-service}")
+    private String serviceName;
+
+    @Value("${spring.application.instance-id:${HOSTNAME:unknown}}")
+    private String instanceId;
+
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
 
     private volatile SearchLlmProperties localConfig;
     private volatile String loadedConfigPath = "";
@@ -87,11 +103,13 @@ public class SearchLlmLocalConfigLoader {
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
-                    JsonNode root = objectMapper.readTree(in);
+                    byte[] bytes = in.readAllBytes();
+                    JsonNode root = objectMapper.readTree(bytes);
                     failIfLegacyConfig(root, normalizedPath);
                     SearchLlmProperties parsed = objectMapper.treeToValue(root, SearchLlmProperties.class);
+                    PlaceholderResolver.resolve(parsed);
                     SearchLlmProperties sanitized = sanitize(parsed, normalizedPath);
-                    Map<String, Long> promptFileTimes = resolvePromptFiles(sanitized, path.getParent());
+                    Map<String, Long> promptFileTimes = resolvePromptFiles(sanitized, resolvePromptBaseDir(path));
 
                     int providerCount = sanitized.getProviders().size();
                     int profileCount = sanitized.getFeatures().getMarketNews().getProfiles().size();
@@ -99,6 +117,8 @@ public class SearchLlmLocalConfigLoader {
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
                     this.loadedPromptFileModifiedTimes = promptFileTimes;
+                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                            "search-llm.json", normalizedPath, bytes);
                     log.info("Loaded local search config from {} (providers={}, marketNewsProfiles={})",
                             path,
                             providerCount,
@@ -108,6 +128,13 @@ public class SearchLlmLocalConfigLoader {
                 log.error("Failed to load local search config from {}", path, e);
             }
         }
+    }
+
+    private Path resolvePromptBaseDir(Path configPath) {
+        if (hasText(promptBaseDir)) {
+            return Paths.get(promptBaseDir).toAbsolutePath().normalize();
+        }
+        return configPath == null ? null : configPath.getParent();
     }
 
     private void failIfLegacyConfig(JsonNode root, String path) {

@@ -7,16 +7,14 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
-import org.springframework.util.DigestUtils;
 import world.willfrog.agent.config.CodeRefineProperties;
+import world.willfrog.alphafrogmicro.common.config.ConfigLoadStateReporter;
 import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 
 import java.io.InputStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
-import java.time.Duration;
-import java.time.Instant;
 import java.util.Optional;
 
 /**
@@ -27,8 +25,6 @@ import java.util.Optional;
 @Component
 @Slf4j
 public class CodeRefineLocalConfigLoader {
-
-    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
 
     private final ObjectMapper objectMapper;
     private final StringRedisTemplate redisTemplate;
@@ -126,26 +122,7 @@ public class CodeRefineLocalConfigLoader {
      * 上报配置加载状态到 Redis，供 admin 查询副本生效情况。
      */
     private void reportState(byte[] contentBytes) {
-        if (redisTemplate == null) {
-            return;
-        }
-        try {
-            String md5 = DigestUtils.md5DigestAsHex(canonicalBytes(contentBytes));
-            String dataId = "code-refine.json";
-            String key = String.format("config:state:%s:%s:%s", serviceName, instanceId, dataId);
-            String value = String.format("{\"md5\":\"%s\",\"loadedAt\":\"%s\"}",
-                    md5, Instant.now().toString());
-            redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(30));
-        } catch (Exception e) {
-            log.warn("[CodeRefineLocalConfigLoader] Redis 状态上报失败", e);
-        }
-    }
-
-    private byte[] canonicalBytes(byte[] contentBytes) {
-        try {
-            return CANONICAL_OBJECT_MAPPER.writeValueAsBytes(CANONICAL_OBJECT_MAPPER.readTree(contentBytes));
-        } catch (Exception e) {
-            return contentBytes;
-        }
+        ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                "code-refine.json", loadedConfigPath, contentBytes);
     }
 }

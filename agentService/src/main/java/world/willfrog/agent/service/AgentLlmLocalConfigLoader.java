@@ -5,10 +5,14 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.alphafrogmicro.common.config.ConfigLoadStateReporter;
+import world.willfrog.alphafrogmicro.common.utils.PlaceholderResolver;
 
 import java.io.InputStream;
 import java.nio.charset.StandardCharsets;
@@ -30,6 +34,18 @@ public class AgentLlmLocalConfigLoader {
 
     @Value("${agent.llm.config-file:}")
     private String configFile;
+
+    @Value("${agent.llm.prompt-base-dir:}")
+    private String promptBaseDir;
+
+    @Value("${spring.application.name:agent-service}")
+    private String serviceName;
+
+    @Value("${spring.application.instance-id:${HOSTNAME:unknown}}")
+    private String instanceId;
+
+    @Autowired(required = false)
+    private StringRedisTemplate redisTemplate;
 
     private volatile AgentLlmProperties localConfig;
     private volatile String loadedConfigPath = "";
@@ -77,13 +93,17 @@ public class AgentLlmLocalConfigLoader {
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
-                    AgentLlmProperties parsed = objectMapper.readValue(in, AgentLlmProperties.class);
+                    byte[] bytes = in.readAllBytes();
+                    AgentLlmProperties parsed = objectMapper.readValue(bytes, AgentLlmProperties.class);
+                    PlaceholderResolver.resolve(parsed);
                     AgentLlmProperties sanitized = sanitize(parsed);
-                    Map<String, Long> promptFileTimes = resolvePromptFiles(sanitized, path.getParent());
+                    Map<String, Long> promptFileTimes = resolvePromptFiles(sanitized, resolvePromptBaseDir(path));
                     this.localConfig = sanitized;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
                     this.loadedPromptFileModifiedTimes = promptFileTimes;
+                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                            "agent-llm.json", normalizedPath, bytes);
                     // 计算从 endpoints 中收集的模型数量
                     int endpointModels = 0;
                     if (sanitized.getEndpoints() != null) {
@@ -140,6 +160,13 @@ public class AgentLlmLocalConfigLoader {
                 log.warn("Local llm config cleared: {}", reason);
             }
         }
+    }
+
+    private Path resolvePromptBaseDir(Path configPath) {
+        if (hasText(promptBaseDir)) {
+            return Paths.get(promptBaseDir).toAbsolutePath().normalize();
+        }
+        return configPath == null ? null : configPath.getParent();
     }
 
     private Map<String, Long> resolvePromptFiles(AgentLlmProperties cfg, Path baseDir) {

@@ -228,9 +228,34 @@ public class ConfigProfileService {
         return configSnapshotDao.listByType(type.getId());
     }
 
+    public List<ConfigType> listTypes() {
+        return configTypeDao.listAll();
+    }
+
     public ConfigSnapshot getSnapshot(String typeName, String version) {
         ConfigType type = getTypeOrThrow(typeName);
         return configSnapshotDao.getByTypeAndVersion(type.getId(), version);
+    }
+
+    public List<ConfigAuditLog> listAuditLogs(String typeName, int limit) {
+        ConfigType type = getTypeOrThrow(typeName);
+        int safeLimit = Math.max(1, Math.min(limit, 200));
+        return configAuditLogDao.listByType(type.getId(), safeLimit);
+    }
+
+    @Transactional
+    public void deleteSnapshot(String typeName, String version, String operatorId) {
+        ConfigType type = getTypeOrThrow(typeName);
+        ConfigSnapshot snapshot = getSnapshotOrThrow(type, version, "目标版本不存在: " + version);
+        ConfigActive active = configActiveDao.getByType(type.getId());
+        if (active != null && Objects.equals(active.getSnapshotId(), snapshot.getId())) {
+            throw new ConfigConflictException("当前激活版本不能删除，请先切换到其它版本");
+        }
+        int deleted = configSnapshotDao.deleteByTypeAndVersion(type.getId(), version);
+        if (deleted != 1) {
+            throw new ConfigNotFoundException("目标版本不存在: " + version);
+        }
+        insertAuditLog(type.getId(), "DELETE", snapshot.getId(), version, operatorId, null);
     }
 
     // ========== 内部方法 ==========

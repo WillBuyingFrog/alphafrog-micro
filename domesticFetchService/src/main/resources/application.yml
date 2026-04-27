@@ -28,6 +28,21 @@ spring:
 af:
   fetch:
     concurrency: ${AF_FETCH_CONCURRENCY:3}
+    jobs:
+      config-file: ${AF_FETCH_JOBS_CONFIG_FILE:}
+      config-refresh-interval-ms: ${AF_FETCH_JOBS_CONFIG_REFRESH_INTERVAL_MS:60000}
+
+alphafrog:
+  config:
+    nacos:
+      enabled: ${AF_CONFIG_NACOS_ENABLED:false}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
+      group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+      subscriptions:
+        - data-id: ${AF_CONFIG_NACOS_FETCH_JOBS_DATA_ID:fetch-jobs.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_FETCH_JOBS_CONFIG_FILE:}
 
 logging:
   level:

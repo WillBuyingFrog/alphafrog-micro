@@ -14,7 +14,7 @@
   "endpoints": {
     "openrouter": {
       "baseUrl": "https://openrouter.ai/api/v1",
-      "apiKey": "replace-with-your-openrouter-api-key",
+      "apiKey": "${AF_AGENT_ENDPOINT_OPENROUTER_API_KEY}",
       "models": {
         "openai/gpt-5.2": {
           "displayName": "GPT-5.2",
@@ -33,7 +33,7 @@
     },
     "fireworks": {
       "baseUrl": "https://api.fireworks.ai/inference/v1",
-      "apiKey": "replace-with-your-fireworks-api-key",
+      "apiKey": "${AF_AGENT_ENDPOINT_FIREWORKS_API_KEY}",
       "models": {
         "accounts/fireworks/models/kimi-k2p5": {
           "displayName": "Kimi K2.5 (Fireworks)",
@@ -43,11 +43,11 @@
     },
     "openai": {
       "baseUrl": "https://api.openai.com/v1",
-      "apiKey": "replace-with-your-openai-api-key"
+      "apiKey": "${AF_AGENT_ENDPOINT_OPENAI_API_KEY}"
     },
     "dashscope": {
       "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-      "apiKey": "replace-with-your-dashscope-api-key",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_API_KEY}",
       "region": "singapore",
       "models": {
         "qwen3.6-max-preview": {

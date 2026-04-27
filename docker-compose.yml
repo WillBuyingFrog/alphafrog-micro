@@ -287,6 +287,9 @@ services:
       TUSHARE_TOKEN: ${TUSHARE_TOKEN}
       LOGGING_LEVEL_APP: ${LOGGING_LEVEL_APP:-INFO}
       AF_FETCH_CONCURRENCY: ${AF_FETCH_CONCURRENCY:-3}
+      AF_CONFIG_NACOS_ENABLED: "true"
+      AF_CONFIG_NACOS_GROUP: "alphafrog-config"
+      AF_FETCH_JOBS_CONFIG_FILE: "/app/config-dynamic/fetch-jobs.json"
       # Memory Optimization (Compressed)
       JAVA_OPTS: >-
         -XX:+UseSerialGC
@@ -295,6 +298,9 @@ services:
         -Xmx200m
         -XX:MaxRAM=420m
         -XX:MaxMetaspaceSize=128m
+    volumes:
+      - ./domesticFetchService/config:/app/config:ro
+      - ./data/domestic-fetch-configs:/app/config-dynamic
     ports:
       - "20882:20882"
     deploy:
@@ -409,7 +415,8 @@ services:
       NACOS_ADDRESS: nacos
       # Agent Service LLM 配置
       # 本地 JSON 配置文件（容器内路径）
-      AF_AGENT_LLM_CONFIG_FILE: ${AF_AGENT_LLM_CONFIG_FILE:-/app/config/agent-llm.local.json}
+      AF_AGENT_LLM_CONFIG_FILE: ${AF_AGENT_LLM_CONFIG_FILE:-/app/config-dynamic/agent-llm.local.json}
+      AF_AGENT_LLM_PROMPT_BASE_DIR: ${AF_AGENT_LLM_PROMPT_BASE_DIR:-/app/config}
       # 全局兜底 key（当 endpoint 未配置 apiKey 时回退）
       AF_AGENT_API_KEY: ${AF_AGENT_API_KEY:-demo}
       # 默认 endpoint 和 model（可选: openrouter, openai, fireworks）
@@ -476,7 +483,10 @@ services:
     environment:
       TZ: Asia/Shanghai
       NACOS_ADDRESS: nacos
-      AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:-/app/config/search-llm.local.json}
+      AF_CONFIG_NACOS_ENABLED: "true"
+      AF_CONFIG_NACOS_GROUP: "alphafrog-config"
+      AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE: ${AF_EXTERNAL_INFO_SEARCH_LLM_CONFIG_FILE:-/app/config-dynamic/search-llm.local.json}
+      AF_EXTERNAL_INFO_SEARCH_LLM_PROMPT_BASE_DIR: ${AF_EXTERNAL_INFO_SEARCH_LLM_PROMPT_BASE_DIR:-/app/config}
       LOGGING_LEVEL_EXTERNAL_INFO: ${LOGGING_LEVEL_EXTERNAL_INFO:-INFO}
       AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
       AF_DB_MAIN_PORT: 5432
@@ -490,7 +500,7 @@ services:
       AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
       AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
       AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
-      AF_RAG_EMBEDDING_CONFIG_FILE: ${AF_RAG_EMBEDDING_CONFIG_FILE:-/app/config/rag-embedding.local.json}
+      AF_RAG_EMBEDDING_CONFIG_FILE: ${AF_RAG_EMBEDDING_CONFIG_FILE:-/app/config-dynamic/rag-embedding.local.json}
       # HTTP/HTTPS 代理（访问 Perplexity/Exa 等境外服务时使用）
       HTTP_PROXY: ${HTTP_PROXY:-}
       HTTPS_PROXY: ${HTTPS_PROXY:-}
@@ -508,6 +518,7 @@ services:
       DUBBO_PROTOCOL_HOST: ${DUBBO_PROTOCOL_HOST:-}
     volumes:
       - ./externalInfoService/config:/app/config:ro
+      - ./data/external-info-configs:/app/config-dynamic
     ports:
       - "50061:50061"
     deploy:

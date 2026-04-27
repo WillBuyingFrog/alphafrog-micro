@@ -10,7 +10,9 @@ import org.springframework.web.bind.annotation.*;
 import world.willfrog.alphafrogmicro.common.exception.config.ConfigConflictException;
 import world.willfrog.alphafrogmicro.common.exception.config.ConfigNotFoundException;
 import world.willfrog.alphafrogmicro.common.exception.config.ConfigPublishException;
+import world.willfrog.alphafrogmicro.common.pojo.config.ConfigAuditLog;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigSnapshot;
+import world.willfrog.alphafrogmicro.common.pojo.config.ConfigType;
 import world.willfrog.alphafrogmicro.common.service.config.ConfigProfileService;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
@@ -30,6 +32,20 @@ public class AdminConfigController {
     private final AuthService authService;
     private final ObjectMapper objectMapper;
 
+    @GetMapping
+    public ResponseEntity<?> listConfigTypes(Authentication authentication) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        try {
+            List<ConfigType> types = configProfileService.listTypes();
+            return ResponseEntity.ok(Map.of("types", types));
+        } catch (Exception e) {
+            log.error("查询配置类型列表失败", e);
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
+        }
+    }
+
     @GetMapping("/{type}")
     public ResponseEntity<?> getActiveConfig(@PathVariable String type, Authentication authentication) {
         if (!isAdmin(authentication)) {
@@ -44,6 +60,26 @@ public class AdminConfigController {
             return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
         } catch (Exception e) {
             log.error("查询激活配置失败 type={}", type, e);
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
+        }
+    }
+
+    @GetMapping("/{type}/audit")
+    public ResponseEntity<?> listAuditLogs(@PathVariable String type,
+                                           @RequestParam(defaultValue = "50") int limit,
+                                           Authentication authentication) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        try {
+            List<ConfigAuditLog> logs = configProfileService.listAuditLogs(type, limit);
+            return ResponseEntity.ok(Map.of("logs", logs));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("查询配置审计日志失败 type={}", type, e);
             return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
@@ -170,6 +206,27 @@ public class AdminConfigController {
             if (e instanceof IllegalArgumentException) {
                 return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
             }
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
+        }
+    }
+
+    @DeleteMapping("/{type}/snapshots/{version}")
+    public ResponseEntity<?> deleteSnapshot(@PathVariable String type,
+                                            @PathVariable String version,
+                                            Authentication authentication) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        try {
+            String operatorId = getOperatorId(authentication);
+            configProfileService.deleteSnapshot(type, version, operatorId);
+            return ResponseEntity.ok(Map.of("message", "Deleted " + version));
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (ConfigConflictException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("删除配置快照失败 type={} version={}", type, version, e);
             return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
         }
     }
