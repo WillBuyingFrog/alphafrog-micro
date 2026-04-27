@@ -50,7 +50,14 @@ class AgentEventServiceTest {
     void extractRunConfig_shouldParseNestedContextConfig() throws Exception {
         String contextJson = objectMapper.writeValueAsString(Map.of(
                 "config", Map.of(
-                        "webSearch", Map.of("enabled", true),
+                        "webSearch", Map.of(
+                                "enabled", true,
+                                "backend", "exa",
+                                "strength", "fast",
+                                "skipHotCache", true,
+                                "skipRagPrefetch", true,
+                                "maxResults", 6
+                        ),
                         "codeInterpreter", Map.of(
                                 "enabled", false,
                                 "maxCredits", 128
@@ -63,6 +70,11 @@ class AgentEventServiceTest {
         AgentEventService.RunConfig config = service.extractRunConfig(extJson);
 
         assertTrue(config.webSearchEnabled());
+        assertEquals("exa", config.webSearchConfig().backend());
+        assertEquals("fast", config.webSearchConfig().strength());
+        assertTrue(config.webSearchConfig().skipHotCache());
+        assertTrue(config.webSearchConfig().skipRagPrefetch());
+        assertEquals(6, config.webSearchConfig().maxResults());
         assertFalse(config.codeInterpreterEnabled());
         assertEquals(128, config.codeInterpreterMaxCredits());
         assertTrue(config.smartRetrievalEnabled());

@@ -77,4 +77,33 @@ class SearchToolsTest {
         assertEquals("backend_native", root.path("data").path("answer_meta").path("answer_type").asText());
         assertFalse(root.path("data").path("backend_meta").isMissingNode());
     }
+
+    @Test
+    void searchWeb_shouldApplyRunLevelWebSearchBackendConfig() {
+        ExternalInfoDubboService dubboService = mock(ExternalInfoDubboService.class);
+        when(dubboService.webSearch(any())).thenReturn(WebSearchResponse.newBuilder()
+                .setOk(true)
+                .setAnswer("answer")
+                .build());
+        SearchTools tools = new SearchTools(objectMapper);
+        ReflectionTestUtils.setField(tools, "externalInfoDubboService", dubboService);
+        AgentContext.setWebSearchConfig(new AgentContext.WebSearchConfig(
+                "exa",
+                "fast",
+                true,
+                true,
+                6
+        ));
+
+        tools.searchWeb("query", "news", "perplexity", "standard", false, false, "", "", 10);
+
+        var captor = org.mockito.ArgumentCaptor.forClass(WebSearchRequest.class);
+        verify(dubboService).webSearch(captor.capture());
+        WebSearchRequest request = captor.getValue();
+        assertEquals("exa", request.getBackend());
+        assertEquals("fast", request.getStrength());
+        assertTrue(request.getSkipHotCache());
+        assertTrue(request.getSkipRagPrefetch());
+        assertEquals(6, request.getMaxResults());
+    }
 }

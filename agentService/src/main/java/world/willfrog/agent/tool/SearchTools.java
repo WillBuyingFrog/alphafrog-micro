@@ -66,14 +66,17 @@ public class SearchTools {
                             @P(value = "时间范围结束 ISO 8601，可选", required = false) String timeRangeEnd,
                             @P(value = "最大返回结果数，可选，默认 5", required = false) int maxResults) {
         try {
-            int limit = maxResults <= 0 ? 5 : maxResults;
+            AgentContext.WebSearchConfig runConfig = AgentContext.getWebSearchConfig();
+            int limit = resolveMaxResults(runConfig.maxResults(), maxResults);
+            boolean effectiveSkipHotCache = runConfig.skipHotCache() != null ? runConfig.skipHotCache() : skipHotCache;
+            boolean effectiveSkipRagPrefetch = runConfig.skipRagPrefetch() != null ? runConfig.skipRagPrefetch() : skipRagPrefetch;
             WebSearchRequest req = WebSearchRequest.newBuilder()
                     .setQuery(nvl(query))
                     .setScene(nvl(scene))
-                    .setBackend(nvl(backend))
-                    .setStrength(nvl(strength))
-                    .setSkipHotCache(skipHotCache)
-                    .setSkipRagPrefetch(skipRagPrefetch)
+                    .setBackend(firstText(runConfig.backend(), backend))
+                    .setStrength(firstText(runConfig.strength(), strength))
+                    .setSkipHotCache(effectiveSkipHotCache)
+                    .setSkipRagPrefetch(effectiveSkipRagPrefetch)
                     .setTimeRangeStart(nvl(timeRangeStart))
                     .setTimeRangeEnd(nvl(timeRangeEnd))
                     .setMaxResults(limit)
@@ -176,6 +179,20 @@ public class SearchTools {
 
     private String nvl(String s) {
         return s == null ? "" : s;
+    }
+
+    private String firstText(String primary, String fallback) {
+        if (primary != null && !primary.trim().isEmpty()) {
+            return primary.trim();
+        }
+        return nvl(fallback);
+    }
+
+    private int resolveMaxResults(Integer runConfigMaxResults, int toolMaxResults) {
+        if (runConfigMaxResults != null && runConfigMaxResults > 0) {
+            return runConfigMaxResults;
+        }
+        return toolMaxResults <= 0 ? 5 : toolMaxResults;
     }
 
     private String writeJson(Object payload) {

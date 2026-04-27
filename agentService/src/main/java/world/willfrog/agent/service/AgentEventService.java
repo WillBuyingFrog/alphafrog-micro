@@ -7,6 +7,7 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.mapper.AgentRunEventMapper;
@@ -398,6 +399,7 @@ public class AgentEventService {
      * <p>
      * 默认值：
      * - webSearch.enabled = false
+     * - webSearch.backend/strength/skipHotCache/skipRagPrefetch/maxResults = unset
      * - codeInterpreter.enabled = true（保持历史行为兼容）
      * - codeInterpreter.maxCredits = 0
      * - smartRetrieval.enabled = false
@@ -421,12 +423,20 @@ public class AgentEventService {
             Map<?, ?> smartRetrieval = readSection(configMap, "smartRetrieval", "smart_retrieval");
 
             boolean webSearchEnabled = readBoolean(webSearch, "enabled", "enabled", false);
+            AgentContext.WebSearchConfig webSearchConfig = new AgentContext.WebSearchConfig(
+                    readString(webSearch, "backend", "backend", ""),
+                    readString(webSearch, "strength", "strength", ""),
+                    readBooleanNullable(webSearch, "skipHotCache", "skip_hot_cache"),
+                    readBooleanNullable(webSearch, "skipRagPrefetch", "skip_rag_prefetch"),
+                    positiveOrNull(readInt(webSearch, "maxResults", "max_results", 0))
+            );
             boolean codeInterpreterEnabled = readBoolean(codeInterpreter, "enabled", "enabled", true);
             int codeInterpreterMaxCredits = readInt(codeInterpreter, "maxCredits", "max_credits", 0);
             boolean smartRetrievalEnabled = readBoolean(smartRetrieval, "enabled", "enabled", false);
 
             return new RunConfig(
                     webSearchEnabled,
+                    webSearchConfig,
                     codeInterpreterEnabled,
                     Math.max(0, codeInterpreterMaxCredits),
                     smartRetrievalEnabled
@@ -542,6 +552,31 @@ public class AgentEventService {
         return boolValue == null ? defaultValue : boolValue;
     }
 
+    private Boolean readBooleanNullable(Map<?, ?> map, String keyCamel, String keySnake) {
+        if (map == null || map.isEmpty()) {
+            return null;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        return toBoolean(value);
+    }
+
+    private String readString(Map<?, ?> map, String keyCamel, String keySnake, String defaultValue) {
+        if (map == null || map.isEmpty()) {
+            return defaultValue;
+        }
+        Object value = map.get(keyCamel);
+        if (value == null) {
+            value = map.get(keySnake);
+        }
+        if (value == null) {
+            return defaultValue;
+        }
+        return String.valueOf(value).trim();
+    }
+
     private int readInt(Map<?, ?> map, String keyCamel, String keySnake, int defaultValue) {
         if (map == null || map.isEmpty()) {
             return defaultValue;
@@ -571,6 +606,10 @@ public class AgentEventService {
             return boolValue;
         }
         return Boolean.parseBoolean(String.valueOf(value));
+    }
+
+    private Integer positiveOrNull(int value) {
+        return value > 0 ? value : null;
     }
 
     /**
@@ -751,12 +790,13 @@ public class AgentEventService {
 
     public record RunConfig(
             boolean webSearchEnabled,
+            AgentContext.WebSearchConfig webSearchConfig,
             boolean codeInterpreterEnabled,
             int codeInterpreterMaxCredits,
             boolean smartRetrievalEnabled
     ) {
         public static RunConfig defaults() {
-            return new RunConfig(false, true, 0, false);
+            return new RunConfig(false, AgentContext.WebSearchConfig.empty(), true, 0, false);
         }
     }
 

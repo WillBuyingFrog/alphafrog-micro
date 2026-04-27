@@ -8,7 +8,9 @@ import world.willfrog.externalinfo.config.SearchLlmProperties;
 import world.willfrog.externalinfo.search.backend.SearchBackend;
 
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 搜索后端路由。
@@ -26,7 +28,7 @@ public class BackendRouter {
 
     /**
      * 解析并返回匹配的 backend 及 preset。
-     * 优先级：显式 backend / preset > defaultPreset。
+     * 优先级：显式 backend / preset > scene 匹配 preset > defaultPreset。
      *
      * @param request WebSearchRequest
      * @return ResolvedBackend 包含 backend 实例和匹配的 preset
@@ -44,6 +46,13 @@ public class BackendRouter {
             targetBackend = matchedPreset != null && hasText(matchedPreset.getBackend())
                     ? matchedPreset.getBackend().trim().toLowerCase()
                     : candidate.toLowerCase();
+        }
+
+        if (!hasText(targetBackend)) {
+            matchedPreset = findPresetByScene(request.getScene(), feature.getDefaultPreset());
+            if (matchedPreset != null && hasText(matchedPreset.getBackend())) {
+                targetBackend = matchedPreset.getBackend().trim().toLowerCase();
+            }
         }
 
         if (!hasText(targetBackend)) {
@@ -115,6 +124,27 @@ public class BackendRouter {
             return preset;
         }
         return feature.getPresets().get(name.trim().toLowerCase());
+    }
+
+    private SearchLlmProperties.WebSearchPreset findPresetByScene(String scene, String defaultPresetName) {
+        if (!hasText(scene)) {
+            return null;
+        }
+        SearchLlmProperties.WebSearchFeature feature = getWebSearchFeature();
+        if (feature == null || feature.getPresets() == null || feature.getPresets().isEmpty()) {
+            return null;
+        }
+        String normalizedScene = scene.trim();
+        SearchLlmProperties.WebSearchPreset defaultPreset = findPresetByName(defaultPresetName);
+        if (defaultPreset != null && normalizedScene.equalsIgnoreCase(defaultPreset.getScene())) {
+            return defaultPreset;
+        }
+        return feature.getPresets().entrySet().stream()
+                .sorted(Comparator.comparing(Map.Entry::getKey))
+                .map(Map.Entry::getValue)
+                .filter(preset -> preset != null && normalizedScene.equalsIgnoreCase(preset.getScene()))
+                .findFirst()
+                .orElse(null);
     }
 
     private SearchLlmProperties.WebSearchFeature getWebSearchFeature() {

@@ -24,6 +24,7 @@ public class AgentContext {
      */
     private static final ThreadLocal<Boolean> DEBUG_MODE_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> WEB_SEARCH_ENABLED_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<WebSearchConfig> WEB_SEARCH_CONFIG_HOLDER = new ThreadLocal<>();
 
     /**
      * OpenRouter reasoning (thinking) effort 配置：
@@ -155,6 +156,23 @@ public class AgentContext {
         WEB_SEARCH_ENABLED_HOLDER.remove();
     }
 
+    public static void setWebSearchConfig(WebSearchConfig config) {
+        if (config == null) {
+            WEB_SEARCH_CONFIG_HOLDER.remove();
+            return;
+        }
+        WEB_SEARCH_CONFIG_HOLDER.set(config);
+    }
+
+    public static WebSearchConfig getWebSearchConfig() {
+        WebSearchConfig config = WEB_SEARCH_CONFIG_HOLDER.get();
+        return config == null ? WebSearchConfig.empty() : config;
+    }
+
+    public static void clearWebSearchConfig() {
+        WEB_SEARCH_CONFIG_HOLDER.remove();
+    }
+
     public static void clearDebugMode() {
         DEBUG_MODE_HOLDER.remove();
     }
@@ -250,10 +268,23 @@ public class AgentContext {
         clearStructuredOutputSpec();
         clearDebugMode();
         clearWebSearchEnabled();
+        clearWebSearchConfig();
         clearReasoningEffort();
         clearStageConfig();
         clearThinkingContent();
         clearStreamingProgress();
+    }
+
+    public record WebSearchConfig(
+            String backend,
+            String strength,
+            Boolean skipHotCache,
+            Boolean skipRagPrefetch,
+            Integer maxResults
+    ) {
+        public static WebSearchConfig empty() {
+            return new WebSearchConfig("", "", null, null, null);
+        }
     }
 
     public static final class StructuredOutputSpec {
