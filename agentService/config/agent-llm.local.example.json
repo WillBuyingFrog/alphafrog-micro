@@ -71,6 +71,60 @@
           "features": ["thinking"]
         }
       }
+    },
+    "dashscope-sg": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_SG_API_KEY}",
+      "region": "singapore",
+      "models": {
+        "qwen3.6-max-preview": {
+          "displayName": "Qwen 3.6 Max Preview (DashScope SG)",
+          "baseRate": 0.5,
+          "features": ["thinking"]
+        },
+        "qwen3.6-plus": {
+          "displayName": "Qwen 3.6 Plus (DashScope SG)",
+          "baseRate": 0.3,
+          "features": ["thinking"]
+        },
+        "qwen3.5-plus": {
+          "displayName": "Qwen 3.5 Plus (DashScope SG)",
+          "baseRate": 0.2,
+          "features": ["thinking"]
+        },
+        "qwen3.5-flash": {
+          "displayName": "Qwen 3.5 Flash (DashScope SG)",
+          "baseRate": 0.1,
+          "features": ["thinking"]
+        }
+      }
+    },
+    "dashscope-cn": {
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_CN_API_KEY}",
+      "region": "cn",
+      "models": {
+        "qwen3.6-max-preview": {
+          "displayName": "Qwen 3.6 Max Preview (DashScope CN)",
+          "baseRate": 0.5,
+          "features": ["thinking"]
+        },
+        "qwen3.6-plus": {
+          "displayName": "Qwen 3.6 Plus (DashScope CN)",
+          "baseRate": 0.3,
+          "features": ["thinking"]
+        },
+        "qwen3.5-plus": {
+          "displayName": "Qwen 3.5 Plus (DashScope CN)",
+          "baseRate": 0.2,
+          "features": ["thinking"]
+        },
+        "qwen3.5-flash": {
+          "displayName": "Qwen 3.5 Flash (DashScope CN)",
+          "baseRate": 0.1,
+          "features": ["thinking"]
+        }
+      }
     }
   },
   "runtime": {
