@@ -184,6 +184,10 @@
     }
   },
   "observability": {
+    "streamingProgress": {
+      "enabled": true,
+      "updateIntervalMs": 3000
+    },
     "openrouter": {
       "costEnrichment": {
         "enabled": true,
@@ -198,7 +202,8 @@
   },
   "debug": {
     "logLlmCurl": false,
-    "logStageConfig": false
+    "logStageConfig": false,
+    "logSseProgress": false
   },
   "prompts": {
     "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",

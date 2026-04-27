@@ -15,10 +15,12 @@ import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.config.RunStageConfig;
 import world.willfrog.agent.tool.MarketDataTools;
 import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.tool.RagTools;
+import world.willfrog.agent.tool.SearchTools;
 
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
@@ -56,6 +58,8 @@ class AgentRunExecutorTest {
     @Mock
     private RagTools ragTools;
     @Mock
+    private SearchTools searchTools;
+    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentObservabilityService observabilityService;
@@ -89,6 +93,7 @@ class AgentRunExecutorTest {
                 marketDataTools,
                 pythonSandboxTools,
                 ragTools,
+                searchTools,
                 stateStore,
                 observabilityService,
                 creditService,
@@ -178,7 +183,13 @@ class AgentRunExecutorTest {
         when(runMapper.findById("run-no-code")).thenReturn(run);
         when(eventService.isRunnable("run-no-code", "u1")).thenReturn(true);
         when(eventService.extractRunConfig(anyString()))
-                .thenReturn(new AgentEventService.RunConfig(false, false, 0, false));
+                .thenReturn(new AgentEventService.RunConfig(
+                        false,
+                        AgentContext.WebSearchConfig.empty(),
+                        false,
+                        0,
+                        false
+                ));
 
         TodoPlan plan = new TodoPlan();
         plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));

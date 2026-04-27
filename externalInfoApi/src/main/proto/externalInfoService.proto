@@ -55,7 +55,82 @@ message RagSearchResponse {
   int32 total = 2;              // 实际返回条数
 }
 
+// ==================== WebSearch 统一搜索（P0）====================
+
+message WebSearchRequest {
+  string query = 1;                    // 原始查询文本
+  string scene = 2;                    // "general" | "finance" | "news"
+  string backend = 3;                  // 可选覆盖："perplexity" | "tavily" | "exa" | ""
+  string strength = 4;                 // 可选覆盖：backend 相关强度档位
+  bool skip_hot_cache = 5;             // 是否跳过热点缓存
+  bool skip_rag_prefetch = 6;          // 是否跳过 RAG 预检
+  string time_range_start = 7;         // 可选：ISO 8601 起始时间
+  string time_range_end = 8;           // 可选：ISO 8601 结束时间
+  int32 max_results = 9;               // 可选：最大返回结果数
+
+  // --- P0 预埋：P2 热点缓存所需的字段 ---
+  string run_id = 10;                  // agent run ID，用于热点统计去重
+  string user_id = 11;                 // 用户 ID，用于热点统计去重
+}
+
+message WebSearchHit {
+  string title = 1;
+  string url = 2;
+  string snippet = 3;                  // 摘要/片段
+  string source = 4;                   // 来源站点
+  string published_date = 5;           // 发布日期
+  float score = 6;                     // 相关性得分
+}
+
+message WebSearchCitation {
+  int32 index = 1;                     // 引用序号 [1], [2]...
+  string url = 2;
+  string title = 3;
+}
+
+message WebSearchBackendMeta {
+  string backend = 1;
+  string model_or_strength = 2;        // 实际使用的模型/强度
+  int32 cost_estimate_ms = 3;          // 预估成本（毫秒或内部信用单位）
+  string raw_query_sent = 4;           // 实际发给 backend 的 query
+}
+
+message WebSearchRagPrefetch {
+  bool used = 1;
+  float relevance_score = 2;           // LLM 判定的相关性得分
+  string rag_summary = 3;              // RAG 结果压缩摘要（1-2 句话）
+}
+
+message WebSearchAnswerMeta {
+  string answer_type = 1;              // "ai_synthesized" | "backend_native" | "none"
+  string model_used = 2;               // 生成答案的模型（如适用）
+}
+
+message WebSearchResponse {
+  // --- 标准化检索结果层（必返） ---
+  repeated WebSearchHit hits = 1;
+  WebSearchBackendMeta backend_meta = 2;
+
+  // --- 可选综合答案层 ---
+  string answer = 3;                   // AI 综合答案（如有）
+  repeated WebSearchCitation citations = 4;
+  WebSearchAnswerMeta answer_meta = 5;
+
+  // --- RAG 预检结果（P1） ---
+  WebSearchRagPrefetch rag_prefetch = 6;
+
+  // --- P0 预埋：P2 热点缓存回写所需的字段 ---
+  string canonical_query = 7;          // 规范化后的 query
+  string slot_signature = 8;           // 槽位签名
+  string result_hash = 9;              // 结果哈希（用于缓存去重/变更检测）
+
+  bool ok = 10;
+  string error_code = 11;
+  string error_message = 12;
+}
+
 service ExternalInfoDubboService {
   rpc GetTodayMarketNews(GetTodayMarketNewsRequest) returns (GetTodayMarketNewsResponse);
   rpc RagSearch(RagSearchRequest) returns (RagSearchResponse);
+  rpc WebSearch(WebSearchRequest) returns (WebSearchResponse);
 }

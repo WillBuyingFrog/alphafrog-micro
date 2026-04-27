@@ -43,6 +43,11 @@ security:
     task-creation-window-minutes: 60
 
 alphafrog:
+  config:
+    nacos:
+      enabled: ${AF_CONFIG_NACOS_ENABLED:true}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
   rag:
     ingest:
       admin-token: ${AF_RAG_INGEST_TOKEN:}

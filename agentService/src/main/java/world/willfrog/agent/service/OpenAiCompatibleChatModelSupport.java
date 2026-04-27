@@ -51,6 +51,7 @@ final class OpenAiCompatibleChatModelSupport {
 
         StringBuilder contentBuilder = new StringBuilder();
         StringBuilder reasoningBuilder = new StringBuilder();
+        Map<Integer, Map<String, Object>> toolCallBuilders = new LinkedHashMap<>();
 
         Map<String, Object> lastUsage = null;
         String lastFinishReason = null;
@@ -137,6 +138,12 @@ final class OpenAiCompatibleChatModelSupport {
                     contentBuilder.append(s);
                 }
 
+                Object toolCallsObj = deltaMap.get("tool_calls");
+                int deltaToolCallChars = 0;
+                if (toolCallsObj instanceof List<?> toolCallsList) {
+                    deltaToolCallChars = mergeToolCallDeltas(toolCallBuilders, toolCallsList);
+                }
+
                 Object reasoningObj = deltaMap.get("reasoning_content");
                 if (reasoningObj instanceof String s) {
                     deltaReasoning = s;
@@ -178,7 +185,7 @@ final class OpenAiCompatibleChatModelSupport {
                 }
 
                 if (progressTracker != null) {
-                    progressTracker.onChunkReceived(deltaContent, deltaReasoning);
+                    progressTracker.onChunkReceived(deltaContent, deltaReasoning, deltaToolCallChars);
                 }
             }
         } catch (IOException e) {
@@ -195,7 +202,12 @@ final class OpenAiCompatibleChatModelSupport {
 
         Map<String, Object> messageMap = new LinkedHashMap<>();
         messageMap.put("role", "assistant");
-        messageMap.put("content", contentBuilder.toString());
+        List<Map<String, Object>> toolCalls = buildToolCalls(toolCallBuilders);
+        messageMap.put("content", toolCalls.isEmpty() ? contentBuilder.toString()
+                : (contentBuilder.isEmpty() ? null : contentBuilder.toString()));
+        if (!toolCalls.isEmpty()) {
+            messageMap.put("tool_calls", toolCalls);
+        }
 
         Map<String, Object> choiceMap = new LinkedHashMap<>();
         choiceMap.put("index", 0);
@@ -220,7 +232,7 @@ final class OpenAiCompatibleChatModelSupport {
 
         StreamingProgressTracker.StreamingProgressSnapshot snapshot = progressTracker != null
                 ? progressTracker.getSnapshot()
-                : new StreamingProgressTracker.StreamingProgressSnapshot(0, 0, 0, 0, 0.0);
+                : new StreamingProgressTracker.StreamingProgressSnapshot(0, 0, 0, 0, 0, 0, 0.0);
 
         return new SseAggregateResult(
                 contentBuilder.toString(),
@@ -228,6 +240,76 @@ final class OpenAiCompatibleChatModelSupport {
                 completion,
                 snapshot
         );
+    }
+
+    @SuppressWarnings("unchecked")
+    private static int mergeToolCallDeltas(Map<Integer, Map<String, Object>> builders, List<?> deltas) {
+        int argumentChars = 0;
+        for (Object deltaObj : deltas) {
+            if (!(deltaObj instanceof Map<?, ?> deltaMap)) {
+                continue;
+            }
+            Integer index = toInt(deltaMap.get("index"));
+            if (index == null) {
+                index = builders.size();
+            }
+            Map<String, Object> target = builders.computeIfAbsent(index, idx -> {
+                Map<String, Object> created = new LinkedHashMap<>();
+                created.put("index", idx);
+                created.put("type", "function");
+                created.put("function", new LinkedHashMap<String, Object>());
+                return created;
+            });
+
+            Object id = deltaMap.get("id");
+            if (id instanceof String s && !s.isBlank()) {
+                target.put("id", s);
+            }
+            Object type = deltaMap.get("type");
+            if (type instanceof String s && !s.isBlank()) {
+                target.put("type", s);
+            }
+
+            Object functionObj = deltaMap.get("function");
+            if (functionObj instanceof Map<?, ?> functionDelta) {
+                Map<String, Object> function = (Map<String, Object>) target.computeIfAbsent(
+                        "function", ignored -> new LinkedHashMap<String, Object>());
+                Object name = functionDelta.get("name");
+                if (name instanceof String s && !s.isBlank()) {
+                    function.put("name", s);
+                }
+                Object arguments = functionDelta.get("arguments");
+                if (arguments instanceof String s) {
+                    String previous = function.get("arguments") instanceof String old ? old : "";
+                    function.put("arguments", previous + s);
+                    argumentChars += s.length();
+                }
+            }
+        }
+        return argumentChars;
+    }
+
+    @SuppressWarnings("unchecked")
+    private static List<Map<String, Object>> buildToolCalls(Map<Integer, Map<String, Object>> builders) {
+        if (builders.isEmpty()) {
+            return List.of();
+        }
+        List<Map<String, Object>> out = new ArrayList<>();
+        for (Map.Entry<Integer, Map<String, Object>> entry : builders.entrySet()) {
+            Integer index = entry.getKey();
+            Map<String, Object> call = new LinkedHashMap<>(entry.getValue());
+            call.putIfAbsent("type", "function");
+            Map<String, Object> function = call.get("function") instanceof Map<?, ?> existing
+                    ? new LinkedHashMap<>((Map<String, Object>) existing)
+                    : new LinkedHashMap<>();
+            function.putIfAbsent("arguments", "");
+            String name = function.get("name") instanceof String s && !s.isBlank() ? s : "unknown";
+            function.put("name", name);
+            call.put("function", function);
+            call.putIfAbsent("id", name + ":" + index);
+            out.add(call);
+        }
+        return out;
     }
 
     private static boolean isSseErrorChunk(Map<String, Object> chunk) {

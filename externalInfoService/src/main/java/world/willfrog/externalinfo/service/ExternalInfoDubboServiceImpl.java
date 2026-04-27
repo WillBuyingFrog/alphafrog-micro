@@ -8,7 +8,10 @@ import world.willfrog.alphafrogmicro.externalinfo.idl.GetTodayMarketNewsResponse
 import world.willfrog.alphafrogmicro.externalinfo.idl.MarketNewsItemMessage;
 import world.willfrog.alphafrogmicro.externalinfo.idl.RagSearchRequest;
 import world.willfrog.alphafrogmicro.externalinfo.idl.RagSearchResponse;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
 import world.willfrog.externalinfo.retrieval.RagSearchServiceImpl;
+import world.willfrog.externalinfo.search.WebSearchOrchestrator;
 
 @DubboService
 @RequiredArgsConstructor
@@ -16,6 +19,7 @@ public class ExternalInfoDubboServiceImpl extends DubboExternalInfoDubboServiceT
 
     private final MarketNewsService marketNewsService;
     private final RagSearchServiceImpl ragSearchService;
+    private final WebSearchOrchestrator webSearchOrchestrator;
 
     @Override
     public GetTodayMarketNewsResponse getTodayMarketNews(GetTodayMarketNewsRequest request) {
@@ -55,5 +59,10 @@ public class ExternalInfoDubboServiceImpl extends DubboExternalInfoDubboServiceT
     @Override
     public RagSearchResponse ragSearch(RagSearchRequest request) {
         return ragSearchService.ragSearch(request);
+    }
+
+    @Override
+    public WebSearchResponse webSearch(WebSearchRequest request) {
+        return webSearchOrchestrator.search(request);
     }
 }

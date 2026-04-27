@@ -16,6 +16,7 @@ import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 
 import java.io.BufferedReader;
@@ -109,13 +110,14 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     request,
                     new TypeReference<Map<String, Object>>() {}
             );
-            // 默认启用流式输出
+            // 默认启用流式输出。SSE 聚合器负责还原 content/reasoning/tool_calls。
             requestJsonMap.put("stream", true);
             requestJsonMap.put("stream_options", Map.of("include_usage", true));
 
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
+                normalizeOpenRouterTokenLimit(requestJsonMap);
                 Map<String, Object> provider = new LinkedHashMap<>();
                 provider.put("order", providerOrder == null ? List.of() : providerOrder);
                 if (structuredOutputSpec != null) {
@@ -199,15 +201,15 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
 
             if (statusCode >= 200 && statusCode < 300) {
                 // 流式响应：解析 SSE
-                StreamingProgressTracker tracker = new StreamingProgressTracker(log, modelName, endpointName);
+                StreamingProgressTracker tracker = createStreamingProgressTracker();
                 OpenAiCompatibleChatModelSupport.SseAggregateResult aggregateResult =
                         OpenAiCompatibleChatModelSupport.aggregateSseStream(
                                 httpResponse.body(), objectMapper, log, tracker
                         );
-                tracker.onStreamComplete(durationMs);
+                durationMs = System.currentTimeMillis() - requestStartedAt;
+                progressSnapshot = tracker.onStreamComplete(durationMs);
                 completion = aggregateResult.completionResponse();
                 reasoningContent = aggregateResult.reasoningContent();
-                progressSnapshot = aggregateResult.progressSnapshot();
 
                 // 为了 HTTP 捕获，将聚合后的响应体序列化
                 String aggregatedBody = objectMapper.writeValueAsString(
@@ -371,6 +373,61 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 && !generationId.isBlank();
     }
 
+    private StreamingProgressTracker createStreamingProgressTracker() {
+        String runId = AgentContext.getRunId();
+        String phase = AgentContext.getPhase();
+        boolean reportEnabled = isStreamingProgressReportEnabled()
+                && observabilityService != null
+                && runId != null
+                && !runId.isBlank();
+        return new StreamingProgressTracker(
+                log,
+                modelName,
+                endpointName,
+                isSseProgressLogEnabled(),
+                reportEnabled,
+                streamingProgressUpdateIntervalMs(),
+                (snapshot, completed) -> observabilityService.recordStreamingProgress(
+                        runId,
+                        phase != null ? phase : "unknown",
+                        endpointName,
+                        modelName,
+                        snapshot,
+                        completed
+                )
+        );
+    }
+
+    private boolean isStreamingProgressReportEnabled() {
+        return localConfigLoader == null
+                || localConfigLoader.current()
+                .map(AgentLlmProperties::getObservability)
+                .map(AgentLlmProperties.Observability::getStreamingProgress)
+                .map(AgentLlmProperties.StreamingProgress::getEnabled)
+                .map(Boolean.TRUE::equals)
+                .orElse(true);
+    }
+
+    private long streamingProgressUpdateIntervalMs() {
+        return localConfigLoader == null ? 3000L
+                : localConfigLoader.current()
+                .map(AgentLlmProperties::getObservability)
+                .map(AgentLlmProperties.Observability::getStreamingProgress)
+                .map(AgentLlmProperties.StreamingProgress::getUpdateIntervalMs)
+                .filter(v -> v != null && v > 0)
+                .map(Integer::longValue)
+                .orElse(3000L);
+    }
+
+    private boolean isSseProgressLogEnabled() {
+        return localConfigLoader != null
+                && localConfigLoader.current()
+                .map(AgentLlmProperties::getDebug)
+                .map(AgentLlmProperties.Debug::getLogSseProgress)
+                .map(Boolean.TRUE::equals)
+                .orElse(false);
+    }
+
     private boolean isOpenRouterEndpoint(String url) {
         if (url == null || url.isBlank()) {
             return false;
@@ -391,7 +448,20 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     private boolean isOpenRouterHost(String host) {
         return host != null && (host.equals("openrouter.ai") || host.endsWith(".openrouter.ai"));
     }
-    
+
+    static void normalizeOpenRouterTokenLimit(Map<String, Object> requestJsonMap) {
+        if (requestJsonMap == null) {
+            return;
+        }
+        Object maxCompletionTokens = requestJsonMap.remove("max_completion_tokens");
+        // OpenRouter 的 provider require_parameters 会按请求字段过滤供应商。
+        // 对 Kimi/Fireworks 等 OpenAI 兼容模型，max_completion_tokens 会导致供应商被过滤；
+        // 使用 OpenRouter Chat Completions 通用字段 max_tokens 更稳定。
+        if (maxCompletionTokens != null && !requestJsonMap.containsKey("max_tokens")) {
+            requestJsonMap.put("max_tokens", maxCompletionTokens);
+        }
+    }
+
     /**
      * 检查是否开启 curl debug 日志（热加载）。
      */

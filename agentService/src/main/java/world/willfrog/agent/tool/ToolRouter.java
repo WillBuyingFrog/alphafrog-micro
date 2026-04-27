@@ -29,6 +29,7 @@ public class ToolRouter {
 
     private final MarketDataTools marketDataTools;
     private final RagTools ragTools;
+    private final SearchTools searchTools;
     private final PythonSandboxTools pythonSandboxTools;
     private final ToolResultCacheService toolResultCacheService;
     private final AgentObservabilityService observabilityService;
@@ -112,6 +113,7 @@ public class ToolRouter {
                 "getFinancialReport",
                 "ragSearch",
                 "loadDocument",
+                "searchWeb",
                 "executePython",
                 "spawnSubAgent",
                 "waitForSubAgent"
@@ -129,6 +131,23 @@ public class ToolRouter {
         long startedAt = System.currentTimeMillis();
         String result;
         try {
+            if ("searchWeb".equals(toolName) && !AgentContext.isWebSearchEnabled()) {
+                result = writeJson(Map.of(
+                        "ok", false,
+                        "tool", "searchWeb",
+                        "data", Map.of(),
+                        "error", Map.of(
+                                "code", "CAPABILITY_DISABLED",
+                                "message", "webSearch is disabled for this run",
+                                "details", Map.of()
+                        )
+                ));
+                return ToolResultCacheService.ToolExecutionOutcome.builder()
+                        .result(result)
+                        .durationMs(Math.max(0L, System.currentTimeMillis() - startedAt))
+                        .success(false)
+                        .build();
+            }
             // 统一入口负责兼容参数别名（ts_code/code 等），工具实现层只接收标准参数。
             result = switch (toolName) {
                 case "getStockInfo" -> marketDataTools.getStockInfo(
@@ -171,6 +190,17 @@ public class ToolRouter {
                 );
                 case "loadDocument" -> ragTools.loadDocument(
                         str(params.get("ossUrl"), params.get("oss_url"), params.get("url"), params.get("arg0"))
+                );
+                case "searchWeb" -> searchTools.searchWeb(
+                        str(params.get("query"), params.get("arg0")),
+                        str(params.get("scene"), params.get("arg1")),
+                        str(params.get("backend"), params.get("arg2")),
+                        str(params.get("strength"), params.get("arg3")),
+                        toBool(params.get("skipHotCache"), params.get("skip_hot_cache"), params.get("arg4")),
+                        toBool(params.get("skipRagPrefetch"), params.get("skip_rag_prefetch"), params.get("arg5")),
+                        str(params.get("timeRangeStart"), params.get("time_range_start"), params.get("arg6")),
+                        str(params.get("timeRangeEnd"), params.get("time_range_end"), params.get("arg7")),
+                        toIntWithDefault(5, params.get("maxResults"), params.get("max_results"), params.get("arg8"))
                 );
                 case "executePython" -> pythonSandboxTools.executePython(
                         str(params.get("code"), params.get("arg0")),
@@ -277,6 +307,14 @@ public class ToolRouter {
         } catch (NumberFormatException e) {
             return defaultValue;
         }
+    }
+
+    private boolean toBool(Object... candidates) {
+        String value = str(candidates);
+        if (value.isEmpty()) {
+            return false;
+        }
+        return Boolean.parseBoolean(value);
     }
 
     private String dateStr(Object... candidates) {

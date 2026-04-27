@@ -115,6 +115,7 @@ public class SearchLlmProperties {
 
     public static class Features {
         private MarketNewsFeature marketNews = new MarketNewsFeature();
+        private WebSearchFeature webSearch = new WebSearchFeature();
 
         public MarketNewsFeature getMarketNews() {
             return marketNews;
@@ -122,6 +123,14 @@ public class SearchLlmProperties {
 
         public void setMarketNews(MarketNewsFeature marketNews) {
             this.marketNews = marketNews == null ? new MarketNewsFeature() : marketNews;
+        }
+
+        public WebSearchFeature getWebSearch() {
+            return webSearch;
+        }
+
+        public void setWebSearch(WebSearchFeature webSearch) {
+            this.webSearch = webSearch == null ? new WebSearchFeature() : webSearch;
         }
     }
 
@@ -311,6 +320,179 @@ public class SearchLlmProperties {
 
         public void setMarketNewsQueryTemplate(String marketNewsQueryTemplate) {
             this.marketNewsQueryTemplate = marketNewsQueryTemplate;
+        }
+    }
+
+    // ==================== WebSearch 配置（P0 新增）====================
+
+    public static class WebSearchFeature {
+        private String defaultPreset;
+        private Map<String, WebSearchPreset> presets = new HashMap<>();
+        private Map<String, BackendConfig> backends = new HashMap<>();
+
+        public String getDefaultPreset() {
+            return defaultPreset;
+        }
+
+        public void setDefaultPreset(String defaultPreset) {
+            this.defaultPreset = defaultPreset;
+        }
+
+        public Map<String, WebSearchPreset> getPresets() {
+            return presets;
+        }
+
+        public void setPresets(Map<String, WebSearchPreset> presets) {
+            this.presets = presets == null ? new HashMap<>() : presets;
+        }
+
+        public Map<String, BackendConfig> getBackends() {
+            return backends;
+        }
+
+        public void setBackends(Map<String, BackendConfig> backends) {
+            this.backends = backends == null ? new HashMap<>() : backends;
+        }
+    }
+
+    public static class WebSearchPreset {
+        private String name;
+        private String scene;        // general | finance | news
+        private String backend;      // perplexity | tavily | exa
+        private String strength;     // fast | standard | deep | reasoning | deep-research
+        private Integer maxResults;
+        private List<String> includeDomains = new ArrayList<>();
+        private List<String> excludeDomains = new ArrayList<>();
+        private String timeRange;    // day | week | month | year
+
+        public String getName() {
+            return name;
+        }
+
+        public void setName(String name) {
+            this.name = name;
+        }
+
+        public String getScene() {
+            return scene;
+        }
+
+        public void setScene(String scene) {
+            this.scene = scene;
+        }
+
+        public String getBackend() {
+            return backend;
+        }
+
+        public void setBackend(String backend) {
+            this.backend = backend;
+        }
+
+        public String getStrength() {
+            return strength;
+        }
+
+        public void setStrength(String strength) {
+            this.strength = strength;
+        }
+
+        public Integer getMaxResults() {
+            return maxResults;
+        }
+
+        public void setMaxResults(Integer maxResults) {
+            this.maxResults = maxResults;
+        }
+
+        public List<String> getIncludeDomains() {
+            return includeDomains;
+        }
+
+        public void setIncludeDomains(List<String> includeDomains) {
+            this.includeDomains = includeDomains == null ? new ArrayList<>() : includeDomains;
+        }
+
+        public List<String> getExcludeDomains() {
+            return excludeDomains;
+        }
+
+        public void setExcludeDomains(List<String> excludeDomains) {
+            this.excludeDomains = excludeDomains == null ? new ArrayList<>() : excludeDomains;
+        }
+
+        public String getTimeRange() {
+            return timeRange;
+        }
+
+        public void setTimeRange(String timeRange) {
+            this.timeRange = timeRange;
+        }
+    }
+
+    public static class BackendConfig {
+        private String baseUrl;
+        private String apiKey;
+        private String authHeader;
+        private String authPrefix;
+        private Map<String, String> headers = new HashMap<>();
+        private Integer connectTimeoutSeconds;
+        private Integer requestTimeoutSeconds;
+
+        public String getBaseUrl() {
+            return baseUrl;
+        }
+
+        public void setBaseUrl(String baseUrl) {
+            this.baseUrl = baseUrl;
+        }
+
+        public String getApiKey() {
+            return apiKey;
+        }
+
+        public void setApiKey(String apiKey) {
+            this.apiKey = apiKey;
+        }
+
+        public String getAuthHeader() {
+            return authHeader;
+        }
+
+        public void setAuthHeader(String authHeader) {
+            this.authHeader = authHeader;
+        }
+
+        public String getAuthPrefix() {
+            return authPrefix;
+        }
+
+        public void setAuthPrefix(String authPrefix) {
+            this.authPrefix = authPrefix;
+        }
+
+        public Map<String, String> getHeaders() {
+            return headers;
+        }
+
+        public void setHeaders(Map<String, String> headers) {
+            this.headers = headers == null ? new HashMap<>() : headers;
+        }
+
+        public Integer getConnectTimeoutSeconds() {
+            return connectTimeoutSeconds;
+        }
+
+        public void setConnectTimeoutSeconds(Integer connectTimeoutSeconds) {
+            this.connectTimeoutSeconds = connectTimeoutSeconds;
+        }
+
+        public Integer getRequestTimeoutSeconds() {
+            return requestTimeoutSeconds;
+        }
+
+        public void setRequestTimeoutSeconds(Integer requestTimeoutSeconds) {
+            this.requestTimeoutSeconds = requestTimeoutSeconds;
         }
     }
 }

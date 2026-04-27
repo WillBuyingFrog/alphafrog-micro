@@ -77,6 +77,39 @@ public class AgentObservabilityService {
             }
         });
     }
+
+    public void recordStreamingProgress(String runId,
+                                        String phase,
+                                        String endpointName,
+                                        String modelName,
+                                        StreamingProgressTracker.StreamingProgressSnapshot snapshot,
+                                        boolean completed) {
+        if (runId == null || runId.isBlank() || snapshot == null) {
+            return;
+        }
+        mutate(runId, state -> {
+            if (endpointName != null && !endpointName.isBlank()) {
+                state.getDiagnostics().setLastEndpoint(endpointName);
+            }
+            if (modelName != null && !modelName.isBlank()) {
+                state.getDiagnostics().setLastModel(modelName);
+            }
+            Diagnostics.StreamingProgressStatus status = new Diagnostics.StreamingProgressStatus();
+            status.setPhase(normalizePhase(phase));
+            status.setEndpoint(nvl(endpointName));
+            status.setModel(nvl(modelName));
+            status.setCompleted(completed);
+            status.setUpdatedAt(OffsetDateTime.now().toString());
+            status.setContentCharCount(snapshot.contentCharCount());
+            status.setReasoningCharCount(snapshot.reasoningCharCount());
+            status.setToolCallCharCount(snapshot.toolCallCharCount());
+            status.setTotalCharCount(snapshot.totalCharCount());
+            status.setChunkCount(snapshot.chunkCount());
+            status.setDurationMs(snapshot.durationMs());
+            status.setCharsPerSecond(snapshot.charsPerSecond());
+            state.getDiagnostics().setStreamingProgress(status);
+        });
+    }
     
     /**
      * 检查指定 Run 是否启用了 LLM 请求捕获（ALP-25）
@@ -385,6 +418,8 @@ public class AgentObservabilityService {
                 payload.put("streamingProgress", Map.of(
                         "contentCharCount", streamingProgress.contentCharCount(),
                         "reasoningCharCount", streamingProgress.reasoningCharCount(),
+                        "toolCallCharCount", streamingProgress.toolCallCharCount(),
+                        "totalCharCount", streamingProgress.totalCharCount(),
                         "chunkCount", streamingProgress.chunkCount(),
                         "durationMs", streamingProgress.durationMs(),
                         "charsPerSecond", streamingProgress.charsPerSecond()
@@ -1114,6 +1149,8 @@ public class AgentObservabilityService {
             LlmTrace.StreamingProgress sp = new LlmTrace.StreamingProgress();
             sp.setContentCharCount(streamingProgress.contentCharCount());
             sp.setReasoningCharCount(streamingProgress.reasoningCharCount());
+            sp.setToolCallCharCount(streamingProgress.toolCallCharCount());
+            sp.setTotalCharCount(streamingProgress.totalCharCount());
             sp.setChunkCount(streamingProgress.chunkCount());
             sp.setDurationMs(streamingProgress.durationMs());
             sp.setCharsPerSecond(streamingProgress.charsPerSecond());
@@ -1487,8 +1524,25 @@ public class AgentObservabilityService {
         private String lastPlanningErrorCategory;
         private String updatedAt;
         private Boolean captureLlmRequests;
+        private StreamingProgressStatus streamingProgress;
         private List<LlmTrace> llmTraces;
         private List<ToolTrace> toolTraces;
+
+        @Data
+        public static class StreamingProgressStatus {
+            private String phase;
+            private String endpoint;
+            private String model;
+            private boolean completed;
+            private String updatedAt;
+            private int contentCharCount;
+            private int reasoningCharCount;
+            private int toolCallCharCount;
+            private int totalCharCount;
+            private int chunkCount;
+            private long durationMs;
+            private double charsPerSecond;
+        }
     }
 
     @Data
@@ -1587,6 +1641,8 @@ public class AgentObservabilityService {
         public static class StreamingProgress {
             private int contentCharCount;
             private int reasoningCharCount;
+            private int toolCallCharCount;
+            private int totalCharCount;
             private int chunkCount;
             private long durationMs;
             private double charsPerSecond;

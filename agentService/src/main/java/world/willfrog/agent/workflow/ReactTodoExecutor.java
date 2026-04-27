@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  *
  * <p>每个 Todo 内部运行一个多轮 ReAct 循环：
  * LLM 决策 → 工具调用 → 结果注入上下文 → 再次 LLM 决策 → ...
- * 直到 LLM 输出 {"answer":"..."} 表示本 Todo 完成，或达到最大调用次数。</p>
+ * 直到 LLM 输出最终回答，或达到最大调用次数。</p>
  *
  * <p>外层还有重试机制（MAX_RETRIES = 2）：如果整个 ReAct 循环失败，
  * 会构建带错误提示的新上下文并重新执行整个循环。</p>
@@ -86,9 +86,6 @@ public class ReactTodoExecutor {
 
     @Value("${agent.flow.react.max-calls-per-todo:10}")
     private int maxCallsPerTodo;
-
-    @Value("${agent.flow.react.legacy-text-tool-call-fallback:true}")
-    private boolean legacyTextToolCallFallback = true;
 
     private final AgentRunStateStore stateStore;
 
@@ -313,72 +310,7 @@ public class ReactTodoExecutor {
                 continue;
             }
 
-            // 兼容旧模式：允许模型输出文本 JSON 表达工具调用
-            if (legacyTextToolCallFallback) {
-                LlmDecision decision = parseDecision(llmOutput);
-                if (decision.getToolName() != null && !decision.getToolName().isBlank()) {
-                    if (llmTraceId != null) {
-                        String excerpt = llmOutput != null && llmOutput.length() > 200
-                                ? llmOutput.substring(0, 200) : llmOutput;
-                        AgentContext.setDecisionContext(
-                                llmTraceId,
-                                phase != null ? phase : "dag_execution",
-                                excerpt
-                        );
-                    }
-
-                    String toolResult;
-                    boolean toolSuccess;
-                    try {
-                        if ("spawnSubAgent".equals(decision.getToolName())) {
-                            toolResult = handleSpawnSubAgent(
-                                    decision.getParams(),
-                                    context,
-                                    runId,
-                                    model,
-                                    pendingSubAgents,
-                                    subAgentIdCounter
-                            );
-                            toolSuccess = !toolResult.contains("\"ok\":false");
-                            recordToolCallObservability(runId, phase, "spawnSubAgent", decision.getParams(),
-                                    toolResult, 0L, toolSuccess, toolSuccess ? null : toolResult);
-                        } else if ("waitForSubAgent".equals(decision.getToolName())) {
-                            toolResult = handleWaitForSubAgent(decision.getParams(), pendingSubAgents);
-                            toolSuccess = !toolResult.contains("\"ok\":false");
-                            recordToolCallObservability(runId, phase, "waitForSubAgent", decision.getParams(),
-                                    toolResult, 0L, toolSuccess, toolSuccess ? null : toolResult);
-                        } else {
-                            TodoExecutionRecord toolRecord = executeTool(decision, context, runId, phase);
-                            toolResult = toolRecord.getOutput();
-                            toolSuccess = toolRecord.isSuccess();
-                        }
-                    } finally {
-                        AgentContext.clearDecisionContext();
-                    }
-                    toolCallsUsed++;
-                    lastOutput = toolResult;
-                    extractAndRegisterDatasetRef(toolResult, context);
-                    String observation = toolSuccess ? "[工具结果]\n" + toolResult : "[工具调用失败]\n" + toolResult;
-                    messages.add(new UserMessage(observation));
-                    if (!toolSuccess) {
-                        log.warn("Tool {} failed in ReAct round {}, LLM will decide next step",
-                                decision.getToolName(), callCount);
-                    }
-                    continue;
-                }
-
-                return TodoExecutionRecord.builder()
-                        .success(true)
-                        .output(nvl(decision.getAnswer()))
-                        .summary("Completed in " + callCount + " round(s), " + toolCallsUsed + " tool call(s)")
-                        .llmTraceId(lastLlmTraceId)
-                        .retryCount(retryCount)
-                        .toolCallsUsed(toolCallsUsed)
-                        .messageHistory(convertMessagesToSnapshots(messages))
-                        .build();
-            }
-
-            // 原生模式下无 tool request 时，默认视为最终回答
+            // breaking change: 工具调用只接受原生 tool_calls。正文 JSON 不再被解析或执行。
             return TodoExecutionRecord.builder()
                     .success(true)
                     .output(nvl(llmOutput))
@@ -458,11 +390,11 @@ public class ReactTodoExecutor {
             detailedHint.append("4. 多数据集：dataset_ids: \"dataset_xxx,dataset_yyy\"（逗号分隔）\n");
             detailedHint.append("5. 代码中需要遍历 /sandbox/input/*/ 读取数据\n\n");
             detailedHint.append("正确示例：\n");
-            detailedHint.append("{\"tool\":\"executePython\",\"params\":{\"dataset_ids\":\"xxx\",\"code\":\"import pandas as pd; ...\"}}");
+            detailedHint.append("通过原生工具调用 executePython，并传入 dataset_ids=\"xxx\"、code=\"import pandas as pd; ...\"");
         } else if (errorHint.contains("keyword")) {
             detailedHint.append("修正建议：\n");
             detailedHint.append("搜索类工具必须使用 'keyword' 参数（不是 'keywords' 或 'query'）\n");
-            detailedHint.append("正确示例：{\"tool\":\"searchIndex\",\"params\":{\"keyword\":\"沪深300\"}}");
+            detailedHint.append("正确示例：通过原生工具调用 searchIndex，并传入 keyword=\"沪深300\"");
         } else {
             detailedHint.append("修正建议：\n");
             detailedHint.append("请确保使用正确的参数名，参考 System Prompt 中的工具规范。\n");
@@ -514,7 +446,7 @@ public class ReactTodoExecutor {
      * 处理 spawnSubAgent 调用：在后台线程启动 SubAgentRunner，立即返回 sub_agent_id。
      * 主 ReAct 循环可继续处理其他工具调用，不会阻塞。
      *
-     * <p>参数（来自 LLM decision.params）：
+     * <p>参数（来自原生 tool call arguments）：
      * <ul>
      *   <li>goal（必填）：子代理目标描述</li>
      *   <li>context（可选）：补充上下文信息</li>
@@ -816,6 +748,7 @@ public class ReactTodoExecutor {
         
         userMsg.append("请决定如何完成。\n");
         userMsg.append("需要调用工具时请直接使用系统提供的工具调用能力，不要手写 JSON。\n");
+        userMsg.append("如果当前任务要求调用工具，下一条消息必须是实际工具调用；不要只说明计划或展示参数。\n");
         userMsg.append("无需工具时，请直接输出最终回答内容。\n");
         userMsg.append("⚠️ 警告：工具参数名必须与工具规范完全一致。");
         
@@ -953,6 +886,7 @@ public class ReactTodoExecutor {
             case "getIndexInfo" -> "{\"ts_code\": \"<指数代码>\"}";
             case "getStockInfo" -> "{\"ts_code\": \"<股票代码>\"}";
             case "executePython" -> "{\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID，逗号分隔>\", \"libraries\": \"<可选：库名逗号分隔>\"}";
+            case "searchWeb" -> "{\"query\": \"<搜索查询文本>\", \"scene\": \"general|finance|news\", \"backend\": \"perplexity|tavily|exa|\", \"strength\": \"<可选>\", \"skipHotCache\": true, \"skipRagPrefetch\": true, \"timeRangeStart\": \"\", \"timeRangeEnd\": \"\", \"maxResults\": 5}";
             default -> "{...}";
         };
     }
@@ -1094,84 +1028,6 @@ public class ReactTodoExecutor {
         return normalized.length() <= 200 ? normalized : normalized.substring(0, 200) + "...";
     }
 
-    private LlmDecision parseDecision(String output) {
-        try {
-            String json = extractJson(output);
-            if (json == null) {
-                return LlmDecision.builder().answer(output).build();
-            }
-            
-            Map<String, Object> map = objectMapper.readValue(json, Map.class);
-            
-            if (map.containsKey("answer")) {
-                return LlmDecision.builder()
-                        .answer((String) map.get("answer"))
-                        .build();
-            }
-            
-            @SuppressWarnings("unchecked")
-            Map<String, Object> params = (Map<String, Object>) map.getOrDefault("params", Map.of());
-            
-            return LlmDecision.builder()
-                    .toolName((String) map.get("tool"))
-                    .params(params)
-                    .build();
-            
-        } catch (Exception e) {
-            return LlmDecision.builder().answer(output).build();
-        }
-    }
-
-    private TodoExecutionRecord executeTool(LlmDecision decision, 
-                                             TodoExecutionContext context,
-                                             String runId,
-                                             String phase) {
-        long toolStartTime = System.currentTimeMillis();
-        String toolName = decision.getToolName();
-        
-        try {
-            Map<String, Object> params = decision.getParams() == null
-                    ? new HashMap<>()
-                    : new HashMap<>(decision.getParams());
-            
-            // 添加 dataset_refs
-            if (!context.getDatasetRefs().isEmpty()) {
-                params.put("_dataset_refs", context.getDatasetRefs());
-            }
-            
-            ToolRouter.ToolInvocationResult invocation = toolRouter.invokeWithMeta(toolName, params);
-            String result = nvl(invocation.getOutput());
-            long toolDurationMs = System.currentTimeMillis() - toolStartTime;
-            boolean success = invocation.isSuccess();
-            
-            return TodoExecutionRecord.builder()
-                    .success(success)
-                    .output(result)
-                    .summary(success ? "Success" : "Failed")
-                    .toolName(toolName)
-                    .toolParams(params)
-                    .toolDurationMs(toolDurationMs)
-                    .build();
-            
-        } catch (Exception e) {
-            long toolDurationMs = System.currentTimeMillis() - toolStartTime;
-            
-            // 记录失败的工具调用
-            if (runId != null && !runId.isBlank()) {
-                recordToolCallObservability(runId, phase, toolName, decision.getParams(), "",
-                        toolDurationMs, false, e.getMessage());
-            }
-            
-            return TodoExecutionRecord.builder()
-                    .success(false)
-                    .output("")
-                    .summary("Tool error: " + e.getMessage())
-                    .toolName(toolName)
-                    .toolDurationMs(toolDurationMs)
-                    .build();
-        }
-    }
-    
     private void recordToolCallObservability(String runId, String phase, String toolName,
                                               Map<String, Object> params, String output,
                                               long durationMs, boolean success, String errorMessage) {
@@ -1200,16 +1056,6 @@ public class ReactTodoExecutor {
         }
     }
 
-    private String extractJson(String text) {
-        if (text == null) return null;
-        int start = text.indexOf('{');
-        int end = text.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return text.substring(start, end + 1);
-        }
-        return null;
-    }
-
     private String nvl(String value) {
         return value == null ? "" : value;
     }
@@ -1225,14 +1071,6 @@ public class ReactTodoExecutor {
     }
 
     private record ToolExecutionOutcome(String result, boolean success) {
-    }
-
-    @Builder
-    @Data
-    private static class LlmDecision {
-        private String toolName;
-        private Map<String, Object> params;
-        private String answer;
     }
 
     @Builder
