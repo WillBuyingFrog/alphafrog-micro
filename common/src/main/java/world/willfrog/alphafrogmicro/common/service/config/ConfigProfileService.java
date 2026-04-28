@@ -10,8 +10,9 @@ import com.networknt.schema.JsonSchema;
 import com.networknt.schema.JsonSchemaFactory;
 import com.networknt.schema.SpecVersion;
 import com.networknt.schema.ValidationMessage;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -40,7 +41,6 @@ import java.util.stream.Collectors;
  */
 @Slf4j
 @Service
-@RequiredArgsConstructor
 public class ConfigProfileService {
 
     private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
@@ -52,6 +52,39 @@ public class ConfigProfileService {
     private final ObjectMapper objectMapper;
     private final ConfigService nacosConfigService;
     private final StringRedisTemplate redisTemplate;
+
+    @Autowired
+    public ConfigProfileService(ConfigTypeDao configTypeDao,
+                                ConfigSnapshotDao configSnapshotDao,
+                                ConfigActiveDao configActiveDao,
+                                ConfigAuditLogDao configAuditLogDao,
+                                ObjectMapper objectMapper,
+                                ObjectProvider<ConfigService> nacosConfigServiceProvider,
+                                StringRedisTemplate redisTemplate) {
+        this(configTypeDao,
+                configSnapshotDao,
+                configActiveDao,
+                configAuditLogDao,
+                objectMapper,
+                nacosConfigServiceProvider.getIfAvailable(),
+                redisTemplate);
+    }
+
+    public ConfigProfileService(ConfigTypeDao configTypeDao,
+                                ConfigSnapshotDao configSnapshotDao,
+                                ConfigActiveDao configActiveDao,
+                                ConfigAuditLogDao configAuditLogDao,
+                                ObjectMapper objectMapper,
+                                ConfigService nacosConfigService,
+                                StringRedisTemplate redisTemplate) {
+        this.configTypeDao = configTypeDao;
+        this.configSnapshotDao = configSnapshotDao;
+        this.configActiveDao = configActiveDao;
+        this.configAuditLogDao = configAuditLogDao;
+        this.objectMapper = objectMapper;
+        this.nacosConfigService = nacosConfigService;
+        this.redisTemplate = redisTemplate;
+    }
 
     /**
      * 基于已有版本派生新版本。
@@ -463,6 +496,11 @@ public class ConfigProfileService {
     }
 
     private void publishToNacos(ConfigType type, ConfigSnapshot target, String operatorId) {
+        if (nacosConfigService == null) {
+            insertAuditLog(type.getId(), "ACTIVATE_PUBLISH_FAILED", target.getId(),
+                    target.getVersion(), operatorId, "Nacos Config 未启用或 ConfigService 未初始化");
+            throw new ConfigPublishException("Nacos Config 未启用或 ConfigService 未初始化");
+        }
         try {
             boolean success = nacosConfigService.publishConfig(
                     type.getDataId(), type.getConfigGroup(), target.getContentJson());

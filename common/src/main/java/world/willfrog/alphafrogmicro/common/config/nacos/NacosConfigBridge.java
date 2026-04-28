@@ -8,6 +8,8 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import jakarta.annotation.PreDestroy;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
@@ -59,6 +61,11 @@ public class NacosConfigBridge {
     private final Environment environment;
     private ConfigService configService;
     private final List<Subscription> activeSubscriptions = new ArrayList<>();
+
+    @Autowired
+    public NacosConfigBridge(ObjectProvider<ObjectMapper> objectMapperProvider, Environment environment) {
+        this(objectMapperProvider.getIfAvailable(ObjectMapper::new), environment);
+    }
 
     public NacosConfigBridge(ObjectMapper objectMapper, Environment environment) {
         this.objectMapper = objectMapper;

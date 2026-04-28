@@ -7,6 +7,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.ArgumentCaptor;
+import org.springframework.beans.factory.support.DefaultListableBeanFactory;
 import org.springframework.mock.env.MockEnvironment;
 
 import java.nio.file.Files;
@@ -111,6 +112,22 @@ class NacosConfigBridgeTest {
     }
 
     // ==================== writeConfigToFile 测试 ====================
+
+    @Test
+    void constructor_shouldFallbackToLocalObjectMapper_whenNoObjectMapperBean(@TempDir Path tempDir) throws Exception {
+        NacosConfigBridge bridge = new NacosConfigBridge(
+                new DefaultListableBeanFactory().getBeanProvider(ObjectMapper.class),
+                environment);
+        Path targetFile = tempDir.resolve("test-config.json");
+        NacosConfigBridge.Subscription sub = new NacosConfigBridge.Subscription();
+        sub.setDataId("test.json");
+        sub.setGroup("test-group");
+        sub.setTargetFile(targetFile.toString());
+
+        invokeWriteConfigToFile(bridge, sub, "{\"key\":\"value\"}");
+
+        assertEquals("{\"key\":\"value\"}", Files.readString(targetFile));
+    }
 
     @Test
     void writeConfigToFile_shouldWriteValidJson(@TempDir Path tempDir) throws Exception {

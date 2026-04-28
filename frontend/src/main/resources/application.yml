@@ -54,6 +54,9 @@ alphafrog:
       external-info-service-url: ${AF_EXTERNAL_INFO_SERVICE_URL:http://alphafrog-external-info-service:18096}
 
 dubbo:
+  consumer:
+    # 允许 frontend 在部分下游服务暂时不可用时先启动，由具体接口调用返回错误而不是整站启动失败
+    check: false
   registry:
     address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
     # 当前未使用 Nacos 作为 Dubbo 配置中心，显式关闭默认兜底，避免启动时额外做 config-center 健康检查

@@ -19,6 +19,9 @@ public class DomesticFetchRabbitConfig {
     @Value("${af.fetch.concurrency:3}")
     private int fetchConcurrency;
 
+    @Value("${spring.rabbitmq.listener.simple.auto-startup:true}")
+    private boolean listenerAutoStartup;
+
     public static final String FETCH_EXCHANGE = "fetch.exchange";
     public static final String FETCH_TASK_QUEUE = "fetch.task.queue.domesticFetchService";
     public static final String FETCH_TASK_ROUTING_KEY = "fetch.task";
@@ -57,6 +60,7 @@ public class DomesticFetchRabbitConfig {
         factory.setConnectionFactory(connectionFactory);
         factory.setConcurrentConsumers(fetchConcurrency);
         factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        factory.setAutoStartup(listenerAutoStartup);
         return factory;
     }
 }
