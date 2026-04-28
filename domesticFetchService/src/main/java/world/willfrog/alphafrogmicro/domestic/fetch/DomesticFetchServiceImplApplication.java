@@ -7,6 +7,7 @@ import org.springframework.boot.autoconfigure.SpringBootApplication;
 import org.springframework.context.annotation.Import;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
+import world.willfrog.alphafrogmicro.common.fetchcatalog.FetchCatalogConfigLoader;
 
 
 @SpringBootApplication(scanBasePackages = {
@@ -14,7 +15,7 @@ import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
 })
 @EnableDubbo
 @EnableScheduling
-@Import(NacosConfigBridge.class)
+@Import({NacosConfigBridge.class, FetchCatalogConfigLoader.class})
 @MapperScan("world.willfrog.alphafrogmicro.common.dao")
 public class DomesticFetchServiceImplApplication {
     public static void main(String[] args) {
