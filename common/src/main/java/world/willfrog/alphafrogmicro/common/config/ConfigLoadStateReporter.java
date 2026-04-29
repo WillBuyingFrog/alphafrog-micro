@@ -1,9 +1,7 @@
 package world.willfrog.alphafrogmicro.common.config;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.redis.core.StringRedisTemplate;
-import org.springframework.util.DigestUtils;
 
 import java.time.Duration;
 import java.time.Instant;
@@ -15,8 +13,6 @@ import java.time.Instant;
  */
 @Slf4j
 public final class ConfigLoadStateReporter {
-
-    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
 
     private ConfigLoadStateReporter() {
     }
@@ -32,7 +28,7 @@ public final class ConfigLoadStateReporter {
             return;
         }
         try {
-            String md5 = DigestUtils.md5DigestAsHex(canonicalBytes(contentBytes));
+            String md5 = ConfigJsonCanonicalizer.md5Hex(contentBytes);
             String safePath = configPath == null ? "" : escapeJson(configPath);
             String key = String.format("config:state:%s:%s:%s", serviceName, instanceId, dataId);
             String value = String.format(
@@ -41,14 +37,6 @@ public final class ConfigLoadStateReporter {
             redisTemplate.opsForValue().set(key, value, Duration.ofSeconds(30));
         } catch (Exception e) {
             log.warn("[ConfigLoadStateReporter] 配置状态上报失败 dataId={}", dataId, e);
-        }
-    }
-
-    private static byte[] canonicalBytes(byte[] contentBytes) {
-        try {
-            return CANONICAL_OBJECT_MAPPER.writeValueAsBytes(CANONICAL_OBJECT_MAPPER.readTree(contentBytes));
-        } catch (Exception e) {
-            return contentBytes;
         }
     }
 

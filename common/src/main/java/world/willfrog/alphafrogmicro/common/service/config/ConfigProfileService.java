@@ -18,6 +18,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.transaction.support.TransactionSynchronization;
 import org.springframework.transaction.support.TransactionSynchronizationManager;
+import world.willfrog.alphafrogmicro.common.config.ConfigJsonCanonicalizer;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigAuditLogDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigActiveDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigSnapshotDao;
@@ -30,8 +31,6 @@ import world.willfrog.alphafrogmicro.common.pojo.config.ConfigActive;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigSnapshot;
 import world.willfrog.alphafrogmicro.common.pojo.config.ConfigType;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
 import java.time.OffsetDateTime;
 import java.util.*;
 import java.util.stream.Collectors;
@@ -42,8 +41,6 @@ import java.util.stream.Collectors;
 @Slf4j
 @Service
 public class ConfigProfileService {
-
-    private static final ObjectMapper CANONICAL_OBJECT_MAPPER = new ObjectMapper();
 
     private final ConfigTypeDao configTypeDao;
     private final ConfigSnapshotDao configSnapshotDao;
@@ -115,7 +112,7 @@ public class ConfigProfileService {
         String newVersion = "v" + (maxNum + 1);
 
         String contentJson = canonicalJson(resultNode);
-        String md5 = md5Hex(contentJson);
+        String md5 = ConfigJsonCanonicalizer.md5Hex(contentJson);
 
         ConfigSnapshot snapshot = new ConfigSnapshot();
         snapshot.setTypeId(type.getId());
@@ -151,7 +148,7 @@ public class ConfigProfileService {
         String newVersion = "v" + (maxNum + 1);
 
         String contentJson = canonicalJson(fullConfig);
-        String md5 = md5Hex(contentJson);
+        String md5 = ConfigJsonCanonicalizer.md5Hex(contentJson);
 
         ConfigSnapshot snapshot = new ConfigSnapshot();
         snapshot.setTypeId(type.getId());
@@ -243,7 +240,7 @@ public class ConfigProfileService {
             }
         }
 
-        String activeSnapshotMd5 = snapshot == null ? null : snapshot.getContentMd5();
+        String activeSnapshotMd5 = snapshot == null ? null : ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson());
         boolean synced = activeSnapshotMd5 != null && !replicas.isEmpty() && replicas.stream()
                 .allMatch(r -> activeSnapshotMd5.equals(r.get("md5")));
 
@@ -437,22 +434,8 @@ public class ConfigProfileService {
         }
     }
 
-    private String md5Hex(String input) {
-        try {
-            MessageDigest md = MessageDigest.getInstance("MD5");
-            byte[] digest = md.digest(input.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (byte b : digest) {
-                sb.append(String.format("%02x", b));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            throw new RuntimeException("MD5 计算失败", e);
-        }
-    }
-
     private String canonicalJson(JsonNode node) throws Exception {
-        return CANONICAL_OBJECT_MAPPER.writeValueAsString(node);
+        return ConfigJsonCanonicalizer.canonicalJson(node);
     }
 
     private ConfigType getTypeOrThrow(String typeName) {

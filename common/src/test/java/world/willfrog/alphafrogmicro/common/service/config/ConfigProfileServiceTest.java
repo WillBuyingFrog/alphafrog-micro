@@ -9,6 +9,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.ValueOperations;
+import world.willfrog.alphafrogmicro.common.config.ConfigJsonCanonicalizer;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigActiveDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigAuditLogDao;
 import world.willfrog.alphafrogmicro.common.dao.config.ConfigSnapshotDao;
@@ -107,7 +108,8 @@ class ConfigProfileServiceTest {
                 .thenReturn(Set.of("config:state:agent-service:pod-1:code-refine.json"));
         when(redisTemplate.opsForValue()).thenReturn(valueOperations);
         when(valueOperations.get("config:state:agent-service:pod-1:code-refine.json"))
-                .thenReturn("{\"md5\":\"abc123\",\"loadedAt\":\"2026-04-24T10:00:00Z\"}");
+                .thenReturn("{\"md5\":\"" + ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson())
+                        + "\",\"loadedAt\":\"2026-04-24T10:00:00Z\"}");
 
         Map<String, Object> result = configProfileService.getActiveWithReplicas("code-refine");
 
