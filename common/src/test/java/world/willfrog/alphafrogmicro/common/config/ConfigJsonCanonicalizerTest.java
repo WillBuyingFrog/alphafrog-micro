@@ -24,5 +24,9 @@ class ConfigJsonCanonicalizerTest {
                 ConfigJsonCanonicalizer.md5Hex(left.getBytes(StandardCharsets.UTF_8)),
                 ConfigJsonCanonicalizer.md5Hex(right.getBytes(StandardCharsets.UTF_8))
         );
+        assertEquals(
+                ConfigJsonCanonicalizer.md5Hex(left),
+                ConfigJsonCanonicalizer.md5Hex(right)
+        );
     }
 }

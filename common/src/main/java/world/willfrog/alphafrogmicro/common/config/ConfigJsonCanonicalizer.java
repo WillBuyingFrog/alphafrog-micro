@@ -48,6 +48,16 @@ public final class ConfigJsonCanonicalizer {
     }
 
     public static String md5Hex(String content) {
+        String normalized = content == null ? "" : content;
+        try {
+            normalized = canonicalJson(OBJECT_MAPPER.readTree(normalized));
+        } catch (Exception ignored) {
+            // 非 JSON 文本保留原始字符串口径，避免影响兼容调用。
+        }
+        return md5RawHex(normalized);
+    }
+
+    private static String md5RawHex(String content) {
         try {
             MessageDigest md = MessageDigest.getInstance("MD5");
             byte[] digest = md.digest(content.getBytes(StandardCharsets.UTF_8));

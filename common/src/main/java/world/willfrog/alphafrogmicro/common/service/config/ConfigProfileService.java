@@ -241,12 +241,16 @@ public class ConfigProfileService {
         }
 
         String activeSnapshotMd5 = snapshot == null ? null : ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson());
+        if (snapshot != null && activeSnapshotMd5 != null) {
+            snapshot.setContentMd5(activeSnapshotMd5);
+        }
         boolean synced = activeSnapshotMd5 != null && !replicas.isEmpty() && replicas.stream()
                 .allMatch(r -> activeSnapshotMd5.equals(r.get("md5")));
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", type);
         result.put("activeSnapshot", snapshot);
+        result.put("activeContentMd5", activeSnapshotMd5);
         result.put("replicas", replicas);
         result.put("replicaCount", replicas.size());
         result.put("synced", synced);

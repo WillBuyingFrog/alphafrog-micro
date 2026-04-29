@@ -122,6 +122,34 @@ class ConfigProfileServiceTest {
     }
 
     @Test
+    void getActiveWithReplicasShouldCompareCanonicalMd5ForLegacySnapshot() throws Exception {
+        ConfigType type = buildType();
+        ConfigSnapshot snapshot = buildSnapshot();
+        snapshot.setContentJson("{\"b\":2,\"a\":{\"d\":4,\"c\":3}}");
+        snapshot.setContentMd5("legacy-md5");
+        ConfigActive active = new ConfigActive();
+        active.setTypeId(type.getId());
+        active.setSnapshotId(snapshot.getId());
+
+        String replicaMd5 = ConfigJsonCanonicalizer.md5Hex("{\"a\":{\"c\":3,\"d\":4},\"b\":2}"
+                .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configActiveDao.getByType(type.getId())).thenReturn(active);
+        when(configSnapshotDao.getById(snapshot.getId())).thenReturn(snapshot);
+        when(redisTemplate.keys("config:state:*:*:code-refine.json"))
+                .thenReturn(Set.of("config:state:agent-service:pod-1:code-refine.json"));
+        when(redisTemplate.opsForValue()).thenReturn(valueOperations);
+        when(valueOperations.get("config:state:agent-service:pod-1:code-refine.json"))
+                .thenReturn("{\"md5\":\"" + replicaMd5 + "\",\"loadedAt\":\"2026-04-24T10:00:00Z\"}");
+
+        Map<String, Object> result = configProfileService.getActiveWithReplicas("code-refine");
+
+        assertTrue((Boolean) result.get("synced"));
+        assertEquals(replicaMd5, result.get("activeContentMd5"));
+        assertEquals(replicaMd5, ((ConfigSnapshot) result.get("activeSnapshot")).getContentMd5());
+    }
+
+    @Test
     void activateShouldThrowConflictWhenAtomicUpdateFails() {
         ConfigType type = buildType();
         ConfigSnapshot snapshot = buildSnapshot();
