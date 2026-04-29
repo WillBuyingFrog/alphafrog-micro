@@ -50,6 +50,7 @@ public class AgentLlmLocalConfigLoader {
     private volatile AgentLlmProperties localConfig;
     private volatile String loadedConfigPath = "";
     private volatile long loadedConfigLastModified = Long.MIN_VALUE;
+    private volatile byte[] loadedConfigBytes = new byte[0];
     private volatile Map<String, Long> loadedPromptFileModifiedTimes = new LinkedHashMap<>();
     private final Object reloadLock = new Object();
 
@@ -90,6 +91,7 @@ public class AgentLlmLocalConfigLoader {
                 String normalizedPath = path.toString();
                 boolean unchanged = normalizedPath.equals(loadedConfigPath) && currentModified == loadedConfigLastModified;
                 if (!force && unchanged && !promptFilesChanged()) {
+                    reportState(loadedConfigBytes);
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
@@ -101,9 +103,9 @@ public class AgentLlmLocalConfigLoader {
                     this.localConfig = sanitized;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
+                    this.loadedConfigBytes = bytes;
                     this.loadedPromptFileModifiedTimes = promptFileTimes;
-                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
-                            "agent-llm.json", normalizedPath, bytes);
+                    reportState(bytes);
                     // 计算从 endpoints 中收集的模型数量
                     int endpointModels = 0;
                     if (sanitized.getEndpoints() != null) {
@@ -123,6 +125,11 @@ public class AgentLlmLocalConfigLoader {
                 log.error("Failed to load local llm config from {}", path, e);
             }
         }
+    }
+
+    private void reportState(byte[] contentBytes) {
+        ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                "agent-llm.json", loadedConfigPath, contentBytes);
     }
 
     public Optional<AgentLlmProperties> current() {

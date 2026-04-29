@@ -44,7 +44,9 @@ public class RagEmbeddingLocalConfigLoader {
     private final ObjectMapper objectMapper;
     private volatile RagEmbeddingProperties localConfig;
     private final Object reloadLock = new Object();
+    private volatile String loadedConfigPath = "";
     private long loadedConfigLastModified = -1;
+    private volatile byte[] loadedConfigBytes = new byte[0];
 
     public RagEmbeddingLocalConfigLoader(ObjectMapper objectMapper) {
         this.objectMapper = objectMapper;
@@ -82,10 +84,12 @@ public class RagEmbeddingLocalConfigLoader {
         try {
             long currentModified = Files.getLastModifiedTime(path).toMillis();
             if (!force && currentModified == loadedConfigLastModified) {
+                reportState(loadedConfigBytes);
                 return;
             }
             synchronized (reloadLock) {
                 if (!force && currentModified == loadedConfigLastModified) {
+                    reportState(loadedConfigBytes);
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
@@ -93,9 +97,10 @@ public class RagEmbeddingLocalConfigLoader {
                     RagEmbeddingProperties parsed = objectMapper.readValue(bytes, RagEmbeddingProperties.class);
                     PlaceholderResolver.resolve(parsed);
                     this.localConfig = parsed;
+                    this.loadedConfigPath = path.toString();
                     this.loadedConfigLastModified = currentModified;
-                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
-                            "rag-embedding.json", path.toString(), bytes);
+                    this.loadedConfigBytes = bytes;
+                    reportState(bytes);
                     log.info("[RagEmbeddingLocalConfigLoader] 已加载 embedding 配置: {} model={} dimensions={}",
                             path,
                             localConfig.getModel().isBlank() ? "(默认)" : localConfig.getModel(),
@@ -105,5 +110,10 @@ public class RagEmbeddingLocalConfigLoader {
         } catch (Exception e) {
             log.error("[RagEmbeddingLocalConfigLoader] 加载失败: {} - {}", configFile, e.getMessage());
         }
+    }
+
+    private void reportState(byte[] contentBytes) {
+        ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                "rag-embedding.json", loadedConfigPath, contentBytes);
     }
 }

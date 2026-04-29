@@ -50,6 +50,7 @@ public class FetchJobsConfig {
     // 已加载的文件路径和最后修改时间
     private volatile String loadedConfigPath = "";
     private volatile long loadedConfigLastModified = Long.MIN_VALUE;
+    private volatile byte[] loadedConfigBytes = new byte[0];
     
     private final Object reloadLock = new Object();
     
@@ -100,6 +101,7 @@ public class FetchJobsConfig {
                         && currentModified == loadedConfigLastModified;
                 
                 if (!force && unchanged) {
+                    reportState(loadedConfigBytes);
                     return;
                 }
                 
@@ -115,8 +117,8 @@ public class FetchJobsConfig {
                     this.config = newConfig;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
-                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
-                            "fetch-jobs.json", normalizedPath, bytes);
+                    this.loadedConfigBytes = bytes;
+                    reportState(bytes);
                     
                     log.info("Loaded fetch jobs config from {} (scheduledJobs={})", 
                             path, 
@@ -131,6 +133,11 @@ public class FetchJobsConfig {
                 }
             }
         }
+    }
+
+    private void reportState(byte[] contentBytes) {
+        ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                "fetch-jobs.json", loadedConfigPath, contentBytes);
     }
     
     /**

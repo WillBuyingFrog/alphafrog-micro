@@ -48,6 +48,7 @@ public class SearchLlmLocalConfigLoader {
     private volatile SearchLlmProperties localConfig;
     private volatile String loadedConfigPath = "";
     private volatile long loadedConfigLastModified = Long.MIN_VALUE;
+    private volatile byte[] loadedConfigBytes = new byte[0];
     private volatile Map<String, Long> loadedPromptFileModifiedTimes = new LinkedHashMap<>();
     private final Object reloadLock = new Object();
 
@@ -100,6 +101,7 @@ public class SearchLlmLocalConfigLoader {
                         && normalizedPath.equals(loadedConfigPath)
                         && currentModified == loadedConfigLastModified;
                 if (!force && unchanged && !promptFilesChanged()) {
+                    reportState(loadedConfigBytes);
                     return;
                 }
                 try (InputStream in = Files.newInputStream(path)) {
@@ -116,9 +118,9 @@ public class SearchLlmLocalConfigLoader {
                     this.localConfig = sanitized;
                     this.loadedConfigPath = normalizedPath;
                     this.loadedConfigLastModified = currentModified;
+                    this.loadedConfigBytes = bytes;
                     this.loadedPromptFileModifiedTimes = promptFileTimes;
-                    ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
-                            "search-llm.json", normalizedPath, bytes);
+                    reportState(bytes);
                     log.info("Loaded local search config from {} (providers={}, marketNewsProfiles={})",
                             path,
                             providerCount,
@@ -128,6 +130,11 @@ public class SearchLlmLocalConfigLoader {
                 log.error("Failed to load local search config from {}", path, e);
             }
         }
+    }
+
+    private void reportState(byte[] contentBytes) {
+        ConfigLoadStateReporter.report(redisTemplate, serviceName, instanceId,
+                "search-llm.json", loadedConfigPath, contentBytes);
     }
 
     private Path resolvePromptBaseDir(Path configPath) {
