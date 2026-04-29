@@ -106,6 +106,83 @@
       "upgrades": [
         "v0.5/"
       ]
+    },
+    {
+      "tag": "v0.6",
+      "commit": "a451263",
+      "services": [
+        "domestic-stock",
+        "domestic-fund",
+        "domestic-index",
+        "domestic-fetch",
+        "portfolio",
+        "frontend",
+        "agent",
+        "python-sandbox",
+        "python-sandbox-gateway",
+        "admin",
+        "external-info"
+      ],
+      "infra": [
+        "redis",
+        "rabbitmq",
+        "meilisearch"
+      ],
+      "upgrades": [
+        "v0.6/"
+      ]
+    },
+    {
+      "tag": "v0.7",
+      "commit": "c443e1b",
+      "services": [
+        "domestic-stock",
+        "domestic-fund",
+        "domestic-index",
+        "domestic-fetch",
+        "portfolio",
+        "frontend",
+        "agent",
+        "python-sandbox",
+        "python-sandbox-gateway",
+        "admin",
+        "external-info"
+      ],
+      "infra": [
+        "redis",
+        "rabbitmq",
+        "meilisearch",
+        "nacos"
+      ],
+      "upgrades": [
+        "v0.7/"
+      ]
+    },
+    {
+      "tag": "v0.7.1",
+      "commit": "pending-v0.7.1",
+      "services": [
+        "domestic-stock",
+        "domestic-fund",
+        "domestic-index",
+        "domestic-fetch",
+        "portfolio",
+        "frontend",
+        "agent",
+        "python-sandbox",
+        "python-sandbox-gateway",
+        "admin",
+        "external-info"
+      ],
+      "infra": [
+        "redis",
+        "rabbitmq",
+        "meilisearch",
+        "nacos"
+      ],
+      "upgrades": [
+        "v0.7.1/"
+      ]
     }
   ]
 }
