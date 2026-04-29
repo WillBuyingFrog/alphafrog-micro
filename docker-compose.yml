@@ -485,6 +485,8 @@ services:
     depends_on:
       nacos:
         condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       TZ: Asia/Shanghai
       NACOS_ADDRESS: nacos
@@ -503,12 +505,15 @@ services:
       AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
       AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
       # 热点 WebSearch 缓存与统计使用 Redis；默认连接本 compose 内的 redis 服务
-      SPRING_DATA_REDIS_HOST: ${AF_REDIS_HOST:-redis}
-      SPRING_DATA_REDIS_PORT: ${AF_REDIS_PORT:-6379}
+      AF_REDIS_HOST: redis
+      AF_REDIS_PORT: 6379
+      AF_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
+      SPRING_DATA_REDIS_HOST: redis
+      SPRING_DATA_REDIS_PORT: 6379
       SPRING_DATA_REDIS_PASSWORD: ${AF_REDIS_PASSWORD:-Excited1s}
-      AF_QDRANT_HOST: ${AF_QDRANT_HOST:-shared-qdrant}
-      AF_QDRANT_PORT: ${AF_QDRANT_PORT:-6334}
-      AF_QDRANT_HTTP_PORT: ${AF_QDRANT_HTTP_PORT:-6333}
+      AF_QDRANT_HOST: shared-qdrant
+      AF_QDRANT_PORT: 6334
+      AF_QDRANT_HTTP_PORT: 6333
       AF_RAG_EMBEDDING_CONFIG_FILE: ${AF_RAG_EMBEDDING_CONFIG_FILE:-/app/config-dynamic/rag-embedding.local.json}
       AF_EMBEDDING_API_KEY: ${AF_EMBEDDING_API_KEY:-}
       # HTTP/HTTPS 代理（访问 Perplexity/Exa 等境外服务时使用）
@@ -516,8 +521,8 @@ services:
       HTTPS_PROXY: ${HTTPS_PROXY:-}
       http_proxy: ${HTTP_PROXY:-}
       https_proxy: ${HTTPS_PROXY:-}
-      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
-      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch}
+      NO_PROXY: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch,shared-qdrant}
+      no_proxy: ${NO_PROXY:-localhost,127.0.0.1,nacos,redis,rabbitmq,meilisearch,shared-qdrant}
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       AF_OSS_ENDPOINT: ${AF_OSS_ENDPOINT:-oss-ap-southeast-1-internal.aliyuncs.com}
       AF_OSS_BUCKET: ${AF_OSS_BUCKET}
