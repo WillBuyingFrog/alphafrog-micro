@@ -1,7 +1,9 @@
 package world.willfrog.alphafrogmicro.common.service.config;
 
 import com.alibaba.nacos.api.config.ConfigService;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import org.mockito.ArgumentCaptor;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -60,6 +62,7 @@ class ConfigProfileServiceTest {
     private ValueOperations<String, String> valueOperations;
 
     private ConfigProfileService configProfileService;
+    private final ObjectMapper objectMapper = new ObjectMapper();
 
     @BeforeEach
     void setUp() {
@@ -68,7 +71,7 @@ class ConfigProfileServiceTest {
                 configSnapshotDao,
                 configActiveDao,
                 configAuditLogDao,
-                new ObjectMapper(),
+                objectMapper,
                 nacosConfigService,
                 redisTemplate
         );
@@ -181,6 +184,125 @@ class ConfigProfileServiceTest {
 
         verify(nacosConfigService).publishConfig(type.getDataId(), type.getConfigGroup(), snapshot.getContentJson());
         verify(configAuditLogDao).insert(any(ConfigAuditLog.class));
+    }
+
+    @Test
+    void deriveOpsShouldSupportArrayElementOperations() throws Exception {
+        ConfigSnapshot inserted = deriveAndCapture(
+                "{\"models\":[\"a\",\"b\"]}",
+                """
+                        [
+                          {"op":"add_if_absent","path":"/models","value":"c"},
+                          {"op":"add_if_absent","path":"/models","value":"c"},
+                          {"op":"add","path":"/models/1","value":"x"},
+                          {"op":"set","path":"/models/0","value":"aa"},
+                          {"op":"remove","path":"/models/2"}
+                        ]
+                        """
+        );
+
+        JsonNode content = objectMapper.readTree(inserted.getContentJson());
+        assertEquals(List.of("aa", "x", "c"), objectMapper.convertValue(content.get("models"), List.class));
+    }
+
+    @Test
+    void deriveOpsShouldSupportArrayAppendAndRemoveValue() throws Exception {
+        ConfigSnapshot inserted = deriveAndCapture(
+                "{\"models\":[\"a\",\"b\",\"c\"]}",
+                """
+                        [
+                          {"op":"add","path":"/models/-","value":"d"},
+                          {"op":"remove_value","path":"/models","value":"b"}
+                        ]
+                        """
+        );
+
+        JsonNode content = objectMapper.readTree(inserted.getContentJson());
+        assertEquals(List.of("a", "c", "d"), objectMapper.convertValue(content.get("models"), List.class));
+    }
+
+    @Test
+    void deriveOpsShouldKeepLegacyArrayAppendAndRemoveByValue() throws Exception {
+        ConfigSnapshot inserted = deriveAndCapture(
+                "{\"models\":[\"a\",\"b\"]}",
+                """
+                        [
+                          {"op":"add","path":"/models","value":"c"},
+                          {"op":"remove","path":"/models","value":"a"}
+                        ]
+                        """
+        );
+
+        JsonNode content = objectMapper.readTree(inserted.getContentJson());
+        assertEquals(List.of("b", "c"), objectMapper.convertValue(content.get("models"), List.class));
+    }
+
+    @Test
+    void deriveOpsShouldSupportEscapedJsonPointerSegments() throws Exception {
+        ConfigSnapshot inserted = deriveAndCapture(
+                "{\"endpoints\":{\"openrouter\":{\"models\":{}}}}",
+                """
+                        [
+                          {
+                            "op":"set",
+                            "path":"/endpoints/openrouter/models/your-provider~1your-new-model",
+                            "value":{"baseRate":0.2,"displayName":"Your New Model","validProviders":["your-provider"]}
+                          }
+                        ]
+                        """
+        );
+
+        JsonNode content = objectMapper.readTree(inserted.getContentJson());
+        JsonNode model = content.at("/endpoints/openrouter/models/your-provider~1your-new-model");
+        assertEquals("Your New Model", model.get("displayName").asText());
+        assertEquals(0.2, model.get("baseRate").asDouble(), 0.0001);
+    }
+
+    @Test
+    void deriveOpsShouldRejectInvalidArrayIndex() throws Exception {
+        ConfigType type = buildType();
+        ConfigSnapshot base = buildSnapshot();
+        base.setVersion("v1");
+        base.setContentJson("{\"models\":[\"a\"]}");
+
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
+
+        assertThrows(IllegalArgumentException.class, () -> configProfileService.derive(
+                "code-refine",
+                "v1",
+                "ops",
+                objectMapper.readTree("[{\"op\":\"set\",\"path\":\"/models/2\",\"value\":\"x\"}]"),
+                "bad index",
+                "7",
+                true
+        ));
+    }
+
+    private ConfigSnapshot deriveAndCapture(String baseJson, String patchJson) throws Exception {
+        ConfigType type = buildType();
+        ConfigSnapshot base = buildSnapshot();
+        base.setId(1);
+        base.setVersion("v1");
+        base.setContentJson(baseJson);
+
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
+        when(configSnapshotDao.maxVersionNumberByType(type.getId())).thenReturn(1);
+
+        configProfileService.derive(
+                "code-refine",
+                "v1",
+                "ops",
+                objectMapper.readTree(patchJson),
+                "test ops",
+                "7",
+                true
+        );
+
+        ArgumentCaptor<ConfigSnapshot> captor = ArgumentCaptor.forClass(ConfigSnapshot.class);
+        verify(configSnapshotDao).insert(captor.capture());
+        return captor.getValue();
     }
 
     private ConfigType buildType() {

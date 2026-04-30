@@ -314,16 +314,15 @@ public class ConfigProfileService {
             String path = opNode.get("path").asText();
             JsonNode value = opNode.has("value") ? opNode.get("value") : null;
 
-            String[] segments = path.split("/");
-            // 去掉开头的空字符串（因为 path 以 / 开头）
-            List<String> keys = Arrays.stream(segments)
-                    .filter(s -> !s.isEmpty())
-                    .collect(Collectors.toList());
+            List<String> keys = parseJsonPointer(path);
 
             switch (op) {
-                case "set" -> setAtPath(result, keys, value);
-                case "add" -> addAtPath(result, keys, value);
+                case "set" -> setAtPath(result, keys, requirePatchValue(op, value));
+                case "replace" -> setAtPath(result, keys, requirePatchValue(op, value));
+                case "add" -> addAtPath(result, keys, requirePatchValue(op, value));
                 case "remove" -> removeAtPath(result, keys, value);
+                case "add_if_absent" -> addIfAbsentAtPath(result, keys, requirePatchValue(op, value));
+                case "remove_value" -> removeValueAtPath(result, keys, value);
                 default -> throw new IllegalArgumentException("不支持的 op: " + op);
             }
         }
@@ -354,13 +353,58 @@ public class ConfigProfileService {
         return result;
     }
 
+    private JsonNode requirePatchValue(String op, JsonNode value) {
+        if (value == null) {
+            throw new IllegalArgumentException(op + " 操作必须提供 value");
+        }
+        return value;
+    }
+
+    private List<String> parseJsonPointer(String path) {
+        if (path == null || path.isBlank()) {
+            throw new IllegalArgumentException("ops path 不能为空");
+        }
+        if (!path.startsWith("/")) {
+            throw new IllegalArgumentException("ops path 必须以 / 开头: " + path);
+        }
+        return Arrays.stream(path.substring(1).split("/", -1))
+                .map(this::unescapeJsonPointerSegment)
+                .collect(Collectors.toList());
+    }
+
+    private String unescapeJsonPointerSegment(String segment) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < segment.length(); i++) {
+            char ch = segment.charAt(i);
+            if (ch == '~') {
+                if (i + 1 >= segment.length()) {
+                    throw new IllegalArgumentException("非法 JSON Pointer 转义: " + segment);
+                }
+                char next = segment.charAt(++i);
+                if (next == '0') {
+                    sb.append('~');
+                } else if (next == '1') {
+                    sb.append('/');
+                } else {
+                    throw new IllegalArgumentException("非法 JSON Pointer 转义: ~" + next);
+                }
+            } else {
+                sb.append(ch);
+            }
+        }
+        return sb.toString();
+    }
+
     private void setAtPath(JsonNode root, List<String> keys, JsonNode value) {
         JsonNode parent = findParent(root, keys);
         String lastKey = keys.get(keys.size() - 1);
         if (parent.isObject()) {
             ((ObjectNode) parent).set(lastKey, value.deepCopy());
+        } else if (parent.isArray()) {
+            int index = parseArrayIndex(lastKey, ((ArrayNode) parent).size(), false);
+            ((ArrayNode) parent).set(index, value.deepCopy());
         } else {
-            throw new IllegalArgumentException("set 目标必须是对象: " + String.join("/", keys));
+            throw new IllegalArgumentException("set 目标父节点必须是对象或数组: " + String.join("/", keys));
         }
     }
 
@@ -375,7 +419,13 @@ public class ConfigProfileService {
                 ((ObjectNode) parent).set(lastKey, value.deepCopy());
             }
         } else if (parent.isArray()) {
-            ((ArrayNode) parent).add(value.deepCopy());
+            ArrayNode array = (ArrayNode) parent;
+            if ("-".equals(lastKey)) {
+                array.add(value.deepCopy());
+            } else {
+                int index = parseArrayIndex(lastKey, array.size(), true);
+                array.insert(index, value.deepCopy());
+            }
         } else {
             throw new IllegalArgumentException("add 目标必须是对象或数组");
         }
@@ -387,33 +437,100 @@ public class ConfigProfileService {
         if (parent.isObject()) {
             JsonNode target = parent.get(lastKey);
             if (target != null && target.isArray() && value != null) {
-                // 按值从数组中删除
-                ArrayNode array = (ArrayNode) target;
-                ArrayNode newArray = objectMapper.createArrayNode();
-                String valueToRemove = value.asText();
-                for (JsonNode item : array) {
-                    if (!item.asText().equals(valueToRemove)) {
-                        newArray.add(item);
-                    }
-                }
-                ((ObjectNode) parent).set(lastKey, newArray);
+                removeArrayValues((ArrayNode) target, value);
             } else {
                 ((ObjectNode) parent).remove(lastKey);
             }
+        } else if (parent.isArray()) {
+            ArrayNode array = (ArrayNode) parent;
+            int index = parseArrayIndex(lastKey, array.size(), false);
+            array.remove(index);
         } else {
-            throw new IllegalArgumentException("remove 目标必须是对象");
+            throw new IllegalArgumentException("remove 目标父节点必须是对象或数组");
+        }
+    }
+
+    private void addIfAbsentAtPath(JsonNode root, List<String> keys, JsonNode value) {
+        JsonNode target = findNode(root, keys);
+        if (!target.isArray()) {
+            throw new IllegalArgumentException("add_if_absent 目标必须是数组: " + String.join("/", keys));
+        }
+        ArrayNode array = (ArrayNode) target;
+        for (JsonNode item : array) {
+            if (item.equals(value)) {
+                return;
+            }
+        }
+        array.add(value.deepCopy());
+    }
+
+    private void removeValueAtPath(JsonNode root, List<String> keys, JsonNode value) {
+        if (value == null) {
+            throw new IllegalArgumentException("remove_value 必须提供 value");
+        }
+        JsonNode target = findNode(root, keys);
+        if (!target.isArray()) {
+            throw new IllegalArgumentException("remove_value 目标必须是数组: " + String.join("/", keys));
+        }
+        removeArrayValues((ArrayNode) target, value);
+    }
+
+    private void removeArrayValues(ArrayNode array, JsonNode value) {
+        for (int i = array.size() - 1; i >= 0; i--) {
+            if (array.get(i).equals(value)) {
+                array.remove(i);
+            }
         }
     }
 
     private JsonNode findParent(JsonNode root, List<String> keys) {
+        if (keys.isEmpty()) {
+            throw new IllegalArgumentException("ops path 必须指向对象字段或数组元素");
+        }
+        if (keys.size() == 1) {
+            return root;
+        }
+        return findNode(root, keys.subList(0, keys.size() - 1));
+    }
+
+    private JsonNode findNode(JsonNode root, List<String> keys) {
         JsonNode current = root;
-        for (int i = 0; i < keys.size() - 1; i++) {
-            current = current.get(keys.get(i));
+        for (String key : keys) {
             if (current == null) {
-                throw new IllegalArgumentException("路径不存在: " + keys.get(i));
+                throw new IllegalArgumentException("路径不存在: " + String.join("/", keys));
+            }
+            if (current.isObject()) {
+                current = current.get(key);
+            } else if (current.isArray()) {
+                int index = parseArrayIndex(key, current.size(), false);
+                current = current.get(index);
+            } else {
+                throw new IllegalArgumentException("路径中间节点必须是对象或数组: " + key);
+            }
+            if (current == null) {
+                throw new IllegalArgumentException("路径不存在: " + key);
             }
         }
         return current;
+    }
+
+    private int parseArrayIndex(String raw, int size, boolean allowEnd) {
+        if ("-".equals(raw)) {
+            if (allowEnd) {
+                return size;
+            }
+            throw new IllegalArgumentException("只有 add 操作支持数组末尾 '-'");
+        }
+        try {
+            int index = Integer.parseInt(raw);
+            int max = allowEnd ? size : size - 1;
+            if (index < 0 || index > max) {
+                throw new IllegalArgumentException("数组下标越界: " + raw + " size=" + size);
+            }
+            return index;
+        } catch (NumberFormatException ex) {
+            throw new IllegalArgumentException("数组下标必须是整数: " + raw, ex);
+        }
     }
 
     private void validateSchema(ConfigType type, JsonNode configNode) {
