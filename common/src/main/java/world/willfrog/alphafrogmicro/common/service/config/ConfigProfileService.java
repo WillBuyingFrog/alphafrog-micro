@@ -92,6 +92,8 @@ public class ConfigProfileService {
         DerivedConfigContent derivedContent = buildDerivedContent(typeName, baseVersion, patchType, patch, force);
         ConfigType type = derivedContent.type();
 
+        lockConfigType(type);
+
         // 生成新版本号（取最大版本号 + 1，避免删除后重复）
         int maxNum = configSnapshotDao.maxVersionNumberByType(type.getId());
         String newVersion = "v" + (maxNum + 1);
@@ -151,6 +153,8 @@ public class ConfigProfileService {
         ConfigType type = getTypeOrThrow(typeName);
 
         validateSchema(type, fullConfig);
+
+        lockConfigType(type);
 
         int maxNum = configSnapshotDao.maxVersionNumberByType(type.getId());
         String newVersion = "v" + (maxNum + 1);
@@ -237,8 +241,11 @@ public class ConfigProfileService {
                             String[] parts = key.split(":");
                             replica.put("serviceName", parts.length > 2 ? parts[2] : "");
                             replica.put("instanceId", parts.length > 3 ? parts[3] : "");
-                            replica.put("md5", node.path("md5").asText());
+                            String replicaMd5 = node.path("md5").asText();
+                            replica.put("md5", replicaMd5);
                             replica.put("loadedAt", node.path("loadedAt").asText());
+                            replica.put("matches", snapshot != null
+                                    && ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson()).equals(replicaMd5));
                             replicas.add(replica);
                         }
                     }
@@ -249,19 +256,20 @@ public class ConfigProfileService {
         }
 
         String activeSnapshotMd5 = snapshot == null ? null : ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson());
-        if (snapshot != null && activeSnapshotMd5 != null) {
-            snapshot.setContentMd5(activeSnapshotMd5);
-        }
+        ConfigSnapshot responseSnapshot = copySnapshotWithMd5(snapshot, activeSnapshotMd5);
         boolean synced = activeSnapshotMd5 != null && !replicas.isEmpty() && replicas.stream()
                 .allMatch(r -> activeSnapshotMd5.equals(r.get("md5")));
+        String syncStatus = resolveSyncStatus(activeSnapshotMd5, replicas, synced);
 
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("type", type);
-        result.put("activeSnapshot", snapshot);
+        result.put("activeSnapshot", responseSnapshot);
         result.put("activeContentMd5", activeSnapshotMd5);
+        result.put("expectedMd5", activeSnapshotMd5);
         result.put("replicas", replicas);
         result.put("replicaCount", replicas.size());
         result.put("synced", synced);
+        result.put("syncStatus", syncStatus);
         return result;
     }
 
@@ -448,12 +456,7 @@ public class ConfigProfileService {
         JsonNode parent = findParent(root, keys);
         String lastKey = keys.get(keys.size() - 1);
         if (parent.isObject()) {
-            JsonNode target = parent.get(lastKey);
-            if (target != null && target.isArray()) {
-                ((ArrayNode) target).add(value.deepCopy());
-            } else {
-                ((ObjectNode) parent).set(lastKey, value.deepCopy());
-            }
+            ((ObjectNode) parent).set(lastKey, value.deepCopy());
         } else if (parent.isArray()) {
             ArrayNode array = (ArrayNode) parent;
             if ("-".equals(lastKey)) {
@@ -471,12 +474,7 @@ public class ConfigProfileService {
         JsonNode parent = findParent(root, keys);
         String lastKey = keys.get(keys.size() - 1);
         if (parent.isObject()) {
-            JsonNode target = parent.get(lastKey);
-            if (target != null && target.isArray() && value != null) {
-                removeArrayValues((ArrayNode) target, value);
-            } else {
-                ((ObjectNode) parent).remove(lastKey);
-            }
+            ((ObjectNode) parent).remove(lastKey);
         } else if (parent.isArray()) {
             ArrayNode array = (ArrayNode) parent;
             int index = parseArrayIndex(lastKey, array.size(), false);
@@ -601,6 +599,39 @@ public class ConfigProfileService {
             throw new ConfigNotFoundException("配置类型不存在: " + typeName);
         }
         return type;
+    }
+
+    private void lockConfigType(ConfigType type) {
+        ConfigType locked = type == null || type.getId() == null ? null : configTypeDao.lockById(type.getId());
+        if (locked == null) {
+            throw new ConfigNotFoundException("配置类型不存在或无法锁定: " + (type == null ? "" : type.getName()));
+        }
+    }
+
+    private ConfigSnapshot copySnapshotWithMd5(ConfigSnapshot source, String contentMd5) {
+        if (source == null) {
+            return null;
+        }
+        ConfigSnapshot copy = new ConfigSnapshot();
+        copy.setId(source.getId());
+        copy.setTypeId(source.getTypeId());
+        copy.setVersion(source.getVersion());
+        copy.setContentJson(source.getContentJson());
+        copy.setContentMd5(contentMd5);
+        copy.setComment(source.getComment());
+        copy.setCreatedBy(source.getCreatedBy());
+        copy.setCreatedAt(source.getCreatedAt());
+        return copy;
+    }
+
+    private String resolveSyncStatus(String expectedMd5, List<Map<String, Object>> replicas, boolean synced) {
+        if (expectedMd5 == null) {
+            return "NO_ACTIVE";
+        }
+        if (replicas == null || replicas.isEmpty()) {
+            return "NO_REPLICAS";
+        }
+        return synced ? "SYNCED" : "DRIFT";
     }
 
     private ConfigSnapshot getSnapshotOrThrow(ConfigType type, String version, String message) {

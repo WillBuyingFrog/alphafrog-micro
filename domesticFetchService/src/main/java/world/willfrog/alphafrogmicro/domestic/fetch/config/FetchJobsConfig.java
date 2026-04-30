@@ -21,7 +21,7 @@ import java.nio.file.Paths;
 
 /**
  * 抓取任务配置管理器
- * 支持热更新：每分钟检查配置文件是否有变化
+ * 支持热更新：默认每 10 秒检查配置文件是否有变化
  */
 @Component
 @Slf4j
@@ -32,7 +32,7 @@ public class FetchJobsConfig {
     @Value("${af.fetch.jobs.config-file:}")
     private String configFilePath;
     
-    @Value("${af.fetch.jobs.config-refresh-interval-ms:60000}")
+    @Value("${af.fetch.jobs.config-refresh-interval-ms:10000}")
     private long refreshIntervalMs;
 
     @Value("${spring.application.name:domestic-fetch-service}")
@@ -60,9 +60,9 @@ public class FetchJobsConfig {
     }
     
     /**
-     * 定时检查配置文件是否有变化，每分钟执行一次
+     * 定时检查配置文件是否有变化，默认 10 秒执行一次。
      */
-    @Scheduled(fixedDelayString = "${af.fetch.jobs.config-refresh-interval-ms:60000}")
+    @Scheduled(fixedDelayString = "${af.fetch.jobs.config-refresh-interval-ms:10000}")
     public void refresh() {
         reloadIfNeeded(false);
     }

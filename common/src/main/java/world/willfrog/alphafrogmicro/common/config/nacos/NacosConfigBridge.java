@@ -152,6 +152,10 @@ public class NacosConfigBridge {
             @Override
             public void receiveConfigInfo(String config) {
                 log.info("[NacosConfigBridge] 收到配置推送 dataId={}", subscription.getDataId());
+                if (config == null || config.isBlank()) {
+                    log.warn("[NacosConfigBridge] 忽略空白配置推送 dataId={}", subscription.getDataId());
+                    return;
+                }
                 writeConfigToFile(subscription, config);
             }
         });

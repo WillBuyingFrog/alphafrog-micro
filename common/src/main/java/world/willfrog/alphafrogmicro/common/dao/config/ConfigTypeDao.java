@@ -26,6 +26,10 @@ public interface ConfigTypeDao {
     })
     ConfigType getByName(@Param("name") String name);
 
+    @Select("SELECT * FROM alphafrog_config_type WHERE id = #{id} FOR UPDATE")
+    @ResultMap("configTypeResult")
+    ConfigType lockById(@Param("id") Integer id);
+
     @Select("SELECT * FROM alphafrog_config_type ORDER BY name")
     @ResultMap("configTypeResult")
     List<ConfigType> listAll();

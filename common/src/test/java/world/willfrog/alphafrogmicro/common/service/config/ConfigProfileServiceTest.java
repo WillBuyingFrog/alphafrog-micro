@@ -4,6 +4,7 @@ import com.alibaba.nacos.api.config.ConfigService;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.mockito.ArgumentCaptor;
+import org.mockito.InOrder;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -36,6 +37,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.inOrder;
 
 @ExtendWith(MockitoExtension.class)
 class ConfigProfileServiceTest {
@@ -94,6 +96,8 @@ class ConfigProfileServiceTest {
 
         assertEquals(0, result.get("replicaCount"));
         assertFalse((Boolean) result.get("synced"));
+        assertEquals("NO_REPLICAS", result.get("syncStatus"));
+        assertEquals(ConfigJsonCanonicalizer.md5Hex(snapshot.getContentJson()), result.get("expectedMd5"));
     }
 
     @Test
@@ -118,10 +122,12 @@ class ConfigProfileServiceTest {
 
         assertEquals(1, result.get("replicaCount"));
         assertTrue((Boolean) result.get("synced"));
+        assertEquals("SYNCED", result.get("syncStatus"));
         @SuppressWarnings("unchecked")
         List<Map<String, Object>> replicas = (List<Map<String, Object>>) result.get("replicas");
         assertEquals("agent-service", replicas.get(0).get("serviceName"));
         assertEquals("pod-1", replicas.get(0).get("instanceId"));
+        assertTrue((Boolean) replicas.get(0).get("matches"));
     }
 
     @Test
@@ -150,6 +156,7 @@ class ConfigProfileServiceTest {
         assertTrue((Boolean) result.get("synced"));
         assertEquals(replicaMd5, result.get("activeContentMd5"));
         assertEquals(replicaMd5, ((ConfigSnapshot) result.get("activeSnapshot")).getContentMd5());
+        assertEquals("legacy-md5", snapshot.getContentMd5());
     }
 
     @Test
@@ -222,19 +229,21 @@ class ConfigProfileServiceTest {
     }
 
     @Test
-    void deriveOpsShouldKeepLegacyArrayAppendAndRemoveByValue() throws Exception {
+    void deriveOpsShouldUseJsonPointerFieldSemanticsForAddAndRemove() throws Exception {
         ConfigSnapshot inserted = deriveAndCapture(
-                "{\"models\":[\"a\",\"b\"]}",
+                "{\"enabled\":true,\"models\":[\"a\",\"b\"]}",
                 """
                         [
-                          {"op":"add","path":"/models","value":"c"},
-                          {"op":"remove","path":"/models","value":"a"}
+                          {"op":"add","path":"/newField","value":"c"},
+                          {"op":"remove","path":"/enabled","value":false}
                         ]
                         """
         );
 
         JsonNode content = objectMapper.readTree(inserted.getContentJson());
-        assertEquals(List.of("b", "c"), objectMapper.convertValue(content.get("models"), List.class));
+        assertEquals(List.of("a", "b"), objectMapper.convertValue(content.get("models"), List.class));
+        assertEquals("c", content.get("newField").asText());
+        assertFalse(content.has("enabled"));
     }
 
     @Test
@@ -290,6 +299,7 @@ class ConfigProfileServiceTest {
         when(configTypeDao.getByName("code-refine")).thenReturn(type);
         when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
         when(configSnapshotDao.maxVersionNumberByType(type.getId())).thenReturn(1);
+        when(configTypeDao.lockById(type.getId())).thenReturn(type);
 
         JsonNode patch = objectMapper.readTree("""
                 [
@@ -307,6 +317,9 @@ class ConfigProfileServiceTest {
 
         ArgumentCaptor<ConfigSnapshot> captor = ArgumentCaptor.forClass(ConfigSnapshot.class);
         verify(configSnapshotDao).insert(captor.capture());
+        InOrder inOrder = inOrder(configTypeDao, configSnapshotDao);
+        inOrder.verify(configTypeDao).lockById(type.getId());
+        inOrder.verify(configSnapshotDao).maxVersionNumberByType(type.getId());
 
         @SuppressWarnings("unchecked")
         Map<String, Object> previewContent = (Map<String, Object>) preview.get("preview");
@@ -367,6 +380,7 @@ class ConfigProfileServiceTest {
         when(configTypeDao.getByName("code-refine")).thenReturn(type);
         when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
         when(configSnapshotDao.maxVersionNumberByType(type.getId())).thenReturn(1);
+        when(configTypeDao.lockById(type.getId())).thenReturn(type);
 
         configProfileService.derive(
                 "code-refine",

@@ -130,10 +130,15 @@ public class AgentRunExecutor {
             stageConfigValidator.validate(stageConfig);
             AgentContext.setStageConfig(stageConfig);
 
-            // Execution 阶段模型解析
+            // Execution 阶段模型解析。显式 run 请求优先，本地阶段配置只作为 fallback。
             String requestedEndpointName = eventService.extractEndpointName(run.getExt());
             String requestedModelName = eventService.extractModelName(run.getExt());
-            StageLlmConfig execStageCfg = stageConfig.getExecution();
+            StageLlmConfig execStageCfg = chooseEffectiveStageConfig(
+                    requestedEndpointName,
+                    requestedModelName,
+                    stageConfig.getExecution(),
+                    run.getExt(),
+                    "execution");
             if (execStageCfg != null && execStageCfg.isValid()) {
                 requestedEndpointName = execStageCfg.getEndpointName();
                 requestedModelName = execStageCfg.getModelName();
@@ -148,13 +153,18 @@ public class AgentRunExecutor {
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
 
-            // Planning 阶段模型解析：优先使用 stageConfig.planning
+            // Planning 阶段模型解析：显式 stage_config_json.planning > run 请求 > 本地 planning。
             ChatModel planningModel;
             String planningEndpointName;
             String planningModelName;
             String planningEndpointBaseUrl;
             boolean useDedicatedPlanningModel = false;
-            StageLlmConfig planningStageCfg = stageConfig.getPlanning();
+            StageLlmConfig planningStageCfg = chooseEffectiveStageConfig(
+                    eventService.extractEndpointName(run.getExt()),
+                    eventService.extractModelName(run.getExt()),
+                    stageConfig.getPlanning(),
+                    run.getExt(),
+                    "planning");
             if (planningStageCfg != null && planningStageCfg.isValid()) {
                 // 客户端或 local 指定了 planning 专用模型
                 AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlm(
@@ -414,6 +424,73 @@ public class AgentRunExecutor {
             }
         }
         return merged;
+    }
+
+    private StageLlmConfig chooseEffectiveStageConfig(String requestedEndpointName,
+                                                      String requestedModelName,
+                                                      StageLlmConfig fallback,
+                                                      String extJson,
+                                                      String stageName) {
+        StageLlmConfig clientStage = parseClientStageConfig(extJson, stageName);
+        StageLlmConfig effective = new StageLlmConfig();
+        effective.setEndpointName(firstNonBlank(
+                clientStage == null ? null : clientStage.getEndpointName(),
+                firstNonBlank(requestedEndpointName, fallback == null ? null : fallback.getEndpointName())));
+        effective.setModelName(firstNonBlank(
+                clientStage == null ? null : clientStage.getModelName(),
+                firstNonBlank(requestedModelName, fallback == null ? null : fallback.getModelName())));
+        effective.setReasoningEffort(firstNonBlank(
+                clientStage == null ? null : clientStage.getReasoningEffort(),
+                fallback == null ? null : fallback.getReasoningEffort()));
+        effective.setTemperature(clientStage != null && clientStage.getTemperature() != null
+                ? clientStage.getTemperature()
+                : (fallback == null ? null : fallback.getTemperature()));
+        effective.setMaxTokens(clientStage != null && clientStage.getMaxTokens() != null
+                ? clientStage.getMaxTokens()
+                : (fallback == null ? null : fallback.getMaxTokens()));
+        return effective;
+    }
+
+    private StageLlmConfig parseClientStageConfig(String extJson, String stageName) {
+        if (extJson == null || extJson.isBlank() || stageName == null || stageName.isBlank()) {
+            return null;
+        }
+        try {
+            var root = objectMapper.readTree(extJson);
+            var stageNode = root.get("stage_config_json");
+            if (stageNode == null || stageNode.isNull()) {
+                return null;
+            }
+            if (stageNode.isTextual()) {
+                stageNode = objectMapper.readTree(stageNode.asText());
+            }
+            var phaseNode = stageNode.get(stageName);
+            if (phaseNode == null || !phaseNode.isObject()) {
+                return null;
+            }
+            StageLlmConfig config = objectMapper.treeToValue(phaseNode, StageLlmConfig.class);
+            return hasAnyStageField(config) ? config : null;
+        } catch (Exception e) {
+            log.warn("解析 stage_config_json.{} 失败，将使用 run 请求与本地 fallback 合并: {}", stageName, e.getMessage());
+            return null;
+        }
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return hasText(first) ? first.trim() : (hasText(second) ? second.trim() : null);
+    }
+
+    private boolean hasText(String value) {
+        return value != null && !value.trim().isEmpty();
+    }
+
+    private boolean hasAnyStageField(StageLlmConfig config) {
+        return config != null
+                && (hasText(config.getEndpointName())
+                || hasText(config.getModelName())
+                || hasText(config.getReasoningEffort())
+                || config.getTemperature() != null
+                || config.getMaxTokens() != null);
     }
 
     /**

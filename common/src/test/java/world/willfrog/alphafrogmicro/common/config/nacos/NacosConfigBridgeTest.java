@@ -255,6 +255,9 @@ class NacosConfigBridgeTest {
 
         // 验证更新后的配置已写入
         assertEquals("{\"updated\":true}", Files.readString(targetFile));
+
+        listener.receiveConfigInfo("   ");
+        assertEquals("{\"updated\":true}", Files.readString(targetFile));
     }
 
     // ==================== 反射辅助方法 ====================

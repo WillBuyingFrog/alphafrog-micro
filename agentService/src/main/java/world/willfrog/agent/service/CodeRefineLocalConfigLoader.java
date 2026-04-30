@@ -3,6 +3,8 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.ObjectProvider;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.scheduling.annotation.Scheduled;
@@ -41,9 +43,16 @@ public class CodeRefineLocalConfigLoader {
     private volatile long loadedConfigLastModified = -1;
     private volatile byte[] loadedConfigBytes = new byte[0];
 
+    @Autowired
     public CodeRefineLocalConfigLoader(ObjectMapper objectMapper,
-                                        StringRedisTemplate redisTemplate,
+                                        ObjectProvider<StringRedisTemplate> redisTemplateProvider,
                                         CodeRefineProperties properties) {
+        this(objectMapper, redisTemplateProvider.getIfAvailable(), properties);
+    }
+
+    public CodeRefineLocalConfigLoader(ObjectMapper objectMapper,
+                                       StringRedisTemplate redisTemplate,
+                                       CodeRefineProperties properties) {
         this.objectMapper = objectMapper;
         this.redisTemplate = redisTemplate;
         this.properties = properties;

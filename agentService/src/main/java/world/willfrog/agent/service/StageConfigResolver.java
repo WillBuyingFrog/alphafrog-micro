@@ -17,7 +17,7 @@ import world.willfrog.agent.config.SubAgentStageConfig;
  * 与 agent-llm.local.json 中的 runtime 配置合并，
  * 生成最终的 RunStageConfig。
  * </p>
- * <p>配置优先级：客户端 Run 级 > agent-llm.local.json 阶段级</p>
+ * <p>配置优先级：客户端阶段字段 > agent-llm.local.json 阶段字段</p>
  */
 @Component
 @RequiredArgsConstructor
@@ -249,16 +249,16 @@ public class StageConfigResolver {
     }
 
     private StageLlmConfig mergeStageLlmConfig(StageLlmConfig client, StageLlmConfig local) {
-        // 客户端传了有效配置（endpoint+model），整体使用客户端配置
-        if (client != null && client.isValid()) {
-            // 可选字段如果客户端没传，从 local 继承
-            if (client.getReasoningEffort() == null && local != null) {
-                client.setReasoningEffort(local.getReasoningEffort());
-            }
-            return client;
+        if (!hasAnyStageField(client)) {
+            return copyStageConfig(local);
         }
-        // 客户端未传有效配置，使用 local
-        return local != null ? local : new StageLlmConfig();
+        StageLlmConfig merged = new StageLlmConfig();
+        merged.setEndpointName(firstNonBlank(client.getEndpointName(), local == null ? null : local.getEndpointName()));
+        merged.setModelName(firstNonBlank(client.getModelName(), local == null ? null : local.getModelName()));
+        merged.setReasoningEffort(firstNonBlank(client.getReasoningEffort(), local == null ? null : local.getReasoningEffort()));
+        merged.setTemperature(client.getTemperature() != null ? client.getTemperature() : (local == null ? null : local.getTemperature()));
+        merged.setMaxTokens(client.getMaxTokens() != null ? client.getMaxTokens() : (local == null ? null : local.getMaxTokens()));
+        return merged;
     }
 
     private SubAgentStageConfig mergeSubAgentConfig(SubAgentStageConfig client, SubAgentStageConfig local) {
@@ -296,5 +296,31 @@ public class StageConfigResolver {
 
     private boolean isNotBlank(String value) {
         return value != null && !value.trim().isEmpty();
+    }
+
+    private String firstNonBlank(String first, String second) {
+        return isNotBlank(first) ? first.trim() : (isNotBlank(second) ? second.trim() : null);
+    }
+
+    private boolean hasAnyStageField(StageLlmConfig config) {
+        return config != null
+                && (isNotBlank(config.getEndpointName())
+                || isNotBlank(config.getModelName())
+                || isNotBlank(config.getReasoningEffort())
+                || config.getTemperature() != null
+                || config.getMaxTokens() != null);
+    }
+
+    private StageLlmConfig copyStageConfig(StageLlmConfig source) {
+        StageLlmConfig copy = new StageLlmConfig();
+        if (source == null) {
+            return copy;
+        }
+        copy.setEndpointName(firstNonBlank(source.getEndpointName(), null));
+        copy.setModelName(firstNonBlank(source.getModelName(), null));
+        copy.setReasoningEffort(firstNonBlank(source.getReasoningEffort(), null));
+        copy.setTemperature(source.getTemperature());
+        copy.setMaxTokens(source.getMaxTokens());
+        return copy;
     }
 }
