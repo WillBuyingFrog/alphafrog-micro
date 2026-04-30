@@ -291,6 +291,7 @@ services:
       AF_CONFIG_NACOS_NAMESPACE: ${AF_CONFIG_NACOS_NAMESPACE:-}
       AF_CONFIG_NACOS_GROUP: "alphafrog-config"
       AF_FETCH_JOBS_CONFIG_FILE: "/app/config-dynamic/fetch-jobs.json"
+      AF_FETCH_JOBS_CONFIG_REFRESH_INTERVAL_MS: 10000
       # Memory Optimization (Compressed)
       JAVA_OPTS: >-
         -XX:+UseSerialGC

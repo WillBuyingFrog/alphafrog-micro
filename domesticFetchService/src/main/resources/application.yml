@@ -30,7 +30,7 @@ af:
     concurrency: ${AF_FETCH_CONCURRENCY:3}
     jobs:
       config-file: ${AF_FETCH_JOBS_CONFIG_FILE:}
-      config-refresh-interval-ms: ${AF_FETCH_JOBS_CONFIG_REFRESH_INTERVAL_MS:60000}
+      config-refresh-interval-ms: ${AF_FETCH_JOBS_CONFIG_REFRESH_INTERVAL_MS:10000}
 
 alphafrog:
   config:
