@@ -1,5 +1,6 @@
 package world.willfrog.alphafrogmicro.frontend.controller;
 
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -19,6 +20,8 @@ import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.mockito.Mockito.doThrow;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
@@ -93,6 +96,61 @@ class AdminConfigControllerTest {
         ResponseEntity<?> response = adminConfigController.getActiveConfig("code-refine", authentication);
 
         assertEquals(403, response.getStatusCode().value());
+    }
+
+    @Test
+    void previewShouldReturnPreviewPayload() throws Exception {
+        Authentication authentication = adminAuthentication();
+        Map<String, Object> previewPayload = Map.of(
+                "base", Map.of("id", 1, "version", "v1"),
+                "preview", Map.of("baseVersion", "v1", "contentMd5", "abc")
+        );
+        when(configProfileService.previewDerive(eq("code-refine"), eq("v1"), eq("ops"), any(JsonNode.class), eq(true)))
+                .thenReturn(previewPayload);
+
+        ResponseEntity<?> response = adminConfigController.previewDeriveSnapshot(
+                "code-refine",
+                Map.of(
+                        "baseVersion", "v1",
+                        "patchType", "ops",
+                        "patch", java.util.List.of(Map.of("op", "add", "path", "/models", "value", "x")),
+                        "force", true
+                ),
+                authentication
+        );
+
+        assertEquals(200, response.getStatusCode().value());
+        assertEquals(previewPayload, response.getBody());
+    }
+
+    @Test
+    void previewShouldReturn409WhenBaseVersionIsStale() throws Exception {
+        Authentication authentication = adminAuthentication();
+        when(configProfileService.previewDerive(eq("code-refine"), eq("v1"), eq("ops"), any(JsonNode.class), eq(false)))
+                .thenThrow(new ConfigConflictException("stale snapshot"));
+
+        ResponseEntity<?> response = adminConfigController.previewDeriveSnapshot(
+                "code-refine",
+                Map.of("baseVersion", "v1", "patchType", "ops", "patch", java.util.List.of()),
+                authentication
+        );
+
+        assertEquals(409, response.getStatusCode().value());
+    }
+
+    @Test
+    void previewShouldReturn400WhenPatchIsInvalid() throws Exception {
+        Authentication authentication = adminAuthentication();
+        when(configProfileService.previewDerive(eq("code-refine"), eq("v1"), eq("ops"), any(JsonNode.class), eq(true)))
+                .thenThrow(new IllegalArgumentException("路径不存在"));
+
+        ResponseEntity<?> response = adminConfigController.previewDeriveSnapshot(
+                "code-refine",
+                Map.of("baseVersion", "v1", "patchType", "ops", "patch", java.util.List.of(), "force", true),
+                authentication
+        );
+
+        assertEquals(400, response.getStatusCode().value());
     }
 
     private Authentication adminAuthentication() {

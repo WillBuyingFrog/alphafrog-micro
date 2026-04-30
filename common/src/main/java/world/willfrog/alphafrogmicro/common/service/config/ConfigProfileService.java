@@ -89,36 +89,18 @@ public class ConfigProfileService {
     @Transactional
     public ConfigSnapshot derive(String typeName, String baseVersion, String patchType,
                                   JsonNode patch, String comment, String operatorId, boolean force) throws Exception {
-        ConfigType type = getTypeOrThrow(typeName);
-        ConfigSnapshot baseSnapshot = getSnapshotOrThrow(type, baseVersion, "基础版本不存在: " + baseVersion);
-
-        // 校验 baseVersion 是否为最新（除非 force=true）
-        if (!force) {
-            List<ConfigSnapshot> allSnapshots = configSnapshotDao.listByType(type.getId());
-            if (!allSnapshots.isEmpty() && !baseVersion.equals(allSnapshots.get(0).getVersion())) {
-                throw new ConfigConflictException("baseVersion 不是最新版本，请传 force=true 强制派生");
-            }
-        }
-
-        // apply patch
-        JsonNode baseNode = objectMapper.readTree(baseSnapshot.getContentJson());
-        JsonNode resultNode = applyPatch(baseNode, patchType, patch);
-
-        // schema 校验
-        validateSchema(type, resultNode);
+        DerivedConfigContent derivedContent = buildDerivedContent(typeName, baseVersion, patchType, patch, force);
+        ConfigType type = derivedContent.type();
 
         // 生成新版本号（取最大版本号 + 1，避免删除后重复）
         int maxNum = configSnapshotDao.maxVersionNumberByType(type.getId());
         String newVersion = "v" + (maxNum + 1);
 
-        String contentJson = canonicalJson(resultNode);
-        String md5 = ConfigJsonCanonicalizer.md5Hex(contentJson);
-
         ConfigSnapshot snapshot = new ConfigSnapshot();
         snapshot.setTypeId(type.getId());
         snapshot.setVersion(newVersion);
-        snapshot.setContentJson(contentJson);
-        snapshot.setContentMd5(md5);
+        snapshot.setContentJson(derivedContent.contentJson());
+        snapshot.setContentMd5(derivedContent.contentMd5());
         snapshot.setComment(comment);
         snapshot.setCreatedBy(operatorId);
         snapshot.setCreatedAt(OffsetDateTime.now());
@@ -132,6 +114,32 @@ public class ConfigProfileService {
         log.info("[ConfigProfileService] 派生配置成功 type={} base={} new={} operator={}",
                 typeName, baseVersion, newVersion, operatorId);
         return saved;
+    }
+
+    /**
+     * 预览基于已有版本派生后的配置内容，不写库、不发布 Nacos。
+     */
+    public Map<String, Object> previewDerive(String typeName, String baseVersion, String patchType,
+                                             JsonNode patch, boolean force) throws Exception {
+        DerivedConfigContent derivedContent = buildDerivedContent(typeName, baseVersion, patchType, patch, force);
+
+        Map<String, Object> base = new LinkedHashMap<>();
+        ConfigSnapshot baseSnapshot = derivedContent.baseSnapshot();
+        base.put("id", baseSnapshot.getId());
+        base.put("version", baseSnapshot.getVersion());
+        base.put("contentMd5", ConfigJsonCanonicalizer.md5Hex(baseSnapshot.getContentJson()));
+
+        Map<String, Object> preview = new LinkedHashMap<>();
+        preview.put("typeId", derivedContent.type().getId());
+        preview.put("baseVersion", baseSnapshot.getVersion());
+        preview.put("patchType", patchType);
+        preview.put("contentJson", derivedContent.contentJson());
+        preview.put("contentMd5", derivedContent.contentMd5());
+
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("base", base);
+        result.put("preview", preview);
+        return result;
     }
 
     /**
@@ -293,6 +301,34 @@ public class ConfigProfileService {
     }
 
     // ========== 内部方法 ==========
+
+    private DerivedConfigContent buildDerivedContent(String typeName, String baseVersion, String patchType,
+                                                     JsonNode patch, boolean force) throws Exception {
+        ConfigType type = getTypeOrThrow(typeName);
+        ConfigSnapshot baseSnapshot = getSnapshotOrThrow(type, baseVersion, "基础版本不存在: " + baseVersion);
+
+        // 校验 baseVersion 是否为最新（除非 force=true）
+        if (!force) {
+            List<ConfigSnapshot> allSnapshots = configSnapshotDao.listByType(type.getId());
+            if (!allSnapshots.isEmpty() && !baseVersion.equals(allSnapshots.get(0).getVersion())) {
+                throw new ConfigConflictException("baseVersion 不是最新版本，请传 force=true 强制派生");
+            }
+        }
+
+        JsonNode baseNode = objectMapper.readTree(baseSnapshot.getContentJson());
+        JsonNode resultNode = applyPatch(baseNode, patchType, patch);
+        validateSchema(type, resultNode);
+
+        String contentJson = canonicalJson(resultNode);
+        String md5 = ConfigJsonCanonicalizer.md5Hex(contentJson);
+        return new DerivedConfigContent(type, baseSnapshot, contentJson, md5);
+    }
+
+    private record DerivedConfigContent(ConfigType type,
+                                        ConfigSnapshot baseSnapshot,
+                                        String contentJson,
+                                        String contentMd5) {
+    }
 
     private JsonNode applyPatch(JsonNode baseNode, String patchType, JsonNode patch) {
         if ("ops".equals(patchType)) {

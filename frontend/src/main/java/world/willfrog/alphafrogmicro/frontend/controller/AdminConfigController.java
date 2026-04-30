@@ -179,6 +179,34 @@ public class AdminConfigController {
         }
     }
 
+    @PostMapping("/{type}/preview")
+    public ResponseEntity<?> previewDeriveSnapshot(@PathVariable String type,
+                                                   @RequestBody Map<String, Object> request,
+                                                   Authentication authentication) {
+        if (!isAdmin(authentication)) {
+            return ResponseEntity.status(403).body(Map.of("error", "Forbidden"));
+        }
+        try {
+            String baseVersion = String.valueOf(request.get("baseVersion"));
+            String patchType = String.valueOf(request.getOrDefault("patchType", "ops"));
+            JsonNode patch = objectMapper.valueToTree(request.get("patch"));
+            boolean force = Boolean.parseBoolean(String.valueOf(request.getOrDefault("force", "false")));
+
+            Map<String, Object> preview = configProfileService.previewDerive(type, baseVersion, patchType, patch, force);
+            return ResponseEntity.ok(preview);
+        } catch (ConfigNotFoundException e) {
+            return ResponseEntity.status(404).body(Map.of("error", e.getMessage()));
+        } catch (ConfigConflictException e) {
+            return ResponseEntity.status(409).body(Map.of("error", e.getMessage()));
+        } catch (Exception e) {
+            log.error("预览配置派生失败 type={}", type, e);
+            if (e instanceof IllegalArgumentException) {
+                return ResponseEntity.badRequest().body(Map.of("error", e.getMessage()));
+            }
+            return ResponseEntity.status(500).body(Map.of("error", "Internal Server Error"));
+        }
+    }
+
     @PostMapping("/{type}/activate")
     public ResponseEntity<?> activateSnapshot(@PathVariable String type,
                                                @RequestBody Map<String, Object> request,

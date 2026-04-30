@@ -279,6 +279,84 @@ class ConfigProfileServiceTest {
         ));
     }
 
+    @Test
+    void previewDeriveShouldUseSameContentLogicAsDerive() throws Exception {
+        ConfigType type = buildType();
+        ConfigSnapshot base = buildSnapshot();
+        base.setId(1);
+        base.setVersion("v1");
+        base.setContentJson("{\"models\":[\"a\"],\"endpoints\":{\"openrouter\":{\"models\":{}}}}");
+
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
+        when(configSnapshotDao.maxVersionNumberByType(type.getId())).thenReturn(1);
+
+        JsonNode patch = objectMapper.readTree("""
+                [
+                  {"op":"add_if_absent","path":"/models","value":"your-provider/your-new-model"},
+                  {
+                    "op":"set",
+                    "path":"/endpoints/openrouter/models/your-provider~1your-new-model",
+                    "value":{"baseRate":0.2,"displayName":"Your New Model"}
+                  }
+                ]
+                """);
+
+        Map<String, Object> preview = configProfileService.previewDerive("code-refine", "v1", "ops", patch, true);
+        configProfileService.derive("code-refine", "v1", "ops", patch, "test ops", "7", true);
+
+        ArgumentCaptor<ConfigSnapshot> captor = ArgumentCaptor.forClass(ConfigSnapshot.class);
+        verify(configSnapshotDao).insert(captor.capture());
+
+        @SuppressWarnings("unchecked")
+        Map<String, Object> previewContent = (Map<String, Object>) preview.get("preview");
+        assertEquals(captor.getValue().getContentJson(), previewContent.get("contentJson"));
+        assertEquals(captor.getValue().getContentMd5(), previewContent.get("contentMd5"));
+    }
+
+    @Test
+    void previewDeriveShouldRejectStaleBaseWhenForceIsFalse() {
+        ConfigType type = buildType();
+        ConfigSnapshot base = buildSnapshot();
+        base.setVersion("v1");
+        ConfigSnapshot latest = buildSnapshot();
+        latest.setVersion("v2");
+
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
+        when(configSnapshotDao.listByType(type.getId())).thenReturn(List.of(latest, base));
+
+        assertThrows(ConfigConflictException.class, () -> configProfileService.previewDerive(
+                "code-refine",
+                "v1",
+                "merge",
+                objectMapper.readTree("{\"maxAttempts\":6}"),
+                false
+        ));
+    }
+
+    @Test
+    void previewDeriveShouldValidateSchema() throws Exception {
+        ConfigType type = buildType();
+        type.setSchemaJson("""
+                {"type":"object","required":["maxAttempts"],"properties":{"maxAttempts":{"type":"integer","minimum":1}}}
+                """);
+        ConfigSnapshot base = buildSnapshot();
+        base.setVersion("v1");
+        base.setContentJson("{\"maxAttempts\":5}");
+
+        when(configTypeDao.getByName("code-refine")).thenReturn(type);
+        when(configSnapshotDao.getByTypeAndVersion(type.getId(), "v1")).thenReturn(base);
+
+        assertThrows(IllegalArgumentException.class, () -> configProfileService.previewDerive(
+                "code-refine",
+                "v1",
+                "merge",
+                objectMapper.readTree("{\"maxAttempts\":0}"),
+                true
+        ));
+    }
+
     private ConfigSnapshot deriveAndCapture(String baseJson, String patchJson) throws Exception {
         ConfigType type = buildType();
         ConfigSnapshot base = buildSnapshot();
