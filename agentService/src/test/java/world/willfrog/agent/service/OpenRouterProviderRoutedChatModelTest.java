@@ -92,6 +92,32 @@ class OpenRouterProviderRoutedChatModelTest {
     }
 
     @Test
+    void applyEndpointSamplingDefaults_shouldOmitTemperatureForFireworks() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("temperature", 0.7D);
+
+        OpenRouterProviderRoutedChatModel.applyEndpointSamplingDefaults(
+                payload,
+                "https://api.fireworks.ai/inference/v1"
+        );
+
+        assertFalse(payload.containsKey("temperature"));
+    }
+
+    @Test
+    void applyEndpointSamplingDefaults_shouldKeepTemperatureForNonFireworks() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("temperature", 0.7D);
+
+        OpenRouterProviderRoutedChatModel.applyEndpointSamplingDefaults(
+                payload,
+                "https://openrouter.ai/api/v1"
+        );
+
+        assertEquals(0.7D, payload.get("temperature"));
+    }
+
+    @Test
     void aggregateSseStream_shouldPreserveToolCallDeltas() {
         String sse = """
                 data: {"id":"gen-1","object":"chat.completion.chunk","created":1,"model":"moonshotai/kimi-k2.5","choices":[{"index":0,"delta":{"role":"assistant","content":""},"finish_reason":null}]}

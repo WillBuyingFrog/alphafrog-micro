@@ -114,6 +114,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // 默认启用流式输出。SSE 聚合器负责还原 content/reasoning/tool_calls。
             requestJsonMap.put("stream", true);
             applyStreamingOptions(requestJsonMap, baseUrl);
+            applyEndpointSamplingDefaults(requestJsonMap, baseUrl);
 
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
@@ -493,6 +494,16 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             return;
         }
         requestJsonMap.put("reasoning_effort", reasoningEffort);
+    }
+
+    static void applyEndpointSamplingDefaults(Map<String, Object> requestJsonMap, String baseUrl) {
+        if (requestJsonMap == null) {
+            return;
+        }
+        if (isFireworksEndpointUrl(baseUrl)) {
+            // Fireworks 实验使用服务端默认采样参数，避免本地全局默认 temperature 干扰。
+            requestJsonMap.remove("temperature");
+        }
     }
 
     private static boolean isFireworksEndpointUrl(String url) {
