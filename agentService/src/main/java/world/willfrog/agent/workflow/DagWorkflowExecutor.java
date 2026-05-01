@@ -306,6 +306,9 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         AtomicInteger totalToolCallsUsed = new AtomicInteger(0);
         AtomicInteger completedCount = new AtomicInteger(0);
         CompletableFuture<Void> allDone = new CompletableFuture<>();
+        Object workflowStateLock = new Object();
+        Map<String, TodoItem> nodeStates = new LinkedHashMap<>();
+        AgentContext.ContextSnapshot parentContext = AgentContext.captureRunContext();
 
         for (TodoItem item : items) {
             nodeLatches.put(item.getId(), new CountDownLatch(graph.getDependencies(item.getId()).size()));
@@ -317,6 +320,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             for (TodoItem item : items) {
                 executor.submit(() -> {
                     try {
+                        AgentContext.restoreRunContext(parentContext);
                         nodeLatches.get(item.getId()).await();
                         String failedDependency = findFailedDependency(graph.getDependencies(item.getId()), nodeSuccess);
                         if (failedDependency != null) {
@@ -327,12 +331,17 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                                     .build();
                             results.put(item.getId(), skipped);
                             nodeSuccess.put(item.getId(), false);
+                            persistDagNodeState(runId, items, workflowStateLock, nodeStates,
+                                    item, TodoStatus.SKIPPED, skipped, totalToolCallsUsed.get());
                             eventService.append(runId, userId, "DAG_NODE_SKIPPED", Map.of(
                                     "todo_id", item.getId(),
                                     "failed_dependency", failedDependency
                             ));
                         } else {
                             AgentContext.setTodoContext(item.getId(), item.getSequence());
+                            AgentContext.setPhase(PHASE_DAG_EXECUTION + "_" + item.getId());
+                            persistDagNodeState(runId, items, workflowStateLock, nodeStates,
+                                    item, TodoStatus.RUNNING, null, totalToolCallsUsed.get());
                             try {
                                 ReactTodoExecutor.TodoExecutionRecord record = reactTodoExecutor.executeWithObservability(
                                         item.getDescription(),
@@ -347,11 +356,15 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                                 if (record.isSuccess()) {
                                     sharedContext.addCompletedTodo(item, record);
                                     extractDatasetIds(record, sharedContext);
+                                    persistDagNodeState(runId, items, workflowStateLock, nodeStates,
+                                            item, TodoStatus.COMPLETED, record, totalToolCallsUsed.get());
                                     eventService.append(runId, userId, "DAG_NODE_COMPLETED", Map.of(
                                             "todo_id", item.getId(),
                                             "tool_calls_used", record.getToolCallsUsed()
                                     ));
                                 } else {
+                                    persistDagNodeState(runId, items, workflowStateLock, nodeStates,
+                                            item, TodoStatus.FAILED, record, totalToolCallsUsed.get());
                                     eventService.append(runId, userId, "DAG_NODE_FAILED", Map.of(
                                             "todo_id", item.getId(),
                                             "summary", nvl(record.getSummary())
@@ -359,17 +372,22 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                                 }
                             } finally {
                                 AgentContext.clearTodoContext();
+                                AgentContext.clearPhase();
                             }
                         }
                     } catch (Throwable t) {
                         log.error("Failed to execute DAG node {}", item.getId(), t);
-                        results.put(item.getId(), ReactTodoExecutor.TodoExecutionRecord.builder()
+                        ReactTodoExecutor.TodoExecutionRecord failed = ReactTodoExecutor.TodoExecutionRecord.builder()
                                 .success(false)
                                 .summary("DAG execution failed: " + nvl(t.getMessage()))
                                 .output("")
-                                .build());
+                                .build();
+                        results.put(item.getId(), failed);
                         nodeSuccess.put(item.getId(), false);
+                        persistDagNodeState(runId, items, workflowStateLock, nodeStates,
+                                item, TodoStatus.FAILED, failed, totalToolCallsUsed.get());
                     } finally {
+                        AgentContext.clear();
                         for (String downstream : graph.getDependents(item.getId())) {
                             CountDownLatch latch = nodeLatches.get(downstream);
                             if (latch != null) {
@@ -390,6 +408,69 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
         } finally {
             executor.shutdownNow();
         }
+    }
+
+    private void persistDagNodeState(String runId,
+                                     List<TodoItem> planItems,
+                                     Object lock,
+                                     Map<String, TodoItem> nodeStates,
+                                     TodoItem item,
+                                     TodoStatus status,
+                                     ReactTodoExecutor.TodoExecutionRecord record,
+                                     int totalToolCallsUsed) {
+        if (runId == null || runId.isBlank() || item == null || status == null) {
+            return;
+        }
+        synchronized (lock) {
+            nodeStates.put(item.getId(), copyWithStatus(item, status, record));
+            List<TodoItem> completedItems = new ArrayList<>();
+            Set<String> completedNodeIds = new HashSet<>();
+            Set<String> runningNodeIds = new HashSet<>();
+            for (TodoItem planItem : planItems) {
+                TodoItem state = nodeStates.get(planItem.getId());
+                if (state == null || state.getStatus() == null || state.getStatus() == TodoStatus.PENDING) {
+                    continue;
+                }
+                if (state.getStatus() == TodoStatus.RUNNING) {
+                    runningNodeIds.add(state.getId());
+                    continue;
+                }
+                completedItems.add(state);
+                if (state.getStatus() == TodoStatus.COMPLETED) {
+                    completedNodeIds.add(state.getId());
+                }
+            }
+            stateStore.saveWorkflowState(runId, WorkflowState.builder()
+                    .executionMode(PlanExecutionMode.DAG)
+                    .completedItems(completedItems)
+                    .completedNodeIds(completedNodeIds)
+                    .runningNodeIds(runningNodeIds)
+                    .toolCallsUsed(Math.max(0, totalToolCallsUsed))
+                    .savedAt(Instant.now())
+                    .build());
+        }
+    }
+
+    private TodoItem copyWithStatus(TodoItem item,
+                                    TodoStatus status,
+                                    ReactTodoExecutor.TodoExecutionRecord record) {
+        return TodoItem.builder()
+                .id(item.getId())
+                .sequence(item.getSequence())
+                .description(item.getDescription())
+                .dependsOn(item.getDependsOn() == null ? List.of() : new ArrayList<>(item.getDependsOn()))
+                .groupKey(item.getGroupKey())
+                .parallelizable(item.isParallelizable())
+                .status(status)
+                .createdAt(item.getCreatedAt())
+                .completedAt(isTerminal(status) ? Instant.now() : null)
+                .resultSummary(record == null ? null : nvl(record.getSummary()))
+                .output(record == null ? null : nvl(record.getOutput()))
+                .build();
+    }
+
+    private boolean isTerminal(TodoStatus status) {
+        return status == TodoStatus.COMPLETED || status == TodoStatus.FAILED || status == TodoStatus.SKIPPED;
     }
 
     private String findFailedDependency(Set<String> deps, Map<String, Boolean> nodeSuccess) {

@@ -298,9 +298,15 @@ public class AgentRunStateStore {
     private String buildTodoProgressJson(String runId, JsonNode itemsNode) {
         Optional<WorkflowState> workflowState = loadWorkflowState(runId);
         Map<String, String> completedStatusById = new HashMap<>();
+        Set<String> runningNodeIds = Set.of();
+        int workflowToolCallsUsed = 0;
         int currentIndex = -1;
         if (workflowState.isPresent()) {
             currentIndex = workflowState.get().getCurrentIndex();
+            workflowToolCallsUsed = Math.max(0, workflowState.get().getToolCallsUsed());
+            if (workflowState.get().getRunningNodeIds() != null) {
+                runningNodeIds = workflowState.get().getRunningNodeIds();
+            }
             for (var item : workflowState.get().getCompletedItems()) {
                 String key = nvl(item.getId());
                 if (key.isBlank()) {
@@ -323,12 +329,12 @@ public class AgentRunStateStore {
             String id = nvl(node.path("id").asText("todo_" + (idx + 1)));
             String status = completedStatusById.get(id);
             if (status == null || status.isBlank()) {
-                status = idx == currentIndex ? "RUNNING" : "PENDING";
+                status = runningNodeIds.contains(id) || idx == currentIndex ? "RUNNING" : "PENDING";
             }
 
             if ("COMPLETED".equals(status)) {
                 completed++;
-            } else if ("FAILED".equals(status)) {
+            } else if ("FAILED".equals(status) || "SKIPPED".equals(status)) {
                 failed++;
             } else if ("RUNNING".equals(status)) {
                 running++;
@@ -352,7 +358,7 @@ public class AgentRunStateStore {
         payload.put("running", running);
         payload.put("pending", pending);
         payload.put("tasks", tasks);
-        payload.put("tool_calls_used", getToolCallCount(runId));
+        payload.put("tool_calls_used", workflowToolCallsUsed > 0 ? workflowToolCallsUsed : getToolCallCount(runId));
         return safeWrite(payload);
     }
 

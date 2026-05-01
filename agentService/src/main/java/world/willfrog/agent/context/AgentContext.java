@@ -256,6 +256,55 @@ public class AgentContext {
         STRUCTURED_OUTPUT_SPEC_HOLDER.remove();
     }
 
+    public static ContextSnapshot captureRunContext() {
+        return new ContextSnapshot(
+                getRunId(),
+                getUserId(),
+                DEBUG_MODE_HOLDER.get(),
+                WEB_SEARCH_ENABLED_HOLDER.get(),
+                WEB_SEARCH_CONFIG_HOLDER.get(),
+                getReasoningEffort(),
+                getStageConfig()
+        );
+    }
+
+    public static void restoreRunContext(ContextSnapshot snapshot) {
+        if (snapshot == null) {
+            return;
+        }
+        if (snapshot.runId() == null) {
+            RUN_ID_HOLDER.remove();
+        } else {
+            setRunId(snapshot.runId());
+        }
+        if (snapshot.userId() == null) {
+            USER_ID_HOLDER.remove();
+        } else {
+            setUserId(snapshot.userId());
+        }
+        if (snapshot.debugMode() == null) {
+            clearDebugMode();
+        } else {
+            setDebugMode(snapshot.debugMode());
+        }
+        if (snapshot.webSearchEnabled() == null) {
+            clearWebSearchEnabled();
+        } else {
+            setWebSearchEnabled(snapshot.webSearchEnabled());
+        }
+        setWebSearchConfig(snapshot.webSearchConfig());
+        if (snapshot.reasoningEffort() == null) {
+            clearReasoningEffort();
+        } else {
+            setReasoningEffort(snapshot.reasoningEffort());
+        }
+        if (snapshot.stageConfig() == null) {
+            clearStageConfig();
+        } else {
+            setStageConfig(snapshot.stageConfig());
+        }
+    }
+
     public static void clear() {
         RUN_ID_HOLDER.remove();
         USER_ID_HOLDER.remove();
@@ -285,6 +334,17 @@ public class AgentContext {
         public static WebSearchConfig empty() {
             return new WebSearchConfig("", "", null, null, null);
         }
+    }
+
+    public record ContextSnapshot(
+            String runId,
+            String userId,
+            Boolean debugMode,
+            Boolean webSearchEnabled,
+            WebSearchConfig webSearchConfig,
+            String reasoningEffort,
+            RunStageConfig stageConfig
+    ) {
     }
 
     public static final class StructuredOutputSpec {

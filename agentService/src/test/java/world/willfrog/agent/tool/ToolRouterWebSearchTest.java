@@ -12,10 +12,12 @@ import java.util.Map;
 import java.util.function.Supplier;
 
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -59,5 +61,41 @@ class ToolRouterWebSearchTest {
 
         assertFalse(result.isSuccess());
         verify(searchTools, never()).searchWeb(anyString(), anyString(), anyString(), anyString(), anyBoolean(), anyBoolean(), anyString(), anyString(), anyInt());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invoke_shouldAllowSearchWebWhenCapabilityEnabled() {
+        AgentContext.setWebSearchEnabled(true);
+        SearchTools searchTools = mock(SearchTools.class);
+        when(searchTools.searchWeb(anyString(), anyString(), anyString(), anyString(), anyBoolean(), anyBoolean(), anyString(), anyString(), anyInt()))
+                .thenReturn("{\"ok\":true,\"tool\":\"searchWeb\",\"data\":{\"items\":[]},\"error\":null}");
+        ToolResultCacheService cacheService = mock(ToolResultCacheService.class);
+        when(cacheService.executeWithCache(anyString(), any(), anyString(), any())).thenAnswer(inv -> {
+            Supplier<ToolResultCacheService.ToolExecutionOutcome> supplier = inv.getArgument(3);
+            ToolResultCacheService.ToolExecutionOutcome outcome = supplier.get();
+            return ToolResultCacheService.CachedToolCallResult.builder()
+                    .result(outcome.getResult())
+                    .durationMs(outcome.getDurationMs())
+                    .success(outcome.isSuccess())
+                    .build();
+        });
+
+        ToolRouter router = new ToolRouter(
+                mock(MarketDataTools.class),
+                mock(RagTools.class),
+                searchTools,
+                mock(PythonSandboxTools.class),
+                cacheService,
+                mock(AgentObservabilityService.class),
+                new ObjectMapper(),
+                new SimpleMeterRegistry(),
+                new StressTestProperties()
+        );
+
+        ToolRouter.ToolInvocationResult result = router.invokeWithMeta("searchWeb", Map.of("query", "q"));
+
+        assertTrue(result.isSuccess());
+        verify(searchTools).searchWeb(eq("q"), anyString(), anyString(), anyString(), anyBoolean(), anyBoolean(), anyString(), anyString(), anyInt());
     }
 }

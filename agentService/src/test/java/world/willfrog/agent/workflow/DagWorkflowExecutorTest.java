@@ -6,6 +6,7 @@ import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.response.ChatResponse;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
@@ -14,6 +15,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
@@ -36,6 +38,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyList;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.atLeastOnce;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
@@ -113,6 +116,11 @@ class DagWorkflowExecutorTest {
                 .build());
         lenient().when(planJudge.judge(any(), any(), any(), anyString(), any()))
                 .thenReturn(JudgeDecision.FAIL);
+    }
+
+    @AfterEach
+    void tearDown() {
+        AgentContext.clear();
     }
 
     @Test
@@ -283,6 +291,55 @@ class DagWorkflowExecutorTest {
 
         assertTrue(result.isSuccess());
         assertEquals(4, result.getToolCallsUsed());
+    }
+
+    @Test
+    void execute_shouldPropagateRunContextToDagWorkerAndPersistNodeState() {
+        AgentContext.setRunId("run-context");
+        AgentContext.setUserId("u1");
+        AgentContext.setDebugMode(true);
+        AgentContext.setWebSearchEnabled(true);
+        AgentContext.setWebSearchConfig(new AgentContext.WebSearchConfig(
+                "perplexity", "standard", true, false, 8));
+        AgentContext.setReasoningEffort("high");
+
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenAnswer(invocation -> {
+            assertEquals("run-context", AgentContext.getRunId());
+            assertEquals("u1", AgentContext.getUserId());
+            assertTrue(AgentContext.isDebugMode());
+            assertTrue(AgentContext.isWebSearchEnabled());
+            assertEquals("perplexity", AgentContext.getWebSearchConfig().backend());
+            assertEquals("high", AgentContext.getReasoningEffort());
+            assertEquals("todo_1", AgentContext.getTodoId());
+            assertEquals("dag_execution_todo_1", AgentContext.getPhase());
+            return ReactTodoExecutor.TodoExecutionRecord.builder()
+                    .success(true)
+                    .output("{\"ok\":true}")
+                    .summary("done")
+                    .toolCallsUsed(1)
+                    .build();
+        });
+
+        TodoPlan plan = TodoPlan.builder()
+                .items(List.of(TodoItem.builder()
+                        .id("todo_1")
+                        .sequence(1)
+                        .description("需要 webSearch 的 DAG 节点")
+                        .build()))
+                .build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-context", plan));
+
+        assertTrue(result.isSuccess());
+        ArgumentCaptor<WorkflowState> stateCaptor = ArgumentCaptor.forClass(WorkflowState.class);
+        verify(stateStore, atLeastOnce()).saveWorkflowState(eq("run-context"), stateCaptor.capture());
+        assertTrue(stateCaptor.getAllValues().stream()
+                .flatMap(state -> state.getCompletedItems().stream())
+                .anyMatch(item -> "todo_1".equals(item.getId())
+                        && item.getStatus() == TodoStatus.COMPLETED
+                        && "done".equals(item.getResultSummary())));
     }
 
     @Test
