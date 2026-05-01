@@ -99,6 +99,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
                     .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
+                    .temperature(temperature)
                     .maxCompletionTokens(maxTokens);
             
             if (toolSpecifications != null && !toolSpecifications.isEmpty()) {
@@ -112,7 +113,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             );
             // 默认启用流式输出。SSE 聚合器负责还原 content/reasoning/tool_calls。
             requestJsonMap.put("stream", true);
-            requestJsonMap.put("stream_options", Map.of("include_usage", true));
+            applyStreamingOptions(requestJsonMap, baseUrl);
 
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
@@ -136,6 +137,9 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     reasoning.put("effort", reasoningEffort);
                     requestJsonMap.put("reasoning", reasoning);
                 }
+            } else if (isFireworksEndpoint(baseUrl)) {
+                String reasoningEffort = AgentContext.getReasoningEffort();
+                applyFireworksReasoningEffort(requestJsonMap, reasoningEffort);
             } else if (structuredOutputSpec != null) {
                 requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
             }
@@ -445,8 +449,16 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         }
     }
 
+    private boolean isFireworksEndpoint(String url) {
+        return isFireworksEndpointUrl(url);
+    }
+
     private boolean isOpenRouterHost(String host) {
         return host != null && (host.equals("openrouter.ai") || host.endsWith(".openrouter.ai"));
+    }
+
+    private static boolean isFireworksHost(String host) {
+        return host != null && (host.equals("fireworks.ai") || host.endsWith(".fireworks.ai"));
     }
 
     static void normalizeOpenRouterTokenLimit(Map<String, Object> requestJsonMap) {
@@ -459,6 +471,44 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         // 使用 OpenRouter Chat Completions 通用字段 max_tokens 更稳定。
         if (maxCompletionTokens != null && !requestJsonMap.containsKey("max_tokens")) {
             requestJsonMap.put("max_tokens", maxCompletionTokens);
+        }
+    }
+
+    static void applyStreamingOptions(Map<String, Object> requestJsonMap, String baseUrl) {
+        if (requestJsonMap == null) {
+            return;
+        }
+        if (isFireworksEndpointUrl(baseUrl)) {
+            // Fireworks 当前 API 文档没有列出 stream_options；流式 perf metrics 通过最终 chunk 返回。
+            requestJsonMap.remove("stream_options");
+            requestJsonMap.put("perf_metrics_in_response", true);
+            return;
+        }
+        requestJsonMap.put("stream_options", Map.of("include_usage", true));
+        requestJsonMap.remove("perf_metrics_in_response");
+    }
+
+    static void applyFireworksReasoningEffort(Map<String, Object> requestJsonMap, String reasoningEffort) {
+        if (requestJsonMap == null || reasoningEffort == null || reasoningEffort.isBlank()) {
+            return;
+        }
+        requestJsonMap.put("reasoning_effort", reasoningEffort);
+    }
+
+    private static boolean isFireworksEndpointUrl(String url) {
+        if (url == null || url.isBlank()) {
+            return false;
+        }
+        try {
+            URI uri = URI.create(url.trim());
+            return isFireworksHost(uri.getHost());
+        } catch (IllegalArgumentException e) {
+            try {
+                URI uri = new URI(url.trim());
+                return isFireworksHost(uri.getHost());
+            } catch (URISyntaxException ignored) {
+                return false;
+            }
         }
     }
 

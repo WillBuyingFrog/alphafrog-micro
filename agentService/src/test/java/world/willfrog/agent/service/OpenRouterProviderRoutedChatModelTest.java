@@ -15,6 +15,7 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 class OpenRouterProviderRoutedChatModelTest {
 
@@ -40,6 +41,54 @@ class OpenRouterProviderRoutedChatModelTest {
 
         assertFalse(payload.containsKey("max_completion_tokens"));
         assertEquals(256, payload.get("max_tokens"));
+    }
+
+    @Test
+    void applyStreamingOptions_shouldUseFireworksPerfMetricsWithoutStreamOptions() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stream", true);
+        payload.put("stream_options", Map.of("include_usage", true));
+
+        OpenRouterProviderRoutedChatModel.applyStreamingOptions(
+                payload,
+                "https://api.fireworks.ai/inference/v1"
+        );
+
+        assertFalse(payload.containsKey("stream_options"));
+        assertEquals(true, payload.get("perf_metrics_in_response"));
+    }
+
+    @Test
+    void applyStreamingOptions_shouldUseOpenAiCompatibleStreamUsageForNonFireworks() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stream", true);
+        payload.put("perf_metrics_in_response", true);
+
+        OpenRouterProviderRoutedChatModel.applyStreamingOptions(
+                payload,
+                "https://openrouter.ai/api/v1"
+        );
+
+        assertFalse(payload.containsKey("perf_metrics_in_response"));
+        assertEquals(Map.of("include_usage", true), payload.get("stream_options"));
+    }
+
+    @Test
+    void applyFireworksReasoningEffort_shouldSetTopLevelReasoningEffort() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+
+        OpenRouterProviderRoutedChatModel.applyFireworksReasoningEffort(payload, "high");
+
+        assertEquals("high", payload.get("reasoning_effort"));
+    }
+
+    @Test
+    void applyFireworksReasoningEffort_shouldIgnoreBlankValue() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+
+        OpenRouterProviderRoutedChatModel.applyFireworksReasoningEffort(payload, " ");
+
+        assertTrue(payload.isEmpty());
     }
 
     @Test
