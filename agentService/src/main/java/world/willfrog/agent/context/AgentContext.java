@@ -292,7 +292,11 @@ public class AgentContext {
         } else {
             setWebSearchEnabled(snapshot.webSearchEnabled());
         }
-        setWebSearchConfig(snapshot.webSearchConfig());
+        if (snapshot.webSearchConfig() == null) {
+            clearWebSearchConfig();
+        } else {
+            setWebSearchConfig(snapshot.webSearchConfig());
+        }
         if (snapshot.reasoningEffort() == null) {
             clearReasoningEffort();
         } else {

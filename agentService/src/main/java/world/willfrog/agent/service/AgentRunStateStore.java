@@ -358,7 +358,7 @@ public class AgentRunStateStore {
         payload.put("running", running);
         payload.put("pending", pending);
         payload.put("tasks", tasks);
-        payload.put("tool_calls_used", workflowToolCallsUsed > 0 ? workflowToolCallsUsed : getToolCallCount(runId));
+        payload.put("tool_calls_used", workflowState.isPresent() ? workflowToolCallsUsed : getToolCallCount(runId));
         return safeWrite(payload);
     }
 

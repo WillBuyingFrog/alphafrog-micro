@@ -343,6 +343,64 @@ class DagWorkflowExecutorTest {
     }
 
     @Test
+    void execute_shouldClearContextBetweenNodesToPreventCrossNodePollution() {
+        // 强制单线程池，确保 todo 串行执行并由同一线程复用
+        ReflectionTestUtils.setField(executor, "defaultDagThreadPoolSize", 1);
+
+        // 设置父线程 run 级上下文
+        AgentContext.setRunId("run-clear");
+        AgentContext.setUserId("u-clear");
+        AgentContext.setWebSearchEnabled(true);
+
+        List<String> capturedTodoIds = new ArrayList<>();
+        List<String> capturedPhases = new ArrayList<>();
+        List<Boolean> capturedWebSearch = new ArrayList<>();
+
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenAnswer(invocation -> {
+            capturedTodoIds.add(AgentContext.getTodoId());
+            capturedPhases.add(AgentContext.getPhase());
+            capturedWebSearch.add(AgentContext.isWebSearchEnabled());
+            return ReactTodoExecutor.TodoExecutionRecord.builder()
+                    .success(true)
+                    .output("{\"ok\":true}")
+                    .summary("done")
+                    .toolCallsUsed(0)
+                    .build();
+        });
+
+        TodoPlan plan = TodoPlan.builder()
+                .items(List.of(
+                        TodoItem.builder()
+                                .id("todo_1")
+                                .sequence(1)
+                                .description("first node")
+                                .build(),
+                        TodoItem.builder()
+                                .id("todo_2")
+                                .sequence(2)
+                                .description("second node")
+                                .dependsOn(List.of("todo_1"))
+                                .build()
+                ))
+                .build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-clear", plan));
+
+        assertTrue(result.isSuccess());
+        assertEquals(2, capturedTodoIds.size());
+        // 节点 1 的 todoId/phase 不应泄漏到节点 2
+        assertEquals("todo_1", capturedTodoIds.get(0));
+        assertEquals("todo_2", capturedTodoIds.get(1));
+        assertTrue(capturedPhases.get(0).contains("todo_1"));
+        assertTrue(capturedPhases.get(1).contains("todo_2"));
+        // 两个节点都应恢复父线程的 webSearchEnabled，不受跨节点污染
+        assertTrue(capturedWebSearch.get(0));
+        assertTrue(capturedWebSearch.get(1));
+    }
+
+    @Test
     void execute_failedNodeStillPersistsState() {
         List<TodoItem> items = new ArrayList<>();
         items.add(TodoItem.builder()
