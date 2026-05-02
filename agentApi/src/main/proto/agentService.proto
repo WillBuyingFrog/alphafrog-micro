@@ -149,6 +149,10 @@ message AgentRunStatusMessage {
   string progress_json = 9;
   string observability_json = 10;
   int32 total_credits_consumed = 11;
+  int32 event_count = 12;
+  int64 started_at_ms = 13;
+  int64 completed_at_ms = 14;
+  int64 elapsed_ms = 15;
 }
 
 message AgentToolMessage {

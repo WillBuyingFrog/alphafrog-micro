@@ -451,7 +451,11 @@ public class AgentController {
                     parseJsonOrNull(status.getPlanJson()),
                     parseJsonOrNull(status.getProgressJson()),
                     parseJsonOrNull(status.getObservabilityJson()),
-                    Math.max(0, status.getTotalCreditsConsumed())
+                    Math.max(0, status.getTotalCreditsConsumed()),
+                    status.getEventCount() > 0 ? status.getEventCount() : null,
+                    status.getStartedAtMs() > 0 ? status.getStartedAtMs() : null,
+                    status.getCompletedAtMs() > 0 ? status.getCompletedAtMs() : null,
+                    status.getElapsedMs() > 0 ? status.getElapsedMs() : null
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");

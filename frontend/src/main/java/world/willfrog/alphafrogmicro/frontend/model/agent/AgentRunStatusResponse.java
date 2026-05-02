@@ -11,6 +11,10 @@ public record AgentRunStatusResponse(
         Object plan,
         Object progress,
         Object observability,
-        Integer totalCreditsConsumed
+        Integer totalCreditsConsumed,
+        Integer eventCount,
+        Long startedAtMs,
+        Long completedAtMs,
+        Long elapsedMs
 ) {
 }

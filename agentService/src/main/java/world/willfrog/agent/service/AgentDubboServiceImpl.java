@@ -477,7 +477,18 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 eventMapper.listByRunId(run.getId()),
                 observabilityJson
         );
-        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson, totalCreditsConsumed);
+
+        // 事件总数
+        Integer maxSeq = eventMapper.findMaxSeq(run.getId());
+        int eventCount = maxSeq != null ? maxSeq : 0;
+
+        // 时间戳（epoch millis）
+        long startedAtMs = toEpochMillis(run.getStartedAt());
+        long completedAtMs = toEpochMillis(run.getCompletedAt());
+        long elapsedMs = computeElapsedMs(run, System.currentTimeMillis());
+
+        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson,
+                totalCreditsConsumed, eventCount, startedAtMs, completedAtMs, elapsedMs);
     }
 
     /**
@@ -968,7 +979,11 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                                                   String planJson,
                                                   String progressJson,
                                                   String observabilityJson,
-                                                  int totalCreditsConsumed) {
+                                                  int totalCreditsConsumed,
+                                                  int eventCount,
+                                                  long startedAtMs,
+                                                  long completedAtMs,
+                                                  long elapsedMs) {
         String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
         String currentTool = "";
         if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
@@ -987,6 +1002,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setProgressJson(nvl(progressJson))
                 .setObservabilityJson(nvl(observabilityJson))
                 .setTotalCreditsConsumed(Math.max(0, totalCreditsConsumed))
+                .setEventCount(eventCount)
+                .setStartedAtMs(startedAtMs)
+                .setCompletedAtMs(completedAtMs)
+                .setElapsedMs(elapsedMs)
                 .build();
     }
 
@@ -1097,5 +1116,29 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             return content;
         }
         return content.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * 将 OffsetDateTime 转为 epoch millis，null 返回 0。
+     */
+    private long toEpochMillis(java.time.OffsetDateTime dt) {
+        if (dt == null) {
+            return 0L;
+        }
+        return dt.toInstant().toEpochMilli();
+    }
+
+    /**
+     * 计算 run 已耗时（millis）。已完成则用 completedAt - startedAt，否则用当前时间 - startedAt。
+     */
+    private long computeElapsedMs(AgentRun run, long nowMs) {
+        if (run.getStartedAt() == null) {
+            return 0L;
+        }
+        long startMs = run.getStartedAt().toInstant().toEpochMilli();
+        if (run.getCompletedAt() != null) {
+            return Math.max(0, run.getCompletedAt().toInstant().toEpochMilli() - startMs);
+        }
+        return Math.max(0, nowMs - startMs);
     }
 }
