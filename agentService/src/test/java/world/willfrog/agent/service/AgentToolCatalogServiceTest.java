@@ -10,6 +10,7 @@ import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.Mockito.mock;
 
 class AgentToolCatalogServiceTest {
 
@@ -20,7 +21,7 @@ class AgentToolCatalogServiceTest {
         AgentToolCatalogService service = new AgentToolCatalogService(
                 null,
                 null,
-                new SearchTools(objectMapper),
+                new SearchTools(objectMapper, mock(SearchEvidenceJudgeService.class)),
                 null,
                 objectMapper
         );

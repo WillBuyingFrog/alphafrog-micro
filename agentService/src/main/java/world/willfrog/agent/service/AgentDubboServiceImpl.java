@@ -87,6 +87,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final ObjectMapper objectMapper;
     private final AgentMessageService messageService;
     private final AgentToolCatalogService toolCatalogService;
+    private final AgentFinalAnswerParser finalAnswerParser;
+    private final AgentCitationService citationService;
 
     @Value("${agent.run.list.default-days:30}")
     private int listDefaultDays;
@@ -428,14 +430,34 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 observabilityJson.length());
         
         String answer = "";
+        String answerMarkdown = "";
+        String structuredAnswerJson = "";
+        AgentCitationService.CitationMap citationMap = AgentCitationService.CitationMap.empty();
         if (snapshotJson != null && !snapshotJson.isBlank()) {
             try {
                 Map<?, ?> snap = objectMapper.readValue(snapshotJson, Map.class);
                 Object v = snap.get("answer");
                 answer = v == null ? "" : String.valueOf(v);
+                Object markdown = snap.get("answer_markdown");
+                answerMarkdown = markdown == null ? "" : String.valueOf(markdown);
+                Object structured = snap.get("structured_answer");
+                if (structured != null) {
+                    structuredAnswerJson = objectMapper.writeValueAsString(structured);
+                }
+                Object snapshotCitationMap = snap.get("citation_map");
+                citationMap = citationService.fromSnapshotMap(snapshotCitationMap);
+                if (citationMap.isEmpty()) {
+                    citationMap = citationService.buildCitationMapFromSnapshotCompletedItems(snap.get("completed_items"));
+                }
             } catch (Exception ignore) {
                 // ignore
             }
+        }
+        if (answerMarkdown == null || answerMarkdown.isBlank()) {
+            AgentFinalAnswerParser.ParsedAnswer parsed = finalAnswerParser.parse(answer, citationMap);
+            answerMarkdown = parsed.answerMarkdown();
+            structuredAnswerJson = finalAnswerParser.writeStructuredJson(parsed.structuredAnswer());
+            answer = answerMarkdown;
         }
         int totalCreditsConsumed = creditService.calculateRunTotalCredits(
                 run,
@@ -449,6 +471,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPayloadJson(snapshotJson == null ? "" : snapshotJson)
                 .setObservabilityJson(observabilityJson)
                 .setTotalCreditsConsumed(totalCreditsConsumed)
+                .setAnswerMarkdown(answerMarkdown == null ? "" : answerMarkdown)
+                .setStructuredAnswerJson(structuredAnswerJson == null ? "" : structuredAnswerJson)
                 .build();
     }
 
@@ -471,11 +495,13 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (planJson != null && !planJson.isBlank()) {
             progressJson = stateStore.buildProgressJson(run.getId(), planJson);
         }
-        String observabilityJson = observabilityService.loadObservabilityJson(run.getId(), run.getSnapshotJson());
+        String observabilitySummaryJson = observabilityService.loadObservabilitySummaryJson(run.getId(), run.getSnapshotJson());
+        String observabilityJson = observabilitySummaryJson;
+        boolean observabilityFullAvailable = observabilityService.isFullObservabilityAvailable(run.getId(), run.getSnapshotJson());
         int totalCreditsConsumed = creditService.calculateRunTotalCredits(
                 run,
                 eventMapper.listByRunId(run.getId()),
-                observabilityJson
+                observabilitySummaryJson
         );
 
         // 事件总数
@@ -487,7 +513,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         long completedAtMs = toEpochMillis(run.getCompletedAt());
         long elapsedMs = computeElapsedMs(run, System.currentTimeMillis());
 
-        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson,
+        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson, observabilitySummaryJson,
+                observabilityFullAvailable,
                 totalCreditsConsumed, eventCount, startedAtMs, completedAtMs, elapsedMs);
     }
 
@@ -979,6 +1006,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                                                   String planJson,
                                                   String progressJson,
                                                   String observabilityJson,
+                                                  String observabilitySummaryJson,
+                                                  boolean observabilityFullAvailable,
                                                   int totalCreditsConsumed,
                                                   int eventCount,
                                                   long startedAtMs,
@@ -1001,6 +1030,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPlanJson(nvl(planJson))
                 .setProgressJson(nvl(progressJson))
                 .setObservabilityJson(nvl(observabilityJson))
+                .setObservabilitySummaryJson(nvl(observabilitySummaryJson))
+                .setObservabilityFullAvailable(observabilityFullAvailable)
                 .setTotalCreditsConsumed(Math.max(0, totalCreditsConsumed))
                 .setEventCount(eventCount)
                 .setStartedAtMs(startedAtMs)

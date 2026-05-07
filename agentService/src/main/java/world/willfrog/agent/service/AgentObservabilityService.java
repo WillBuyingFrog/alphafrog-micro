@@ -218,6 +218,10 @@ public class AgentObservabilityService {
                                 String errorMessage,
                                 Map<String, Object> requestSnapshot,
                                 String responseText) {
+        String providerTraceId = AgentContext.consumeProviderLlmTraceId();
+        if (providerTraceId != null && !providerTraceId.isBlank()) {
+            return providerTraceId;
+        }
         Map<String, Object> sanitizedRequestSnapshot = sanitizeRequestSnapshot(requestSnapshot);
         String responsePreview = trim(responseText, llmTraceTextLimit());
         String traceId = newTraceId();
@@ -375,6 +379,31 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand) {
+        return recordLlmCallWithRawHttp(runId, phase, tokenUsage, cachedTokens, durationMs, startedAtMillis, completedAtMillis,
+                endpointName, modelName, errorMessage, thinkingContent, streamingProgress, httpRequest, httpResponse, curlCommand, List.of());
+    }
+
+    public String recordLlmCallWithRawHttp(
+            String runId,
+            String phase,
+            TokenUsage tokenUsage,
+            Integer cachedTokens,
+            long durationMs,
+            long startedAtMillis,
+            long completedAtMillis,
+            String endpointName,
+            String modelName,
+            String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress,
+            RawHttpLogger.HttpRequestRecord httpRequest,
+            RawHttpLogger.HttpResponseRecord httpResponse,
+            String curlCommand,
+            List<Map<String, Object>> attempts) {
+        String providerTraceId = AgentContext.consumeProviderLlmTraceId();
+        if (providerTraceId != null && !providerTraceId.isBlank()) {
+            return providerTraceId;
+        }
         String traceId = newTraceId();
         String stage = resolveStage(null);
         String rawResponseBody = httpResponse == null ? null : httpResponse.getBody();
@@ -469,7 +498,8 @@ public class AgentObservabilityService {
                     httpRequest,
                     httpResponse,
                     curlCommand,
-                    reasoning
+                    reasoning,
+                    attempts == null ? List.of() : attempts
             );
         });
         return traceId;
@@ -680,6 +710,29 @@ public class AgentObservabilityService {
                 runId, snapshotJson == null ? 0 : snapshotJson.length(),
                 "agent:run:" + runId + ":observability");
         return "";
+    }
+
+    public String loadObservabilitySummaryJson(String runId, String snapshotJson) {
+        String full = loadObservabilityJson(runId, snapshotJson);
+        if (full == null || full.isBlank()) {
+            return "";
+        }
+        try {
+            ObservabilityState state = objectMapper.readValue(full, ObservabilityState.class);
+            return safeWrite(buildSummaryMap(state));
+        } catch (Exception e) {
+            Map<String, Object> parsed = parseJsonObject(full);
+            return safeWrite(buildSummaryMap(parsed));
+        }
+    }
+
+    public boolean isFullObservabilityAvailable(String runId, String snapshotJson) {
+        Optional<String> cached = stateStore.loadObservability(runId);
+        if (cached.isPresent() && !cached.get().isBlank()) {
+            return true;
+        }
+        Map<String, Object> snapshot = parseJsonObject(snapshotJson);
+        return snapshot.get("observability") != null;
     }
 
     public String attachObservabilityToSnapshot(String runId, String snapshotJson, AgentRunStatus status) {
@@ -964,6 +1017,58 @@ public class AgentObservabilityService {
         }
     }
 
+    private Map<String, Object> buildSummaryMap(ObservabilityState state) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        if (state == null) {
+            return out;
+        }
+        out.put("summary", state.getSummary() == null ? Map.of() : state.getSummary());
+        out.put("phases", state.getPhases() == null ? Map.of() : state.getPhases());
+        Map<String, Object> diagnostics = new LinkedHashMap<>();
+        Diagnostics d = state.getDiagnostics();
+        if (d != null) {
+            diagnostics.put("lastModel", nvl(d.getLastModel()));
+            diagnostics.put("lastEndpoint", nvl(d.getLastEndpoint()));
+            diagnostics.put("lastTool", nvl(d.getLastTool()));
+            diagnostics.put("lastErrorType", nvl(d.getLastErrorType()));
+            diagnostics.put("lastErrorMessage", nvl(d.getLastErrorMessage()));
+            diagnostics.put("planningStructured", d.getPlanningStructured());
+            diagnostics.put("planningAttempts", d.getPlanningAttempts());
+            diagnostics.put("subAgentPlanningAttempts", d.getSubAgentPlanningAttempts());
+            diagnostics.put("lastPlanningErrorCategory", nvl(d.getLastPlanningErrorCategory()));
+            diagnostics.put("updatedAt", nvl(d.getUpdatedAt()));
+            diagnostics.put("streamingProgress", d.getStreamingProgress());
+            diagnostics.put("llmTraceCount", d.getLlmTraces() == null ? 0 : d.getLlmTraces().size());
+            diagnostics.put("toolTraceCount", d.getToolTraces() == null ? 0 : d.getToolTraces().size());
+        }
+        out.put("diagnostics", diagnostics);
+        return out;
+    }
+
+    private Map<String, Object> buildSummaryMap(Map<String, Object> full) {
+        Map<String, Object> out = new LinkedHashMap<>();
+        Object summary = full.get("summary");
+        Object phases = full.get("phases");
+        out.put("summary", summary instanceof Map<?, ?> ? summary : Map.of());
+        out.put("phases", phases instanceof Map<?, ?> ? phases : Map.of());
+        Map<String, Object> diagnosticsOut = new LinkedHashMap<>();
+        Object diagnostics = full.get("diagnostics");
+        if (diagnostics instanceof Map<?, ?> d) {
+            for (String key : List.of(
+                    "lastModel", "lastEndpoint", "lastTool", "lastErrorType", "lastErrorMessage",
+                    "planningStructured", "planningAttempts", "subAgentPlanningAttempts",
+                    "lastPlanningErrorCategory", "updatedAt", "streamingProgress")) {
+                diagnosticsOut.put(key, d.get(key));
+            }
+            Object llmTraces = d.get("llmTraces");
+            Object toolTraces = d.get("toolTraces");
+            diagnosticsOut.put("llmTraceCount", llmTraces instanceof List<?> list ? list.size() : 0);
+            diagnosticsOut.put("toolTraceCount", toolTraces instanceof List<?> list ? list.size() : 0);
+        }
+        out.put("diagnostics", diagnosticsOut);
+        return out;
+    }
+
     private long toLong(Object value) {
         if (value == null) {
             return 0L;
@@ -1118,7 +1223,8 @@ public class AgentObservabilityService {
             RawHttpLogger.HttpRequestRecord httpRequest,
             RawHttpLogger.HttpResponseRecord httpResponse,
             String curlCommand,
-            ReasoningExtraction reasoning) {
+            ReasoningExtraction reasoning,
+            List<Map<String, Object>> attempts) {
 
         if (!shouldCaptureLlmTrace(diagnostics)) {
             return;
@@ -1192,6 +1298,7 @@ public class AgentObservabilityService {
         
         // 设置 curl 命令
         trace.setCurlCommand(curlCommand);
+        trace.setAttempts(attempts == null ? List.of() : attempts);
         
         // 保留向后兼容的字段
         trace.setRequest(null);
@@ -1615,6 +1722,9 @@ public class AgentObservabilityService {
          * 原始 HTTP 响应信息（包含 statusCode、headers、body）
          */
         private RawHttpTrace httpResponse;
+
+        /** HTTP attempt 明细，表示一次 logical LLM call 内的重试过程。 */
+        private List<Map<String, Object>> attempts;
         
         /**
          * 可直接执行的 curl 命令（Authorization 已脱敏）

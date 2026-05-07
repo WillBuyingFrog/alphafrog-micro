@@ -7,6 +7,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
+import java.time.Duration;
 import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicBoolean;
@@ -115,6 +116,26 @@ class OpenRouterProviderRoutedChatModelTest {
         );
 
         assertEquals(0.7D, payload.get("temperature"));
+    }
+
+    @Test
+    void resolveRequestTimeout_shouldUseStageAndPhaseBuckets() {
+        assertEquals(Duration.ofSeconds(90),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("planning", "execution"));
+        assertEquals(Duration.ofSeconds(90),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("final_answer", "summarizing"));
+        assertEquals(Duration.ofSeconds(30),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("python_refine_plan", "execution"));
+        assertEquals(Duration.ofSeconds(30),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("sub_agent_step_execute", "execution"));
+        assertEquals(Duration.ofSeconds(30),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("semantic_judge", "execution"));
+        assertEquals(Duration.ofSeconds(30),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("tool_use_decision", "execution"));
+        assertEquals(Duration.ofSeconds(30),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("search_evidence_judge", "execution"));
+        assertEquals(Duration.ofSeconds(60),
+                OpenRouterProviderRoutedChatModel.resolveRequestTimeout("summarizing", "execution"));
     }
 
     @Test

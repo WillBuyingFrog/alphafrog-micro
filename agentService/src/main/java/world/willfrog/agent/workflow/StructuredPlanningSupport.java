@@ -192,6 +192,11 @@ public final class StructuredPlanningSupport {
                 "required", List.of("analysis", "items"),
                 "properties", Map.of(
                         "analysis", Map.of("type", "string"),
+                        "extractedEntities", Map.of(
+                                "type", "array",
+                                "description", "用户明确提到的金融实体、指数、基金或股票名称。",
+                                "items", Map.of("type", "string")
+                        ),
                         "items", Map.of(
                                 "type", "array",
                                 "minItems", 1,

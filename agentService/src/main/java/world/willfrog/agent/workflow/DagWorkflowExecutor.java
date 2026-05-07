@@ -13,6 +13,7 @@ import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -59,6 +60,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final AgentLlmProperties llmProperties;
     private final ObjectMapper objectMapper;
+    private final AgentCitationService citationService;
 
     private static final String PHASE_DAG_EXECUTION = "dag_execution";
 
@@ -103,11 +105,12 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             DagRunOutcome outcome = runSingleDag(workingPlan, request);
             lastOutcome = outcome;
             if (outcome.success()) {
-                String finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
+                FinalAnswerResult finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
                 recordDagCompletion(runId, userId, true, startedAt, null, outcome.totalToolCallsUsed());
                 return WorkflowExecutionResult.builder()
                         .success(true)
-                        .finalAnswer(finalAnswer)
+                        .finalAnswer(finalAnswer.answer())
+                        .citationMap(finalAnswer.citationMap())
                         .toolCallsUsed(outcome.totalToolCallsUsed())
                         .build();
             }
@@ -151,11 +154,12 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 FallbackResult fallbackResult = fallbackToLinear(workingPlan, outcome.sharedContext(), request);
                 int totalToolCalls = outcome.totalToolCallsUsed() + fallbackResult.toolCallsUsed();
                 if (fallbackResult.success()) {
-                    String finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
+                    FinalAnswerResult finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
                     recordDagCompletion(runId, userId, true, startedAt, null, totalToolCalls);
                     return WorkflowExecutionResult.builder()
                             .success(true)
-                            .finalAnswer(finalAnswer)
+                            .finalAnswer(finalAnswer.answer())
+                            .citationMap(finalAnswer.citationMap())
                             .toolCallsUsed(totalToolCalls)
                             .build();
                 }
@@ -553,7 +557,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 .build();
     }
 
-    private String generateFinalAnswer(SharedExecutionContext context, WorkflowRequest request) {
+    private FinalAnswerResult generateFinalAnswer(SharedExecutionContext context, WorkflowRequest request) {
+        AgentCitationService.CitationMap citationMap = citationService.buildCitationMap(context.getCompletedTodos());
         try {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
@@ -569,21 +574,40 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     contextText.append("  输出: ").append(todo.getOutput()).append("\n");
                 }
             }
-            contextText.append("\n请根据以上所有任务结果，生成对用户问题的最终回答。");
-            contextText.append("\n输出格式: {\"answer\":\"<你的最终回答>\"}");
+            contextText.append(citationService.buildPromptBlock(citationMap));
+            contextText.append("\n请根据以上所有任务结果，生成对用户问题可直接展示的最终回答。");
+            contextText.append("\n请直接输出 Markdown，不要把回答包在 JSON 或代码块里。若使用搜索证据，请在相关句子后标注引用序号，例如 [1] [2]。");
 
             messages.add(new UserMessage(contextText.toString()));
-            ChatResponse response = request.getModel().chat(messages);
-            var aiMessage = response.aiMessage();
-            return aiMessage != null ? aiMessage.text() : "";
+            String previousPhase = AgentContext.getPhase();
+            String previousStage = AgentContext.getStage();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+            AgentContext.setStage("final_answer");
+            ChatResponse response;
+            try {
+                response = request.getModel().chat(messages);
+            } finally {
+                if (previousPhase == null || previousPhase.isBlank()) {
+                    AgentContext.clearPhase();
+                } else {
+                    AgentContext.setPhase(previousPhase);
+                }
+                if (previousStage == null || previousStage.isBlank()) {
+                    AgentContext.clearStage();
+                } else {
+                    AgentContext.setStage(previousStage);
+                }
+            }
+            var aiMessage = response == null ? null : response.aiMessage();
+            return new FinalAnswerResult(aiMessage != null ? aiMessage.text() : "", citationMap);
         } catch (Exception e) {
             log.error("Failed to generate DAG final answer", e);
             List<CompletedTodoInfo> completed = context.getCompletedTodos();
             if (completed.isEmpty()) {
-                return "无执行结果";
+                return new FinalAnswerResult("无执行结果", citationMap);
             }
             String fallback = completed.get(completed.size() - 1).getOutput();
-            return fallback != null ? fallback : "无法生成回答: " + e.getMessage();
+            return new FinalAnswerResult(fallback != null ? fallback : "无法生成回答: " + e.getMessage(), citationMap);
         }
     }
 
@@ -642,6 +666,7 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     .build());
         }
         cloned.setItems(clonedItems);
+        cloned.setExtractedEntities(plan.getExtractedEntities() == null ? List.of() : new ArrayList<>(plan.getExtractedEntities()));
         cloned.setExecutionMode(plan.getExecutionMode());
         cloned.setDagMetadata(plan.getDagMetadata());
         return cloned;
@@ -685,6 +710,9 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private record FinalAnswerResult(String answer, AgentCitationService.CitationMap citationMap) {
     }
 
     private record DagParallelResult(

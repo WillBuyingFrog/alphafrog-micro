@@ -10,8 +10,11 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
@@ -41,6 +44,7 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final PatchPlanner patchPlanner;
     private final PlanPatcher planPatcher;
     private final AgentRunStateStore stateStore;
+    private final AgentCitationService citationService;
 
     @Value("${agent.flow.workflow.max-tool-calls:20}")
     private int defaultMaxToolCalls;
@@ -221,10 +225,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return buildFailureResult(completedTodos, nvl(record.getSummary()));
         }
 
-        String finalAnswer = generateFinalAnswer(userGoal, completedTodos, request.getModel());
+        FinalAnswerResult finalAnswer = generateFinalAnswer(userGoal, completedTodos, request.getModel());
         return WorkflowExecutionResult.builder()
                 .success(true)
-                .finalAnswer(finalAnswer)
+                .finalAnswer(finalAnswer.answer())
+                .citationMap(finalAnswer.citationMap())
                 .completedItems(new ArrayList<>())
                 .toolCallsUsed(totalToolCalls)
                 .build();
@@ -255,9 +260,10 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 .build();
     }
 
-    private String generateFinalAnswer(String userGoal,
-                                       List<CompletedTodoInfo> completedTodos,
-                                       ChatModel model) {
+    private FinalAnswerResult generateFinalAnswer(String userGoal,
+                                                  List<CompletedTodoInfo> completedTodos,
+                                                  ChatModel model) {
+        AgentCitationService.CitationMap citationMap = citationService.buildCitationMap(completedTodos);
         try {
             List<ChatMessage> messages = new ArrayList<>();
             messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
@@ -273,15 +279,34 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     context.append("  输出: ").append(todo.getOutput()).append("\n");
                 }
             }
-            context.append("\n请根据以上所有任务结果，生成对用户问题的最终回答。");
-            context.append("\n输出格式: {\"answer\":\"<你的最终回答>\"}");
+            context.append(citationService.buildPromptBlock(citationMap));
+            context.append("\n请根据以上所有任务结果，生成对用户问题可直接展示的最终回答。");
+            context.append("\n请直接输出 Markdown，不要把回答包在 JSON 或代码块里。若使用搜索证据，请在相关句子后标注引用序号，例如 [1] [2]。");
             messages.add(new UserMessage(context.toString()));
 
-            ChatResponse response = model.chat(messages);
-            return response.aiMessage() != null ? response.aiMessage().text() : "";
+            String previousPhase = AgentContext.getPhase();
+            String previousStage = AgentContext.getStage();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+            AgentContext.setStage("final_answer");
+            ChatResponse response;
+            try {
+                response = model.chat(messages);
+            } finally {
+                if (previousPhase == null || previousPhase.isBlank()) {
+                    AgentContext.clearPhase();
+                } else {
+                    AgentContext.setPhase(previousPhase);
+                }
+                if (previousStage == null || previousStage.isBlank()) {
+                    AgentContext.clearStage();
+                } else {
+                    AgentContext.setStage(previousStage);
+                }
+            }
+            return new FinalAnswerResult(response.aiMessage() != null ? response.aiMessage().text() : "", citationMap);
         } catch (Exception e) {
             log.error("Failed to generate final answer", e);
-            return "无法生成回答: " + e.getMessage();
+            return new FinalAnswerResult("无法生成回答: " + e.getMessage(), citationMap);
         }
     }
 
@@ -296,11 +321,15 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 .success(false)
                 .finalAnswer(combinedOutput.toString())
                 .failureReason(errorMessage)
+                .citationMap(citationService.buildCitationMap(completedTodos))
                 .completedItems(new ArrayList<>())
                 .build();
     }
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private record FinalAnswerResult(String answer, AgentCitationService.CitationMap citationMap) {
     }
 }

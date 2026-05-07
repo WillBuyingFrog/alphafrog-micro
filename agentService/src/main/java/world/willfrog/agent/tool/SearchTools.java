@@ -6,6 +6,7 @@ import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.SearchEvidenceJudgeService;
 import world.willfrog.alphafrogmicro.externalinfo.idl.ExternalInfoDubboService;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
 import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
@@ -27,9 +28,11 @@ public class SearchTools {
     private ExternalInfoDubboService externalInfoDubboService;
 
     private final ObjectMapper objectMapper;
+    private final SearchEvidenceJudgeService searchEvidenceJudgeService;
 
-    public SearchTools(ObjectMapper objectMapper) {
+    public SearchTools(ObjectMapper objectMapper, SearchEvidenceJudgeService searchEvidenceJudgeService) {
         this.objectMapper = objectMapper;
+        this.searchEvidenceJudgeService = searchEvidenceJudgeService;
     }
 
     @Tool("""
@@ -100,6 +103,7 @@ public class SearchTools {
 
             // 组装 hits
             List<Map<String, Object>> hits = new ArrayList<>();
+            List<String> requestedEntities = AgentContext.getExtractedEntities();
             for (WebSearchHit hit : resp.getHitsList()) {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("title", hit.getTitle());
@@ -120,6 +124,11 @@ public class SearchTools {
                 row.put("title", citation.getTitle());
                 citations.add(row);
             }
+
+            SearchEvidenceJudgeService.JudgeResult judgeResult = searchEvidenceJudgeService.judge(
+                    query, requestedEntities, hits, citations);
+            applyJudgeResult(hits, judgeResult.hits());
+            applyJudgeResult(citations, judgeResult.citations());
 
             // 组装 backend_meta
             Map<String, Object> backendMeta = new LinkedHashMap<>();
@@ -159,6 +168,9 @@ public class SearchTools {
             data.put("canonical_query", resp.getCanonicalQuery());
             data.put("slot_signature", resp.getSlotSignature());
             data.put("result_hash", resp.getResultHash());
+            data.put("requested_entities", requestedEntities);
+            data.put("relevanceJudged", judgeResult.relevanceJudged());
+            data.put("relevanceJudgeError", judgeResult.relevanceJudgeError());
 
             Map<String, Object> payload = new LinkedHashMap<>();
             payload.put("ok", true);
@@ -193,6 +205,23 @@ public class SearchTools {
             return runConfigMaxResults;
         }
         return toolMaxResults <= 0 ? 5 : toolMaxResults;
+    }
+
+    private void applyJudgeResult(List<Map<String, Object>> rows,
+                                  List<SearchEvidenceJudgeService.ItemJudgement> judgements) {
+        for (int i = 0; i < rows.size(); i++) {
+            SearchEvidenceJudgeService.ItemJudgement judgement = judgements != null && i < judgements.size()
+                    ? judgements.get(i)
+                    : new SearchEvidenceJudgeService.ItemJudgement(
+                    true, List.of(), List.of(), "搜索证据相关性 judge 未返回该条结果", false, "JUDGE_RESULT_MISSING");
+            Map<String, Object> row = rows.get(i);
+            row.put("entityMatch", judgement.entityMatch());
+            row.put("matchedEntities", judgement.matchedEntities());
+            row.put("outOfScopeEntities", judgement.outOfScopeEntities());
+            row.put("relevanceWarning", judgement.relevanceWarning());
+            row.put("relevanceJudged", judgement.relevanceJudged());
+            row.put("relevanceJudgeError", judgement.relevanceJudgeError());
+        }
     }
 
     private String writeJson(Object payload) {

@@ -30,6 +30,10 @@ public class TraceDetailResponse {
     private String reasoningText;
     private Boolean hasError;
     private String error;
+    private Object attempts;
+    private Object httpRequest;
+    private Object httpResponse;
+    private String curlCommand;
 
     // Tool specific
     private String toolName;

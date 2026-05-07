@@ -1,5 +1,6 @@
 package world.willfrog.agent.context;
 
+import java.util.List;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -17,6 +18,7 @@ public class AgentContext {
     private static final ThreadLocal<String> DECISION_TRACE_ID_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<String> DECISION_STAGE_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<String> DECISION_EXCERPT_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<String> PROVIDER_LLM_TRACE_ID_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<StructuredOutputSpec> STRUCTURED_OUTPUT_SPEC_HOLDER = new ThreadLocal<>();
     /**
      * 调试模式开关：
@@ -25,6 +27,7 @@ public class AgentContext {
     private static final ThreadLocal<Boolean> DEBUG_MODE_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<Boolean> WEB_SEARCH_ENABLED_HOLDER = new ThreadLocal<>();
     private static final ThreadLocal<WebSearchConfig> WEB_SEARCH_CONFIG_HOLDER = new ThreadLocal<>();
+    private static final ThreadLocal<List<String>> EXTRACTED_ENTITIES_HOLDER = new ThreadLocal<>();
 
     /**
      * OpenRouter reasoning (thinking) effort 配置：
@@ -173,6 +176,23 @@ public class AgentContext {
         WEB_SEARCH_CONFIG_HOLDER.remove();
     }
 
+    public static void setExtractedEntities(List<String> entities) {
+        if (entities == null || entities.isEmpty()) {
+            EXTRACTED_ENTITIES_HOLDER.remove();
+            return;
+        }
+        EXTRACTED_ENTITIES_HOLDER.set(List.copyOf(entities));
+    }
+
+    public static List<String> getExtractedEntities() {
+        List<String> entities = EXTRACTED_ENTITIES_HOLDER.get();
+        return entities == null ? List.of() : entities;
+    }
+
+    public static void clearExtractedEntities() {
+        EXTRACTED_ENTITIES_HOLDER.remove();
+    }
+
     public static void clearDebugMode() {
         DEBUG_MODE_HOLDER.remove();
     }
@@ -252,6 +272,20 @@ public class AgentContext {
         DECISION_EXCERPT_HOLDER.remove();
     }
 
+    public static void setProviderLlmTraceId(String traceId) {
+        if (traceId == null || traceId.isBlank()) {
+            PROVIDER_LLM_TRACE_ID_HOLDER.remove();
+            return;
+        }
+        PROVIDER_LLM_TRACE_ID_HOLDER.set(traceId);
+    }
+
+    public static String consumeProviderLlmTraceId() {
+        String traceId = PROVIDER_LLM_TRACE_ID_HOLDER.get();
+        PROVIDER_LLM_TRACE_ID_HOLDER.remove();
+        return traceId;
+    }
+
     public static void clearStructuredOutputSpec() {
         STRUCTURED_OUTPUT_SPEC_HOLDER.remove();
     }
@@ -263,6 +297,7 @@ public class AgentContext {
                 DEBUG_MODE_HOLDER.get(),
                 WEB_SEARCH_ENABLED_HOLDER.get(),
                 WEB_SEARCH_CONFIG_HOLDER.get(),
+                EXTRACTED_ENTITIES_HOLDER.get(),
                 getReasoningEffort(),
                 getStageConfig()
         );
@@ -297,6 +332,11 @@ public class AgentContext {
         } else {
             setWebSearchConfig(snapshot.webSearchConfig());
         }
+        if (snapshot.extractedEntities() == null) {
+            clearExtractedEntities();
+        } else {
+            setExtractedEntities(snapshot.extractedEntities());
+        }
         if (snapshot.reasoningEffort() == null) {
             clearReasoningEffort();
         } else {
@@ -318,10 +358,12 @@ public class AgentContext {
         clearSubAgentStepIndex();
         clearPythonRefineAttempt();
         clearDecisionContext();
+        PROVIDER_LLM_TRACE_ID_HOLDER.remove();
         clearStructuredOutputSpec();
         clearDebugMode();
         clearWebSearchEnabled();
         clearWebSearchConfig();
+        clearExtractedEntities();
         clearReasoningEffort();
         clearStageConfig();
         clearThinkingContent();
@@ -346,6 +388,7 @@ public class AgentContext {
             Boolean debugMode,
             Boolean webSearchEnabled,
             WebSearchConfig webSearchConfig,
+            List<String> extractedEntities,
             String reasoningEffort,
             RunStageConfig stageConfig
     ) {

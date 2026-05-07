@@ -4,6 +4,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import world.willfrog.agent.service.AgentCitationService;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -22,5 +23,7 @@ public class WorkflowExecutionResult {
     private List<TodoItem> completedItems = new ArrayList<>();
     @Builder.Default
     private Map<String, TodoExecutionRecord> context = Map.of();
+    @Builder.Default
+    private AgentCitationService.CitationMap citationMap = AgentCitationService.CitationMap.empty();
     private int toolCallsUsed;
 }

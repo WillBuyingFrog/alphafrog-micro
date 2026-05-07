@@ -62,6 +62,8 @@ public class AgentRunExecutor {
     private final AgentLlmProperties llmProperties;
     private final StageConfigResolver stageConfigResolver;
     private final StageConfigValidator stageConfigValidator;
+    private final AgentFinalAnswerParser finalAnswerParser;
+    private final AgentCitationService citationService;
 
     private final AtomicInteger activeRuns = new AtomicInteger(0);
     private Timer runDurationTimer;
@@ -253,6 +255,7 @@ public class AgentRunExecutor {
                     .executionMode(executionMode)
                     .maxTodos(maxTodos)
                     .build());
+            AgentContext.setExtractedEntities(todoPlan.getExtractedEntities());
 
             // 根据 Plan 特征选择执行器（LinearWorkflowExecutor 或 DagWorkflowExecutor）
             WorkflowExecutor selectedExecutor = workflowExecutorFactory.select(todoPlan);
@@ -275,6 +278,7 @@ public class AgentRunExecutor {
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
                     .modelName(modelName)
+                    .extractedEntities(todoPlan.getExtractedEntities())
                     .enablePlanPatch(enablePlanPatch)
                     .build());
 
@@ -285,7 +289,7 @@ public class AgentRunExecutor {
             }
 
             if (result.isSuccess()) {
-                String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), AgentRunStatus.COMPLETED, runId);
+                String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.COMPLETED, runId);
                 runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
                 int totalCreditsConsumed = creditService.calculateRunTotalCredits(
                         runId,
@@ -326,7 +330,7 @@ public class AgentRunExecutor {
             }
 
             String reason = nvl(result.getFailureReason());
-            String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), AgentRunStatus.FAILED, runId);
+            String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.FAILED, runId);
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshotJson, true, reason);
             runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.FAILED, eventService.nextInterruptedExpiresAt());
             eventService.append(runId, userId, "WORKFLOW_FAILED", mapOf(
@@ -353,13 +357,18 @@ public class AgentRunExecutor {
                                      Object completedItems,
                                      String answer,
                                      Object context,
+                                     AgentCitationService.CitationMap citationMap,
                                      AgentRunStatus status,
                                      String runId) {
         Map<String, Object> snapshot = new HashMap<>();
+        AgentCitationService.CitationMap safeCitationMap = citationMap == null ? AgentCitationService.CitationMap.empty() : citationMap;
+        AgentFinalAnswerParser.ParsedAnswer parsedAnswer = finalAnswerParser.parse(answer, safeCitationMap);
         snapshot.put("user_goal", userGoal);
         snapshot.put("plan", plan);
         snapshot.put("completed_items", completedItems);
-        snapshot.put("answer", nvl(answer));
+        snapshot.put("citation_map", citationService.toSnapshotMap(safeCitationMap));
+        snapshot.put("answer", nvl(parsedAnswer.answerMarkdown()));
+        snapshot.putAll(parsedAnswer.toSnapshotFields());
         snapshot.put("context", context == null ? Map.of() : context);
         try {
             String json = objectMapper.writeValueAsString(snapshot);

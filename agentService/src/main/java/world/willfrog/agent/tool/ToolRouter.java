@@ -8,10 +8,12 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.StressTestProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.service.AgentRunBudgetService;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -38,11 +40,17 @@ public class ToolRouter {
     private final StressTestProperties stressTestProperties;
     private final ConcurrentHashMap<String, Timer> toolCallTimers = new ConcurrentHashMap<>();
 
+    @Autowired(required = false)
+    private AgentRunBudgetService budgetService;
+
     public String invoke(String toolName, Map<String, Object> params) {
         return invokeWithMeta(toolName, params).getOutput();
     }
 
     public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
+        if (budgetService != null) {
+            budgetService.checkBeforeToolCall();
+        }
         debugLog("tool invoke request: runId={}, tool={}, params={}",
                 AgentContext.getRunId(), nvl(toolName), safeJson(params));
 

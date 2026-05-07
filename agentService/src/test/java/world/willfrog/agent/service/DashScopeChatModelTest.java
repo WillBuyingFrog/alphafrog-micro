@@ -1,16 +1,30 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
+import dev.langchain4j.data.message.UserMessage;
+import dev.langchain4j.model.chat.request.ChatRequest;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
+import world.willfrog.agent.context.AgentContext;
 
 import java.util.LinkedHashMap;
+import java.util.List;
 import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
+import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.isNull;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
 
 class DashScopeChatModelTest {
 
@@ -84,6 +98,77 @@ class DashScopeChatModelTest {
 
         Object empty = ReflectionTestUtils.invokeMethod(model, "extractThinkingContent", (Object) null);
         assertEquals("", ReflectionTestUtils.invokeMethod(empty, "thinking"));
+    }
+
+    @Test
+    void reportLlmCall_shouldExposeProviderTraceIdForOuterDedup() {
+        AgentContext.clear();
+        AgentContext.setRunId("run-dashscope-trace");
+        AgentObservabilityService observabilityService = mock(AgentObservabilityService.class);
+        when(observabilityService.recordLlmCallWithRawHttp(
+                anyString(),
+                anyString(),
+                any(),
+                any(),
+                anyLong(),
+                anyLong(),
+                anyLong(),
+                anyString(),
+                anyString(),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull(),
+                isNull()
+        )).thenReturn("trace-dashscope-1");
+        DashScopeChatModel model = new DashScopeChatModel(
+                new ObjectMapper(),
+                "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+                "dashscope-key",
+                "qwen-plus",
+                0.6D,
+                1024,
+                mock(RawHttpLogger.class),
+                observabilityService,
+                "dashscope",
+                true,
+                mock(AgentLlmLocalConfigLoader.class)
+        );
+
+        String traceId = ReflectionTestUtils.invokeMethod(
+                model,
+                "reportLlmCall",
+                null,
+                null,
+                null,
+                100L,
+                50L,
+                null,
+                null,
+                null
+        );
+
+        assertEquals("trace-dashscope-1", traceId);
+        assertEquals("trace-dashscope-1", AgentContext.consumeProviderLlmTraceId());
+        AgentContext.clear();
+    }
+
+    @Test
+    void doChat_shouldCheckBudgetBeforeNetworkAttempt() {
+        DashScopeChatModel model = newModel("qwen-plus", true);
+        AgentRunBudgetService budgetService = mock(AgentRunBudgetService.class);
+        doThrow(new IllegalStateException("budget exceeded"))
+                .when(budgetService).checkBeforeLlmCall();
+        model.setBudgetService(budgetService);
+
+        ChatRequest request = ChatRequest.builder()
+                .messages(List.of(new UserMessage("hello")))
+                .build();
+
+        assertThrows(IllegalStateException.class, () -> model.doChat(request));
+        verify(budgetService).checkBeforeLlmCall();
+        verify(budgetService, never()).checkHttpAttempt(anyInt());
     }
 
     private static boolean invokeSupportsThinking(DashScopeChatModel model, String name) {

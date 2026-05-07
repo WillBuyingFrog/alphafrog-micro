@@ -95,6 +95,34 @@ class AgentObservabilityServiceEnhancedTest {
     }
 
     @Test
+    void recordLlmCallWithRawHttp_shouldReturnProviderTraceIdWithoutMutatingState() {
+        String runId = "test-provider-dedup-raw";
+        AgentContext.setProviderLlmTraceId("provider-trace-1");
+
+        String traceId = service.recordLlmCallWithRawHttp(
+                runId,
+                "execution",
+                new TokenUsage(1, 2, 3),
+                null,
+                100L,
+                10L,
+                110L,
+                "openrouter",
+                "model-a",
+                null,
+                null,
+                null,
+                null,
+                null,
+                null,
+                List.of()
+        );
+
+        assertEquals("provider-trace-1", traceId);
+        assertNull(savedJson.get(), "provider 已记录 trace 时不应重复写 observability");
+    }
+
+    @Test
     void loadObservabilityJson_shouldPreferRedisCache() {
         String runId = "test-load-from-redis";
         when(stateStore.loadObservability(eq(runId))).thenReturn(Optional.of("{\"summary\":{\"status\":\"EXECUTING\"}}"));

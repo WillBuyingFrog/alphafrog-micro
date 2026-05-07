@@ -17,6 +17,7 @@ import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
@@ -88,7 +89,8 @@ class DagWorkflowExecutorTest {
                 stateStore,
                 localConfigLoader,
                 llmProperties,
-                new ObjectMapper()
+                new ObjectMapper(),
+                new AgentCitationService(new ObjectMapper())
         );
         lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultDagThreadPoolSize", 4);
@@ -578,6 +580,41 @@ class DagWorkflowExecutorTest {
                 .reduce((first, second) -> second)
                 .orElse("");
         assertTrue(finalUserMessage.contains(longOutput));
+    }
+
+    @Test
+    void execute_finalAnswerPromptShouldIncludeCitationMap() {
+        String output = """
+                {"ok":true,"tool":"searchWeb","data":{"citations":[
+                  {"index":4,"title":"DAG来源","url":"https://example.com/dag","entityMatch":true,"relevanceJudged":true}
+                ]}}
+                """;
+        when(reactTodoExecutor.executeWithObservability(anyString(), any(), any(), anyString(), anyString()))
+                .thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .summary("ok")
+                        .output(output)
+                        .toolCallsUsed(1)
+                        .build());
+
+        TodoPlan plan = TodoPlan.builder()
+                .items(List.of(TodoItem.builder().id("todo_1").sequence(1).description("搜索节点").build()))
+                .build();
+
+        WorkflowExecutionResult result = executor.execute(request("run-dag-citations", plan));
+
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> messageCaptor = ArgumentCaptor.forClass(List.class);
+        verify(model).chat(messageCaptor.capture());
+        String finalUserMessage = messageCaptor.getValue().stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::singleText)
+                .reduce((first, second) -> second)
+                .orElse("");
+        assertTrue(finalUserMessage.contains("可引用来源"));
+        assertTrue(finalUserMessage.contains("[1] DAG来源 - https://example.com/dag"));
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {

@@ -82,4 +82,36 @@ class AgentAiServiceFactoryDashScopeTest {
         String baseUrl = (String) ReflectionTestUtils.getField(model, "baseUrl");
         assertEquals("https://custom-dashscope.example/compatible-mode/v1", baseUrl);
     }
+
+    @Test
+    void buildChatModelWithProviderOrder_shouldInjectBudgetServiceIntoDashScopeModel() {
+        AgentAiServiceFactory factory = new AgentAiServiceFactory(
+                mock(AgentLlmResolver.class),
+                mock(AgentLlmProperties.class),
+                new ObjectMapper(),
+                mock(RawHttpLogger.class),
+                mock(AgentObservabilityService.class),
+                mock(OpenRouterCostService.class),
+                mock(AgentLlmLocalConfigLoader.class)
+        );
+        AgentRunBudgetService budgetService = mock(AgentRunBudgetService.class);
+        ReflectionTestUtils.setField(factory, "budgetService", budgetService);
+        ReflectionTestUtils.setField(factory, "openAiApiKey", "fallback-key");
+        ReflectionTestUtils.setField(factory, "maxTokens", 1024);
+        ReflectionTestUtils.setField(factory, "temperature", 0.6D);
+
+        AgentLlmResolver.ResolvedLlm resolved = new AgentLlmResolver.ResolvedLlm(
+                "dashscope",
+                "",
+                "qwen-plus",
+                "dashscope-key",
+                "us",
+                java.util.List.of()
+        );
+
+        ChatModel model = factory.buildChatModelWithProviderOrder(resolved, java.util.List.of());
+
+        assertInstanceOf(DashScopeChatModel.class, model);
+        assertEquals(budgetService, ReflectionTestUtils.getField(model, "budgetService"));
+    }
 }

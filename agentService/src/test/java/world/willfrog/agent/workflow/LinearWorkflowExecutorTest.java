@@ -1,5 +1,6 @@
 package world.willfrog.agent.workflow;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
@@ -15,6 +16,7 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
@@ -67,7 +69,8 @@ class LinearWorkflowExecutorTest {
                 planJudge,
                 patchPlanner,
                 planPatcher,
-                stateStore
+                stateStore,
+                new AgentCitationService(new ObjectMapper())
         );
         lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
@@ -269,6 +272,43 @@ class LinearWorkflowExecutorTest {
                 .orElse("");
         assertTrue(finalUserMessage.contains(longOutput));
         assertEquals(1, result.getToolCallsUsed());
+    }
+
+    @Test
+    void execute_finalAnswerPromptShouldIncludeRenumberedCitationMap() {
+        String output = """
+                {"ok":true,"tool":"searchWeb","data":{"citations":[
+                  {"index":8,"title":"来源A","url":"https://example.com/a","entityMatch":true,"relevanceJudged":true},
+                  {"index":9,"title":"来源A重复","url":"https://example.com/a#section","entityMatch":true,"relevanceJudged":true},
+                  {"index":10,"title":"来源B","url":"https://example.com/b","entityMatch":false,"relevanceJudged":false,"relevanceWarning":"低相关"}
+                ]}}
+                """;
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output(output)
+                .summary("ok")
+                .toolCallsUsed(1)
+                .build());
+
+        WorkflowExecutionResult result = executor.execute(request("run-citations", planWithTools(1)));
+
+        assertTrue(result.isSuccess());
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<ChatMessage>> messageCaptor = ArgumentCaptor.forClass(List.class);
+        verify(model).chat(messageCaptor.capture());
+        String finalUserMessage = messageCaptor.getValue().stream()
+                .filter(UserMessage.class::isInstance)
+                .map(UserMessage.class::cast)
+                .map(UserMessage::singleText)
+                .reduce((first, second) -> second)
+                .orElse("");
+        assertTrue(finalUserMessage.contains("可引用来源"));
+        assertTrue(finalUserMessage.contains("[1] 来源A - https://example.com/a"));
+        assertTrue(finalUserMessage.contains("[2] 来源B - https://example.com/b"));
+        assertFalse(finalUserMessage.contains("[2] 来源A重复"));
+        assertTrue(finalUserMessage.contains("相关性需谨慎"));
     }
 
     private WorkflowRequest request(String runId, TodoPlan plan) {

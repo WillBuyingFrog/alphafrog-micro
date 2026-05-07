@@ -15,11 +15,13 @@ import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 
 import java.io.BufferedReader;
+import java.io.IOException;
 import java.io.InputStreamReader;
 import java.net.URI;
 import java.net.URISyntaxException;
@@ -28,6 +30,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -76,6 +79,9 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     // Debug 配置加载器（热加载）
     private final AgentLlmLocalConfigLoader localConfigLoader;
 
+    @Setter
+    private AgentRunBudgetService budgetService;
+
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
         List<ChatMessage> messages = chatRequest.messages();
@@ -93,8 +99,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         String curlCommand = null;
         int statusCode = -1;
         String responseJson = null;
+        List<Map<String, Object>> attempts = List.of();
         
         try {
+            if (budgetService != null) {
+                budgetService.checkBeforeLlmCall();
+            }
             // ========== 1. 构建请求 ==========
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
@@ -160,9 +170,10 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             requestHeaders.put("Content-Type", "application/json");
             requestHeaders.put("Accept", "application/json");
             
+            Duration requestTimeout = resolveRequestTimeout();
             HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(requestUrl))
-                    .timeout(Duration.ofSeconds(180))
+                    .timeout(requestTimeout)
                     .header("Content-Type", "application/json")
                     .header("Accept", "application/json")
                     .header("Authorization", "Bearer " + OpenAiCompatibleChatModelSupport.nvl(apiKey))
@@ -190,14 +201,15 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                         endpointName, modelName, providerOrder, curlCommand);
             }
             
-            // ========== 2. 发送 HTTP 请求（流式） ==========
-            HttpResponse<java.io.InputStream> httpResponse = HTTP_CLIENT.send(
-                    httpRequestBuilder.build(),
-                    HttpResponse.BodyHandlers.ofInputStream()
-            );
-            
-            // ========== 3. 处理响应 ==========
-            statusCode = httpResponse.statusCode();
+            // ========== 2. 发送 HTTP 请求（流式，按 logical call 聚合重试） ==========
+            int maxAttempts = budgetService == null ? 2 : budgetService.maxHttpAttemptsPerLogicalCall();
+            AttemptResult attemptResult = sendWithRetry(httpRequestBuilder, shouldCapture, requestRecord, requestStartedAt,
+                    maxAttempts, requestTimeout);
+            attempts = attemptResult.attempts();
+            HttpResponse<java.io.InputStream> httpResponse = attemptResult.response();
+            responseRecord = attemptResult.responseRecord();
+            statusCode = attemptResult.statusCode();
+            responseJson = attemptResult.errorBody();
             long durationMs = System.currentTimeMillis() - requestStartedAt;
             
             ChatCompletionResponse completion;
@@ -228,24 +240,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                     curlCommand = httpLogger.toCurlCommand(requestRecord);
                 }
             } else {
-                // 错误响应：读取完整 body
-                try (BufferedReader reader = new BufferedReader(
-                        new InputStreamReader(httpResponse.body(), StandardCharsets.UTF_8))) {
-                    responseJson = reader.lines().collect(java.util.stream.Collectors.joining("\n"));
-                }
-                
-                if (shouldCapture) {
-                    Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
-                    responseRecord = httpLogger.recordResponse(statusCode, responseHeaders, responseJson, durationMs);
-                    curlCommand = httpLogger.toCurlCommand(requestRecord);
-                }
-                
-                // 处理 HTTP 错误状态码
-                if (shouldCapture && observabilityService != null) {
-                    reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
-                             "HTTP_ERROR_" + statusCode, null, null);
-                }
-                
                 String detail = "OpenRouter provider routed chat completion failed"
                         + " (http=" + statusCode
                         + ", providers=" + providerOrder
@@ -272,7 +266,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
                 String traceId = reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
-                        reasoningContent, progressSnapshot);
+                        reasoningContent, progressSnapshot, attemptResult.attempts());
                 String runId = AgentContext.getRunId();
                 if (shouldEnrichOpenRouterCost(runId, traceId, completion.id())) {
                     openRouterCostService.enrichCostInfoAsync(runId, traceId, completion.id(), apiKey, baseUrl);
@@ -294,7 +288,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
                 reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, "INTERRUPTED",
-                        null, null);
+                        null, null, List.of());
             }
             
             String detail = "OpenRouter provider routed chat completion interrupted"
@@ -307,8 +301,8 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             if (shouldCapture && observabilityService != null) {
                 long durationMs = System.currentTimeMillis() - requestStartedAt;
                 String errorType = e.getClass().getSimpleName();
-                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, 
-                            errorType + ": " + e.getMessage(), null, null);
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs,
+                            errorType + ": " + e.getMessage(), null, null, attempts);
             }
             
             String detail = "OpenRouter provider routed chat completion failed"
@@ -333,6 +327,20 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             String errorMessage,
             String thinkingContent,
             StreamingProgressTracker.StreamingProgressSnapshot streamingProgress) {
+        return reportLlmCall(request, response, curlCommand, startedAtMillis, durationMs, errorMessage,
+                thinkingContent, streamingProgress, List.of());
+    }
+
+    private String reportLlmCall(
+            RawHttpLogger.HttpRequestRecord request,
+            RawHttpLogger.HttpResponseRecord response,
+            String curlCommand,
+            long startedAtMillis,
+            long durationMs,
+            String errorMessage,
+            String thinkingContent,
+            StreamingProgressTracker.StreamingProgressSnapshot streamingProgress,
+            List<Map<String, Object>> attempts) {
         
         if (observabilityService == null) {
             return null;
@@ -349,7 +357,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         Integer cachedTokens = OpenAiCompatibleChatModelSupport.extractCachedTokensFromResponse(objectMapper, response, log);
         long completedAtMillis = startedAtMillis + durationMs;
         
-        return observabilityService.recordLlmCallWithRawHttp(
+        String traceId = observabilityService.recordLlmCallWithRawHttp(
                 runId,
                 phase != null ? phase : "unknown",
                 tokenUsage,
@@ -364,8 +372,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 streamingProgress,
                 request,
                 response,
-                curlCommand
+                curlCommand,
+                attempts
         );
+        AgentContext.setProviderLlmTraceId(traceId);
+        return traceId;
     }
 
     private boolean shouldEnrichOpenRouterCost(String runId, String traceId, String generationId) {
@@ -401,6 +412,119 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                         completed
                 )
         );
+    }
+
+    private AttemptResult sendWithRetry(HttpRequest.Builder httpRequestBuilder,
+                                        boolean shouldCapture,
+                                        RawHttpLogger.HttpRequestRecord requestRecord,
+                                        long logicalStartedAt,
+                                        int maxAttempts,
+                                        Duration requestTimeout) throws IOException, InterruptedException {
+        List<Map<String, Object>> attempts = new ArrayList<>();
+        Exception lastException = null;
+        RawHttpLogger.HttpResponseRecord lastResponseRecord = null;
+        String lastErrorBody = null;
+        int lastStatusCode = -1;
+        int cappedAttempts = Math.max(1, maxAttempts);
+        for (int attempt = 1; attempt <= cappedAttempts; attempt++) {
+            if (budgetService != null) {
+                budgetService.checkHttpAttempt(attempt);
+            }
+            long attemptStarted = System.currentTimeMillis();
+            try {
+                HttpResponse<java.io.InputStream> httpResponse = HTTP_CLIENT.send(
+                        httpRequestBuilder.build(),
+                        HttpResponse.BodyHandlers.ofInputStream()
+                );
+                int status = httpResponse.statusCode();
+                long attemptDuration = System.currentTimeMillis() - attemptStarted;
+                Map<String, Object> attemptMeta = new LinkedHashMap<>();
+                attemptMeta.put("attempt", attempt);
+                attemptMeta.put("httpStatus", status);
+                attemptMeta.put("durationMs", attemptDuration);
+                attemptMeta.put("timeoutSeconds", requestTimeout.toSeconds());
+                attempts.add(attemptMeta);
+
+                if (status >= 200 && status < 300) {
+                    return new AttemptResult(httpResponse, null, status, null, attempts);
+                }
+
+                String body;
+                try (BufferedReader reader = new BufferedReader(
+                        new InputStreamReader(httpResponse.body(), StandardCharsets.UTF_8))) {
+                    body = reader.lines().collect(java.util.stream.Collectors.joining("\n"));
+                }
+                lastErrorBody = body;
+                lastStatusCode = status;
+                if (shouldCapture && httpLogger != null) {
+                    Map<String, String> responseHeaders = httpLogger.extractHeaders(httpResponse);
+                    lastResponseRecord = httpLogger.recordResponse(
+                            status, responseHeaders, body, System.currentTimeMillis() - logicalStartedAt);
+                }
+                attemptMeta.put("retryable", isRetryableStatus(status));
+                attemptMeta.put("error", OpenAiCompatibleChatModelSupport.shorten(body));
+                if (!isRetryableStatus(status) || attempt >= cappedAttempts) {
+                    return new AttemptResult(httpResponse, lastResponseRecord, status, body, attempts);
+                }
+            } catch (IOException e) {
+                long attemptDuration = System.currentTimeMillis() - attemptStarted;
+                lastException = e;
+                Map<String, Object> attemptMeta = new LinkedHashMap<>();
+                attemptMeta.put("attempt", attempt);
+                attemptMeta.put("durationMs", attemptDuration);
+                attemptMeta.put("timeoutSeconds", requestTimeout.toSeconds());
+                attemptMeta.put("retryable", true);
+                attemptMeta.put("error", e.getClass().getSimpleName() + ": " + e.getMessage());
+                attempts.add(attemptMeta);
+                if (attempt >= cappedAttempts) {
+                    throw e;
+                }
+            }
+            sleepBeforeRetry();
+        }
+        if (lastException instanceof IOException ioException) {
+            throw ioException;
+        }
+        return new AttemptResult(null, lastResponseRecord, lastStatusCode, lastErrorBody, attempts);
+    }
+
+    private boolean isRetryableStatus(int status) {
+        return status == 408 || status == 429 || (status >= 500 && status <= 599);
+    }
+
+    private void sleepBeforeRetry() throws InterruptedException {
+        Thread.sleep(2000L);
+    }
+
+    private Duration resolveRequestTimeout() {
+        return resolveRequestTimeout(AgentContext.getStage(), AgentContext.getPhase());
+    }
+
+    static Duration resolveRequestTimeout(String stageValue, String phaseValue) {
+        String stage = OpenAiCompatibleChatModelSupport.nvl(stageValue).toLowerCase();
+        String phase = OpenAiCompatibleChatModelSupport.nvl(phaseValue).toLowerCase();
+        if (phase.contains("planning") || stage.contains("planning") || stage.contains("final_answer")) {
+            return Duration.ofSeconds(90);
+        }
+        if (stage.contains("semantic_judge")
+                || stage.contains("search_evidence_judge")
+                || stage.contains("tool_decision")
+                || stage.endsWith("_decision")
+                || stage.endsWith("_execute")
+                || stage.endsWith("_plan")
+                || phase.contains("decision")) {
+            return Duration.ofSeconds(30);
+        }
+        return Duration.ofSeconds(60);
+    }
+
+    private record AttemptResult(
+            HttpResponse<java.io.InputStream> response,
+            RawHttpLogger.HttpResponseRecord responseRecord,
+            int statusCode,
+            String errorBody,
+            List<Map<String, Object>> attempts
+    ) {
     }
 
     private boolean isStreamingProgressReportEnabled() {

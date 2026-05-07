@@ -108,7 +108,9 @@ class AgentRunExecutorTest {
                 localConfigLoader,
                 new AgentLlmProperties(),
                 stageConfigResolver,
-                stageConfigValidator
+                stageConfigValidator,
+                new AgentFinalAnswerParser(new ObjectMapper()),
+                new AgentCitationService(new ObjectMapper())
         );
         executor.init();
 
@@ -152,6 +154,52 @@ class AgentRunExecutorTest {
         verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
         verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
         verify(creditService).recordRunConsumeLedger(eq("run-ok"), eq("u1"), eq(0));
+    }
+
+    @Test
+    void execute_shouldWriteCitationQualityFlagsIntoSnapshot() throws Exception {
+        AgentRun run = run("run-citation-flags");
+        when(runMapper.findById("run-citation-flags")).thenReturn(run);
+        when(eventService.isRunnable("run-citation-flags", "u1")).thenReturn(true);
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        AgentCitationService.CitationMap citationMap = new AgentCitationService.CitationMap(List.of(
+                new AgentCitationService.Citation(
+                        1,
+                        1,
+                        "低相关来源",
+                        "https://example.com/a",
+                        "todo_1",
+                        false,
+                        true,
+                        "实体不匹配"
+                )
+        ));
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("结论来自低相关来源 [1]。")
+                .citationMap(citationMap)
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        executor.execute("run-citation-flags");
+
+        ArgumentCaptor<String> snapshotCaptor = ArgumentCaptor.forClass(String.class);
+        verify(observabilityService).attachObservabilityToSnapshot(
+                eq("run-citation-flags"),
+                snapshotCaptor.capture(),
+                eq(AgentRunStatus.COMPLETED)
+        );
+        Map<?, ?> snapshot = new ObjectMapper().readValue(snapshotCaptor.getValue(), Map.class);
+        assertEquals("结论来自低相关来源 [1]。", snapshot.get("answer_markdown"));
+        assertTrue(String.valueOf(snapshot.get("quality_flags")).contains("CITATION_REFERENCE_LOW_RELEVANCE"));
     }
 
     @Test

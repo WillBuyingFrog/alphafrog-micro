@@ -62,11 +62,14 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageListRespon
 import world.willfrog.alphafrogmicro.frontend.model.agent.TraceListResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TraceDetailResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TraceSpanItem;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -78,6 +81,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 public class AgentController {
 
     private static final int ADMIN_USER_TYPE = 1127;
+    private static final int OBSERVABILITY_FULL_MAX_BYTES = 5 * 1024 * 1024;
 
     @DubboReference
     private AgentDubboService agentDubboService;
@@ -336,6 +340,62 @@ public class AgentController {
         }
     }
 
+    @GetMapping("/{runId}/timeline")
+    public ResponseWrapper<TimelineResponse> timeline(Authentication authentication,
+                                                      @PathVariable("runId") String runId,
+                                                      @RequestParam(value = "after_seq", required = false, defaultValue = "0") int afterSeq,
+                                                      @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            int safeLimit = Math.min(Math.max(1, limit), 500);
+            ListAgentRunEventsResponse resp = agentDubboService.listEvents(
+                    ListAgentRunEventsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setAfterSeq(Math.max(0, afterSeq))
+                            .setLimit(safeLimit)
+                            .build()
+            );
+            List<TimelineResponse.TimelineItem> items = new ArrayList<>();
+            String minEventTime = null;
+            String maxEventTime = null;
+            for (var e : resp.getItemsList()) {
+                Object payload = parseJsonOrNull(e.getPayloadJson());
+                String eventTime = strVal(e.getCreatedAt());
+                if (minEventTime == null || eventTime.compareTo(minEventTime) < 0) {
+                    minEventTime = eventTime;
+                }
+                if (maxEventTime == null || eventTime.compareTo(maxEventTime) > 0) {
+                    maxEventTime = eventTime;
+                }
+                items.add(new TimelineResponse.TimelineItem(
+                        e.getSeq(),
+                        "event",
+                        null,
+                        e.getEventType(),
+                        e.getCreatedAt(),
+                        timelineTitle(e.getEventType(), payload),
+                        null,
+                        payload
+                ));
+            }
+            appendTraceTimelineItems(userId, runId, items, minEventTime, maxEventTime,
+                    Math.max(0, safeLimit - items.size()));
+            items.sort(Comparator
+                    .comparing(TimelineResponse.TimelineItem::time, Comparator.nullsLast(String::compareTo))
+                    .thenComparing(TimelineResponse.TimelineItem::source, Comparator.nullsLast(String::compareTo))
+                    .thenComparingInt(TimelineResponse.TimelineItem::seq));
+            return ResponseWrapper.success(new TimelineResponse(items, resp.getNextAfterSeq(), resp.getHasMore()));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 timeline");
+        } catch (Exception e) {
+            return handleError(e, "查询 timeline");
+        }
+    }
+
     @PostMapping("/{runId}:cancel")
     public ResponseWrapper<AgentRunResponse> cancel(Authentication authentication,
                                                    @PathVariable("runId") String runId) {
@@ -411,8 +471,10 @@ public class AgentController {
                     result.getId(),
                     result.getStatus(),
                     emptyToNull(result.getAnswer()),
+                    emptyToNull(result.getAnswerMarkdown()),
+                    parseJsonOrNull(result.getStructuredAnswerJson()),
                     parseJsonOrNull(result.getPayloadJson()),
-                    parseJsonOrNull(result.getObservabilityJson()),
+                    null,
                     Math.max(0, result.getTotalCreditsConsumed())
             );
             if (!"COMPLETED".equalsIgnoreCase(result.getStatus())) {
@@ -451,6 +513,8 @@ public class AgentController {
                     parseJsonOrNull(status.getPlanJson()),
                     parseJsonOrNull(status.getProgressJson()),
                     parseJsonOrNull(status.getObservabilityJson()),
+                    parseJsonOrNull(status.getObservabilitySummaryJson()),
+                    status.getObservabilityFullAvailable(),
                     Math.max(0, status.getTotalCreditsConsumed()),
                     status.getEventCount() > 0 ? status.getEventCount() : null,
                     status.getStartedAtMs() > 0 ? status.getStartedAtMs() : null,
@@ -464,9 +528,47 @@ public class AgentController {
         }
     }
 
+    @GetMapping("/{runId}/observability/full")
+    public ResponseWrapper<Object> observabilityFull(Authentication authentication,
+                                                     @PathVariable("runId") String runId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = agentDubboService.getResult(
+                    GetAgentRunResultRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .build()
+            );
+            String observabilityJson = result.getObservabilityJson();
+            if (observabilityJson != null
+                    && observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {
+                return ResponseWrapper.error(
+                        ResponseCode.BUSINESS_ERROR,
+                        "observability 过大，请使用 /traces 或 /timeline 分页接口"
+                );
+            }
+            Object observability = parseJsonOrNull(observabilityJson);
+            if (observability == null) {
+                return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "observability 不存在");
+            }
+            return ResponseWrapper.success(observability);
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询完整 observability");
+        } catch (Exception e) {
+            return handleError(e, "查询完整 observability");
+        }
+    }
+
     @GetMapping("/{runId}/traces")
     public ResponseWrapper<TraceListResponse> traces(Authentication authentication,
-                                                     @PathVariable("runId") String runId) {
+                                                     @PathVariable("runId") String runId,
+                                                     @RequestParam(value = "type", required = false, defaultValue = "") String type,
+                                                     @RequestParam(value = "phase", required = false, defaultValue = "") String phase,
+                                                     @RequestParam(value = "after", required = false, defaultValue = "0") int after,
+                                                     @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -539,10 +641,25 @@ public class AgentController {
                 }
             }
 
+            String typeFilter = nvl(type).trim().toLowerCase();
+            String phaseFilter = nvl(phase).trim().toLowerCase();
+            if (!typeFilter.isBlank()) {
+                spans.removeIf(s -> s.getType() == null || !typeFilter.equalsIgnoreCase(s.getType()));
+            }
+            if (!phaseFilter.isBlank()) {
+                spans.removeIf(s -> s.getPhase() == null || !phaseFilter.equalsIgnoreCase(s.getPhase()));
+            }
+
             // Sort by time, assign seq
             spans.sort(Comparator.comparing(s -> s.getTime() == null ? "" : s.getTime()));
             AtomicInteger seqCounter = new AtomicInteger(1);
             spans.forEach(s -> s.setSeq(seqCounter.getAndIncrement()));
+            int safeAfter = Math.max(0, after);
+            int safeLimit = Math.min(Math.max(1, limit), 500);
+            spans = spans.stream()
+                    .filter(s -> s.getSeq() > safeAfter)
+                    .limit(safeLimit)
+                    .toList();
 
             TraceListResponse.TraceSummary traceSummary = new TraceListResponse.TraceSummary(
                     longVal(summary.get("llmCalls")),
@@ -607,6 +724,10 @@ public class AgentController {
                                 .reasoningText(strVal(m.get("reasoningText")))
                                 .hasError(boolVal(m.get("hasError")))
                                 .error(emptyToNull(strVal(m.get("error"))))
+                                .attempts(m.get("attempts"))
+                                .httpRequest(m.get("httpRequest"))
+                                .httpResponse(m.get("httpResponse"))
+                                .curlCommand(emptyToNull(strVal(m.get("curlCommand"))))
                                 .build());
                     }
                 }
@@ -822,7 +943,7 @@ public class AgentController {
         String contextOverride = null;
         if (request.contextOverride() != null && !request.contextOverride().isBlank()) {
             boolean admin = isAdmin(authentication);
-            boolean debugMode = Boolean.TRUE.equals(request.stream()); // 或其他 debug 标识
+            boolean debugMode = Boolean.TRUE.equals(request.debugMode());
             if (admin && debugMode) {
                 contextOverride = request.contextOverride();
             } else {
@@ -1035,8 +1156,131 @@ public class AgentController {
         }
     }
 
+    @SuppressWarnings("unchecked")
+    private void appendTraceTimelineItems(String userId,
+                                          String runId,
+                                          List<TimelineResponse.TimelineItem> items,
+                                          String minEventTime,
+                                          String maxEventTime,
+                                          int maxAdditionalItems) {
+        if (maxAdditionalItems <= 0) {
+            return;
+        }
+        try {
+            AgentRunResultMessage result = agentDubboService.getResult(
+                    GetAgentRunResultRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .build()
+            );
+            String observabilityJson = result.getObservabilityJson();
+            if (observabilityJson == null || observabilityJson.isBlank()
+                    || observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {
+                return;
+            }
+            Map<String, Object> obs = objectMapper.readValue(observabilityJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+            AtomicInteger traceSeq = new AtomicInteger(1);
+            appendTraceTimelineItems(items, diagnostics.get("llmTraces"), "llm", minEventTime, maxEventTime,
+                    traceSeq, maxAdditionalItems);
+            appendTraceTimelineItems(items, diagnostics.get("toolTraces"), "tool", minEventTime, maxEventTime,
+                    traceSeq, maxAdditionalItems);
+        } catch (Exception e) {
+            log.debug("合并 timeline trace 失败: runId={}, error={}", runId, e.getMessage());
+        }
+    }
+
+    private void appendTraceTimelineItems(List<TimelineResponse.TimelineItem> items,
+                                          Object tracesObj,
+                                          String traceType,
+                                          String minEventTime,
+                                          String maxEventTime,
+                                          AtomicInteger traceSeq,
+                                          int maxAdditionalItems) {
+        if (!(tracesObj instanceof List<?> traces)) {
+            return;
+        }
+        for (Object item : traces) {
+            if (traceSeq.get() > maxAdditionalItems) {
+                return;
+            }
+            if (!(item instanceof Map<?, ?> trace)) {
+                continue;
+            }
+            String traceTime = strVal(trace.get("time"));
+            if (!withinTimelineWindow(traceTime, minEventTime, maxEventTime)) {
+                continue;
+            }
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("trace_id", strVal(trace.get("traceId")));
+            detail.put("phase", strVal(trace.get("phase")));
+            detail.put("todo_id", emptyToNull(strVal(trace.get("todoId"))));
+            detail.put("duration_ms", longVal(trace.get("durationMs")));
+            if ("llm".equals(traceType)) {
+                detail.put("model", strVal(trace.get("model")));
+                detail.put("endpoint", strVal(trace.get("endpoint")));
+                detail.put("has_error", boolVal(trace.get("hasError")));
+                detail.put("input_tokens", nullableLong(trace.get("inputTokens")));
+                detail.put("output_tokens", nullableLong(trace.get("outputTokens")));
+            } else {
+                detail.put("tool_name", strVal(trace.get("toolName")));
+                detail.put("success", boolVal(trace.get("success")));
+                detail.put("cache_hit", boolVal(trace.get("cacheHit")));
+            }
+            items.add(new TimelineResponse.TimelineItem(
+                    -traceSeq.getAndIncrement(),
+                    "trace",
+                    strVal(trace.get("traceId")),
+                    traceType,
+                    traceTime,
+                    traceTimelineTitle(traceType, trace),
+                    longVal(trace.get("durationMs")),
+                    detail
+            ));
+        }
+    }
+
+    private boolean withinTimelineWindow(String time, String minEventTime, String maxEventTime) {
+        if (time == null || time.isBlank()) {
+            return false;
+        }
+        if (minEventTime == null || maxEventTime == null) {
+            return true;
+        }
+        return time.compareTo(minEventTime) >= 0 && time.compareTo(maxEventTime) <= 0;
+    }
+
     private String strVal(Object value) {
         return value == null ? "" : String.valueOf(value);
+    }
+
+    private String traceTimelineTitle(String traceType, Map<?, ?> trace) {
+        String phase = strVal(trace.get("phase"));
+        long durationMs = longVal(trace.get("durationMs"));
+        if ("llm".equals(traceType)) {
+            return truncate("LLM " + phase + " " + strVal(trace.get("model")) + " " + durationMs + "ms", 120);
+        }
+        return truncate("Tool " + phase + " " + strVal(trace.get("toolName")) + " " + durationMs + "ms", 120);
+    }
+
+    private String timelineTitle(String eventType, Object payload) {
+        String type = nvl(eventType);
+        if (payload instanceof Map<?, ?> map) {
+            Object todo = map.get("todo_id");
+            Object tool = map.get("tool");
+            Object summary = map.get("summary");
+            if (todo != null && !String.valueOf(todo).isBlank()) {
+                return type + " " + todo;
+            }
+            if (tool != null && !String.valueOf(tool).isBlank()) {
+                return type + " " + tool;
+            }
+            if (summary != null && !String.valueOf(summary).isBlank()) {
+                return truncate(type + " " + summary, 120);
+            }
+        }
+        return type;
     }
 
     private long longVal(Object value) {

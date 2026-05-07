@@ -5,6 +5,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.openai.OpenAiChatModel;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
@@ -25,6 +26,9 @@ public class AgentAiServiceFactory {
     private final AgentObservabilityService observabilityService;
     private final OpenRouterCostService openRouterCostService;
     private final AgentLlmLocalConfigLoader localConfigLoader;
+
+    @Autowired(required = false)
+    private AgentRunBudgetService budgetService;
 
     @Value("${langchain4j.open-ai.api-key}")
     private String openAiApiKey;
@@ -103,7 +107,7 @@ public class AgentAiServiceFactory {
             }
             double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
-            return new OpenRouterProviderRoutedChatModel(
+            OpenRouterProviderRoutedChatModel model = new OpenRouterProviderRoutedChatModel(
                     objectMapper,
                     resolved.baseUrl(),
                     apiKey,
@@ -118,6 +122,8 @@ public class AgentAiServiceFactory {
                     resolved.endpointName(),
                     localConfigLoader
             );
+            model.setBudgetService(budgetService);
+            return model;
         }
         return buildChatModelWithTemperature(resolved, temperatureOverride);
     }
@@ -135,7 +141,7 @@ public class AgentAiServiceFactory {
         }
         if (shouldUseProviderRoutedModel(resolved)) {
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
-            return new OpenRouterProviderRoutedChatModel(
+            OpenRouterProviderRoutedChatModel model = new OpenRouterProviderRoutedChatModel(
                     objectMapper,
                     resolved.baseUrl(),
                     apiKey,
@@ -150,6 +156,8 @@ public class AgentAiServiceFactory {
                     resolved.endpointName(),
                     localConfigLoader
             );
+            model.setBudgetService(budgetService);
+            return model;
         }
 
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
@@ -255,7 +263,7 @@ public class AgentAiServiceFactory {
                                                       String apiKey,
                                                       double finalTemperature) {
         boolean enableThinking = resolveEnableThinking(resolved);
-        return new DashScopeChatModel(
+        DashScopeChatModel model = new DashScopeChatModel(
                 objectMapper,
                 resolveDashScopeBaseUrl(resolved),
                 apiKey,
@@ -268,6 +276,8 @@ public class AgentAiServiceFactory {
                 enableThinking,
                 localConfigLoader
         );
+        model.setBudgetService(budgetService);
+        return model;
     }
 
     /**

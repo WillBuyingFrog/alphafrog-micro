@@ -135,6 +135,8 @@ message AgentRunResultMessage {
   string payload_json = 4;
   string observability_json = 5;
   int32 total_credits_consumed = 6;
+  string answer_markdown = 7;
+  string structured_answer_json = 8;
 }
 
 message AgentRunStatusMessage {
@@ -153,6 +155,8 @@ message AgentRunStatusMessage {
   int64 started_at_ms = 13;
   int64 completed_at_ms = 14;
   int64 elapsed_ms = 15;
+  string observability_summary_json = 16;
+  bool observability_full_available = 17;
 }
 
 message AgentToolMessage {

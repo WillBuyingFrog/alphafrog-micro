@@ -610,9 +610,24 @@ public class TodoPlanner {
             }
         }
 
+        List<String> extractedEntities = new ArrayList<>();
+        JsonNode entitiesNode = root.path("extractedEntities");
+        if (!entitiesNode.isArray()) {
+            entitiesNode = root.path("extracted_entities");
+        }
+        if (entitiesNode.isArray()) {
+            for (JsonNode entityNode : entitiesNode) {
+                String entity = nvl(entityNode.asText("")).trim();
+                if (!entity.isBlank() && !extractedEntities.contains(entity)) {
+                    extractedEntities.add(entity);
+                }
+            }
+        }
+
         return TodoPlan.builder()
                 .analysis(nvl(root.path("analysis").asText("")))
                 .items(items)
+                .extractedEntities(extractedEntities)
                 .build();
     }
 

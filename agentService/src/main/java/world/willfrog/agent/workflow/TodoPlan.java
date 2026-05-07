@@ -16,6 +16,8 @@ public class TodoPlan {
     private String analysis;
     @Builder.Default
     private List<TodoItem> items = new ArrayList<>();
+    @Builder.Default
+    private List<String> extractedEntities = new ArrayList<>();
 
     /** 执行模式：LINEAR / DAG / AUTO */
     private PlanExecutionMode executionMode;

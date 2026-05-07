@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
@@ -16,6 +17,7 @@ import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
@@ -32,6 +34,7 @@ import java.util.List;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.lenient;
@@ -73,7 +76,23 @@ class AgentDubboServiceImplTest {
 
     @BeforeEach
     void setUp() {
-        service = new AgentDubboServiceImpl(
+        service = createService(new AgentFinalAnswerParser(new ObjectMapper()), new AgentCitationService(new ObjectMapper()));
+
+        lenient().when(eventService.shouldMarkExpired(org.mockito.ArgumentMatchers.any())).thenReturn(false);
+        lenient().when(eventService.extractRunDisplayTitle(anyString())).thenReturn("");
+        lenient().when(stateStore.loadPlan(anyString())).thenReturn(java.util.Optional.empty());
+        lenient().when(observabilityService.loadObservabilityJson(anyString(), anyString())).thenReturn("{}");
+        lenient().when(observabilityService.loadObservabilitySummaryJson(anyString(), anyString())).thenReturn("{}");
+        lenient().when(observabilityService.isFullObservabilityAvailable(anyString(), anyString())).thenReturn(false);
+        lenient().when(creditService.calculateRunTotalCredits(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyString()
+        )).thenReturn(0);
+    }
+
+    private AgentDubboServiceImpl createService(AgentFinalAnswerParser parser, AgentCitationService citations) {
+        AgentDubboServiceImpl created = new AgentDubboServiceImpl(
                 runMapper,
                 eventMapper,
                 eventService,
@@ -87,22 +106,15 @@ class AgentDubboServiceImplTest {
                 userDao,
                 new ObjectMapper(),
                 messageService,
-                toolCatalogService
+                toolCatalogService,
+                parser,
+                citations
         );
-        ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
-        ReflectionTestUtils.setField(service, "artifactRetentionNormalDays", 7);
-        ReflectionTestUtils.setField(service, "artifactRetentionAdminDays", 30);
-        ReflectionTestUtils.setField(service, "maxPollingIntervalSeconds", 3);
-
-        lenient().when(eventService.shouldMarkExpired(org.mockito.ArgumentMatchers.any())).thenReturn(false);
-        lenient().when(eventService.extractRunDisplayTitle(anyString())).thenReturn("");
-        lenient().when(stateStore.loadPlan(anyString())).thenReturn(java.util.Optional.empty());
-        lenient().when(observabilityService.loadObservabilityJson(anyString(), anyString())).thenReturn("{}");
-        lenient().when(creditService.calculateRunTotalCredits(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyList(),
-                org.mockito.ArgumentMatchers.anyString()
-        )).thenReturn(0);
+        ReflectionTestUtils.setField(created, "checkpointVersion", "v2");
+        ReflectionTestUtils.setField(created, "artifactRetentionNormalDays", 7);
+        ReflectionTestUtils.setField(created, "artifactRetentionAdminDays", 30);
+        ReflectionTestUtils.setField(created, "maxPollingIntervalSeconds", 3);
+        return created;
     }
 
     @Test
@@ -159,6 +171,67 @@ class AgentDubboServiceImplTest {
         var status = service.getStatus(GetAgentRunStatusRequest.newBuilder().setUserId("u1").setId("run-2").build());
         assertEquals("EXECUTING", status.getPhase());
         assertEquals(0, status.getTotalCreditsConsumed());
+    }
+
+    @Test
+    void getStatus_shouldPopulateLegacyObservabilityJsonWithLiteSummary() {
+        AgentRun run = new AgentRun();
+        run.setId("run-status-lite");
+        run.setUserId("u1");
+        run.setStatus(AgentRunStatus.EXECUTING);
+        run.setPlanJson("{}");
+        run.setSnapshotJson("{}");
+        when(runMapper.findByIdAndUser("run-status-lite", "u1")).thenReturn(run);
+        when(observabilityService.loadObservabilitySummaryJson("run-status-lite", "{}"))
+                .thenReturn("{\"summary\":{\"llmCalls\":1}}");
+        when(observabilityService.isFullObservabilityAvailable("run-status-lite", "{}")).thenReturn(true);
+
+        var status = service.getStatus(GetAgentRunStatusRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-status-lite")
+                .build());
+
+        assertEquals("{\"summary\":{\"llmCalls\":1}}", status.getObservabilityJson());
+        assertEquals("{\"summary\":{\"llmCalls\":1}}", status.getObservabilitySummaryJson());
+        assertEquals(true, status.getObservabilityFullAvailable());
+    }
+
+    @Test
+    void getResult_fallbackParseShouldUseCitationMapFromCompletedItems() {
+        AgentRun run = new AgentRun();
+        run.setId("run-result-citations");
+        run.setUserId("u1");
+        run.setStatus(AgentRunStatus.COMPLETED);
+        run.setSnapshotJson("""
+                {
+                  "answer": "回答 [1]",
+                  "completed_items": [
+                    {
+                      "todo_id": "todo_1",
+                      "description": "搜索",
+                      "summary": "done",
+                      "output": "{\\"citations\\":[{\\"index\\":1,\\"title\\":\\"来源\\",\\"url\\":\\"https://example.com/a\\",\\"entityMatch\\":true,\\"relevanceJudged\\":true}]}"
+                    }
+                  ]
+                }
+                """);
+        when(runMapper.findByIdAndUser("run-result-citations", "u1")).thenReturn(run);
+        AgentFinalAnswerParser parser = org.mockito.Mockito.mock(AgentFinalAnswerParser.class);
+        when(parser.parse(eq("回答 [1]"), any(AgentCitationService.CitationMap.class)))
+                .thenReturn(new AgentFinalAnswerParser.ParsedAnswer("回答 [1]", "回答 [1]", null, List.of()));
+        when(parser.writeStructuredJson(any())).thenReturn("");
+        AgentDubboServiceImpl localService = createService(parser, new AgentCitationService(new ObjectMapper()));
+
+        var response = localService.getResult(GetAgentRunResultRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-result-citations")
+                .build());
+
+        ArgumentCaptor<AgentCitationService.CitationMap> citationMapCaptor =
+                ArgumentCaptor.forClass(AgentCitationService.CitationMap.class);
+        verify(parser).parse(eq("回答 [1]"), citationMapCaptor.capture());
+        assertEquals("回答 [1]", response.getAnswerMarkdown());
+        assertEquals("https://example.com/a", citationMapCaptor.getValue().byIndex(1).url());
     }
 
     @Test

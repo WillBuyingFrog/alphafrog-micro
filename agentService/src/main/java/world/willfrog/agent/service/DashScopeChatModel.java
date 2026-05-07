@@ -16,6 +16,7 @@ import dev.langchain4j.model.openai.internal.OpenAiUtils;
 import dev.langchain4j.model.output.FinishReason;
 import dev.langchain4j.model.output.TokenUsage;
 import lombok.RequiredArgsConstructor;
+import lombok.Setter;
 import lombok.extern.slf4j.Slf4j;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
@@ -59,6 +60,9 @@ public class DashScopeChatModel implements ChatModel {
     private final boolean enableThinking;
     private final AgentLlmLocalConfigLoader localConfigLoader;
 
+    @Setter
+    private AgentRunBudgetService budgetService;
+
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
         List<ChatMessage> messages = chatRequest.messages();
@@ -75,6 +79,9 @@ public class DashScopeChatModel implements ChatModel {
         String curlCommand = null;
 
         try {
+            if (budgetService != null) {
+                budgetService.checkBeforeLlmCall();
+            }
             ChatCompletionRequest.Builder builder = ChatCompletionRequest.builder()
                     .model(OpenAiCompatibleChatModelSupport.nvl(modelName))
                     .messages(OpenAiUtils.toOpenAiMessages(messages == null ? List.of() : messages))
@@ -117,9 +124,11 @@ public class DashScopeChatModel implements ChatModel {
             String requestUrl = OpenAiCompatibleChatModelSupport.buildChatCompletionsUrl(baseUrl);
             Map<String, String> requestHeaders = OpenAiCompatibleChatModelSupport.buildRequestHeaders(apiKey);
 
+            Duration requestTimeout = OpenRouterProviderRoutedChatModel.resolveRequestTimeout(
+                    AgentContext.getStage(), AgentContext.getPhase());
             HttpRequest.Builder httpRequestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(requestUrl))
-                    .timeout(Duration.ofSeconds(180))
+                    .timeout(requestTimeout)
                     .header("Content-Type", "application/json")
                     .header("Accept", "application/json")
                     .header("Authorization", "Bearer " + OpenAiCompatibleChatModelSupport.nvl(apiKey))
@@ -135,6 +144,9 @@ public class DashScopeChatModel implements ChatModel {
                 log.info("[LLM Debug CURL] endpoint={} model={}\n{}", endpointName, modelName, curlCommand);
             }
 
+            if (budgetService != null) {
+                budgetService.checkHttpAttempt(1);
+            }
             HttpResponse<java.io.InputStream> httpResponse = HTTP_CLIENT.send(
                     httpRequestBuilder.build(),
                     HttpResponse.BodyHandlers.ofInputStream()
@@ -185,10 +197,6 @@ public class DashScopeChatModel implements ChatModel {
                 }
 
                 if (statusCode < 200 || statusCode >= 300) {
-                    if (shouldCapture && observabilityService != null) {
-                        reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs,
-                                "HTTP_ERROR_" + statusCode, null, null);
-                    }
                     String detail = "DashScope chat completion failed"
                             + " (http=" + statusCode
                             + ", model=" + OpenAiCompatibleChatModelSupport.nvl(modelName)
@@ -294,7 +302,7 @@ public class DashScopeChatModel implements ChatModel {
         return null;
     }
 
-    private void reportLlmCall(
+    private String reportLlmCall(
             RawHttpLogger.HttpRequestRecord request,
             RawHttpLogger.HttpResponseRecord response,
             String curlCommand,
@@ -305,21 +313,21 @@ public class DashScopeChatModel implements ChatModel {
             StreamingProgressTracker.StreamingProgressSnapshot streamingProgress) {
 
         if (observabilityService == null) {
-            return;
+            return null;
         }
 
         String runId = AgentContext.getRunId();
         String phase = AgentContext.getPhase();
 
         if (runId == null || runId.isBlank()) {
-            return;
+            return null;
         }
 
         TokenUsage tokenUsage = OpenAiCompatibleChatModelSupport.extractTokenUsageFromResponse(objectMapper, response, log);
         Integer cachedTokens = OpenAiCompatibleChatModelSupport.extractCachedTokensFromResponse(objectMapper, response, log);
         long completedAtMillis = startedAtMillis + durationMs;
 
-        observabilityService.recordLlmCallWithRawHttp(
+        String traceId = observabilityService.recordLlmCallWithRawHttp(
                 runId,
                 phase != null ? phase : "unknown",
                 tokenUsage,
@@ -336,6 +344,8 @@ public class DashScopeChatModel implements ChatModel {
                 response,
                 curlCommand
         );
+        AgentContext.setProviderLlmTraceId(traceId);
+        return traceId;
     }
 
     private void applyThinkingConfig(Map<String, Object> requestJsonMap, List<ChatMessage> messages) {
