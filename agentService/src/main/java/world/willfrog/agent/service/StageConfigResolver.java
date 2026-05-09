@@ -10,6 +10,9 @@ import world.willfrog.agent.config.RunStageConfig;
 import world.willfrog.agent.config.StageLlmConfig;
 import world.willfrog.agent.config.SubAgentStageConfig;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 阶段级 LLM 配置解析器。
  * <p>
@@ -240,6 +243,11 @@ public class StageConfigResolver {
                 client == null ? null : client.getExecution(),
                 local == null ? null : local.getExecution()));
 
+        // final_answer 目前没有本地专用默认值，客户端字段会在执行器中继续用 run 请求补齐 endpoint/model。
+        merged.setFinalAnswer(mergeStageLlmConfig(
+                client == null ? null : client.getFinalAnswer(),
+                local == null ? null : local.getFinalAnswer()));
+
         // sub_agent
         merged.setSubAgent(mergeSubAgentConfig(
                 client == null ? null : client.getSubAgent(),
@@ -258,6 +266,7 @@ public class StageConfigResolver {
         merged.setReasoningEffort(firstNonBlank(client.getReasoningEffort(), local == null ? null : local.getReasoningEffort()));
         merged.setTemperature(client.getTemperature() != null ? client.getTemperature() : (local == null ? null : local.getTemperature()));
         merged.setMaxTokens(client.getMaxTokens() != null ? client.getMaxTokens() : (local == null ? null : local.getMaxTokens()));
+        merged.setProviderOrder(firstNonEmpty(client.getProviderOrder(), local == null ? null : local.getProviderOrder()));
         return merged;
     }
 
@@ -308,7 +317,8 @@ public class StageConfigResolver {
                 || isNotBlank(config.getModelName())
                 || isNotBlank(config.getReasoningEffort())
                 || config.getTemperature() != null
-                || config.getMaxTokens() != null);
+                || config.getMaxTokens() != null
+                || (config.getProviderOrder() != null && !config.getProviderOrder().isEmpty()));
     }
 
     private StageLlmConfig copyStageConfig(StageLlmConfig source) {
@@ -321,6 +331,31 @@ public class StageConfigResolver {
         copy.setReasoningEffort(firstNonBlank(source.getReasoningEffort(), null));
         copy.setTemperature(source.getTemperature());
         copy.setMaxTokens(source.getMaxTokens());
+        copy.setProviderOrder(copyProviderOrder(source.getProviderOrder()));
         return copy;
+    }
+
+    private List<String> firstNonEmpty(List<String> first, List<String> second) {
+        if (first != null && !first.isEmpty()) {
+            return copyProviderOrder(first);
+        }
+        return copyProviderOrder(second);
+    }
+
+    private List<String> copyProviderOrder(List<String> source) {
+        if (source == null || source.isEmpty()) {
+            return null;
+        }
+        List<String> copy = new ArrayList<>();
+        for (String provider : source) {
+            if (provider == null || provider.isBlank()) {
+                continue;
+            }
+            String normalized = provider.trim();
+            if (!copy.contains(normalized)) {
+                copy.add(normalized);
+            }
+        }
+        return copy.isEmpty() ? null : copy;
     }
 }

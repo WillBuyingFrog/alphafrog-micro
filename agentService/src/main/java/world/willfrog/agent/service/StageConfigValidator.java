@@ -39,6 +39,7 @@ public class StageConfigValidator {
         List<String> errors = new ArrayList<>();
         validateStage(config.getPlanning(), "planning", errors);
         validateStage(config.getExecution(), "execution", errors);
+        validateStage(config.getFinalAnswer(), "final_answer", errors);
         if (config.getSubAgent() != null) {
             validateStage(config.getSubAgent().getLowComplexity(), "sub_agent.low_complexity", errors);
             validateStage(config.getSubAgent().getMediumComplexity(), "sub_agent.medium_complexity", errors);

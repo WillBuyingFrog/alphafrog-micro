@@ -19,6 +19,8 @@ public class WorkflowRequest {
     private String userGoal;
     private TodoPlan plan;
     private ChatModel model;
+    private ChatModel finalAnswerModel;
+    private String finalAnswerReasoningEffort;
     private List<ToolSpecification> toolSpecifications;
     private String endpointName;
     private String endpointBaseUrl;

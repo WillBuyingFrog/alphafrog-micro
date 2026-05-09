@@ -1,5 +1,6 @@
 package world.willfrog.agent.config;
 
+import com.fasterxml.jackson.annotation.JsonAlias;
 import lombok.Data;
 
 /**
@@ -9,5 +10,7 @@ import lombok.Data;
 public class RunStageConfig {
     private StageLlmConfig planning;
     private StageLlmConfig execution;
+    @JsonAlias({"final_answer", "finalAnswer"})
+    private StageLlmConfig finalAnswer;
     private SubAgentStageConfig subAgent;
 }

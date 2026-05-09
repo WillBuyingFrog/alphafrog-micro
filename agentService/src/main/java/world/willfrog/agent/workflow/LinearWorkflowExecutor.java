@@ -225,7 +225,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             return buildFailureResult(completedTodos, nvl(record.getSummary()));
         }
 
-        FinalAnswerResult finalAnswer = generateFinalAnswer(userGoal, completedTodos, request.getModel());
+        ChatModel finalAnswerModel = request.getFinalAnswerModel() == null ? request.getModel() : request.getFinalAnswerModel();
+        FinalAnswerResult finalAnswer = generateFinalAnswer(
+                userGoal,
+                completedTodos,
+                finalAnswerModel,
+                request.getFinalAnswerReasoningEffort());
         return WorkflowExecutionResult.builder()
                 .success(true)
                 .finalAnswer(finalAnswer.answer())
@@ -262,7 +267,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
     private FinalAnswerResult generateFinalAnswer(String userGoal,
                                                   List<CompletedTodoInfo> completedTodos,
-                                                  ChatModel model) {
+                                                  ChatModel model,
+                                                  String finalAnswerReasoningEffort) {
         AgentCitationService.CitationMap citationMap = citationService.buildCitationMap(completedTodos);
         try {
             List<ChatMessage> messages = new ArrayList<>();
@@ -286,8 +292,12 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
             String previousPhase = AgentContext.getPhase();
             String previousStage = AgentContext.getStage();
+            String previousReasoningEffort = AgentContext.getReasoningEffort();
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
             AgentContext.setStage("final_answer");
+            if (finalAnswerReasoningEffort != null && !finalAnswerReasoningEffort.isBlank()) {
+                AgentContext.setReasoningEffort(finalAnswerReasoningEffort);
+            }
             ChatResponse response;
             try {
                 response = model.chat(messages);
@@ -301,6 +311,11 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     AgentContext.clearStage();
                 } else {
                     AgentContext.setStage(previousStage);
+                }
+                if (previousReasoningEffort == null || previousReasoningEffort.isBlank()) {
+                    AgentContext.clearReasoningEffort();
+                } else {
+                    AgentContext.setReasoningEffort(previousReasoningEffort);
                 }
             }
             return new FinalAnswerResult(response.aiMessage() != null ? response.aiMessage().text() : "", citationMap);

@@ -41,6 +41,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -412,6 +413,61 @@ class AgentRunExecutorTest {
         verify(todoPlanner).plan(planCaptor.capture());
         assertEquals("stage-endpoint", planCaptor.getValue().getEndpointName());
         assertEquals("stage-model", planCaptor.getValue().getModelName());
+    }
+
+    @Test
+    void execute_shouldUseStageSpecificOpenRouterProviderOrder() {
+        AgentRun run = run("run-stage-provider-order");
+        run.setExt("""
+                {"stage_config_json":{
+                  "planning":{"endpointName":"openrouter","modelName":"planning-model","providerOrder":["moonshotai/int4","novita"]},
+                  "execution":{"endpointName":"openrouter","modelName":"execution-model","provider_order":"fireworks, deepinfra"},
+                  "final_answer":{"endpointName":"openrouter","modelName":"final-model","providers":["novita"],"reasoningEffort":"high"}
+                }}
+                """);
+        when(runMapper.findById("run-stage-provider-order")).thenReturn(run);
+        when(eventService.isRunnable("run-stage-provider-order", "u1")).thenReturn(true);
+        when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of("run-level-provider"));
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        StageLlmConfig planning = stage("openrouter", "planning-model");
+        planning.setProviderOrder(List.of("moonshotai/int4", "novita"));
+        StageLlmConfig execution = stage("openrouter", "execution-model");
+        execution.setProviderOrder(List.of("fireworks", "deepinfra"));
+        StageLlmConfig finalAnswer = stage("openrouter", "final-model");
+        finalAnswer.setProviderOrder(List.of("novita"));
+        finalAnswer.setReasoningEffort("high");
+        stageConfig.setPlanning(planning);
+        stageConfig.setExecution(execution);
+        stageConfig.setFinalAnswer(finalAnswer);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of("valid-provider")
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-stage-provider-order");
+
+        ArgumentCaptor<AgentLlmResolver.ResolvedLlm> resolvedCaptor = ArgumentCaptor.forClass(AgentLlmResolver.ResolvedLlm.class);
+        ArgumentCaptor<List> providerCaptor = ArgumentCaptor.forClass(List.class);
+        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(resolvedCaptor.capture(), providerCaptor.capture());
+
+        assertEquals("execution-model", resolvedCaptor.getAllValues().get(0).modelName());
+        assertEquals(List.of("fireworks", "deepinfra", "valid-provider"), providerCaptor.getAllValues().get(0));
+        assertEquals("planning-model", resolvedCaptor.getAllValues().get(1).modelName());
+        assertEquals(List.of("moonshotai/int4", "novita", "valid-provider"), providerCaptor.getAllValues().get(1));
+        assertEquals("final-model", resolvedCaptor.getAllValues().get(2).modelName());
+        assertEquals(List.of("novita", "valid-provider"), providerCaptor.getAllValues().get(2));
+
+        ArgumentCaptor<WorkflowRequest> workflowCaptor = ArgumentCaptor.forClass(WorkflowRequest.class);
+        verify(workflowExecutor).execute(workflowCaptor.capture());
+        assertEquals(chatLanguageModel, workflowCaptor.getValue().getFinalAnswerModel());
+        assertEquals("high", workflowCaptor.getValue().getFinalAnswerReasoningEffort());
     }
 
     private AgentRun run(String id) {

@@ -150,7 +150,7 @@ public class AgentRunExecutor {
             String modelName = resolvedLlm.modelName();
             String endpointBaseUrl = resolvedLlm.baseUrl();
             var userProviderOrder = eventService.extractOpenRouterProviderOrder(run.getExt());
-            var providerOrder = mergeProviderOrder(userProviderOrder, resolvedLlm.validProviders());
+            var providerOrder = mergeProviderOrder(resolveStageProviderOrder(execStageCfg, userProviderOrder), resolvedLlm.validProviders());
 
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
@@ -172,7 +172,9 @@ public class AgentRunExecutor {
                 AgentLlmResolver.ResolvedLlm planningResolvedLlm = aiServiceFactory.resolveLlm(
                         planningStageCfg.getEndpointName(), planningStageCfg.getModelName());
                 // Bug 修复：planning 阶段应使用 planning 模型自己的 validProviders，而非 execution 阶段的
-                var planningProviderOrder = mergeProviderOrder(userProviderOrder, planningResolvedLlm.validProviders());
+                var planningProviderOrder = mergeProviderOrder(
+                        resolveStageProviderOrder(planningStageCfg, userProviderOrder),
+                        planningResolvedLlm.validProviders());
                 planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, planningProviderOrder);
                 planningEndpointName = planningResolvedLlm.endpointName();
                 planningModelName = planningResolvedLlm.modelName();
@@ -191,6 +193,27 @@ public class AgentRunExecutor {
                     "model", planningModelName,
                     "dedicatedConfig", useDedicatedPlanningModel
             ));
+
+            ChatModel finalAnswerModel = null;
+            StageLlmConfig finalAnswerStageCfg = chooseEffectiveStageConfig(
+                    eventService.extractEndpointName(run.getExt()),
+                    eventService.extractModelName(run.getExt()),
+                    stageConfig.getFinalAnswer(),
+                    run.getExt(),
+                    "final_answer");
+            if (hasAnyStageField(stageConfig.getFinalAnswer()) && finalAnswerStageCfg != null && finalAnswerStageCfg.isValid()) {
+                AgentLlmResolver.ResolvedLlm finalAnswerResolvedLlm = aiServiceFactory.resolveLlm(
+                        finalAnswerStageCfg.getEndpointName(), finalAnswerStageCfg.getModelName());
+                var finalAnswerProviderOrder = mergeProviderOrder(
+                        resolveStageProviderOrder(finalAnswerStageCfg, userProviderOrder),
+                        finalAnswerResolvedLlm.validProviders());
+                finalAnswerModel = aiServiceFactory.buildChatModelWithProviderOrder(finalAnswerResolvedLlm, finalAnswerProviderOrder);
+                eventService.append(runId, userId, "FINAL_ANSWER_MODEL_SELECTED", mapOf(
+                        "endpoint", finalAnswerResolvedLlm.endpointName(),
+                        "model", finalAnswerResolvedLlm.modelName(),
+                        "dedicatedConfig", true
+                ));
+            }
 
             String userGoal = resolveUserGoal(run);
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
@@ -274,6 +297,8 @@ public class AgentRunExecutor {
                     .userGoal(userGoal)
                     .plan(todoPlan)
                     .model(chatModel)
+                    .finalAnswerModel(finalAnswerModel)
+                    .finalAnswerReasoningEffort(finalAnswerStageCfg == null ? null : finalAnswerStageCfg.getReasoningEffort())
                     .toolSpecifications(toolSpecifications)
                     .endpointName(endpointName)
                     .endpointBaseUrl(endpointBaseUrl)
@@ -457,6 +482,9 @@ public class AgentRunExecutor {
         effective.setMaxTokens(clientStage != null && clientStage.getMaxTokens() != null
                 ? clientStage.getMaxTokens()
                 : (fallback == null ? null : fallback.getMaxTokens()));
+        effective.setProviderOrder(clientStage != null && clientStage.getProviderOrder() != null && !clientStage.getProviderOrder().isEmpty()
+                ? clientStage.getProviderOrder()
+                : (fallback == null ? null : fallback.getProviderOrder()));
         return effective;
     }
 
@@ -499,7 +527,15 @@ public class AgentRunExecutor {
                 || hasText(config.getModelName())
                 || hasText(config.getReasoningEffort())
                 || config.getTemperature() != null
-                || config.getMaxTokens() != null);
+                || config.getMaxTokens() != null
+                || (config.getProviderOrder() != null && !config.getProviderOrder().isEmpty()));
+    }
+
+    private List<String> resolveStageProviderOrder(StageLlmConfig stageConfig, List<String> runProviderOrder) {
+        if (stageConfig != null && stageConfig.getProviderOrder() != null && !stageConfig.getProviderOrder().isEmpty()) {
+            return stageConfig.getProviderOrder();
+        }
+        return runProviderOrder;
     }
 
     /**

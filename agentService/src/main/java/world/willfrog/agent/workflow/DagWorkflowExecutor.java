@@ -581,11 +581,16 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             messages.add(new UserMessage(contextText.toString()));
             String previousPhase = AgentContext.getPhase();
             String previousStage = AgentContext.getStage();
+            String previousReasoningEffort = AgentContext.getReasoningEffort();
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
             AgentContext.setStage("final_answer");
+            if (request.getFinalAnswerReasoningEffort() != null && !request.getFinalAnswerReasoningEffort().isBlank()) {
+                AgentContext.setReasoningEffort(request.getFinalAnswerReasoningEffort());
+            }
+            ChatModel finalAnswerModel = request.getFinalAnswerModel() == null ? request.getModel() : request.getFinalAnswerModel();
             ChatResponse response;
             try {
-                response = request.getModel().chat(messages);
+                response = finalAnswerModel.chat(messages);
             } finally {
                 if (previousPhase == null || previousPhase.isBlank()) {
                     AgentContext.clearPhase();
@@ -596,6 +601,11 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                     AgentContext.clearStage();
                 } else {
                     AgentContext.setStage(previousStage);
+                }
+                if (previousReasoningEffort == null || previousReasoningEffort.isBlank()) {
+                    AgentContext.clearReasoningEffort();
+                } else {
+                    AgentContext.setReasoningEffort(previousReasoningEffort);
                 }
             }
             var aiMessage = response == null ? null : response.aiMessage();

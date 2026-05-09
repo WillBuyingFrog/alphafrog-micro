@@ -6,6 +6,8 @@ import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.config.StageLlmConfig;
 
+import java.util.List;
+
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.mockito.Mockito.mock;
@@ -76,6 +78,31 @@ class StageConfigResolverTest {
         assertEquals("base-model", accessor.planning().getModelName());
         assertEquals(0.2D, accessor.planning().getTemperature());
         assertEquals(1024, accessor.planning().getMaxTokens());
+    }
+
+    @Test
+    void resolveShouldParseStageProviderOrderArrayAndCommaString() {
+        AgentLlmProperties properties = new AgentLlmProperties();
+        AgentLlmLocalConfigLoader localConfigLoader = mock(AgentLlmLocalConfigLoader.class);
+        when(localConfigLoader.current()).thenReturn(java.util.Optional.empty());
+
+        StageConfigResolver resolver = new StageConfigResolver(
+                properties,
+                localConfigLoader,
+                new ObjectMapper()
+        );
+
+        var config = resolver.resolve("""
+                {"stage_config_json":{
+                  "planning":{"endpointName":"openrouter","modelName":"planner","providerOrder":["moonshotai/int4","novita"]},
+                  "execution":{"endpointName":"openrouter","modelName":"executor","provider_order":"fireworks, deepinfra"},
+                  "final_answer":{"endpointName":"openrouter","modelName":"final","providers":["novita"]}
+                }}
+                """);
+
+        assertEquals(List.of("moonshotai/int4", "novita"), config.getPlanning().getProviderOrder());
+        assertEquals(List.of("fireworks", "deepinfra"), config.getExecution().getProviderOrder());
+        assertEquals(List.of("novita"), config.getFinalAnswer().getProviderOrder());
     }
 
     private record RunStageConfigAccessor(world.willfrog.agent.config.RunStageConfig config) {
