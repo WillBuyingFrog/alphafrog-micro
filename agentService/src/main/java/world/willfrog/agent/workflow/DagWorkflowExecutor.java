@@ -115,6 +115,8 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
     private final ObjectMapper objectMapper;
     /** 引用来源服务，从已完成任务中构建引用编号表 */
     private final AgentCitationService citationService;
+    /** 轻量失败分类器，避免所有失败都进入 LLM Judge。 */
+    private final WorkflowFailureClassifier failureClassifier;
 
     /** 观测阶段前缀：每个节点会再追加 _todoId 形成完整 phase 名 */
     private static final String PHASE_DAG_EXECUTION = "dag_execution";
@@ -217,6 +219,42 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             String failedNodeId = outcome.failedItem().getId();
             int usedRetries = retryByFailedNode.getOrDefault(failedNodeId, 0);
             TodoExecutionRecord failedRecord = toLegacyRecord(outcome.failedRecord());
+            WorkflowFailureClassifier.FailureClassification classification = failureClassifier.classify(outcome.failedRecord());
+            eventService.append(runId, userId, "FAILURE_CLASSIFIED", Map.of(
+                    "todoId", failedNodeId,
+                    "category", classification.category().name(),
+                    "action", classification.action().name(),
+                    "errorCode", nvl(classification.errorCode())
+            ));
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.FAIL_FAST) {
+                String reason = nvl(outcome.failureReason());
+                recordDagCompletion(runId, userId, false, startedAt, reason, outcome.totalToolCallsUsed());
+                return WorkflowExecutionResult.builder()
+                        .success(false)
+                        .failureReason(reason)
+                        .toolCallsUsed(outcome.totalToolCallsUsed())
+                        .build();
+            }
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.RETRY_CURRENT) {
+                if (usedRetries >= maxRetriesPerNode) {
+                    String reason = "dag_retry_exhausted:" + failedNodeId;
+                    recordDagCompletion(runId, userId, false, startedAt, reason, outcome.totalToolCallsUsed());
+                    return WorkflowExecutionResult.builder()
+                            .success(false)
+                            .failureReason(reason)
+                            .toolCallsUsed(outcome.totalToolCallsUsed())
+                            .build();
+                }
+                retryByFailedNode.put(failedNodeId, usedRetries + 1);
+                patchRound++;
+                eventService.append(runId, userId, "DAG_NODE_RETRY_SCHEDULED", Map.of(
+                        "failed_node_id", failedNodeId,
+                        "retry_count", usedRetries + 1,
+                        "max_retries", maxRetriesPerNode,
+                        "source", classification.category().name()
+                ));
+                continue;
+            }
             JudgeDecision decision = planJudge.judge(
                     failedRecord,
                     workingPlan,

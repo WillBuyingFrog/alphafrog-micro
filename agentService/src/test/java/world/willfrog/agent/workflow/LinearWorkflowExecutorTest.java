@@ -70,7 +70,8 @@ class LinearWorkflowExecutorTest {
                 patchPlanner,
                 planPatcher,
                 stateStore,
-                new AgentCitationService(new ObjectMapper())
+                new AgentCitationService(new ObjectMapper()),
+                new WorkflowFailureClassifier()
         );
         lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultMaxToolCalls", 20);
@@ -201,6 +202,34 @@ class LinearWorkflowExecutorTest {
         verify(planJudge).judge(any(), any(), anyMap(), anyString(), any());
         verify(patchPlanner).generatePatch(any(), any(), anyMap(), anyString(), any());
         verify(planPatcher).applyPatch(any(), any());
+    }
+
+    @Test
+    void execute_planPatchEnabled_shouldRetryInfraFailureWithoutPlanJudge() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(false)
+                        .output("")
+                        .summary("HTTP_ERROR_500 Internal server error")
+                        .toolCallsUsed(0)
+                        .build(),
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .output("{\"ok\":true}")
+                        .summary("retry success")
+                        .toolCallsUsed(1)
+                        .build()
+        );
+
+        WorkflowRequest request = request("run-infra-retry", planWithTools(1));
+        request.setEnablePlanPatch(true);
+        WorkflowExecutionResult result = executor.execute(request);
+
+        assertTrue(result.isSuccess());
+        verifyNoInteractions(planJudge, patchPlanner, planPatcher);
+        verify(eventService).append(eq("run-infra-retry"), eq("u1"), eq("FAILURE_CLASSIFIED"), anyMap());
     }
 
     @Test

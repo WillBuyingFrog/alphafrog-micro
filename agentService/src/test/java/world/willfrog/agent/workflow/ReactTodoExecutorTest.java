@@ -268,6 +268,36 @@ class ReactTodoExecutorTest {
     }
 
     @Test
+    void executeWithObservability_shouldStopWhenSameFailedToolCallRepeats() {
+        ReflectionTestUtils.setField(executor, "maxCallsPerTodo", 10);
+        ReflectionTestUtils.setField(executor, "maxSameFailedToolCallPerTodo", 1);
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(toolCallMessage("call_1", "searchIndex", "{\"keyword\":\"bad\"}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(toolCallMessage("call_2", "searchIndex", "{\"keyword\":\"bad\"}"))
+                        .build());
+        when(toolRouter.invokeWithMeta(eq("searchIndex"), anyMap()))
+                .thenReturn(invocationResult("{\"ok\":false,\"error\":{\"code\":\"NO_DATA\",\"message\":\"not found\"}}", false));
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "重复失败工具调用",
+                ctx,
+                model,
+                "run-repeat",
+                "dag_execution"
+        );
+
+        assertFalse(record.isSuccess());
+        assertTrue(record.getSummary().startsWith("repeated_tool_call:searchIndex:"));
+        assertEquals(2, record.getToolCallsUsed());
+        verify(model, times(2)).chat(any(ChatRequest.class));
+    }
+
+    @Test
     void executeWithObservability_shouldContinueAfterToolFailure() {
         ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
         when(model.chat(any(ChatRequest.class)))
@@ -347,6 +377,45 @@ class ReactTodoExecutorTest {
         String userText = ((dev.langchain4j.data.message.UserMessage) msgs.get(1)).singleText();
         // "分析指数" is the userGoal set in context(), not the task description "查询沪深300"
         assertTrue(userText.contains("分析指数"), "First UserMessage must contain userGoal");
+    }
+
+    @Test
+    void buildMessages_shouldUseCompletedTodoSummaryByDefault() {
+        CompletedTodoInfo completed = CompletedTodoInfo.builder()
+                .todoId("todo_1")
+                .description("已完成任务")
+                .summary("短摘要")
+                .output("{\"ok\":true,\"data\":{\"dataset_id\":\"ds_001\"}}")
+                .messageHistory(List.of(
+                        CompletedTodoInfo.ChatMessageSnapshot.builder()
+                                .role("assistant")
+                                .content("完整历史不应默认注入")
+                                .build()))
+                .build();
+        ReactTodoExecutor.TodoExecutionContext ctx = ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("分析指数")
+                .availableTools(Set.of("searchIndex"))
+                .completedTodos(List.of(completed))
+                .datasetRefs(new java.util.HashMap<>())
+                .build();
+        when(model.chat(any(List.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("完成"))
+                        .build());
+
+        executor.executeWithObservability("下一步", ctx, model, "run-summary", "test");
+
+        @SuppressWarnings("unchecked")
+        ArgumentCaptor<List<dev.langchain4j.data.message.ChatMessage>> captor =
+                ArgumentCaptor.forClass(List.class);
+        verify(model).chat(captor.capture());
+        String joined = captor.getValue().stream()
+                .filter(msg -> msg instanceof dev.langchain4j.data.message.UserMessage)
+                .map(msg -> ((dev.langchain4j.data.message.UserMessage) msg).singleText())
+                .collect(java.util.stream.Collectors.joining("\n"));
+        assertTrue(joined.contains("短摘要"));
+        assertTrue(joined.contains("ds_001"));
+        assertFalse(joined.contains("完整历史不应默认注入"));
     }
 
     private ReactTodoExecutor.TodoExecutionContext context() {

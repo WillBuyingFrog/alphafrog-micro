@@ -33,6 +33,7 @@ import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
@@ -85,6 +86,8 @@ class AgentRunExecutorTest {
     private StageConfigResolver stageConfigResolver;
     @Mock
     private StageConfigValidator stageConfigValidator;
+    @Mock
+    private AgentSimpleToolFastPathService simpleToolFastPathService;
 
     private AgentRunExecutor executor;
 
@@ -111,7 +114,8 @@ class AgentRunExecutorTest {
                 stageConfigResolver,
                 stageConfigValidator,
                 new AgentFinalAnswerParser(new ObjectMapper()),
-                new AgentCitationService(new ObjectMapper())
+                new AgentCitationService(new ObjectMapper()),
+                simpleToolFastPathService
         );
         executor.init();
 
@@ -123,6 +127,7 @@ class AgentRunExecutorTest {
         when(eventService.extractUserGoal(anyString())).thenReturn("goal");
         when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
         when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
+        lenient().when(simpleToolFastPathService.decide(anyString(), any())).thenReturn(Optional.empty());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null, List.of()));
@@ -155,6 +160,30 @@ class AgentRunExecutorTest {
         verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
         verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
         verify(creditService).recordRunConsumeLedger(eq("run-ok"), eq("u1"), eq(0));
+    }
+
+    @Test
+    void execute_shouldUseFastPathBeforePlanningWhenSelected() {
+        AgentRun run = run("run-fast-path");
+        when(runMapper.findById("run-fast-path")).thenReturn(run);
+        when(eventService.isRunnable("run-fast-path", "u1")).thenReturn(true);
+        AgentSimpleToolFastPathService.FastPathDecision decision =
+                AgentSimpleToolFastPathService.FastPathDecision.selected("searchIndex", Map.of("keyword", "沪深300"));
+        when(simpleToolFastPathService.decide(anyString(), any())).thenReturn(Optional.of(decision));
+        when(simpleToolFastPathService.execute(decision)).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .finalAnswer("fast answer")
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-fast-path");
+
+        verify(simpleToolFastPathService).execute(decision);
+        verify(todoPlanner, times(0)).plan(any());
+        verify(eventService).append(eq("run-fast-path"), eq("u1"), eq("FAST_PATH_SELECTED"), anyMap());
+        verify(eventService).append(eq("run-fast-path"), eq("u1"), eq("FAST_PATH_COMPLETED"), anyMap());
+        verify(runMapper).updateSnapshot(eq("run-fast-path"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
     }
 
     @Test

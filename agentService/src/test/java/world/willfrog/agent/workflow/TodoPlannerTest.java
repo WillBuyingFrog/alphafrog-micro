@@ -113,7 +113,7 @@ class TodoPlannerTest {
         when(structuredMsg.text()).thenReturn(
             "{\"analysis\":\"分析用户查询需求\",\"items\":["
             + "{\"id\":\"todo_1\",\"sequence\":1,\"description\":\"搜索平安相关的股票信息\"}"
-            + "]}"
+            + "],\"extractedEntities\":[\"沪深300\",\"中证500\"]}"
         );
         ChatResponse structuredResp = ChatResponse.builder()
                 .aiMessage(structuredMsg)
@@ -139,6 +139,7 @@ class TodoPlannerTest {
         assertEquals(1, plan.getItems().size());
         assertEquals("todo_1", plan.getItems().get(0).getId());
         assertEquals("搜索平安相关的股票信息", plan.getItems().get(0).getDescription());
+        assertEquals(List.of("沪深300", "中证500"), plan.getExtractedEntities());
         // 验证 analysis 使用了 strategy stage 的 detail
         assertEquals("先搜索平安相关股票信息，再整理结果。", plan.getAnalysis());
         verify(stateStore).recordPlan(eq("run-1"), anyString(), eq(true));

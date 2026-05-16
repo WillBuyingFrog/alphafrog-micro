@@ -99,6 +99,8 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private final AgentRunStateStore stateStore;
     /** 引用来源服务，从已完成任务中提取引用并构建引用表 */
     private final AgentCitationService citationService;
+    /** 轻量失败分类器，避免所有失败都进入 LLM Judge。 */
+    private final WorkflowFailureClassifier failureClassifier;
 
     /** 整个 Run 的全局工具调用次数上限（默认 20 次），防止失控消耗 */
     @Value("${agent.flow.workflow.max-tool-calls:20}")
@@ -239,6 +241,32 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 log.info("Run {} has been {}, skipping plan patch", runId, runStatus.get());
                 return buildFailureResult(completedTodos,
                         "run_" + runStatus.get().toLowerCase() + ":" + nvl(record.getSummary()));
+            }
+
+            WorkflowFailureClassifier.FailureClassification classification = failureClassifier.classify(record);
+            eventService.append(runId, userId, "FAILURE_CLASSIFIED", Map.of(
+                    "todoId", item.getId(),
+                    "category", classification.category().name(),
+                    "action", classification.action().name(),
+                    "errorCode", nvl(classification.errorCode())
+            ));
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.FAIL_FAST) {
+                return buildFailureResult(completedTodos, nvl(record.getSummary()));
+            }
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.RETRY_CURRENT) {
+                int retries = retryCountByTodo.getOrDefault(item.getId(), 0);
+                if (retries >= maxRetriesPerTodoAfterJudge) {
+                    return buildFailureResult(completedTodos,
+                            "todo_retry_exhausted:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                retryCountByTodo.put(item.getId(), retries + 1);
+                eventService.append(runId, userId, "TODO_RETRY_SCHEDULED", Map.of(
+                        "todo_id", item.getId(),
+                        "retry_count", retries + 1,
+                        "max_retries", maxRetriesPerTodoAfterJudge,
+                        "source", classification.category().name()
+                ));
+                continue;
             }
 
             // 调用 Plan Judge 对失败做出判断

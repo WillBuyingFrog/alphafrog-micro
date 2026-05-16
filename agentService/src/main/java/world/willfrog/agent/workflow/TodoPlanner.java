@@ -687,6 +687,9 @@ public class TodoPlanner {
     private TodoPlan normalize(TodoPlan source, int maxTodos, Set<String> toolWhitelist) {
         TodoPlan out = new TodoPlan();
         out.setAnalysis(nvl(source.getAnalysis()));
+        out.setExtractedEntities(source.getExtractedEntities() == null
+                ? List.of()
+                : new ArrayList<>(source.getExtractedEntities()));
         List<TodoItem> normalized = new ArrayList<>();
         int seq = 1;
         for (TodoItem raw : source.getItems() == null ? List.<TodoItem>of() : source.getItems()) {

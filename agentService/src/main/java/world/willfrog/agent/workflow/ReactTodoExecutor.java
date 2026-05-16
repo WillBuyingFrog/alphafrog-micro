@@ -121,6 +121,14 @@ public class ReactTodoExecutor {
     @Value("${agent.flow.react.max-calls-per-todo:10}")
     private int maxCallsPerTodo;
 
+    /** 同一 Todo 内同一失败工具调用允许重复出现的最大次数。 */
+    @Value("${agent.flow.react.max-same-failed-tool-call-per-todo:1}")
+    private int maxSameFailedToolCallPerTodo;
+
+    /** 已完成 Todo 注入到后续 Todo 的上下文模式：summary / full。 */
+    @Value("${agent.flow.react.completed-todo-context-mode:summary}")
+    private String completedTodoContextMode;
+
     /** Run 级 Redis 状态缓存，用于在执行循环中检查 run 是否被用户取消 */
     private final AgentRunStateStore stateStore;
 
@@ -211,7 +219,7 @@ public class ReactTodoExecutor {
             TodoExecutionRecord record = executeReActLoop(description, context, model, runId, phase, retryCount);
 
             // 如果 ReAct 循环失败且仍有重试配额，进行重试
-            if (!record.isSuccess() && retryCount < MAX_RETRIES) {
+            if (!record.isSuccess() && retryCount < MAX_RETRIES && !isConvergenceStop(record)) {
                 String errorHint = extractErrorHint(record.getOutput());
                 log.warn("Todo execution failed, will retry {}/{}: {}, error: {}",
                         retryCount + 1, MAX_RETRIES, description, errorHint);
@@ -280,6 +288,7 @@ public class ReactTodoExecutor {
         int toolCallsUsed = 0;
         String lastLlmTraceId = null;
         String lastOutput = "";
+        Map<String, Integer> failedToolCallCounts = new HashMap<>();
 
         // Sub-Agent 追踪：key=sub_agent_id, value=后台执行的 Future
         Map<String, Future<SubAgentRunner.SubAgentResult>> pendingSubAgents = new HashMap<>();
@@ -383,6 +392,23 @@ public class ReactTodoExecutor {
                     if (!outcome.success()) {
                         log.warn("Tool {} failed in ReAct round {}, LLM will decide next step",
                                 toolRequest.name(), callCount);
+                        String fingerprint = toolCallFingerprint(toolRequest.name(), toolRequest.arguments());
+                        int repeatedFailures = failedToolCallCounts.merge(fingerprint, 1, Integer::sum);
+                        if (repeatedFailures > Math.max(1, maxSameFailedToolCallPerTodo)) {
+                            String argsHash = Integer.toHexString(fingerprint.hashCode());
+                            String summary = "repeated_tool_call:" + toolRequest.name() + ":" + argsHash;
+                            log.warn("Stopping ReAct loop because failed tool call repeated: tool={}, count={}, hash={}",
+                                    toolRequest.name(), repeatedFailures, argsHash);
+                            return TodoExecutionRecord.builder()
+                                    .success(false)
+                                    .output(outcome.result())
+                                    .summary(summary)
+                                    .llmTraceId(lastLlmTraceId)
+                                    .retryCount(retryCount)
+                                    .toolCallsUsed(toolCallsUsed)
+                                    .messageHistory(convertMessagesToSnapshots(messages))
+                                    .build();
+                        }
                     }
                 }
                 // 工具执行完毕后继续下一轮 ReAct 循环（LLM 看到工具结果后继续决策）
@@ -520,6 +546,12 @@ public class ReactTodoExecutor {
                 .completedTodos(updatedTodos)
                 .datasetRefs(original.getDatasetRefs())
                 .build();
+    }
+
+    private boolean isConvergenceStop(TodoExecutionRecord record) {
+        return record != null
+                && record.getSummary() != null
+                && record.getSummary().startsWith("repeated_tool_call:");
     }
 
     /**
@@ -897,18 +929,18 @@ public class ReactTodoExecutor {
         }
         messages.add(new UserMessage(dynamicCtx.toString()));
 
-        // 3. 历史完成的 Todo：优先使用完整消息历史（含 CoT 推理过程）
+        // 3. 历史完成的 Todo：默认只传 summary/output，避免跨 todo 上下文膨胀。
         for (CompletedTodoInfo todo : context.getCompletedTodos()) {
-            if (todo.getMessageHistory() != null && !todo.getMessageHistory().isEmpty()) {
+            if (shouldRestoreFullHistory(description, todo)) {
                 // 还原对话上下文（含 LLM 的 CoT 推理和工具调用历史）
                 log.debug("Restoring message history for todo {}: {} messages", todo.getTodoId(), todo.getMessageHistory().size());
                 messages.addAll(restoreMessagesFromSnapshots(todo.getMessageHistory()));
             } else {
-                // summary 模式（向后兼容旧数据）
                 messages.add(new UserMessage(String.format(
-                        "已完成: %s\n结果: %s",
+                        "已完成: %s\n摘要: %s\n输出: %s",
                         todo.getDescription(),
-                        todo.getSummary()
+                        nvl(todo.getSummary()),
+                        nvl(todo.getOutput())
                 )));
             }
         }
@@ -1000,6 +1032,24 @@ public class ReactTodoExecutor {
         }
 
         return snapshots;
+    }
+
+    /**
+     * 判断是否恢复已完成 Todo 的完整消息历史。
+     *
+     * <p>默认 summary 模式可以降低 prompt 体积；full 模式作为兼容回滚开关保留。</p>
+     */
+    private boolean shouldRestoreFullHistory(String currentDescription, CompletedTodoInfo todo) {
+        if (todo == null || todo.getMessageHistory() == null || todo.getMessageHistory().isEmpty()) {
+            return false;
+        }
+        if ("full".equalsIgnoreCase(nvl(completedTodoContextMode))) {
+            return true;
+        }
+        String text = nvl(currentDescription);
+        return text.contains("参考前面的推理过程")
+                || text.contains("复盘完整过程")
+                || text.contains("继续上一步对话");
     }
 
     /**
@@ -1110,6 +1160,43 @@ public class ReactTodoExecutor {
                     .toList());
         }
         return names;
+    }
+
+    /**
+     * 生成工具调用指纹，用于识别同一 Todo 内重复失败的同一工具同一参数调用。
+     */
+    private String toolCallFingerprint(String toolName, String arguments) {
+        return nvl(toolName) + ":" + canonicalArguments(arguments);
+    }
+
+    /**
+     * 将工具参数规范化为稳定 JSON。解析失败时使用去空白后的原始字符串。
+     */
+    private String canonicalArguments(String arguments) {
+        if (arguments == null || arguments.isBlank()) {
+            return "";
+        }
+        try {
+            Object parsed = objectMapper.readValue(arguments, Object.class);
+            return objectMapper.writeValueAsString(sortJsonLike(parsed));
+        } catch (Exception e) {
+            return arguments.trim();
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private Object sortJsonLike(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            TreeMap<String, Object> sorted = new TreeMap<>();
+            for (Map.Entry<?, ?> entry : map.entrySet()) {
+                sorted.put(String.valueOf(entry.getKey()), sortJsonLike(entry.getValue()));
+            }
+            return sorted;
+        }
+        if (value instanceof List<?> list) {
+            return list.stream().map(this::sortJsonLike).toList();
+        }
+        return value;
     }
 
     /**

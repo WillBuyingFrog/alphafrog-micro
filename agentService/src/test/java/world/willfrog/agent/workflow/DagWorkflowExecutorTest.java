@@ -90,7 +90,8 @@ class DagWorkflowExecutorTest {
                 localConfigLoader,
                 llmProperties,
                 new ObjectMapper(),
-                new AgentCitationService(new ObjectMapper())
+                new AgentCitationService(new ObjectMapper()),
+                new WorkflowFailureClassifier()
         );
         lenient().when(stateStore.loadRunStatus(anyString())).thenReturn(Optional.empty());
         ReflectionTestUtils.setField(executor, "defaultDagThreadPoolSize", 4);

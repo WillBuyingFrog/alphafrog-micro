@@ -25,6 +25,7 @@ import world.willfrog.agent.tool.PythonSandboxTools;
 import world.willfrog.agent.tool.RagTools;
 import world.willfrog.agent.tool.SearchTools;
 import world.willfrog.agent.workflow.PlanExecutionMode;
+import world.willfrog.agent.workflow.TodoPlan;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
 import world.willfrog.agent.workflow.WorkflowExecutor;
@@ -115,6 +116,8 @@ public class AgentRunExecutor {
     private final AgentFinalAnswerParser finalAnswerParser;
     /** 引用来源服务，负责从已完成任务中提取、去重、编号引用来源 */
     private final AgentCitationService citationService;
+    /** 简单单工具查询 fast-path，命中时跳过 Planning/ReAct。 */
+    private final AgentSimpleToolFastPathService simpleToolFastPathService;
 
     /** 当前正在执行的 Agent Run 数量（用于 Micrometer Gauge） */
     private final AtomicInteger activeRuns = new AtomicInteger(0);
@@ -373,6 +376,31 @@ public class AgentRunExecutor {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }
 
+            // ── 6a. 简单单工具查询 fast-path ──
+            // 命中高确定性的单工具查询时，跳过完整 Planning + ReAct，降低简单问题延迟。
+            var fastPathDecision = simpleToolFastPathService.decide(userGoal, toolSpecifications);
+            if (fastPathDecision.isPresent()) {
+                AgentSimpleToolFastPathService.FastPathDecision decision = fastPathDecision.get();
+                if (decision.selected()) {
+                    eventService.append(runId, userId, "FAST_PATH_SELECTED", mapOf(
+                            "tool", decision.toolName(),
+                            "params", decision.params()
+                    ));
+                    WorkflowExecutionResult fastPathResult = simpleToolFastPathService.execute(decision);
+                    eventService.append(runId, userId,
+                            fastPathResult.isSuccess() ? "FAST_PATH_COMPLETED" : "FAST_PATH_FAILED",
+                            mapOf("tool", decision.toolName()));
+                    TodoPlan fastPathPlan = TodoPlan.builder()
+                            .analysis("fast_path:" + decision.toolName())
+                            .items(List.of())
+                            .extractedEntities(List.of())
+                            .build();
+                    handleWorkflowResult(run, userId, userGoal, endpointName, modelName, fastPathPlan, fastPathResult);
+                    return;
+                }
+                eventService.append(runId, userId, "FAST_PATH_SKIPPED", mapOf("reason", decision.reason()));
+            }
+
             // ── 7. 解析执行模式 ──
             // 执行模式决定走线性还是 DAG 执行器。AUTO 模式下由 Planner 自动判断。
             String executionModeStr = eventService.extractExecutionMode(run.getExt());
@@ -433,69 +461,7 @@ public class AgentRunExecutor {
                     .build());
 
             // ── 11. 处理执行结果 ──
-
-            // 11a. Run 被暂停（等待用户输入），标记 WAITING 状态
-            if (result.isPaused()) {
-                stateStore.markRunStatus(runId, AgentRunStatus.WAITING.name());
-                runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
-                return;
-            }
-
-            // 11b. Run 执行成功
-            if (result.isSuccess()) {
-                // 构建 run snapshot JSON：包含最终答案（经 AgentFinalAnswerParser 解析）、
-                // 引用表、观测数据等，写入 DB snapshot 字段
-                String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.COMPLETED, runId);
-                runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
-                // 计算本次 run 消耗的总额度
-                int totalCreditsConsumed = creditService.calculateRunTotalCredits(
-                        runId,
-                        userId,
-                        observabilityService.loadObservabilityJson(runId, snapshotJson)
-                );
-                eventService.append(runId, userId, "WORKFLOW_COMPLETED", mapOf(
-                        "answer", nvl(result.getFinalAnswer()),
-                        "tool_calls_used", result.getToolCallsUsed(),
-                        "totalCreditsConsumed", totalCreditsConsumed,
-                        "total_credits_consumed", totalCreditsConsumed
-                ));
-
-                // 写入助手回复消息（用于追问接口的消息上下文）
-                try {
-                    String assistantMetaJson = messageService.buildMetaJson(
-                            modelName,
-                            endpointName,
-                            null,
-                            null
-                    );
-                    messageService.createAssistantMessage(runId, result.getFinalAnswer(), assistantMetaJson);
-
-                    eventService.append(runId, userId, "MESSAGE_COMPLETED", mapOf(
-                            "role", "assistant",
-                            "content_preview", preview(result.getFinalAnswer(), 200),
-                            "model", nvl(modelName),
-                            "endpoint", nvl(endpointName)
-                    ));
-                } catch (Exception e) {
-                    log.warn("Failed to create assistant message for runId={}, but continuing: {}", runId, e.getMessage());
-                }
-
-                // 记录额度消费流水
-                creditService.recordRunConsumeLedger(runId, userId, totalCreditsConsumed);
-                stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
-                return;
-            }
-
-            // 11c. Run 执行失败：构建失败 snapshot 并更新 DB
-            String reason = nvl(result.getFailureReason());
-            String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.FAILED, runId);
-            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshotJson, true, reason);
-            runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.FAILED, eventService.nextInterruptedExpiresAt());
-            eventService.append(runId, userId, "WORKFLOW_FAILED", mapOf(
-                    "error", reason,
-                    "tool_calls_used", result.getToolCallsUsed()
-            ));
-            stateStore.markRunStatus(runId, AgentRunStatus.FAILED.name());
+            handleWorkflowResult(run, userId, userGoal, endpointName, modelName, todoPlan, result);
         } catch (Exception e) {
             // ── 未预期的异常 ──
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -511,6 +477,74 @@ public class AgentRunExecutor {
             // 确保清理 ThreadLocal，避免线程池复用时上下文串扰
             AgentContext.clear();
         }
+    }
+
+    /**
+     * 统一处理 workflow 或 fast-path 的执行结果。
+     */
+    private void handleWorkflowResult(AgentRun run,
+                                      String userId,
+                                      String userGoal,
+                                      String endpointName,
+                                      String modelName,
+                                      TodoPlan todoPlan,
+                                      WorkflowExecutionResult result) {
+        String runId = run.getId();
+
+        if (result.isPaused()) {
+            stateStore.markRunStatus(runId, AgentRunStatus.WAITING.name());
+            runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
+            return;
+        }
+
+        if (result.isSuccess()) {
+            String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.COMPLETED, runId);
+            runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
+            int totalCreditsConsumed = creditService.calculateRunTotalCredits(
+                    runId,
+                    userId,
+                    observabilityService.loadObservabilityJson(runId, snapshotJson)
+            );
+            eventService.append(runId, userId, "WORKFLOW_COMPLETED", mapOf(
+                    "answer", nvl(result.getFinalAnswer()),
+                    "tool_calls_used", result.getToolCallsUsed(),
+                    "totalCreditsConsumed", totalCreditsConsumed,
+                    "total_credits_consumed", totalCreditsConsumed
+            ));
+
+            try {
+                String assistantMetaJson = messageService.buildMetaJson(
+                        modelName,
+                        endpointName,
+                        null,
+                        null
+                );
+                messageService.createAssistantMessage(runId, result.getFinalAnswer(), assistantMetaJson);
+
+                eventService.append(runId, userId, "MESSAGE_COMPLETED", mapOf(
+                        "role", "assistant",
+                        "content_preview", preview(result.getFinalAnswer(), 200),
+                        "model", nvl(modelName),
+                        "endpoint", nvl(endpointName)
+                ));
+            } catch (Exception e) {
+                log.warn("Failed to create assistant message for runId={}, but continuing: {}", runId, e.getMessage());
+            }
+
+            creditService.recordRunConsumeLedger(runId, userId, totalCreditsConsumed);
+            stateStore.markRunStatus(runId, AgentRunStatus.COMPLETED.name());
+            return;
+        }
+
+        String reason = nvl(result.getFailureReason());
+        String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.FAILED, runId);
+        runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshotJson, true, reason);
+        runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.FAILED, eventService.nextInterruptedExpiresAt());
+        eventService.append(runId, userId, "WORKFLOW_FAILED", mapOf(
+                "error", reason,
+                "tool_calls_used", result.getToolCallsUsed()
+        ));
+        stateStore.markRunStatus(runId, AgentRunStatus.FAILED.name());
     }
 
     /**
