@@ -51,7 +51,7 @@ public class MarketDataTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool("查询单只或多只股票基础信息。参数要求：tsCode 支持 | 分隔的多个代码（最多3个）或 JSON 数组，每个代码必须是 TuShare 格式如 000001.SZ。批量示例：\"000001.SZ|600519.SH\"")
+    @Tool("查询单只或多只股票基础信息。参数要求：tsCode 支持 | 分隔的多个代码（默认最多3个）或 JSON 数组，每个代码必须是 TuShare 格式如 000001.SZ。批量示例：\"000001.SZ|600519.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getStockInfo(String tsCode) {
         List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
         if (tsCodes.size() > 1) {
@@ -79,7 +79,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
+    @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码（默认最多2个）或 JSON 数组，如 \"000001.SZ|600519.SH\"；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getStockDaily(String tsCode, String startDateStr, String endDateStr) {
         List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
         if (tsCodes.size() > 1) {
@@ -126,7 +126,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。")
+    @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"平安银行|万科A\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String searchStock(String keyword) {
         List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
         if (queries.size() > 1) {
@@ -163,7 +163,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或基金名称关键词（例如 510300、沪深300ETF）。")
+    @Tool("按关键词搜索基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或基金名称关键词（例如 510300、沪深300ETF）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"沪深300ETF|中证500ETF\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String searchFund(String keyword) {
         List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
         if (queries.size() > 1) {
@@ -199,7 +199,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询单只或多只指数基础信息。参数要求：tsCode 支持 | 分隔的多个代码（最多3个）或 JSON 数组，每个代码必须是 TuShare 指数代码格式如 000300.SH。批量示例：\"000300.SH|000905.SH\"")
+    @Tool("查询单只或多只指数基础信息。参数要求：tsCode 支持 | 分隔的多个代码（默认最多3个）或 JSON 数组，每个代码必须是 TuShare 指数代码格式如 000300.SH。批量示例：\"000300.SH|000905.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getIndexInfo(String tsCode) {
         List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
         if (tsCodes.size() > 1) {
@@ -227,7 +227,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。")
+    @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码（默认最多2个）或 JSON 数组，如 \"000300.SH|000905.SH\"；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getIndexDaily(String tsCode, String startDateStr, String endDateStr) {
         List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
         if (tsCodes.size() > 1) {
@@ -274,7 +274,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。")
+    @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"沪深300|中证500\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String searchIndex(String keyword) {
         List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
         if (queries.size() > 1) {

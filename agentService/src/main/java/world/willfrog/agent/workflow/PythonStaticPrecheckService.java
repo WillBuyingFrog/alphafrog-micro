@@ -50,10 +50,13 @@ public class PythonStaticPrecheckService {
         report.put("issues", issues);
 
         if (!issues.isEmpty()) {
+            String errorCode = parsedDatasetIds.isEmpty()
+                    ? "MISSING_DATASET_IDS"
+                    : "STATIC_PRECHECK_FAILED";
             return Result.builder()
                     .passed(false)
                     .category(TodoFailureCategory.STATIC)
-                    .errorCode("STATIC_PRECHECK_FAILED")
+                    .errorCode(errorCode)
                     .message(String.join("; ", issues))
                     .report(report)
                     .build();

@@ -62,20 +62,27 @@ public class AgentAiServiceFactory {
     }
 
     public ChatModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved, Double temperatureOverride) {
+        return buildChatModelWithTemperature(resolved, temperatureOverride, null);
+    }
+
+    public ChatModel buildChatModelWithTemperature(AgentLlmResolver.ResolvedLlm resolved,
+                                                 Double temperatureOverride,
+                                                 Integer maxTokensOverride) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
             throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
         }
         double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
+        int effectiveMaxTokens = resolveMaxTokens(maxTokensOverride);
         if (isDashScopeEndpoint(resolved)) {
-            return buildDashScopeChatModel(resolved, apiKey, finalTemperature);
+            return buildDashScopeChatModel(resolved, apiKey, finalTemperature, effectiveMaxTokens);
         }
         OpenAiChatModel.OpenAiChatModelBuilder builder = OpenAiChatModel.builder()
                 .apiKey(apiKey)
                 .baseUrl(resolved.baseUrl())
                 .modelName(resolved.modelName())
-                .maxTokens(maxTokens)
+                .maxTokens(effectiveMaxTokens)
                 .temperature(finalTemperature)
                 .logRequests(debugEnabled)
                 .logResponses(debugEnabled);
@@ -90,7 +97,15 @@ public class AgentAiServiceFactory {
     public ChatModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
                                                                            List<String> providerOrder,
                                                                            Double temperatureOverride) {
+        return buildChatModelWithProviderOrderAndTemperature(resolved, providerOrder, temperatureOverride, null);
+    }
+
+    public ChatModel buildChatModelWithProviderOrderAndTemperature(AgentLlmResolver.ResolvedLlm resolved,
+                                                                           List<String> providerOrder,
+                                                                           Double temperatureOverride,
+                                                                           Integer maxTokensOverride) {
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
+        int effectiveMaxTokens = resolveMaxTokens(maxTokensOverride);
         // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
         if (isDashScopeEndpoint(resolved)) {
             String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
@@ -98,7 +113,7 @@ public class AgentAiServiceFactory {
                 throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
             }
             double finalTemperature = temperatureOverride == null ? (temperature == null ? 0.7D : temperature) : temperatureOverride;
-            return buildDashScopeChatModel(resolved, apiKey, finalTemperature);
+            return buildDashScopeChatModel(resolved, apiKey, finalTemperature, effectiveMaxTokens);
         }
         if (shouldUseProviderRoutedModel(resolved)) {
             String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
@@ -114,7 +129,7 @@ public class AgentAiServiceFactory {
                     headers,
                     resolved.modelName(),
                     finalTemperature,
-                    maxTokens,
+                    effectiveMaxTokens,
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
@@ -125,19 +140,26 @@ public class AgentAiServiceFactory {
             model.setBudgetService(budgetService);
             return model;
         }
-        return buildChatModelWithTemperature(resolved, temperatureOverride);
+        return buildChatModelWithTemperature(resolved, temperatureOverride, maxTokensOverride);
     }
 
     public ChatModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved, List<String> providerOrder) {
+        return buildChatModelWithProviderOrder(resolved, providerOrder, null);
+    }
+
+    public ChatModel buildChatModelWithProviderOrder(AgentLlmResolver.ResolvedLlm resolved,
+                                                     List<String> providerOrder,
+                                                     Integer maxTokensOverride) {
         boolean debugEnabled = log.isDebugEnabled();
         String apiKey = isBlank(resolved.apiKey()) ? openAiApiKey : resolved.apiKey();
         if (isBlank(apiKey)) {
             throw new IllegalArgumentException("LLM api key 未配置: endpoint=" + resolved.endpointName());
         }
         List<String> normalizedProviderOrder = sanitizeProviderOrder(providerOrder);
+        int effectiveMaxTokens = resolveMaxTokens(maxTokensOverride);
         // ALP-25: 对所有端点使用 OpenRouterProviderRoutedChatModel 以支持 HTTP 捕获
         if (isDashScopeEndpoint(resolved)) {
-            return buildDashScopeChatModel(resolved, apiKey, temperature);
+            return buildDashScopeChatModel(resolved, apiKey, temperature, effectiveMaxTokens);
         }
         if (shouldUseProviderRoutedModel(resolved)) {
             Map<String, String> headers = buildCustomHeaders(resolved.baseUrl());
@@ -148,7 +170,7 @@ public class AgentAiServiceFactory {
                     headers,
                     resolved.modelName(),
                     temperature,
-                    maxTokens,
+                    effectiveMaxTokens,
                     normalizedProviderOrder,
                     httpLogger,
                     observabilityService,
@@ -164,7 +186,7 @@ public class AgentAiServiceFactory {
                 .apiKey(apiKey)
                 .baseUrl(resolved.baseUrl())
                 .modelName(resolved.modelName())
-                .maxTokens(maxTokens)
+                .maxTokens(effectiveMaxTokens)
                 .temperature(temperature)
                 .logRequests(debugEnabled)
                 .logResponses(debugEnabled);
@@ -261,7 +283,8 @@ public class AgentAiServiceFactory {
 
     private ChatModel buildDashScopeChatModel(AgentLlmResolver.ResolvedLlm resolved,
                                                       String apiKey,
-                                                      double finalTemperature) {
+                                                      double finalTemperature,
+                                                      int effectiveMaxTokens) {
         boolean enableThinking = resolveEnableThinking(resolved);
         DashScopeChatModel model = new DashScopeChatModel(
                 objectMapper,
@@ -269,7 +292,7 @@ public class AgentAiServiceFactory {
                 apiKey,
                 resolved.modelName(),
                 finalTemperature,
-                maxTokens,
+                effectiveMaxTokens,
                 httpLogger,
                 observabilityService,
                 resolved.endpointName(),
@@ -278,6 +301,13 @@ public class AgentAiServiceFactory {
         );
         model.setBudgetService(budgetService);
         return model;
+    }
+
+    private int resolveMaxTokens(Integer maxTokensOverride) {
+        if (maxTokensOverride != null && maxTokensOverride > 0) {
+            return maxTokensOverride;
+        }
+        return maxTokens != null && maxTokens > 0 ? maxTokens : 4096;
     }
 
     /**

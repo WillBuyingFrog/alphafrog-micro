@@ -267,7 +267,8 @@ public class AgentRunExecutor {
             // 初始化 run 级观测记录
             observabilityService.initializeRun(runId, endpointName, modelName, captureLlmRequests);
             // 构建带 provider 路由的 ChatModel（用于 Execution 阶段）
-            ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(resolvedLlm, providerOrder);
+            ChatModel chatModel = aiServiceFactory.buildChatModelWithProviderOrder(
+                    resolvedLlm, providerOrder, execStageCfg.getMaxTokens());
 
             // ── 4b. 解析 Planning 阶段的专用模型配置 ──
             // Planning 可以使用与 Execution 不同的模型
@@ -290,7 +291,8 @@ public class AgentRunExecutor {
                 var planningProviderOrder = mergeProviderOrder(
                         resolveStageProviderOrder(planningStageCfg, userProviderOrder),
                         planningResolvedLlm.validProviders());
-                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(planningResolvedLlm, planningProviderOrder);
+                planningModel = aiServiceFactory.buildChatModelWithProviderOrder(
+                        planningResolvedLlm, planningProviderOrder, planningStageCfg.getMaxTokens());
                 planningEndpointName = planningResolvedLlm.endpointName();
                 planningModelName = planningResolvedLlm.modelName();
                 planningEndpointBaseUrl = planningResolvedLlm.baseUrl();
@@ -324,7 +326,8 @@ public class AgentRunExecutor {
                 var finalAnswerProviderOrder = mergeProviderOrder(
                         resolveStageProviderOrder(finalAnswerStageCfg, userProviderOrder),
                         finalAnswerResolvedLlm.validProviders());
-                finalAnswerModel = aiServiceFactory.buildChatModelWithProviderOrder(finalAnswerResolvedLlm, finalAnswerProviderOrder);
+                finalAnswerModel = aiServiceFactory.buildChatModelWithProviderOrder(
+                        finalAnswerResolvedLlm, finalAnswerProviderOrder, finalAnswerStageCfg.getMaxTokens());
                 eventService.append(runId, userId, "FINAL_ANSWER_MODEL_SELECTED", mapOf(
                         "endpoint", finalAnswerResolvedLlm.endpointName(),
                         "model", finalAnswerResolvedLlm.modelName(),

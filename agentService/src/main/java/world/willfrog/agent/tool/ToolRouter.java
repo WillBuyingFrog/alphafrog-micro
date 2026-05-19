@@ -10,10 +10,13 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.config.StressTestProperties;
 import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentRunBudgetService;
+import world.willfrog.agent.workflow.PythonStaticPrecheckService;
 
 import java.util.ArrayList;
 import java.util.LinkedHashSet;
@@ -76,6 +79,10 @@ public class ToolRouter {
     private final SearchTools searchTools;
     /** Python 沙箱执行工具集（executePython） */
     private final PythonSandboxTools pythonSandboxTools;
+    /** executePython 静态参数/代码预校验（B1） */
+    private final PythonStaticPrecheckService pythonStaticPrecheckService;
+    /** 运行时 LLM/执行配置（含 static-precheck-enabled） */
+    private final AgentLlmProperties llmProperties;
     /** 工具结果缓存服务，按 toolName + params + scope 做去重缓存 */
     private final ToolResultCacheService toolResultCacheService;
     /** 观测数据服务，记录每次工具调用的 trace（参数、结果、耗时、缓存元数据等） */
@@ -96,6 +103,12 @@ public class ToolRouter {
      */
     @Autowired(required = false)
     private AgentRunBudgetService budgetService;
+
+    /**
+     * 本地热加载配置 — 可选注入，用于覆盖 application.yml 中的 execution 开关。
+     */
+    @Autowired(required = false)
+    private AgentLlmLocalConfigLoader localConfigLoader;
 
     /**
      * 简化入口：仅返回工具输出文本，丢弃成功标志、耗时、缓存元数据等。
@@ -264,6 +277,62 @@ public class ToolRouter {
      * @param params   原始参数 Map
      * @return 工具执行结果（含结果文本、耗时、成功标志）
      */
+    private String invokeExecutePython(Map<String, Object> params) {
+        String code = str(params.get("code"), params.get("arg0"));
+        String datasetIds = collectExecutePythonDatasetIds(params);
+        if (isStaticPrecheckEnabled()) {
+            PythonStaticPrecheckService.Result precheck =
+                    pythonStaticPrecheckService.check(code, datasetIds, params);
+            if (!precheck.isPassed()) {
+                return precheckFailure("executePython", precheck);
+            }
+        }
+        return pythonSandboxTools.executePython(
+                code,
+                datasetIds,
+                str(params.get("libraries"), params.get("arg3")),
+                toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
+        );
+    }
+
+    private boolean isStaticPrecheckEnabled() {
+        if (localConfigLoader != null) {
+            Boolean local = localConfigLoader.current()
+                    .map(AgentLlmProperties::getRuntime)
+                    .map(AgentLlmProperties.Runtime::getExecution)
+                    .map(AgentLlmProperties.Execution::getStaticPrecheckEnabled)
+                    .orElse(null);
+            if (local != null) {
+                return local;
+            }
+        }
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null) {
+            Boolean enabled = llmProperties.getRuntime().getExecution().getStaticPrecheckEnabled();
+            if (enabled != null) {
+                return enabled;
+            }
+        }
+        return true;
+    }
+
+    private String precheckFailure(String toolName, PythonStaticPrecheckService.Result precheck) {
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("pre_validation_failed", true);
+        if (precheck.getReport() != null) {
+            details.put("report", precheck.getReport());
+        }
+        return writeJson(Map.of(
+                "ok", false,
+                "tool", nvl(toolName),
+                "data", Map.of(),
+                "error", Map.of(
+                        "code", nvl(precheck.getErrorCode()),
+                        "message", nvl(precheck.getMessage()),
+                        "details", details
+                )
+        ));
+    }
+
     private ToolResultCacheService.ToolExecutionOutcome executeDirect(String toolName, Map<String, Object> params) {
         long startedAt = System.currentTimeMillis();
         String result;
@@ -340,12 +409,7 @@ public class ToolRouter {
                         str(params.get("timeRangeEnd"), params.get("time_range_end"), params.get("arg7")),
                         toIntWithDefault(5, params.get("maxResults"), params.get("max_results"), params.get("arg8"))
                 );
-                case "executePython" -> pythonSandboxTools.executePython(
-                        str(params.get("code"), params.get("arg0")),
-                        collectExecutePythonDatasetIds(params),
-                        str(params.get("libraries"), params.get("arg3")),
-                        toNullableInt(params.get("timeout_seconds"), params.get("timeoutSeconds"), params.get("arg4"))
-                );
+                case "executePython" -> invokeExecutePython(params);
                 default -> unsupported(toolName);
             };
         } catch (Exception e) {

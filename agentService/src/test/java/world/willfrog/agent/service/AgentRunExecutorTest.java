@@ -39,6 +39,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
@@ -131,7 +132,8 @@ class AgentRunExecutorTest {
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
                 .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null, List.of()));
-        when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
+        lenient().when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
+        when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any(), any())).thenReturn(chatLanguageModel);
         lenient().when(creditService.calculateRunTotalCredits(anyString(), anyString(), any())).thenReturn(0);
         lenient().when(workflowExecutorFactory.select(any())).thenReturn(workflowExecutor);
     }
@@ -484,7 +486,9 @@ class AgentRunExecutorTest {
 
         ArgumentCaptor<AgentLlmResolver.ResolvedLlm> resolvedCaptor = ArgumentCaptor.forClass(AgentLlmResolver.ResolvedLlm.class);
         ArgumentCaptor<List> providerCaptor = ArgumentCaptor.forClass(List.class);
-        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(resolvedCaptor.capture(), providerCaptor.capture());
+        ArgumentCaptor<Integer> maxTokensCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(
+                resolvedCaptor.capture(), providerCaptor.capture(), maxTokensCaptor.capture());
 
         assertEquals("execution-model", resolvedCaptor.getAllValues().get(0).modelName());
         assertEquals(List.of("fireworks", "deepinfra", "valid-provider"), providerCaptor.getAllValues().get(0));
@@ -497,6 +501,70 @@ class AgentRunExecutorTest {
         verify(workflowExecutor).execute(workflowCaptor.capture());
         assertEquals(chatLanguageModel, workflowCaptor.getValue().getFinalAnswerModel());
         assertEquals("high", workflowCaptor.getValue().getFinalAnswerReasoningEffort());
+    }
+
+    @Test
+    void execute_shouldPassStageMaxTokensToChatModelFactory() {
+        AgentRun run = run("run-stage-max-tokens");
+        run.setExt("""
+                {"stage_config_json":{
+                  "planning":{"endpointName":"openrouter","modelName":"planning-model","maxTokens":4096},
+                  "execution":{"endpointName":"openrouter","modelName":"execution-model","maxTokens":8192},
+                  "final_answer":{"endpointName":"openrouter","modelName":"final-model","maxTokens":20000}
+                }}
+                """);
+        when(runMapper.findById("run-stage-max-tokens")).thenReturn(run);
+        when(eventService.isRunnable("run-stage-max-tokens", "u1")).thenReturn(true);
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        StageLlmConfig planning = stage("openrouter", "planning-model");
+        planning.setMaxTokens(4096);
+        StageLlmConfig execution = stage("openrouter", "execution-model");
+        execution.setMaxTokens(8192);
+        StageLlmConfig finalAnswer = stage("openrouter", "final-model");
+        finalAnswer.setMaxTokens(20000);
+        stageConfig.setPlanning(planning);
+        stageConfig.setExecution(execution);
+        stageConfig.setFinalAnswer(finalAnswer);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of("valid-provider")
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-stage-max-tokens");
+
+        ArgumentCaptor<Integer> maxTokensCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(any(), any(), maxTokensCaptor.capture());
+        assertEquals(8192, maxTokensCaptor.getAllValues().get(0));
+        assertEquals(4096, maxTokensCaptor.getAllValues().get(1));
+        assertEquals(20000, maxTokensCaptor.getAllValues().get(2));
+    }
+
+    @Test
+    void execute_shouldUseGlobalDefaultMaxTokensWhenStageMaxTokensMissing() {
+        AgentRun run = run("run-default-max-tokens");
+        when(runMapper.findById("run-default-max-tokens")).thenReturn(run);
+        when(eventService.isRunnable("run-default-max-tokens", "u1")).thenReturn(true);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of()
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-default-max-tokens");
+
+        verify(aiServiceFactory, times(1)).buildChatModelWithProviderOrder(any(), any(), isNull());
     }
 
     private AgentRun run(String id) {

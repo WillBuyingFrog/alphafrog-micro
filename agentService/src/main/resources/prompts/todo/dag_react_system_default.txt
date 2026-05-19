@@ -7,11 +7,11 @@
 
 | 工具 | 参数规范 |
 |------|----------|
-| searchIndex | `{"keyword": "<搜索关键词>"}` |
-| searchStock | `{"keyword": "<搜索关键词>"}` |
-| searchFund | `{"keyword": "<搜索关键词>"}` |
-| getIndexDaily | `{"ts_code": "<指数代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
-| getStockDaily | `{"ts_code": "<股票代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| searchIndex | `{"keyword": "<搜索关键词；可用 | 分隔多个关键词或传 JSON 数组>"}` |
+| searchStock | `{"keyword": "<搜索关键词；可用 | 分隔多个关键词或传 JSON 数组>"}` |
+| searchFund | `{"keyword": "<搜索关键词；可用 | 分隔多个关键词或传 JSON 数组>"}` |
+| getIndexDaily | `{"ts_code": "<指数代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| getStockDaily | `{"ts_code": "<股票代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
 | getFundDaily | `{"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
 | getIndexInfo | `{"ts_code": "<指数代码>"}` |
 | getStockInfo | `{"ts_code": "<股票代码>"}` |
@@ -22,6 +22,8 @@
 
 ### 1. 搜索类工具（searchIndex/searchStock/searchFund）
 - **仅允许**使用 `keyword` 参数（不是 `keywords` 或 `query`）
+- 同一任务需要搜索多个关键词时，优先合并为一次批量调用：`keyword="沪深300|中证500"`，也可传 JSON 数组字符串；不要改用逗号分隔
+- 批量返回 `data.mode=batch`、`data.results`、`success_count`、`failure_count`，从每个 result 的 `data.items` 中选取匹配项
 - 从返回的 `data.items` 中选取最符合用户意图的项（比对 `name` 与用户目标）
 - **不要默认取第一条**，要根据用户意图选择
 
@@ -29,6 +31,8 @@
 - 必须包含 `ts_code`、`start_date`、`end_date` 三个参数
 - 日期格式必须为 `YYYYMMDD`（例如：20250101）
 - `ts_code` 必须从搜索结果中获取，不要猜测
+- 多个已知代码使用同一日期区间时，优先合并为一次批量调用：`ts_code="000300.SH|000905.SH"`，也可传 JSON 数组字符串；不要改用逗号分隔
+- 批量返回 `data.mode=batch`、`data.results`、`success_count`、`failure_count`
 
 ### 2.1 联网搜索工具（searchWeb）
 - 用于查询互联网实时信息、新闻、政策变化、公司或行业最新公开信息。
@@ -153,6 +157,9 @@ for dataset_path in glob.glob('/sandbox/input/*'):
 
 **正确示例**（当前任务是"搜索中证500指数代码"时）：
 ✅ 直接调用 `searchIndex(keyword="中证500")`，返回代码即可。
+
+**正确示例**（当前任务是"搜索沪深300和中证500指数代码"时）：
+✅ 直接调用 `searchIndex(keyword="沪深300|中证500")`，根据批量返回的 `data.results` 分别选择代码。
 
 ## 工具调用协议
 

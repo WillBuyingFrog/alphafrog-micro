@@ -126,6 +126,30 @@ class AgentPromptServiceCacheTest {
     }
 
     @Test
+    void planningStrategyStageInstruction_shouldDescribeMarketDataBatchSyntax() {
+        AgentLlmProperties properties = new AgentLlmProperties();
+        AgentLlmProperties.Prompts prompts = new AgentLlmProperties.Prompts();
+        prompts.setPlanningStrategyStage("{{toolCapabilities}}");
+        properties.setPrompts(prompts);
+        AgentPromptService service = new AgentPromptService(properties, localConfigLoader);
+
+        String instruction = service.planningStrategyStageInstruction(
+                "searchIndex,getIndexDaily,searchStock,getStockDaily",
+                5,
+                500
+        );
+
+        assertTrue(instruction.contains("keyword=\"沪深300|中证500\""),
+                "规划阶段应提示 search 类工具使用 | 批量关键词");
+        assertTrue(instruction.contains("tsCode=\"000300.SH|000905.SH\""),
+                "规划阶段应提示日线工具使用 | 批量代码");
+        assertTrue(instruction.contains("JSON 数组"),
+                "规划阶段应提示可使用 JSON 数组批量参数");
+        assertFalse(instruction.contains("ts_code 用逗号分隔"),
+                "行情批量参数不应提示使用逗号分隔");
+    }
+
+    @Test
     void planningStructuredStageInstruction_shouldContainStageMarker() {
         String instruction = promptService.planningStructuredStageInstruction();
         assertTrue(instruction.contains("[Stage: PLANNING_STRUCTURED]"),

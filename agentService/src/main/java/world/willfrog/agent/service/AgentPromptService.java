@@ -486,7 +486,7 @@ public class AgentPromptService {
     /**
      * 构建工具能力说明，帮助规划模型了解工具的批量操作能力。
      *
-     * <p>为白名单中每个工具生成一行中文说明,重点说明是否支持批量(逗号分隔多个 ts_code)等关键能力。
+     * <p>为白名单中每个工具生成一行中文说明,重点说明是否支持批量(| 分隔或 JSON 数组)等能力。
      * 工具说明覆盖行情类、检索类、Python 沙箱、RAG 等所有当前可用的工具。</p>
      */
     private String buildToolCapabilities(String toolWhitelist) {
@@ -497,23 +497,23 @@ public class AgentPromptService {
             tool = tool.trim();
             switch (tool) {
                 case "getIndexDaily" -> capabilities.add(
-                    "- getIndexDaily: 批量查询指数日线数据。支持同时查询多个指数（ts_code 用逗号分隔），建议优先使用批量查询而非多次单查。");
+                    "- getIndexDaily: 查询指数日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000300.SH|000905.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "getStockDaily" -> capabilities.add(
-                    "- getStockDaily: 批量查询股票日线数据。支持同时查询多只股票（ts_code 用逗号分隔）。");
+                    "- getStockDaily: 查询股票日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000001.SZ|600519.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "getFundDaily" -> capabilities.add(
-                    "- getFundDaily: 批量查询基金日线数据。支持同时查询多只基金（ts_code 用逗号分隔）。");
+                    "- getFundDaily: 查询基金日线数据。若工具实现支持批量，请使用当前工具定义声明的参数格式，不要自行改用逗号分隔。");
                 case "searchIndex" -> capabilities.add(
-                    "- searchIndex: 搜索指数代码。返回指数名称和代码对应关系。");
+                    "- searchIndex: 搜索指数代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"沪深300|中证500\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchStock" -> capabilities.add(
-                    "- searchStock: 搜索股票代码。返回股票名称和代码对应关系。");
+                    "- searchStock: 搜索股票代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"平安银行|万科A\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchFund" -> capabilities.add(
-                    "- searchFund: 搜索基金代码。返回基金名称和代码对应关系。");
+                    "- searchFund: 搜索基金代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"沪深300ETF|中证500ETF\"；批量返回 data.mode=batch 和 data.results。");
                 case "executePython" -> capabilities.add(
                     "- executePython: 执行 Python 代码进行数据分析。支持批量处理多个数据集（dataset_ids 用逗号分隔）。");
                 case "getIndexInfo" -> capabilities.add(
-                    "- getIndexInfo: 查询指数基本信息。支持批量查询多个指数。");
+                    "- getIndexInfo: 查询指数基本信息。tsCode 支持 | 分隔或 JSON 数组批量，默认最多3个，如 tsCode=\"000300.SH|000905.SH\"。");
                 case "getStockInfo" -> capabilities.add(
-                    "- getStockInfo: 查询股票基本信息。支持批量查询多只股票。");
+                    "- getStockInfo: 查询股票基本信息。tsCode 支持 | 分隔或 JSON 数组批量，默认最多3个，如 tsCode=\"000001.SZ|600519.SH\"。");
                 case "getFinancialReport" -> capabilities.add(
                     "- getFinancialReport: 查询财务报表数据（利润表、资产负债表、现金流量表）。");
                 case "ragSearch" -> capabilities.add(
