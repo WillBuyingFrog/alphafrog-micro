@@ -12,9 +12,11 @@ import org.springframework.core.env.Environment;
 import org.springframework.scheduling.annotation.Scheduled;
 import world.willfrog.alphafrogmicro.common.component.MeiliSearchIndexManager;
 import world.willfrog.alphafrogmicro.common.component.MeiliSearchDataSyncService;
+import world.willfrog.alphafrogmicro.common.dao.domestic.fund.EtfShareSizeDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundNavDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.FundPortfolioDao;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.EtfShareSize;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundNav;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.FundPortfolio;
@@ -44,6 +46,7 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
     private final FundNavDao fundNavDao;
     private final FundInfoDao fundInfoDao;
     private final FundPortfolioDao fundPortfolioDao;
+    private final EtfShareSizeDao etfShareSizeDao;
     private final Environment environment;
     private volatile Client meiliClient;
     private volatile String meiliClientHost;
@@ -54,10 +57,13 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
     private volatile MeiliSearchDataSyncService syncService;
 
     public DomesticFundServiceImpl(FundNavDao fundNavDao, FundInfoDao fundInfoDao,
-                                   FundPortfolioDao fundPortfolioDao, Environment environment) {
+                                   FundPortfolioDao fundPortfolioDao,
+                                   EtfShareSizeDao etfShareSizeDao,
+                                   Environment environment) {
         this.fundNavDao = fundNavDao;
         this.fundInfoDao = fundInfoDao;
         this.fundPortfolioDao = fundPortfolioDao;
+        this.etfShareSizeDao = etfShareSizeDao;
         this.environment = environment;
     }
 
@@ -223,6 +229,57 @@ public class DomesticFundServiceImpl extends DomesticFundServiceImplBase {
                     tsCode, startDateTimestamp, endDateTimestamp);
             return DomesticFundNavsByTsCodeAndDateRangeResponse.newBuilder().build();
         }
+    }
+
+    @Override
+    public DomesticEtfShareSizesByTsCodeAndDateRangeResponse getDomesticEtfShareSizesByTsCodeAndDateRange(
+            DomesticEtfShareSizesByTsCodeAndDateRangeRequest request) {
+        String tsCode = request.getTsCode();
+        long startDateTimestamp = request.getStartDateTimestamp();
+        long endDateTimestamp = request.getEndDateTimestamp();
+
+        List<EtfShareSize> rows;
+        try {
+            rows = etfShareSizeDao.getByTsCodeAndDateRange(tsCode, startDateTimestamp, endDateTimestamp);
+        } catch (Exception e) {
+            log.error("Error getting ETF share size for tsCode: {}, range: {}-{}", tsCode, startDateTimestamp,
+                    endDateTimestamp, e);
+            return DomesticEtfShareSizesByTsCodeAndDateRangeResponse.newBuilder().build();
+        }
+
+        DomesticEtfShareSizesByTsCodeAndDateRangeResponse.Builder responseBuilder =
+                DomesticEtfShareSizesByTsCodeAndDateRangeResponse.newBuilder();
+        if (rows == null || rows.isEmpty()) {
+            log.warn("ETF share size not found for tsCode: {}, range: {}-{}", tsCode, startDateTimestamp,
+                    endDateTimestamp);
+            return responseBuilder.build();
+        }
+
+        for (EtfShareSize row : rows) {
+            DomesticEtfShareSizeItem.Builder item = DomesticEtfShareSizeItem.newBuilder()
+                    .setTsCode(row.getTsCode())
+                    .setTradeDate(row.getTradeDate());
+            if (row.getEtfName() != null) {
+                item.setEtfName(row.getEtfName());
+            }
+            if (row.getTotalShare() != null) {
+                item.setTotalShare(row.getTotalShare());
+            }
+            if (row.getTotalSize() != null) {
+                item.setTotalSize(row.getTotalSize());
+            }
+            if (row.getNav() != null) {
+                item.setNav(row.getNav());
+            }
+            if (row.getClose() != null) {
+                item.setClose(row.getClose());
+            }
+            if (row.getExchange() != null) {
+                item.setExchange(row.getExchange());
+            }
+            responseBuilder.addItems(item.build());
+        }
+        return responseBuilder.build();
     }
 
     @Override

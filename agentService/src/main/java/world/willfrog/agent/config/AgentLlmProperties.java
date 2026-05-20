@@ -376,6 +376,8 @@ public class AgentLlmProperties {
         private Double staticFixTemperature;
         private Boolean failFast;
         private String defaultExecutionMode;
+        /** 为 true 时才允许抓取/查询 ETF 复权因子并暴露 getEtfAdj */
+        private Boolean adjFactorEnabled = false;
         /** OpenRouter reasoning (thinking) 配置 */
         private Reasoning reasoning = new Reasoning();
 
@@ -491,6 +493,14 @@ public class AgentLlmProperties {
             this.defaultExecutionMode = defaultExecutionMode;
         }
 
+        public Boolean getAdjFactorEnabled() {
+            return adjFactorEnabled;
+        }
+
+        public void setAdjFactorEnabled(Boolean adjFactorEnabled) {
+            this.adjFactorEnabled = adjFactorEnabled;
+        }
+
         public Reasoning getReasoning() {
             return reasoning;
         }
@@ -504,6 +514,8 @@ public class AgentLlmProperties {
         private Integer maxParallelSearchQueries;
         private Integer maxParallelDailyQueries;
         private Integer dagThreadPoolSize;
+        private ExternalSearch externalSearch = new ExternalSearch();
+        private ToolWeightedLimit toolWeightedLimit = new ToolWeightedLimit();
 
         public Integer getMaxParallelSearchQueries() {
             return maxParallelSearchQueries;
@@ -527,6 +539,147 @@ public class AgentLlmProperties {
 
         public void setDagThreadPoolSize(Integer dagThreadPoolSize) {
             this.dagThreadPoolSize = dagThreadPoolSize;
+        }
+
+        public ExternalSearch getExternalSearch() {
+            return externalSearch;
+        }
+
+        public void setExternalSearch(ExternalSearch externalSearch) {
+            this.externalSearch = externalSearch == null ? new ExternalSearch() : externalSearch;
+        }
+
+        public ToolWeightedLimit getToolWeightedLimit() {
+            return toolWeightedLimit;
+        }
+
+        public void setToolWeightedLimit(ToolWeightedLimit toolWeightedLimit) {
+            this.toolWeightedLimit = toolWeightedLimit == null ? new ToolWeightedLimit() : toolWeightedLimit;
+        }
+    }
+
+    public static class ExternalSearch {
+        private Integer maxConcurrent;
+        private ProviderLimits providerLimits = new ProviderLimits();
+
+        public Integer getMaxConcurrent() {
+            return maxConcurrent;
+        }
+
+        public void setMaxConcurrent(Integer maxConcurrent) {
+            this.maxConcurrent = maxConcurrent;
+        }
+
+        public ProviderLimits getProviderLimits() {
+            return providerLimits;
+        }
+
+        public void setProviderLimits(ProviderLimits providerLimits) {
+            this.providerLimits = providerLimits == null ? new ProviderLimits() : providerLimits;
+        }
+    }
+
+    public static class ProviderLimits {
+        private Integer perplexity;
+        private Integer exa;
+        private Integer tavily;
+
+        public Integer getPerplexity() {
+            return perplexity;
+        }
+
+        public void setPerplexity(Integer perplexity) {
+            this.perplexity = perplexity;
+        }
+
+        public Integer getExa() {
+            return exa;
+        }
+
+        public void setExa(Integer exa) {
+            this.exa = exa;
+        }
+
+        public Integer getTavily() {
+            return tavily;
+        }
+
+        public void setTavily(Integer tavily) {
+            this.tavily = tavily;
+        }
+    }
+
+    public static class ToolWeightedLimit {
+        private Boolean enabled;
+        private Integer maxWeight;
+        private Integer defaultWeight;
+        private java.util.Map<String, ToolWeightEntry> tools = new java.util.HashMap<>();
+
+        public Boolean getEnabled() {
+            return enabled;
+        }
+
+        public void setEnabled(Boolean enabled) {
+            this.enabled = enabled;
+        }
+
+        public Integer getMaxWeight() {
+            return maxWeight;
+        }
+
+        public void setMaxWeight(Integer maxWeight) {
+            this.maxWeight = maxWeight;
+        }
+
+        public Integer getDefaultWeight() {
+            return defaultWeight;
+        }
+
+        public void setDefaultWeight(Integer defaultWeight) {
+            this.defaultWeight = defaultWeight;
+        }
+
+        public java.util.Map<String, ToolWeightEntry> getTools() {
+            return tools;
+        }
+
+        public void setTools(java.util.Map<String, ToolWeightEntry> tools) {
+            this.tools = tools == null ? new java.util.HashMap<>() : tools;
+        }
+    }
+
+    public static class ToolWeightEntry {
+        private Integer weight;
+        private Integer maxBatchItems;
+        private Boolean requiresAdjFactorEnabled;
+
+        public Integer getWeight() {
+            return weight;
+        }
+
+        public void setWeight(Integer weight) {
+            this.weight = weight;
+        }
+
+        public Integer getMaxBatchItems() {
+            return maxBatchItems;
+        }
+
+        public void setMaxBatchItems(Integer maxBatchItems) {
+            this.maxBatchItems = maxBatchItems;
+        }
+
+        public Boolean getRequiresAdjFactorEnabled() {
+            return requiresAdjFactorEnabled;
+        }
+
+        public void setRequiresAdjFactorEnabled(Boolean requiresAdjFactorEnabled) {
+            this.requiresAdjFactorEnabled = requiresAdjFactorEnabled;
+        }
+
+        /** 配置缺省时视为 false，避免 Nacos/JSON 遗漏字段导致 NPE 或歧义。 */
+        public boolean isRequiresAdjFactorEnabled() {
+            return Boolean.TRUE.equals(requiresAdjFactorEnabled);
         }
     }
 

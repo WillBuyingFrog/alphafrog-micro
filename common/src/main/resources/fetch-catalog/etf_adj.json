@@ -1,0 +1,24 @@
+{
+  "dataType": "etf_adj",
+  "label": "ETF 复权因子",
+  "description": "通过 TuShare fund_adj 接口抓取 ETF 复权因子（api_name=fund_adj）；默认可注册不调度，受 adjFactorEnabled 控制",
+  "serviceModule": "domesticFundFetchService",
+  "tushareApiName": "fund_adj",
+  "taskVariants": [
+    {
+      "subType": 2,
+      "label": "按日期范围抓取",
+      "description": "按 ts_code 与日期范围抓取复权因子",
+      "requiredParams": ["ts_code", "start_date", "end_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "ts_code": { "label": "基金代码", "type": "string", "default": null },
+        "start_date": { "label": "开始日期", "type": "string", "format": "yyyyMMdd", "default": null },
+        "end_date": { "label": "结束日期", "type": "string", "format": "yyyyMMdd", "default": null },
+        "offset": { "label": "偏移量", "type": "number", "default": 0 },
+        "limit": { "label": "每页条数", "type": "number", "default": 2000 }
+      },
+      "specialFlags": ["string_date"]
+    }
+  ]
+}

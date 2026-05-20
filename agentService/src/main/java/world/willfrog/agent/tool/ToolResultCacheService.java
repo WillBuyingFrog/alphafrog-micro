@@ -38,9 +38,12 @@ public class ToolResultCacheService {
     private static final String SOURCE_REDIS = "redis_tool_cache";
     private static final String SOURCE_DATASET_REGISTRY = "dataset_registry";
     private static final String SOURCE_NONE = "none";
-    private static final Set<String> SEARCH_TOOLS = Set.of("searchStock", "searchFund", "searchIndex");
+    private static final Set<String> SEARCH_TOOLS = Set.of(
+            "searchStock", "searchFund", "searchIndex", "searchAssetInfo");
     private static final Set<String> INFO_TOOLS = Set.of("getStockInfo", "getIndexInfo");
-    private static final Set<String> DATASET_TOOLS = Set.of("getStockDaily", "getIndexDaily");
+    private static final Set<String> DATASET_TOOLS = Set.of(
+            "getStockDaily", "getIndexDaily",
+            "getExchangeAssetDaily", "getOffExchangeAssetDaily", "getListedAssetShareSize", "getEtfAdj");
     private static final DateTimeFormatter DATE_FORMATTER = DateTimeFormatter.BASIC_ISO_DATE;
 
     private final StringRedisTemplate redisTemplate;
@@ -273,11 +276,25 @@ public class ToolResultCacheService {
             case "searchStock":
             case "searchFund":
             case "searchIndex":
+            case "searchAssetInfo":
                 putIfPresent(normalized, "keyword", normalizeKeyword(firstNonBlank(
                         source.get("keyword"),
                         source.get("query"),
                         source.get("arg0")
                 )));
+                if ("searchAssetInfo".equals(toolName)) {
+                    putIfPresent(normalized, "assetTypes", normalizeGeneric(firstNonBlank(
+                            source.get("assetTypes"),
+                            source.get("asset_types"),
+                            source.get("arg1")
+                    )).toLowerCase(Locale.ROOT));
+                    putIfPresent(normalized, "marketScope", normalizeGeneric(firstNonBlank(
+                            source.get("marketScope"),
+                            source.get("market_scope"),
+                            source.get("arg2"),
+                            "domestic"
+                    )).toLowerCase(Locale.ROOT));
+                }
                 break;
             case "getStockInfo":
             case "getIndexInfo":
@@ -292,6 +309,10 @@ public class ToolResultCacheService {
                 break;
             case "getStockDaily":
             case "getIndexDaily":
+            case "getExchangeAssetDaily":
+            case "getOffExchangeAssetDaily":
+            case "getListedAssetShareSize":
+            case "getEtfAdj":
                 putIfPresent(normalized, "tsCode", normalizeCode(firstNonBlank(
                         source.get("tsCode"),
                         source.get("ts_code"),
@@ -304,14 +325,37 @@ public class ToolResultCacheService {
                         source.get("startDateStr"),
                         source.get("startDate"),
                         source.get("start_date"),
-                        source.get("arg1")
+                        "getExchangeAssetDaily".equals(toolName) || "getOffExchangeAssetDaily".equals(toolName)
+                                || "getListedAssetShareSize".equals(toolName) || "getEtfAdj".equals(toolName)
+                                ? source.get("arg2") : source.get("arg1")
                 )));
                 putIfPresent(normalized, "endDateStr", normalizeDate(firstNonBlank(
                         source.get("endDateStr"),
                         source.get("endDate"),
                         source.get("end_date"),
-                        source.get("arg2")
+                        "getExchangeAssetDaily".equals(toolName) || "getOffExchangeAssetDaily".equals(toolName)
+                                || "getListedAssetShareSize".equals(toolName) || "getEtfAdj".equals(toolName)
+                                ? source.get("arg3") : source.get("arg2")
                 )));
+                if ("getExchangeAssetDaily".equals(toolName)) {
+                    putIfPresent(normalized, "assetType", normalizeGeneric(firstNonBlank(
+                            source.get("assetType"),
+                            source.get("asset_type"),
+                            source.get("arg1")
+                    )).toLowerCase(Locale.ROOT));
+                    putIfPresent(normalized, "priceMode", normalizeGeneric(firstNonBlank(
+                            source.get("priceMode"),
+                            source.get("price_mode"),
+                            source.get("arg4"),
+                            "raw_ohlc"
+                    )).toLowerCase(Locale.ROOT));
+                }
+                if ("getListedAssetShareSize".equals(toolName)) {
+                    putIfPresent(normalized, "exchange", normalizeCode(firstNonBlank(
+                            source.get("exchange"),
+                            source.get("arg3")
+                    )));
+                }
                 break;
             default:
                 for (Map.Entry<String, Object> entry : source.entrySet()) {

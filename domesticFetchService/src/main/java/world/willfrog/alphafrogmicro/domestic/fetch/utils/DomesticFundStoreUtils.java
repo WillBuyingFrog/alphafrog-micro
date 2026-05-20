@@ -7,7 +7,13 @@ import org.apache.ibatis.session.ExecutorType;
 import org.apache.ibatis.session.SqlSession;
 import org.apache.ibatis.session.SqlSessionFactory;
 import org.springframework.stereotype.Component;
+import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfAdjFactorDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfDailyDao;
+import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfInfoDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.fund.*;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.etf.EtfAdjFactor;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.etf.EtfDaily;
+import world.willfrog.alphafrogmicro.common.pojo.domestic.etf.EtfInfo;
 import world.willfrog.alphafrogmicro.common.pojo.domestic.fund.*;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 
@@ -548,6 +554,225 @@ public class DomesticFundStoreUtils {
         }
 
         return list.size();
+    }
+
+    public int storeEtfInfoByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<EtfInfo> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                EtfInfo pojo = new EtfInfo();
+                JSONObject ext = new JSONObject();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "csname":
+                        case "cname":
+                            pojo.setName(item.getString(j));
+                            break;
+                        case "extname":
+                            pojo.setFullName(item.getString(j));
+                            break;
+                        case "exchange":
+                            pojo.setExchange(item.getString(j));
+                            break;
+                        case "mgr_name":
+                            pojo.setMgrName(item.getString(j));
+                            break;
+                        case "list_status":
+                            pojo.setListStatus(item.getString(j));
+                            break;
+                        case "etf_type":
+                            pojo.setEtfType(item.getString(j));
+                            break;
+                        case "index_code":
+                            pojo.setIndexCode(item.getString(j));
+                            break;
+                        case "index_name":
+                            pojo.setIndexName(item.getString(j));
+                            break;
+                        case "list_date":
+                            pojo.setListDate(parseDate(item.getString(j)));
+                            break;
+                        case "setup_date":
+                            pojo.setSetupDate(parseDate(item.getString(j)));
+                            break;
+                        default:
+                            ext.put(field, item.get(j));
+                            break;
+                    }
+                }
+                if (!ext.isEmpty()) {
+                    pojo.setExtended(ext.toJSONString());
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to EtfInfo", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            EtfInfoDao dao = sqlSession.getMapper(EtfInfoDao.class);
+            int i = 0;
+            int batchSize = 50;
+            for (EtfInfo item : list) {
+                i++;
+                dao.insertEtfInfo(item);
+                if (i % batchSize == 0 || i == list.size()) {
+                    sqlSession.flushStatements();
+                    sqlSession.clearCache();
+                }
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting EtfInfo data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+    public int storeEtfDailyByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<EtfDaily> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                EtfDaily pojo = new EtfDaily();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "trade_date":
+                            pojo.setTradeDate(parseDate(item.getString(j)));
+                            break;
+                        case "open":
+                            pojo.setOpen(toDouble(item, j));
+                            break;
+                        case "high":
+                            pojo.setHigh(toDouble(item, j));
+                            break;
+                        case "low":
+                            pojo.setLow(toDouble(item, j));
+                            break;
+                        case "close":
+                            pojo.setClose(toDouble(item, j));
+                            break;
+                        case "pre_close":
+                            pojo.setPreClose(toDouble(item, j));
+                            break;
+                        case "change":
+                            pojo.setChange(toDouble(item, j));
+                            break;
+                        case "pct_chg":
+                            pojo.setPctChg(toDouble(item, j));
+                            break;
+                        case "vol":
+                            pojo.setVol(toDouble(item, j));
+                            break;
+                        case "amount":
+                            pojo.setAmount(toDouble(item, j));
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to EtfDaily", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            EtfDailyDao dao = sqlSession.getMapper(EtfDailyDao.class);
+            int i = 0;
+            int batchSize = 50;
+            for (EtfDaily item : list) {
+                i++;
+                dao.insertEtfDaily(item);
+                if (i % batchSize == 0 || i == list.size()) {
+                    sqlSession.flushStatements();
+                    sqlSession.clearCache();
+                }
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting EtfDaily data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+    public int storeEtfAdjFactorByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        List<EtfAdjFactor> list = new ArrayList<>();
+
+        try {
+            for (int i = 0; i < data.size(); i++) {
+                JSONArray item = data.getJSONArray(i);
+                EtfAdjFactor pojo = new EtfAdjFactor();
+                for (int j = 0; j < fields.size(); j++) {
+                    String field = fields.getString(j);
+                    switch (field) {
+                        case "ts_code":
+                            pojo.setTsCode(item.getString(j));
+                            break;
+                        case "trade_date":
+                            pojo.setTradeDate(parseDate(item.getString(j)));
+                            break;
+                        case "adj_factor":
+                            pojo.setAdjFactor(toDouble(item, j));
+                            break;
+                        default:
+                            break;
+                    }
+                }
+                list.add(pojo);
+            }
+        } catch (Exception e) {
+            log.error("Error occurred while converting raw TuShare data to EtfAdjFactor", e);
+            return -1;
+        }
+
+        try (SqlSession sqlSession = sqlSessionFactory.openSession(ExecutorType.BATCH)) {
+            EtfAdjFactorDao dao = sqlSession.getMapper(EtfAdjFactorDao.class);
+            int i = 0;
+            int batchSize = 50;
+            for (EtfAdjFactor item : list) {
+                i++;
+                dao.insertEtfAdjFactor(item);
+                if (i % batchSize == 0 || i == list.size()) {
+                    sqlSession.flushStatements();
+                    sqlSession.clearCache();
+                }
+            }
+            sqlSession.commit();
+        } catch (Exception e) {
+            log.error("Error occurred while inserting EtfAdjFactor data", e);
+            return -2;
+        }
+
+        return list.size();
+    }
+
+    private Long parseDate(String value) {
+        if (value == null || value.trim().isEmpty()) {
+            return null;
+        }
+        return DateConvertUtils.convertFlexibleDateStrToLong(value);
+    }
+
+    private Double toDouble(JSONArray item, int index) {
+        BigDecimal value = item.getBigDecimal(index);
+        return value == null ? null : value.doubleValue();
     }
 
 }

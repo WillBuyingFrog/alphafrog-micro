@@ -167,12 +167,35 @@
       "staticFixModel": "openai/gpt-5.2",
       "staticFixTemperature": 0.0,
       "failFast": false,
-      "defaultExecutionMode": "AUTO"
+      "defaultExecutionMode": "AUTO",
+      "adjFactorEnabled": false
     },
     "parallel": {
       "maxParallelSearchQueries": 3,
       "maxParallelDailyQueries": 2,
-      "dagThreadPoolSize": 4
+      "dagThreadPoolSize": 4,
+      "externalSearch": {
+        "maxConcurrent": 2,
+        "providerLimits": {
+          "perplexity": 1,
+          "exa": 2,
+          "tavily": 2
+        }
+      },
+      "toolWeightedLimit": {
+        "enabled": true,
+        "maxWeight": 12,
+        "defaultWeight": 2,
+        "tools": {
+          "searchAssetInfo": { "weight": 1, "maxBatchItems": 8 },
+          "getExchangeAssetDaily": { "weight": 3, "maxBatchItems": 6 },
+          "getOffExchangeAssetDaily": { "weight": 3, "maxBatchItems": 6 },
+          "getEtfAdj": { "weight": 2, "maxBatchItems": 8, "requiresAdjFactorEnabled": true },
+          "getListedAssetShareSize": { "weight": 2, "maxBatchItems": 8 },
+          "ragSearch": { "weight": 2, "maxBatchItems": 1 },
+          "executePython": { "weight": 4, "maxBatchItems": 1 }
+        }
+      }
     },
     "subAgent": {
       "enabled": true,

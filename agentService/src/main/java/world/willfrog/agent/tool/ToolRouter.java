@@ -23,6 +23,7 @@ import java.util.LinkedHashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.TimeUnit;
@@ -110,6 +111,9 @@ public class ToolRouter {
     @Autowired(required = false)
     private AgentLlmLocalConfigLoader localConfigLoader;
 
+    @Autowired(required = false)
+    private ToolWeightedLimitService toolWeightedLimitService;
+
     /**
      * 简化入口：仅返回工具输出文本，丢弃成功标志、耗时、缓存元数据等。
      *
@@ -174,6 +178,25 @@ public class ToolRouter {
                     .build();
         }
 
+        Optional<ToolWeightedLimitService.WeightLease> weightLease = Optional.empty();
+        if (toolWeightedLimitService != null) {
+            Optional<ToolWeightedLimitService.WeightLease> acquired = toolWeightedLimitService.tryAcquire(toolName, params);
+            if (acquired.isEmpty()) {
+                int effectiveWeight = toolWeightedLimitService.previewEffectiveWeight(toolName, params);
+                String errorResult = weightLimitExceeded(toolName, effectiveWeight);
+                recordObservability(toolName, params, errorResult, 0, false, null);
+                getOrCreateToolCallTimer(nvl(toolName)).record(0, TimeUnit.MILLISECONDS);
+                return ToolInvocationResult.builder()
+                        .output(errorResult)
+                        .success(false)
+                        .durationMs(0)
+                        .cacheMeta(null)
+                        .build();
+            }
+            weightLease = acquired;
+        }
+
+        try {
         // 主调用路径：走缓存装饰，由 ToolResultCacheService 决定命中或回源到 executeDirect
         ToolResultCacheService.CachedToolCallResult cached = toolResultCacheService.executeWithCache(
                 toolName,
@@ -204,6 +227,9 @@ public class ToolRouter {
                 .durationMs(durationMs)
                 .cacheMeta(cacheMeta)
                 .build();
+        } finally {
+            weightLease.ifPresent(ToolWeightedLimitService.WeightLease::release);
+        }
     }
 
     /**
@@ -236,6 +262,11 @@ public class ToolRouter {
                 "getIndexInfo",
                 "getIndexDaily",
                 "searchIndex",
+                "searchAssetInfo",
+                "getExchangeAssetDaily",
+                "getOffExchangeAssetDaily",
+                "getEtfAdj",
+                "getListedAssetShareSize",
                 "getFinancialReport",
                 "ragSearch",
                 "loadDocument",
@@ -315,6 +346,26 @@ public class ToolRouter {
         return true;
     }
 
+    private boolean isAdjFactorEnabled() {
+        if (localConfigLoader != null) {
+            Boolean local = localConfigLoader.current()
+                    .map(AgentLlmProperties::getRuntime)
+                    .map(AgentLlmProperties.Runtime::getExecution)
+                    .map(AgentLlmProperties.Execution::getAdjFactorEnabled)
+                    .orElse(null);
+            if (local != null) {
+                return local;
+            }
+        }
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null) {
+            Boolean enabled = llmProperties.getRuntime().getExecution().getAdjFactorEnabled();
+            if (enabled != null) {
+                return enabled;
+            }
+        }
+        return false;
+    }
+
     private String precheckFailure(String toolName, PythonStaticPrecheckService.Result precheck) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("pre_validation_failed", true);
@@ -381,6 +432,48 @@ public class ToolRouter {
                 );
                 case "searchIndex" -> marketDataTools.searchIndex(
                         str(params.get("keyword"), params.get("query"), params.get("arg0"))
+                );
+                case "searchAssetInfo" -> marketDataTools.searchAssetInfo(
+                        str(params.get("query"), params.get("keyword"), params.get("arg0")),
+                        str(params.get("assetTypes"), params.get("asset_types"), params.get("arg1")),
+                        str(params.get("marketScope"), params.get("market_scope"), params.get("arg2"), "domestic")
+                );
+                case "getExchangeAssetDaily" -> marketDataTools.getExchangeAssetDaily(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("arg0")),
+                        str(params.get("assetType"), params.get("asset_type"), params.get("arg1")),
+                        dateStr(params.get("startDate"), params.get("startDateStr"), params.get("start_date"), params.get("arg2")),
+                        dateStr(params.get("endDate"), params.get("endDateStr"), params.get("end_date"), params.get("arg3")),
+                        str(params.get("priceMode"), params.get("price_mode"), params.get("arg4"), "raw_ohlc")
+                );
+                case "getOffExchangeAssetDaily" -> marketDataTools.getOffExchangeAssetDaily(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("arg0")),
+                        dateStr(params.get("startDate"), params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
+                        dateStr(params.get("endDate"), params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
+                );
+                case "getEtfAdj" -> {
+                    if (!isAdjFactorEnabled()) {
+                        yield writeJson(Map.of(
+                                "ok", false,
+                                "tool", "getEtfAdj",
+                                "data", Map.of(),
+                                "error", Map.of(
+                                        "code", "CAPABILITY_DISABLED",
+                                        "message", "ETF adj factor is disabled (adjFactorEnabled=false)",
+                                        "details", Map.of("adjFactorEnabled", false)
+                                )
+                        ));
+                    }
+                    yield marketDataTools.getEtfAdj(
+                            str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("arg0")),
+                            dateStr(params.get("startDate"), params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
+                            dateStr(params.get("endDate"), params.get("endDateStr"), params.get("end_date"), params.get("arg2"))
+                    );
+                }
+                case "getListedAssetShareSize" -> marketDataTools.getListedAssetShareSize(
+                        str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("arg0")),
+                        dateStr(params.get("startDate"), params.get("startDateStr"), params.get("start_date"), params.get("arg1")),
+                        dateStr(params.get("endDate"), params.get("endDateStr"), params.get("end_date"), params.get("arg2")),
+                        str(params.get("exchange"), params.get("arg3"))
                 );
                 case "getFinancialReport" -> marketDataTools.getFinancialReport(
                         str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("ts code"), params.get("arg0")),
@@ -657,6 +750,22 @@ public class ToolRouter {
                         "code", "TOOL_INVOCATION_ERROR",
                         "message", nvl(message),
                         "details", Map.of()
+                )
+        ));
+    }
+
+    private String weightLimitExceeded(String toolName, int effectiveWeight) {
+        return writeJson(Map.of(
+                "ok", false,
+                "tool", nvl(toolName),
+                "data", Map.of(),
+                "error", Map.of(
+                        "code", "TOOL_WEIGHT_LIMIT_EXCEEDED",
+                        "message", "Tool weighted concurrency limit exceeded, retry later",
+                        "details", Map.of(
+                                "effectiveWeight", Math.max(0, effectiveWeight),
+                                "tool", nvl(toolName)
+                        )
                 )
         ));
     }

@@ -18,6 +18,7 @@ import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
@@ -32,6 +33,9 @@ public class MarketDataTools {
 
     @DubboReference
     private DomesticIndexService domesticIndexService;
+
+    @DubboReference
+    private DomesticListedAssetService domesticListedAssetService;
 
     private final DatasetWriter datasetWriter;
     private final DatasetRegistry datasetRegistry;
@@ -311,6 +315,459 @@ public class MarketDataTools {
         } catch (Exception e) {
             return fail("searchIndex", "TOOL_ERROR", "Error searching index", Map.of("message", nvl(e.getMessage())));
         }
+    }
+
+    @Tool("统一搜索股票/ETF/指数/场外基金基本信息。参数要求：query 支持 | 分隔或 JSON 数组；assetTypes 可选 stock,etf,index,off_exchange_fund（逗号分隔，默认全部）；marketScope 目前仅支持 domestic。")
+    public String searchAssetInfo(String query, String assetTypes, String marketScope) {
+        String scope = nvl(marketScope).trim();
+        if (!scope.isBlank() && !"domestic".equalsIgnoreCase(scope)) {
+            return fail("searchAssetInfo", "INVALID_ARGUMENT", "Only marketScope=domestic is supported in v1",
+                    Map.of("marketScope", scope));
+        }
+        LinkedHashSet<String> types = parseAssetTypes(assetTypes);
+        List<String> queries = parseBatchValues(query, resolveMaxParallelSearchQueries());
+        if (queries.size() > 1) {
+            return batchSearch("searchAssetInfo", queries, q -> searchAssetInfoSingle(q, types));
+        }
+        String single = queries.isEmpty() ? query : queries.get(0);
+        return searchAssetInfoSingle(single, types);
+    }
+
+    private String searchAssetInfoSingle(String query, LinkedHashSet<String> types) {
+        List<Map<String, Object>> items = new ArrayList<>();
+        List<Map<String, Object>> partialErrors = new ArrayList<>();
+        for (String type : types) {
+            switch (type) {
+                case "stock" -> mergeSearchItems(items, partialErrors, query, "stock", searchStockSingle(query));
+                case "index" -> mergeSearchItems(items, partialErrors, query, "index", searchIndexSingle(query));
+                case "off_exchange_fund" -> mergeSearchItems(items, partialErrors, query, "off_exchange_fund", searchFundSingle(query));
+                case "etf" -> mergeSearchItems(items, partialErrors, query, "etf", searchListedAssetEtfSingle(query));
+                default -> partialErrors.add(Map.of(
+                        "asset_type", type,
+                        "code", "INVALID_ARGUMENT",
+                        "message", "Unsupported asset type"
+                ));
+            }
+        }
+        if (items.isEmpty() && !partialErrors.isEmpty()) {
+            boolean allUnavailable = partialErrors.stream()
+                    .allMatch(err -> "SERVICE_UNAVAILABLE".equals(String.valueOf(err.get("code"))));
+            if (allUnavailable) {
+                return serviceUnavailable("searchAssetInfo", "DomesticListedAssetService (A5) is not available yet");
+            }
+        }
+        if (items.isEmpty()) {
+            return fail("searchAssetInfo", "NO_DATA", "No assets found for query", Map.of(
+                    "query", nvl(query),
+                    "asset_types", new ArrayList<>(types)
+            ));
+        }
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("query", nvl(query));
+        data.put("asset_types", new ArrayList<>(types));
+        data.put("market_scope", "domestic");
+        data.put("count", items.size());
+        data.put("items", items);
+        if (!partialErrors.isEmpty()) {
+            data.put("partial_errors", partialErrors);
+        }
+        return ok("searchAssetInfo", data);
+    }
+
+    @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。")
+    public String getExchangeAssetDaily(String tsCode, String assetType, String startDate, String endDate, String priceMode) {
+        String type = normalizeAssetType(assetType);
+        if (type.isBlank()) {
+            return fail("getExchangeAssetDaily", "INVALID_ARGUMENT", "assetType is required: stock|etf|index",
+                    Map.of("assetType", nvl(assetType)));
+        }
+        String mode = nvl(priceMode).trim().toLowerCase();
+        if (!mode.isBlank() && !"raw_ohlc".equals(mode)) {
+            return fail("getExchangeAssetDaily", "INVALID_ARGUMENT", "Only priceMode=raw_ohlc is supported in v1",
+                    Map.of("priceMode", nvl(priceMode)));
+        }
+        if ("etf".equals(type)) {
+            List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+            if (tsCodes.size() > 1) {
+                return batchGetListedAssetDaily("getExchangeAssetDaily", tsCodes, startDate, endDate);
+            }
+            String singleTsCode = tsCodes.isEmpty() ? tsCode : tsCodes.get(0);
+            return fetchListedAssetDailySingle(singleTsCode, startDate, endDate, "etf", "getExchangeAssetDaily");
+        }
+        if ("stock".equals(type)) {
+            return getStockDaily(tsCode, startDate, endDate);
+        }
+        if ("index".equals(type)) {
+            return getIndexDaily(tsCode, startDate, endDate);
+        }
+        return fail("getExchangeAssetDaily", "INVALID_ARGUMENT", "Unsupported assetType: " + type,
+                Map.of("assetType", type));
+    }
+
+    @Tool("查询场外基金净值序列。参数要求：tsCode 为基金代码；startDate/endDate 为 YYYYMMDD。不用于 ETF 场内日线回测。")
+    public String getOffExchangeAssetDaily(String tsCode, String startDate, String endDate) {
+        String normalizedTsCode = nvl(tsCode).trim();
+        String normalizedStart = compactDate(startDate);
+        String normalizedEnd = compactDate(endDate);
+        long startMs = convertToMsTimestamp(normalizedStart);
+        long endMs = convertToMsTimestamp(normalizedEnd);
+        if (normalizedTsCode.isBlank() || startMs <= 0 || endMs <= 0) {
+            return fail("getOffExchangeAssetDaily", "INVALID_ARGUMENT", "Invalid tsCode or date range, use YYYYMMDD",
+                    Map.of("ts_code", normalizedTsCode, "start_date", normalizedStart, "end_date", normalizedEnd));
+        }
+        try {
+            DomesticFundNavsByTsCodeAndDateRangeRequest request = DomesticFundNavsByTsCodeAndDateRangeRequest.newBuilder()
+                    .setTsCode(normalizedTsCode)
+                    .setStartDateTimestamp(startMs)
+                    .setEndDateTimestamp(endMs)
+                    .build();
+            DomesticFundNavsByTsCodeAndDateRangeResponse response =
+                    domesticFundService.getDomesticFundNavsByTsCodeAndDateRange(request);
+            if (response.getItemsCount() <= 0) {
+                return fail("getOffExchangeAssetDaily", "NO_DATA", "No fund nav data found", Map.of(
+                        "ts_code", normalizedTsCode,
+                        "start_date", normalizedStart,
+                        "end_date", normalizedEnd
+                ));
+            }
+            List<Map<String, Object>> previewRows = new ArrayList<>();
+            response.getItemsList().stream().limit(20).forEach(item -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("nav_date", item.getNavDate());
+                row.put("unit_nav", item.getUnitNav());
+                row.put("adj_nav", item.getAdjNav());
+                previewRows.add(row);
+            });
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ts_code", normalizedTsCode);
+            data.put("start_date", normalizedStart);
+            data.put("end_date", normalizedEnd);
+            data.put("asset_type", "off_exchange_fund");
+            data.put("rows", response.getItemsCount());
+            data.put("preview_rows", previewRows);
+            return ok("getOffExchangeAssetDaily", data);
+        } catch (Exception e) {
+            return fail("getOffExchangeAssetDaily", "TOOL_ERROR", "Error fetching fund nav data",
+                    Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    @Tool("查询 ETF 复权因子时序。参数要求：tsCode/startDate/endDate；仅当 adjFactorEnabled=true 时可用。")
+    public String getEtfAdj(String tsCode, String startDate, String endDate) {
+        if (!isAdjFactorEnabled()) {
+            return fail("getEtfAdj", "CAPABILITY_DISABLED", "ETF adj factor is disabled (adjFactorEnabled=false)",
+                    Map.of("adjFactorEnabled", false));
+        }
+        String normalizedTsCode = nvl(tsCode).trim();
+        String normalizedStart = compactDate(startDate);
+        String normalizedEnd = compactDate(endDate);
+        long startMs = convertToMsTimestamp(normalizedStart);
+        long endMs = convertToMsTimestamp(normalizedEnd);
+        if (normalizedTsCode.isBlank() || startMs <= 0 || endMs <= 0) {
+            return fail("getEtfAdj", "INVALID_ARGUMENT", "Invalid tsCode or date range, use YYYYMMDD",
+                    Map.of("ts_code", normalizedTsCode, "start_date", normalizedStart, "end_date", normalizedEnd));
+        }
+        try {
+            ListedAssetAdjFactorRequest request = ListedAssetAdjFactorRequest.newBuilder()
+                    .setTsCode(normalizedTsCode)
+                    .setStartDate(startMs)
+                    .setEndDate(endMs)
+                    .build();
+            ListedAssetAdjFactorResponse response = domesticListedAssetService.getListedAssetAdjFactors(request);
+            if (response.getItemsCount() <= 0) {
+                return fail("getEtfAdj", "NO_DATA", "No ETF adj factor data found", Map.of(
+                        "ts_code", normalizedTsCode,
+                        "start_date", normalizedStart,
+                        "end_date", normalizedEnd
+                ));
+            }
+            List<Map<String, Object>> previewRows = new ArrayList<>();
+            response.getItemsList().stream().limit(20).forEach(item -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("trade_date", item.getTradeDate());
+                row.put("adj_factor", item.getAdjFactor());
+                previewRows.add(row);
+            });
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ts_code", normalizedTsCode);
+            data.put("start_date", normalizedStart);
+            data.put("end_date", normalizedEnd);
+            data.put("asset_type", "etf");
+            data.put("rows", response.getItemsCount());
+            data.put("preview_rows", previewRows);
+            return ok("getEtfAdj", data);
+        } catch (Exception e) {
+            return fail("getEtfAdj", "TOOL_ERROR", "Error fetching ETF adj factors",
+                    Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    @Tool("查询 ETF 份额规模时序。参数要求：tsCode、startDate、endDate；exchange 使用 SSE/SZSE/BSE。")
+    public String getListedAssetShareSize(String tsCode, String startDate, String endDate, String exchange) {
+        String normalizedTsCode = nvl(tsCode).trim();
+        String normalizedStart = compactDate(startDate);
+        String normalizedEnd = compactDate(endDate);
+        String normalizedExchange = nvl(exchange).trim().toUpperCase();
+        long startMs = convertToMsTimestamp(normalizedStart);
+        long endMs = convertToMsTimestamp(normalizedEnd);
+        if (normalizedTsCode.isBlank() || startMs <= 0 || endMs <= 0) {
+            return fail("getListedAssetShareSize", "INVALID_ARGUMENT", "Invalid tsCode or date range, use YYYYMMDD",
+                    Map.of("ts_code", normalizedTsCode, "start_date", normalizedStart, "end_date", normalizedEnd));
+        }
+        if (!normalizedExchange.isBlank()
+                && !Set.of("SSE", "SZSE", "BSE").contains(normalizedExchange)) {
+            return fail("getListedAssetShareSize", "INVALID_ARGUMENT", "exchange must be SSE, SZSE, or BSE",
+                    Map.of("exchange", nvl(exchange)));
+        }
+        try {
+            DomesticEtfShareSizesByTsCodeAndDateRangeRequest request =
+                    DomesticEtfShareSizesByTsCodeAndDateRangeRequest.newBuilder()
+                            .setTsCode(normalizedTsCode)
+                            .setStartDateTimestamp(startMs)
+                            .setEndDateTimestamp(endMs)
+                            .build();
+            DomesticEtfShareSizesByTsCodeAndDateRangeResponse response =
+                    domesticFundService.getDomesticEtfShareSizesByTsCodeAndDateRange(request);
+            List<DomesticEtfShareSizeItem> items = response.getItemsList();
+            if (!normalizedExchange.isBlank()) {
+                items = items.stream()
+                        .filter(item -> normalizedExchange.equalsIgnoreCase(nvl(item.getExchange())))
+                        .toList();
+            }
+            if (items.isEmpty()) {
+                return fail("getListedAssetShareSize", "NO_DATA", "No ETF share size data found", Map.of(
+                        "ts_code", normalizedTsCode,
+                        "start_date", normalizedStart,
+                        "end_date", normalizedEnd,
+                        "exchange", normalizedExchange
+                ));
+            }
+            List<Map<String, Object>> previewRows = new ArrayList<>();
+            items.stream().limit(20).forEach(item -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("trade_date", item.getTradeDate());
+                row.put("total_share", item.hasTotalShare() ? item.getTotalShare() : null);
+                row.put("total_size", item.hasTotalSize() ? item.getTotalSize() : null);
+                row.put("exchange", item.getExchange());
+                previewRows.add(row);
+            });
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("ts_code", normalizedTsCode);
+            data.put("start_date", normalizedStart);
+            data.put("end_date", normalizedEnd);
+            data.put("asset_type", "etf");
+            if (!normalizedExchange.isBlank()) {
+                data.put("exchange", normalizedExchange);
+            }
+            data.put("rows", items.size());
+            data.put("preview_rows", previewRows);
+            return ok("getListedAssetShareSize", data);
+        } catch (Exception e) {
+            return fail("getListedAssetShareSize", "TOOL_ERROR", "Error fetching ETF share size",
+                    Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    private String searchListedAssetEtfSingle(String query) {
+        try {
+            ListedAssetSearchRequest request = ListedAssetSearchRequest.newBuilder()
+                    .setQuery(nvl(query))
+                    .addAssetTypes("etf")
+                    .setMarketScope("domestic")
+                    .setLimit(20)
+                    .build();
+            ListedAssetSearchResponse response = domesticListedAssetService.searchListedAssets(request);
+            if (response.getItemsCount() <= 0) {
+                return fail("searchAssetInfo", "NO_DATA", "No ETF found for keyword", Map.of("keyword", nvl(query)));
+            }
+            List<Map<String, Object>> items = new ArrayList<>();
+            response.getItemsList().stream().limit(20).forEach(item -> items.add(listedAssetInfoToRow(item)));
+            return ok("searchAssetInfo", Map.of(
+                    "query", nvl(query),
+                    "count", response.getItemsCount(),
+                    "returned", items.size(),
+                    "items", items
+            ));
+        } catch (Exception e) {
+            return fail("searchAssetInfo", "TOOL_ERROR", "Error searching ETF via DomesticListedAssetService",
+                    Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    private String batchGetListedAssetDaily(String toolName,
+                                            List<String> tsCodes,
+                                            String startDateStr,
+                                            String endDateStr) {
+        List<CompletableFuture<Map<String, Object>>> futures = tsCodes.stream()
+                .map(code -> CompletableFuture.supplyAsync(() -> {
+                    String response = fetchListedAssetDailySingle(code, startDateStr, endDateStr, "etf", toolName);
+                    Map<String, Object> payload = readJsonMap(response);
+                    Map<String, Object> row = new LinkedHashMap<>();
+                    row.put("ts_code", code);
+                    row.put("ok", Boolean.TRUE.equals(payload.get("ok")));
+                    row.put("data", readNestedMap(payload.get("data")));
+                    row.put("error", readNestedMap(payload.get("error")));
+                    return row;
+                }))
+                .toList();
+
+        List<Map<String, Object>> results = futures.stream().map(CompletableFuture::join).toList();
+        long successCount = results.stream().filter(it -> Boolean.TRUE.equals(it.get("ok"))).count();
+
+        return ok(toolName, Map.of(
+                "mode", "batch",
+                "ts_codes", tsCodes,
+                "asset_type", "etf",
+                "start_date", compactDate(startDateStr),
+                "end_date", compactDate(endDateStr),
+                "results", results,
+                "success_count", successCount,
+                "failure_count", Math.max(0, results.size() - successCount)
+        ));
+    }
+
+    private String fetchListedAssetDailySingle(String tsCode,
+                                               String startDateStr,
+                                               String endDateStr,
+                                               String assetType,
+                                               String toolName) {
+        String normalizedTsCode = nvl(tsCode).trim();
+        String normalizedStart = compactDate(startDateStr);
+        String normalizedEnd = compactDate(endDateStr);
+        long startDate = convertToMsTimestamp(normalizedStart);
+        long endDate = convertToMsTimestamp(normalizedEnd);
+        if (startDate <= 0 || endDate <= 0) {
+            return fail(toolName, "INVALID_ARGUMENT", "Invalid date range, please use YYYYMMDD format (Asia/Shanghai).", Map.of(
+                    "ts_code", normalizedTsCode,
+                    "start_date", normalizedStart,
+                    "end_date", normalizedEnd
+            ));
+        }
+
+        List<String> headers = Arrays.asList("ts_code", "trade_date", "open", "high", "low", "close", "pre_close", "change", "pct_chg", "vol", "amount");
+        String datasetKind = "etf".equals(assetType) ? "etf_daily" : "listed_asset_daily";
+        try {
+            if (datasetWriter.isEnabled() && datasetRegistry.isEnabled()) {
+                return datasetRegistry.findReusable(datasetKind, normalizedTsCode, normalizedStart, normalizedEnd, headers)
+                        .map(meta -> ok(toolName, datasetData(
+                                normalizedTsCode,
+                                normalizedStart,
+                                normalizedEnd,
+                                headers,
+                                meta.getDatasetId(),
+                                meta.getRowCount(),
+                                "reused",
+                                true,
+                                List.of()
+                        )))
+                        .orElseGet(() -> fetchListedAssetDailyFromService(
+                                normalizedTsCode, normalizedStart, normalizedEnd, assetType, toolName, headers, datasetKind));
+            }
+            return fetchListedAssetDailyFromService(
+                    normalizedTsCode, normalizedStart, normalizedEnd, assetType, toolName, headers, datasetKind);
+        } catch (Exception e) {
+            return fail(toolName, "TOOL_ERROR", "Error fetching listed asset daily data", Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    private String fetchListedAssetDailyFromService(String tsCode,
+                                                    String startDateStr,
+                                                    String endDateStr,
+                                                    String assetType,
+                                                    String toolName,
+                                                    List<String> headers,
+                                                    String datasetKind) {
+        try {
+            ListedAssetDailyRequest request = ListedAssetDailyRequest.newBuilder()
+                    .setTsCode(tsCode)
+                    .setAssetType(assetType)
+                    .setStartDate(convertToMsTimestamp(startDateStr))
+                    .setEndDate(convertToMsTimestamp(endDateStr))
+                    .setPriceMode("raw_ohlc")
+                    .build();
+            ListedAssetDailyResponse response = domesticListedAssetService.getListedAssetDaily(request);
+            if (response.getItemsCount() <= 0) {
+                return fail(toolName, "NO_DATA", "No daily listed asset data found", Map.of(
+                        "ts_code", tsCode,
+                        "asset_type", assetType,
+                        "start_date", startDateStr,
+                        "end_date", endDateStr
+                ));
+            }
+
+            if (datasetWriter.isEnabled()) {
+                String runId = AgentContext.getRunId();
+                String prefix = (runId != null ? runId : "unknown") + "-" + assetType;
+                String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
+                        item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(),
+                        item.hasPreClose() ? item.getPreClose() : null,
+                        item.hasChange() ? item.getChange() : null,
+                        item.hasPctChg() ? item.getPctChg() : null,
+                        item.hasVol() ? item.getVol() : null,
+                        item.hasAmount() ? item.getAmount() : null
+                ));
+                if (datasetRegistry.isEnabled()) {
+                    datasetRegistry.registerDataset(datasetKind, tsCode, startDateStr, endDateStr, headers, datasetId, response.getItemsCount());
+                }
+                return ok(toolName, datasetData(
+                        tsCode,
+                        startDateStr,
+                        endDateStr,
+                        headers,
+                        datasetId,
+                        response.getItemsCount(),
+                        "created",
+                        false,
+                        List.of()
+                ));
+            }
+
+            List<Map<String, Object>> previewRows = new ArrayList<>();
+            response.getItemsList().stream().limit(20).forEach(item -> {
+                Map<String, Object> row = new LinkedHashMap<>();
+                row.put("trade_date", item.getTradeDate());
+                row.put("close", item.getClose());
+                previewRows.add(row);
+            });
+            Map<String, Object> data = datasetData(
+                    tsCode,
+                    startDateStr,
+                    endDateStr,
+                    headers,
+                    "",
+                    response.getItemsCount(),
+                    "inline",
+                    false,
+                    previewRows
+            );
+            data.put("asset_type", assetType);
+            return ok(toolName, data);
+        } catch (Exception e) {
+            return fail(toolName, "TOOL_ERROR", "Error fetching listed asset daily data", Map.of("message", nvl(e.getMessage())));
+        }
+    }
+
+    private Map<String, Object> listedAssetInfoToRow(ListedAssetInfoItem item) {
+        Map<String, Object> row = new LinkedHashMap<>();
+        row.put("ts_code", item.getTsCode());
+        row.put("name", item.getName());
+        row.put("asset_type", item.getAssetType());
+        if (item.hasExchange()) {
+            row.put("exchange", item.getExchange());
+        }
+        if (item.hasIndexCode()) {
+            row.put("index_code", item.getIndexCode());
+        }
+        if (item.hasIndexName()) {
+            row.put("index_name", item.getIndexName());
+        }
+        if (item.hasEtfType()) {
+            row.put("etf_type", item.getEtfType());
+        }
+        if (item.hasManagerName()) {
+            row.put("manager_name", item.getManagerName());
+        }
+        return row;
     }
 
     private String batchSearch(String toolName, List<String> queries, Function<String, String> singleCall) {
@@ -706,6 +1163,94 @@ public class MarketDataTools {
                 .replace("\"", "\\\"")
                 .replace("\n", "\\n")
                 .replace("\r", "\\r");
+    }
+
+    private LinkedHashSet<String> parseAssetTypes(String assetTypes) {
+        LinkedHashSet<String> types = new LinkedHashSet<>();
+        String raw = nvl(assetTypes).trim();
+        if (raw.isBlank()) {
+            types.add("stock");
+            types.add("etf");
+            types.add("index");
+            types.add("off_exchange_fund");
+            return types;
+        }
+        for (String part : raw.split("[,|]")) {
+            String normalized = normalizeAssetType(part);
+            if (!normalized.isBlank()) {
+                types.add(normalized);
+            }
+        }
+        if (types.isEmpty()) {
+            types.add("stock");
+            types.add("etf");
+            types.add("index");
+            types.add("off_exchange_fund");
+        }
+        return types;
+    }
+
+    private String normalizeAssetType(String assetType) {
+        String type = nvl(assetType).trim().toLowerCase();
+        return switch (type) {
+            case "stock", "etf", "index", "off_exchange_fund" -> type;
+            case "fund", "off_exchange", "offexchangefund" -> "off_exchange_fund";
+            default -> type;
+        };
+    }
+
+    private void mergeSearchItems(List<Map<String, Object>> items,
+                                  List<Map<String, Object>> partialErrors,
+                                  String query,
+                                  String assetType,
+                                  String responseJson) {
+        Map<String, Object> payload = readJsonMap(responseJson);
+        if (Boolean.TRUE.equals(payload.get("ok"))) {
+            Map<String, Object> data = readNestedMap(payload.get("data"));
+            Object rawItems = data.get("items");
+            if (rawItems instanceof List<?> list) {
+                for (Object item : list) {
+                    if (item instanceof Map<?, ?> row) {
+                        Map<String, Object> enriched = new LinkedHashMap<>();
+                        for (Map.Entry<?, ?> entry : row.entrySet()) {
+                            enriched.put(String.valueOf(entry.getKey()), entry.getValue());
+                        }
+                        enriched.put("asset_type", assetType);
+                        items.add(enriched);
+                    }
+                }
+            }
+            return;
+        }
+        Map<String, Object> error = readNestedMap(payload.get("error"));
+        partialErrors.add(Map.of(
+                "asset_type", assetType,
+                "query", nvl(query),
+                "code", nvl(String.valueOf(error.getOrDefault("code", "TOOL_ERROR"))),
+                "message", nvl(String.valueOf(error.getOrDefault("message", "search failed")))
+        ));
+    }
+
+    private String serviceUnavailable(String tool, String message) {
+        return fail(tool, "SERVICE_UNAVAILABLE", message, Map.of());
+    }
+
+    private boolean isAdjFactorEnabled() {
+        Boolean local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getExecution)
+                .map(AgentLlmProperties.Execution::getAdjFactorEnabled)
+                .orElse(null);
+        if (local != null) {
+            return local;
+        }
+        if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null) {
+            Boolean enabled = llmProperties.getRuntime().getExecution().getAdjFactorEnabled();
+            if (enabled != null) {
+                return enabled;
+            }
+        }
+        return false;
     }
 
     @Tool("""

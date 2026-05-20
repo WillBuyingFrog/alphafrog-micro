@@ -220,6 +220,7 @@ service DomesticFundService {
   rpc searchDomesticFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
   rpc getDomesticFundPortfolioByTsCodeAndDateRange(DomesticFundPortfolioByTsCodeAndDateRangeRequest) returns (DomesticFundPortfolioByTsCodeAndDateRangeResponse);
   rpc getDomesticFundPortfolioBySymbolAndDateRange(DomesticFundPortfolioBySymbolAndDateRangeRequest) returns (DomesticFundPortfolioBySymbolAndDateRangeResponse);
+  rpc getDomesticEtfShareSizesByTsCodeAndDateRange(DomesticEtfShareSizesByTsCodeAndDateRangeRequest) returns (DomesticEtfShareSizesByTsCodeAndDateRangeResponse);
 
 }
 
@@ -290,6 +291,84 @@ message DomesticEtfShareSizeFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+/**
+  ETF 基本信息爬取
+ */
+
+message DomesticEtfInfoFetchRequest {
+  string tsCode = 1;
+  string listStatus = 2;
+  string exchange = 3;
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticEtfInfoFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 场内日线爬取（TuShare fund_daily）
+ */
+
+message DomesticEtfDailyFetchRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  int32 offset = 5;
+  int32 limit = 6;
+}
+
+message DomesticEtfDailyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 复权因子爬取（TuShare fund_adj）
+ */
+
+message DomesticEtfAdjFactorFetchRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  int32 offset = 5;
+  int32 limit = 6;
+}
+
+message DomesticEtfAdjFactorFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 份额规模查询（复用 alphafrog_fund_etf_share_size）
+ */
+
+message DomesticEtfShareSizeItem {
+  string tsCode = 1;
+  int64 tradeDate = 2;
+  optional string etfName = 3;
+  optional double totalShare = 4;
+  optional double totalSize = 5;
+  optional double nav = 6;
+  optional double close = 7;
+  optional string exchange = 8;
+}
+
+message DomesticEtfShareSizesByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDateTimestamp = 2;
+  int64 endDateTimestamp = 3;
+}
+
+message DomesticEtfShareSizesByTsCodeAndDateRangeResponse {
+  repeated DomesticEtfShareSizeItem items = 1;
+}
+
 
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
@@ -300,4 +379,7 @@ service DomesticFundFetchService {
   rpc fetchFundManagerByTsCode(DomesticFundManagerFetchByTsCodeRequest) returns (DomesticFundManagerFetchByTsCodeResponse);
   rpc fetchFundShareByTradeDate(DomesticFundShareFetchByTradeDateRequest) returns (DomesticFundShareFetchByTradeDateResponse);
   rpc fetchEtfShareSizeByTradeDate(DomesticEtfShareSizeFetchByTradeDateRequest) returns (DomesticEtfShareSizeFetchByTradeDateResponse);
+  rpc fetchEtfInfo(DomesticEtfInfoFetchRequest) returns (DomesticEtfInfoFetchResponse);
+  rpc fetchEtfDaily(DomesticEtfDailyFetchRequest) returns (DomesticEtfDailyFetchResponse);
+  rpc fetchEtfAdjFactor(DomesticEtfAdjFactorFetchRequest) returns (DomesticEtfAdjFactorFetchResponse);
 }

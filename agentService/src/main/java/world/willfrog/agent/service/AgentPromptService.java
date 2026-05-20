@@ -500,8 +500,16 @@ public class AgentPromptService {
                     "- getIndexDaily: 查询指数日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000300.SH|000905.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "getStockDaily" -> capabilities.add(
                     "- getStockDaily: 查询股票日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000001.SZ|600519.SH\"；批量返回 data.mode=batch 和 data.results。");
-                case "getFundDaily" -> capabilities.add(
-                    "- getFundDaily: 查询基金日线数据。若工具实现支持批量，请使用当前工具定义声明的参数格式，不要自行改用逗号分隔。");
+                case "searchAssetInfo" -> capabilities.add(
+                    "- searchAssetInfo: 搜索股票/ETF/指数/场外基金基本信息。query 支持 | 分隔或 JSON 数组；assetTypes 可选 stock,etf,index,off_exchange_fund。");
+                case "getExchangeAssetDaily" -> capabilities.add(
+                    "- getExchangeAssetDaily: 查询场内资产日线（股票/ETF/指数）。tsCode 支持批量；ETF 需 A5 服务就绪。");
+                case "getOffExchangeAssetDaily" -> capabilities.add(
+                    "- getOffExchangeAssetDaily: 查询场外基金净值序列，不用于 ETF 场内回测。");
+                case "getListedAssetShareSize" -> capabilities.add(
+                    "- getListedAssetShareSize: 查询 ETF 份额规模时序；exchange 使用 SSE/SZSE/BSE。");
+                case "getEtfAdj" -> capabilities.add(
+                    "- getEtfAdj: 查询 ETF 复权因子；仅当 adjFactorEnabled=true 时可用。");
                 case "searchIndex" -> capabilities.add(
                     "- searchIndex: 搜索指数代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"沪深300|中证500\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchStock" -> capabilities.add(

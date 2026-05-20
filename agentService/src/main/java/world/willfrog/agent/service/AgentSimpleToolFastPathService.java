@@ -109,6 +109,14 @@ public class AgentSimpleToolFastPathService {
         if (isIndexQuery(text) && availableTools.contains("searchIndex")) {
             return Optional.of(FastPathDecision.selected("searchIndex", Map.of("keyword", keyword)));
         }
+        if (availableTools.contains("searchAssetInfo")
+                && (text.toUpperCase(Locale.ROOT).contains("ETF") || text.contains("etf"))) {
+            return Optional.of(FastPathDecision.selected("searchAssetInfo", Map.of(
+                    "query", keyword,
+                    "assetTypes", "etf",
+                    "marketScope", "domestic"
+            )));
+        }
         if (text.contains("基金") && availableTools.contains("searchFund")) {
             return Optional.of(FastPathDecision.selected("searchFund", Map.of("keyword", keyword)));
         }

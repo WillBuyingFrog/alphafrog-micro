@@ -363,8 +363,10 @@ public class AgentLlmLocalConfigLoader {
         }
         if (cfg.getRuntime() == null) {
             cfg.setRuntime(null);
+        } else {
+            sanitizeRuntime(cfg.getRuntime());
         }
-        if (cfg.getRuntime().getMultiTurn() == null) {
+        if (cfg.getRuntime() != null && cfg.getRuntime().getMultiTurn() == null) {
             cfg.getRuntime().setMultiTurn(null);
         }
         if (cfg.getRuntime().getMultiTurn().getCompression() == null) {
@@ -416,5 +418,23 @@ public class AgentLlmLocalConfigLoader {
             cfg.setOpenrouter(null);
         }
         return cfg;
+    }
+
+    private void sanitizeRuntime(AgentLlmProperties.Runtime runtime) {
+        if (runtime.getExecution() != null && runtime.getExecution().getAdjFactorEnabled() == null) {
+            runtime.getExecution().setAdjFactorEnabled(false);
+        }
+        if (runtime.getParallel() == null || runtime.getParallel().getToolWeightedLimit() == null) {
+            return;
+        }
+        AgentLlmProperties.ToolWeightedLimit limit = runtime.getParallel().getToolWeightedLimit();
+        if (limit.getTools() == null) {
+            return;
+        }
+        for (AgentLlmProperties.ToolWeightEntry entry : limit.getTools().values()) {
+            if (entry != null && entry.getRequiresAdjFactorEnabled() == null) {
+                entry.setRequiresAdjFactorEnabled(false);
+            }
+        }
     }
 }

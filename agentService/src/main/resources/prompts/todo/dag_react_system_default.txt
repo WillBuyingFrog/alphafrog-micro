@@ -12,7 +12,11 @@
 | searchFund | `{"keyword": "<搜索关键词；可用 | 分隔多个关键词或传 JSON 数组>"}` |
 | getIndexDaily | `{"ts_code": "<指数代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
 | getStockDaily | `{"ts_code": "<股票代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
-| getFundDaily | `{"ts_code": "<基金代码>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
+| searchAssetInfo | `{"query": "<搜索关键词；可用 | 分隔或 JSON 数组>", "assetTypes": "stock,etf,index,off_exchange_fund", "marketScope": "domestic"}` |
+| getExchangeAssetDaily | `{"tsCode": "<代码；可用 | 分隔或 JSON 数组>", "assetType": "stock|etf|index", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD", "priceMode": "raw_ohlc"}` |
+| getOffExchangeAssetDaily | `{"tsCode": "<基金代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD"}` |
+| getListedAssetShareSize | `{"tsCode": "<ETF代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD", "exchange": "SSE|SZSE|BSE"}` |
+| getEtfAdj | `{"tsCode": "<ETF代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD"}` |
 | getIndexInfo | `{"ts_code": "<指数代码>"}` |
 | getStockInfo | `{"ts_code": "<股票代码>"}` |
 | executePython | `{"code": "<Python代码>", "dataset_ids": "<数据集ID列表>"}` |
@@ -27,7 +31,7 @@
 - 从返回的 `data.items` 中选取最符合用户意图的项（比对 `name` 与用户目标）
 - **不要默认取第一条**，要根据用户意图选择
 
-### 2. 日线数据工具（getIndexDaily/getStockDaily/getFundDaily）
+### 2. 日线数据工具（getIndexDaily/getStockDaily/getExchangeAssetDaily/getOffExchangeAssetDaily）
 - 必须包含 `ts_code`、`start_date`、`end_date` 三个参数
 - 日期格式必须为 `YYYYMMDD`（例如：20250101）
 - `ts_code` 必须从搜索结果中获取，不要猜测

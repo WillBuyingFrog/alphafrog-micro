@@ -1,0 +1,115 @@
+syntax = "proto3";
+
+option java_multiple_files = true;
+
+package world.willfrog.alphafrogmicro.domestic.idl;
+
+/**
+  境内场内资产统一查询服务
+
+  第一轮只新增新服务契约，不删除 DomesticStockService 等旧接口。
+  ETF 份额规模查询仍由 DomesticFundService 承接，本 proto 不重复定义。
+ */
+
+/**
+  场内资产基础信息
+ */
+
+message ListedAssetInfoItem {
+  string assetType = 1;        // stock / etf
+  string tsCode = 2;
+  string name = 3;
+  optional string symbol = 4;
+  optional string fullName = 5;
+  optional string exchange = 6;     // 股票沿用 SH/SZ 等旧口径；ETF 对外使用 SSE/SZSE/BSE
+  optional string market = 7;
+  optional string industry = 8;
+  optional string listStatus = 9;
+  optional int64 listDate = 10;
+  optional int64 delistDate = 11;
+  optional string etfType = 12;
+  optional string indexCode = 13;
+  optional string indexName = 14;
+  optional string managerName = 15;
+  optional string sourceService = 16;
+}
+
+message ListedAssetInfoRequest {
+  string tsCode = 1;
+  string assetType = 2;        // stock / etf
+}
+
+message ListedAssetInfoResponse {
+  optional ListedAssetInfoItem item = 1;
+}
+
+message ListedAssetSearchRequest {
+  string query = 1;
+  repeated string assetTypes = 2;   // stock / etf
+  optional string marketScope = 3;  // domestic
+  optional int32 limit = 4;
+}
+
+message ListedAssetSearchResponse {
+  repeated ListedAssetInfoItem items = 1;
+}
+
+/**
+  场内资产日线
+ */
+
+message ListedAssetDailyItem {
+  string assetType = 1;        // stock / etf
+  string tsCode = 2;
+  int64 tradeDate = 3;
+  double open = 4;
+  double high = 5;
+  double low = 6;
+  double close = 7;
+  optional double preClose = 8;
+  optional double change = 9;
+  optional double pctChg = 10;
+  optional double vol = 11;
+  optional double amount = 12;
+}
+
+message ListedAssetDailyRequest {
+  string tsCode = 1;
+  string assetType = 2;        // stock / etf
+  int64 startDate = 3;
+  int64 endDate = 4;
+  optional string priceMode = 5;    // raw_ohlc by default
+}
+
+message ListedAssetDailyResponse {
+  repeated ListedAssetDailyItem items = 1;
+}
+
+/**
+  ETF 复权因子
+
+  系统侧命名为 etf_adj；抓取源接口是 TuShare fund_adj。
+ */
+
+message ListedAssetAdjFactorItem {
+  string tsCode = 1;
+  int64 tradeDate = 2;
+  double adjFactor = 3;
+}
+
+message ListedAssetAdjFactorRequest {
+  string tsCode = 1;
+  int64 startDate = 2;
+  int64 endDate = 3;
+}
+
+message ListedAssetAdjFactorResponse {
+  repeated ListedAssetAdjFactorItem items = 1;
+}
+
+service DomesticListedAssetService {
+  rpc getListedAssetInfo(ListedAssetInfoRequest) returns (ListedAssetInfoResponse);
+  rpc searchListedAssets(ListedAssetSearchRequest) returns (ListedAssetSearchResponse);
+  rpc getListedAssetDaily(ListedAssetDailyRequest) returns (ListedAssetDailyResponse);
+  rpc getListedAssetAdjFactors(ListedAssetAdjFactorRequest) returns (ListedAssetAdjFactorResponse);
+}

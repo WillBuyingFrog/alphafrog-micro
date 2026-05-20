@@ -1133,7 +1133,11 @@ public class ReactTodoExecutor {
             case "searchFund" -> "{\"keyword\": \"<搜索关键词>\"}";
             case "getIndexDaily" -> "{\"ts_code\": \"<指数代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
             case "getStockDaily" -> "{\"ts_code\": \"<股票代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
-            case "getFundDaily" -> "{\"ts_code\": \"<基金代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
+            case "searchAssetInfo" -> "{\"query\": \"<搜索关键词>\", \"assetTypes\": \"stock,etf,index\", \"marketScope\": \"domestic\"}";
+            case "getExchangeAssetDaily" -> "{\"tsCode\": \"<代码>\", \"assetType\": \"stock|etf\", \"startDate\": \"YYYYMMDD\", \"endDate\": \"YYYYMMDD\"}";
+            case "getOffExchangeAssetDaily" -> "{\"tsCode\": \"<基金代码>\", \"startDate\": \"YYYYMMDD\", \"endDate\": \"YYYYMMDD\"}";
+            case "getListedAssetShareSize" -> "{\"tsCode\": \"<ETF代码>\", \"startDate\": \"YYYYMMDD\", \"endDate\": \"YYYYMMDD\", \"exchange\": \"SSE\"}";
+            case "getEtfAdj" -> "{\"tsCode\": \"<ETF代码>\", \"startDate\": \"YYYYMMDD\", \"endDate\": \"YYYYMMDD\"}";
             case "getIndexInfo" -> "{\"ts_code\": \"<指数代码>\"}";
             case "getStockInfo" -> "{\"ts_code\": \"<股票代码>\"}";
             case "executePython" -> "{\"code\": \"<Python代码>\", \"dataset_ids\": \"<必需：数据集ID，逗号分隔>\", \"libraries\": \"<可选：库名逗号分隔>\"}";

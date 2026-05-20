@@ -570,14 +570,30 @@ public class SubAgentRunner {
             args.putAll(rawArgs);
         }
 
-        if ("searchIndex".equals(tool) || "searchStock".equals(tool) || "searchFund".equals(tool)) {
+        if ("searchIndex".equals(tool) || "searchStock".equals(tool) || "searchFund".equals(tool)
+                || "searchAssetInfo".equals(tool)) {
             String keyword = firstNonBlank(args.get("keyword"), args.get("query"), args.get("q"), args.get("name"), args.get("arg0"));
             if (!keyword.isBlank()) {
                 args.put("keyword", keyword);
+                if ("searchAssetInfo".equals(tool)) {
+                    args.put("query", keyword);
+                }
+            }
+            if ("searchAssetInfo".equals(tool)) {
+                String assetTypes = firstNonBlank(args.get("assetTypes"), args.get("asset_types"), args.get("arg1"));
+                if (!assetTypes.isBlank()) {
+                    args.put("assetTypes", assetTypes);
+                }
+                String marketScope = firstNonBlank(args.get("marketScope"), args.get("market_scope"), args.get("arg2"), "domestic");
+                if (!marketScope.isBlank()) {
+                    args.put("marketScope", marketScope);
+                }
             }
         }
 
-        if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool)) {
+        if ("getIndexDaily".equals(tool) || "getStockDaily".equals(tool)
+                || "getExchangeAssetDaily".equals(tool) || "getOffExchangeAssetDaily".equals(tool)
+                || "getListedAssetShareSize".equals(tool) || "getEtfAdj".equals(tool)) {
             String tsCode = firstNonBlank(
                     args.get("tsCode"),
                     args.get("ts_code"),
@@ -606,6 +622,22 @@ public class SubAgentRunner {
             }
             if (!endDateStr.isBlank()) {
                 args.put("endDateStr", endDateStr);
+            }
+            if ("getExchangeAssetDaily".equals(tool)) {
+                String assetType = firstNonBlank(args.get("assetType"), args.get("asset_type"), args.get("arg1"));
+                if (!assetType.isBlank()) {
+                    args.put("assetType", assetType);
+                }
+                String priceMode = firstNonBlank(args.get("priceMode"), args.get("price_mode"), args.get("arg4"), "raw_ohlc");
+                if (!priceMode.isBlank()) {
+                    args.put("priceMode", priceMode);
+                }
+            }
+            if ("getListedAssetShareSize".equals(tool)) {
+                String exchange = firstNonBlank(args.get("exchange"), args.get("arg3"));
+                if (!exchange.isBlank()) {
+                    args.put("exchange", exchange);
+                }
             }
         }
 

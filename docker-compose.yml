@@ -255,6 +255,42 @@ services:
     networks:
       - alphafrog-network
 
+  domestic-listed-asset-service:
+    image: alphafrog-micro-domestic-listed-asset-service:latest
+    build: ./domesticListedAssetService
+    container_name: alphafrog-domestic-listed-asset-service
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    depends_on:
+      nacos:
+        condition: service_healthy
+    environment:
+      TZ: Asia/Shanghai
+      AF_DB_MAIN_HOST: ${AF_DB_MAIN_HOST:-host.docker.internal}
+      AF_DB_MAIN_PORT: 5432
+      AF_DB_MAIN_DATABASE: ${AF_DB_MAIN_DATABASE:-alphafrog}
+      AF_DB_MAIN_USER: ${AF_DB_MAIN_USER:-alphafrog}
+      AF_DB_MAIN_PASSWORD: ${AF_DB_MAIN_PASSWORD:-alphafrog_pass}
+      NACOS_ADDRESS: nacos
+      # Memory Optimization (Compressed)
+      JAVA_OPTS: >-
+        -XX:+UseSerialGC
+        -Xss512k
+        -Xms64m
+        -Xmx200m
+        -XX:MaxRAM=420m
+        -XX:MaxMetaspaceSize=128m
+    ports:
+      - "50062:50062"
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 200M
+    networks:
+      - alphafrog-network
+
   domestic-fetch-service:
     image: alphafrog-micro-domestic-fetch-service:latest
     build: ./domesticFetchService
@@ -614,6 +650,8 @@ services:
       domestic-index-service:
         condition: service_started
       domestic-fund-service:
+        condition: service_started
+      domestic-listed-asset-service:
         condition: service_started
       admin-service:
         condition: service_started

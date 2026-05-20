@@ -119,6 +119,36 @@ class AgentLlmLocalConfigLoaderTest {
     }
 
     @Test
+    void load_shouldDefaultRequiresAdjFactorEnabledToFalseWhenOmitted() throws Exception {
+        Path configFile = tempDir.resolve("agent-llm.local.json");
+        Files.writeString(configFile, """
+                {
+                  "runtime": {
+                    "parallel": {
+                      "toolWeightedLimit": {
+                        "enabled": true,
+                        "tools": {
+                          "getStockDaily": { "weight": 2 },
+                          "getEtfAdj": { "weight": 2, "requiresAdjFactorEnabled": true }
+                        }
+                      }
+                    }
+                  }
+                }
+                """, StandardCharsets.UTF_8);
+
+        AgentLlmLocalConfigLoader loader = new AgentLlmLocalConfigLoader(new ObjectMapper());
+        ReflectionTestUtils.setField(loader, "configFile", configFile.toString());
+        loader.load();
+
+        var tools = loader.current().orElseThrow()
+                .getRuntime().getParallel().getToolWeightedLimit().getTools();
+        assertFalse(tools.get("getStockDaily").isRequiresAdjFactorEnabled());
+        assertFalse(tools.get("getStockDaily").getRequiresAdjFactorEnabled());
+        assertTrue(tools.get("getEtfAdj").isRequiresAdjFactorEnabled());
+    }
+
+    @Test
     void load_shouldResolveDagModeGuidancePromptFile() throws Exception {
         Path promptsDir = tempDir.resolve("prompts").resolve("todo");
         Files.createDirectories(promptsDir);

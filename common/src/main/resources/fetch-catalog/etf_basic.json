@@ -1,0 +1,24 @@
+{
+  "dataType": "etf_basic",
+  "label": "ETF 基本信息",
+  "description": "通过 TuShare etf_basic 接口抓取 ETF 基本信息（含跟踪指数 index_code）",
+  "serviceModule": "domesticFundFetchService",
+  "tushareApiName": "etf_basic",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按条件查询",
+      "description": "按 ts_code、exchange、list_status 等条件抓取 ETF 基本信息",
+      "requiredParams": [],
+      "optionalParams": ["ts_code", "list_status", "exchange", "offset", "limit"],
+      "paramDefs": {
+        "ts_code": { "label": "基金代码", "type": "string", "default": null },
+        "list_status": { "label": "上市状态", "type": "string", "default": "L" },
+        "exchange": { "label": "交易所", "description": "SSE/SZSE", "type": "string", "default": null },
+        "offset": { "label": "偏移量", "type": "number", "default": 0 },
+        "limit": { "label": "每页条数", "type": "number", "default": 5000 }
+      },
+      "specialFlags": []
+    }
+  ]
+}

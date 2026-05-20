@@ -87,6 +87,7 @@
         <module>agentApi</module>
         <module>externalInfoApi</module>
         <module>domesticStockApi</module>
+        <module>domesticListedAssetApi</module>
         <module>domesticFundApi</module>
         <module>domesticIndexApi</module>
         <module>ragFetchApi</module>
@@ -96,6 +97,7 @@
         <module>domesticIndexService</module>
         <module>domesticFundService</module>
         <module>domesticStockService</module>
+        <module>domesticListedAssetService</module>
         <module>domesticFetchService</module>
         <module>adminService</module>
         <module>portfolioService</module>

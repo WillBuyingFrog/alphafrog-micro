@@ -484,5 +484,158 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                 .setStatus("success").setFetchedItemsCount(result).build();
     }
 
+    @Override
+    public DomesticEtfInfoFetchResponse fetchEtfInfo(DomesticEtfInfoFetchRequest request) {
+        String tsCode = request.getTsCode();
+        String listStatus = request.getListStatus();
+        String exchange = request.getExchange();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，etf_basic 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "etf_basic");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (listStatus != null && !listStatus.isBlank()) {
+            queryParams.put("list_status", listStatus);
+        }
+        if (exchange != null && !exchange.isBlank()) {
+            queryParams.put("exchange", exchange);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,csname,extname,cname,index_code,index_name,setup_date,list_date," +
+                "list_status,exchange,mgr_name,custod_name,mgt_fee,etf_type");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        if (response == null) {
+            return DomesticEtfInfoFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        int result = domesticFundStoreUtils.storeEtfInfoByRawTuShareOutput(data, fields);
+        if (result < 0) {
+            return DomesticEtfInfoFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticEtfInfoFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    @Override
+    public DomesticEtfDailyFetchResponse fetchEtfDaily(DomesticEtfDailyFetchRequest request) {
+        String tsCode = request.getTsCode();
+        String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        int effectiveLimit = limit > 0 ? limit : 5000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_daily 使用默认页大小 5000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_daily");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,trade_date,open,high,low,close,pre_close,change,pct_chg,vol,amount");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        if (response == null) {
+            return DomesticEtfDailyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        int result = domesticFundStoreUtils.storeEtfDailyByRawTuShareOutput(data, fields);
+        if (result < 0) {
+            return DomesticEtfDailyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticEtfDailyFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
+    @Override
+    public DomesticEtfAdjFactorFetchResponse fetchEtfAdjFactor(DomesticEtfAdjFactorFetchRequest request) {
+        String tsCode = request.getTsCode();
+        String tradeDate = request.getTradeDate();
+        String startDate = request.getStartDate();
+        String endDate = request.getEndDate();
+        int offset = request.getOffset();
+        int limit = request.getLimit();
+
+        int effectiveLimit = limit > 0 ? limit : 2000;
+        if (limit <= 0) {
+            log.warn("未提供 limit 参数，fund_adj 使用默认页大小 2000；不提供 limit 不是推荐做法");
+        }
+
+        Map<String, Object> params = new HashMap<>();
+        Map<String, Object> queryParams = new HashMap<>();
+
+        params.put("api_name", "fund_adj");
+        if (tsCode != null && !tsCode.isBlank()) {
+            queryParams.put("ts_code", tsCode);
+        }
+        if (tradeDate != null && !tradeDate.isBlank()) {
+            queryParams.put("trade_date", tradeDate);
+        }
+        if (startDate != null && !startDate.isBlank()) {
+            queryParams.put("start_date", startDate);
+        }
+        if (endDate != null && !endDate.isBlank()) {
+            queryParams.put("end_date", endDate);
+        }
+        queryParams.put("offset", offset);
+        queryParams.put("limit", effectiveLimit);
+        params.put("params", queryParams);
+        params.put("fields", "ts_code,trade_date,adj_factor");
+
+        JSONObject response = tuShareRequestUtils.createTusharePostRequest(params);
+        if (response == null) {
+            return DomesticEtfAdjFactorFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+
+        JSONArray data = response.getJSONObject("data").getJSONArray("items");
+        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        int result = domesticFundStoreUtils.storeEtfAdjFactorByRawTuShareOutput(data, fields);
+        if (result < 0) {
+            return DomesticEtfAdjFactorFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(result).build();
+        }
+        return DomesticEtfAdjFactorFetchResponse.newBuilder()
+                .setStatus("success").setFetchedItemsCount(result).build();
+    }
+
 
 }

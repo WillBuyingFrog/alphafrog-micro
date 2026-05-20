@@ -530,6 +530,56 @@ public class FetchTopicConsumer {
                     }
                     break;
 
+                case "etf_basic":
+                    if (taskSubType == 1) {
+                        DomesticEtfInfoFetchRequest request =
+                                DomesticEtfInfoFetchRequest.newBuilder()
+                                        .setTsCode(str(p, "ts_code"))
+                                        .setListStatus(str(p, "list_status"))
+                                        .setExchange(str(p, "exchange"))
+                                        .setOffset(num(p, "offset"))
+                                        .setLimit(num(p, "limit"))
+                                        .build();
+                        result = domesticFundFetchService.fetchEtfInfo(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "etf_daily":
+                    if (taskSubType == 1 || taskSubType == 2) {
+                        DomesticEtfDailyFetchRequest request =
+                                DomesticEtfDailyFetchRequest.newBuilder()
+                                        .setTsCode(str(p, "ts_code"))
+                                        .setTradeDate(str(p, "trade_date"))
+                                        .setStartDate(str(p, "start_date"))
+                                        .setEndDate(str(p, "end_date"))
+                                        .setOffset(num(p, "offset"))
+                                        .setLimit(num(p, "limit"))
+                                        .build();
+                        result = domesticFundFetchService.fetchEtfDaily(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
+                case "etf_adj":
+                    if (taskSubType == 2) {
+                        DomesticEtfAdjFactorFetchRequest request =
+                                DomesticEtfAdjFactorFetchRequest.newBuilder()
+                                        .setTsCode(str(p, "ts_code"))
+                                        .setTradeDate(str(p, "trade_date"))
+                                        .setStartDate(str(p, "start_date"))
+                                        .setEndDate(str(p, "end_date"))
+                                        .setOffset(num(p, "offset"))
+                                        .setLimit(num(p, "limit"))
+                                        .build();
+                        result = domesticFundFetchService.fetchEtfAdjFactor(request).getFetchedItemsCount();
+                    } else {
+                        result = -1;
+                    }
+                    break;
+
                 case "trade_calendar":
                     if (taskSubType == 1) {
                         long startDate = dateToTs(p.get("start_date"));
