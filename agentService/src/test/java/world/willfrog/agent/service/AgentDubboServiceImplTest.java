@@ -71,6 +71,8 @@ class AgentDubboServiceImplTest {
     private AgentMessageService messageService;
     @Mock
     private AgentToolCatalogService toolCatalogService;
+    @Mock
+    private SnapshotPartService snapshotPartService;
 
     private AgentDubboServiceImpl service;
 
@@ -108,7 +110,8 @@ class AgentDubboServiceImplTest {
                 messageService,
                 toolCatalogService,
                 parser,
-                citations
+                citations,
+                snapshotPartService
         );
         ReflectionTestUtils.setField(created, "checkpointVersion", "v2");
         ReflectionTestUtils.setField(created, "artifactRetentionNormalDays", 7);

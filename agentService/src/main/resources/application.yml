@@ -289,6 +289,12 @@ agent:
       max-attempts: ${AF_AGENT_FLOW_CODE_REFINE_MAX_ATTEMPTS:3}
     hitl:
       state-ttl-seconds: ${AF_AGENT_FLOW_HITL_STATE_TTL_SECONDS:3600}
+  snapshot:
+    default-part-size: ${AF_AGENT_SNAPSHOT_DEFAULT_PART_SIZE:524288}
+    min-part-size: ${AF_AGENT_SNAPSHOT_MIN_PART_SIZE:65536}
+    max-part-size: ${AF_AGENT_SNAPSHOT_MAX_PART_SIZE:2097152}
+    cache-ttl-seconds: ${AF_AGENT_SNAPSHOT_CACHE_TTL_SECONDS:3600}
+    gzip-enabled: ${AF_AGENT_SNAPSHOT_GZIP_ENABLED:true}
 
 # Nacos 配置订阅（动态配置下发）
 alphafrog:

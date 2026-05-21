@@ -54,6 +54,10 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesResponse;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartsMetaMessage;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessageItem;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
@@ -89,6 +93,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final AgentToolCatalogService toolCatalogService;
     private final AgentFinalAnswerParser finalAnswerParser;
     private final AgentCitationService citationService;
+    private final SnapshotPartService snapshotPartService;
 
     @Value("${agent.run.list.default-days:30}")
     private int listDefaultDays;
@@ -835,6 +840,46 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
 
         return builder.build();
+    }
+
+    @Override
+    public AgentSnapshotPartsMetaMessage getSnapshotPartsMeta(GetAgentSnapshotPartsRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        SnapshotPartsMeta meta = snapshotPartService.getOrBuildMeta(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getMaxPartSize());
+        return AgentSnapshotPartsMetaMessage.newBuilder()
+                .setRunId(nvl(meta.getRunId()))
+                .setPartSize(meta.getPartSize())
+                .setTotalParts(meta.getTotalParts())
+                .setUncompressedSize(meta.getUncompressedSize())
+                .setCompressedSize(meta.getCompressedSize())
+                .setCompression(nvl(meta.getCompression()))
+                .setChecksum(nvl(meta.getChecksum()))
+                .build();
+    }
+
+    @Override
+    public AgentSnapshotPartMessage getSnapshotPart(GetAgentSnapshotPartRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        SnapshotPartsMeta meta = snapshotPartService.getOrBuildMeta(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getMaxPartSize());
+        byte[] content = snapshotPartService.getPartBytes(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getPartIndex(),
+                request.getMaxPartSize());
+        return AgentSnapshotPartMessage.newBuilder()
+                .setRunId(nvl(meta.getRunId()))
+                .setPartIndex(request.getPartIndex())
+                .setPartSize(meta.getPartSize())
+                .setTotalParts(meta.getTotalParts())
+                .setContent(com.google.protobuf.ByteString.copyFrom(content))
+                .setCompression(nvl(meta.getCompression()))
+                .build();
     }
 
     private AgentRun requireRun(String id, String userId) {

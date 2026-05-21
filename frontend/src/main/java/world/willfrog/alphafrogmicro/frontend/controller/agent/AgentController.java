@@ -14,6 +14,8 @@ import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartsMetaMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
@@ -21,6 +23,8 @@ import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
@@ -53,6 +57,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListItemResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentSnapshotPartsMetaResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunUpdateRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendRequest;
@@ -231,6 +236,67 @@ public class AgentController {
             return handleRpcError(e, "查询 agent run");
         } catch (Exception e) {
             return handleError(e, "查询 agent run");
+        }
+    }
+
+    @GetMapping("/{runId}/snapshot/parts")
+    public ResponseWrapper<AgentSnapshotPartsMetaResponse> snapshotParts(Authentication authentication,
+                                                                        @PathVariable("runId") String runId,
+                                                                        @RequestParam(value = "maxPartSize", required = false, defaultValue = "0") int maxPartSize) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentSnapshotPartsMetaMessage meta = agentDubboService.getSnapshotPartsMeta(
+                    GetAgentSnapshotPartsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setMaxPartSize(maxPartSize)
+                            .build()
+            );
+            return ResponseWrapper.success(toSnapshotPartsMetaResponse(meta));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 agent snapshot parts");
+        } catch (Exception e) {
+            return handleError(e, "查询 agent snapshot parts");
+        }
+    }
+
+    @GetMapping("/{runId}/snapshot/parts/{partIndex}")
+    public ResponseEntity<byte[]> snapshotPart(Authentication authentication,
+                                               @PathVariable("runId") String runId,
+                                               @PathVariable("partIndex") int partIndex,
+                                               @RequestParam(value = "maxPartSize", required = false, defaultValue = "0") int maxPartSize) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return snapshotPartError(401, "UNAUTHORIZED");
+        }
+        try {
+            AgentSnapshotPartMessage part = agentDubboService.getSnapshotPart(
+                    GetAgentSnapshotPartRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setPartIndex(partIndex)
+                            .setMaxPartSize(maxPartSize)
+                            .build()
+            );
+            byte[] content = part.getContent().toByteArray();
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentLength(content.length);
+            headers.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            headers.set("X-Snapshot-Compression", nvl(part.getCompression()));
+            headers.set("X-Snapshot-Part-Index", String.valueOf(part.getPartIndex()));
+            headers.set("X-Snapshot-Part-Size", String.valueOf(part.getPartSize()));
+            headers.set("X-Snapshot-Total-Parts", String.valueOf(part.getTotalParts()));
+            return ResponseEntity.ok().headers(headers).body(content);
+        } catch (RpcException e) {
+            log.error("查询 agent snapshot part 失败: {}", e.getMessage());
+            return snapshotPartError(resolveSnapshotPartErrorStatus(e.getMessage()), "RPC_ERROR");
+        } catch (Exception e) {
+            log.error("查询 agent snapshot part 失败", e);
+            return snapshotPartError(resolveSnapshotPartErrorStatus(e.getMessage()), "ERROR");
         }
     }
 
@@ -1093,6 +1159,36 @@ public class AgentController {
                 emptyToNull(run.getCompletedAt()),
                 emptyToNull(run.getExt())
         );
+    }
+
+    private AgentSnapshotPartsMetaResponse toSnapshotPartsMetaResponse(AgentSnapshotPartsMetaMessage meta) {
+        return new AgentSnapshotPartsMetaResponse(
+                meta.getRunId(),
+                meta.getPartSize(),
+                meta.getTotalParts(),
+                meta.getUncompressedSize(),
+                meta.getCompressedSize(),
+                emptyToNull(meta.getCompression()),
+                emptyToNull(meta.getChecksum())
+        );
+    }
+
+    private ResponseEntity<byte[]> snapshotPartError(int status, String code) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentLength(0);
+        headers.set("X-Snapshot-Error", code);
+        return ResponseEntity.status(status).headers(headers).body(new byte[0]);
+    }
+
+    private int resolveSnapshotPartErrorStatus(String message) {
+        String msg = message == null ? "" : message.toLowerCase();
+        if (msg.contains("run not found")) {
+            return 404;
+        }
+        if (msg.contains("part_index") || msg.contains("out of range") || msg.contains("snapshot has no parts")) {
+            return 400;
+        }
+        return 500;
     }
 
     private <T> ResponseWrapper<T> handleRpcError(RpcException e, String action) {
