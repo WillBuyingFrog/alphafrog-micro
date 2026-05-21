@@ -11,7 +11,7 @@ public interface EtfShareSizeDao {
     @Insert("INSERT INTO alphafrog_fund_etf_share_size (trade_date, ts_code, etf_name, total_share, total_size, " +
             "nav, close, exchange, extended) " +
             "VALUES (#{tradeDate}, #{tsCode}, #{etfName}, #{totalShare}, #{totalSize}, " +
-            "#{nav}, #{close}, #{exchange}, #{extended}) " +
+            "#{nav}, #{close}, #{exchange}, CAST(#{extended} AS jsonb)) " +
             "ON CONFLICT (ts_code, trade_date) DO NOTHING")
     int insertEtfShareSize(EtfShareSize etfShareSize);
 

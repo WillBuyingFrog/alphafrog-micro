@@ -11,7 +11,7 @@ public interface EtfInfoDao {
     @Insert("INSERT INTO alphafrog_domestic_etf (ts_code, name, full_name, exchange, mgr_name, list_status, " +
             "etf_type, index_code, index_name, list_date, setup_date, extended) " +
             "VALUES (#{tsCode}, #{name}, #{fullName}, #{exchange}, #{mgrName}, #{listStatus}, " +
-            "#{etfType}, #{indexCode}, #{indexName}, #{listDate}, #{setupDate}, #{extended}) " +
+            "#{etfType}, #{indexCode}, #{indexName}, #{listDate}, #{setupDate}, CAST(#{extended} AS jsonb)) " +
             "ON CONFLICT (ts_code) DO NOTHING")
     int insertEtfInfo(EtfInfo etfInfo);
 
