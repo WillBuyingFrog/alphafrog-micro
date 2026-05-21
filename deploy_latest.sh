@@ -45,7 +45,8 @@ Usage:
   ./deploy_latest.sh --services serviceA,serviceB
   ./deploy_latest.sh --with-infra     # rebuild with infrastructure services
   ./deploy_latest.sh --all            # rebuild all including python services
-  ./deploy_latest.sh --deploy-only    # skip build, only recreate containers
+  ./deploy_latest.sh --skip-maven     # skip Maven, still run docker_build.sh, then recreate containers
+  ./deploy_latest.sh --deploy-only    # skip Maven and docker_build.sh, only recreate containers
 
 Services:
   # Business Services
@@ -124,6 +125,7 @@ service_known() {
 RAW_SERVICES=()
 WITH_INFRA=false
 WITH_ALL=false
+SKIP_MAVEN=false
 DEPLOY_ONLY=false
 
 while [[ $# -gt 0 ]]; do
@@ -138,6 +140,10 @@ while [[ $# -gt 0 ]]; do
       ;;
     --all)
       WITH_ALL=true
+      shift
+      ;;
+    --skip-maven)
+      SKIP_MAVEN=true
       shift
       ;;
     --deploy-only)
@@ -217,27 +223,35 @@ fi
 
 echo "=== Selected services: ${SELECTED[*]} ==="
 
-# Maven 编译（--deploy-only 时跳过）
+if [[ "$DEPLOY_ONLY" == true && "$SKIP_MAVEN" == true ]]; then
+  echo "Note: --deploy-only 已包含跳过 Maven 与 Docker 构建，忽略 --skip-maven" >&2
+fi
+
+# Maven 编译（--skip-maven / --deploy-only 时跳过）
 if [[ "$DEPLOY_ONLY" != true ]]; then
-  if [[ ${#SERVICES[@]} -eq 0 ]]; then
-    echo "=== Building all Java modules ==="
-    mvn -DskipTests compile install
-  else
-    MODULES=()
-    for svc in "${SELECTED[@]}"; do
-      mod="$(service_module "$svc" 2>/dev/null || true)"
-      if [[ -n "$mod" ]]; then
-        MODULES+=("$mod")
+  if [[ "$SKIP_MAVEN" != true ]]; then
+    if [[ ${#SERVICES[@]} -eq 0 ]]; then
+      echo "=== Building all Java modules ==="
+      mvn -DskipTests compile install
+    else
+      MODULES=()
+      for svc in "${SELECTED[@]}"; do
+        mod="$(service_module "$svc" 2>/dev/null || true)"
+        if [[ -n "$mod" ]]; then
+          MODULES+=("$mod")
+        fi
+      done
+      if [[ ${#MODULES[@]} -gt 0 ]]; then
+        echo "=== Building modules: ${MODULES[*]} ==="
+        MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
+        mvn -DskipTests -pl "$MODULE_LIST" -am compile install
       fi
-    done
-    if [[ ${#MODULES[@]} -gt 0 ]]; then
-      echo "=== Building modules: ${MODULES[*]} ==="
-      MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
-      mvn -DskipTests -pl "$MODULE_LIST" -am compile install
     fi
+  else
+    echo "=== Skip-maven mode: skipping Maven compile ==="
   fi
 
-  # Docker 构建镜像
+  # Docker 构建镜像（--deploy-only 时跳过）
   echo "=== Building Docker images ==="
   for svc in "${SELECTED[@]}"; do
     build_script="$(service_build_script "$svc" 2>/dev/null || true)"
@@ -247,7 +261,7 @@ if [[ "$DEPLOY_ONLY" != true ]]; then
     fi
   done
 else
-  echo "=== Deploy-only mode: skipping build ==="
+  echo "=== Deploy-only mode: skipping Maven and Docker image build ==="
 fi
 
 # 检查 Docker Compose 命令
