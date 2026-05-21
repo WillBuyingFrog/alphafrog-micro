@@ -14,7 +14,7 @@
       "paramDefs": {
         "ts_code": { "label": "基金代码", "type": "string", "default": null },
         "list_status": { "label": "上市状态", "type": "string", "default": "L" },
-        "exchange": { "label": "交易所", "description": "SSE/SZSE", "type": "string", "default": null },
+        "exchange": { "label": "交易所", "description": "TuShare 官方交易所代码：SSE/SZSE/BSE", "type": "string", "default": null },
         "offset": { "label": "偏移量", "type": "number", "default": 0 },
         "limit": { "label": "每页条数", "type": "number", "default": 5000 }
       },

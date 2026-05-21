@@ -48,7 +48,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码，如 SZ 表示深圳，SH 表示上海",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },
@@ -113,7 +113,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码，如 SZ 表示深圳，SH 表示上海",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },
@@ -176,7 +176,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },
@@ -245,7 +245,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },
@@ -311,7 +311,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },
@@ -377,7 +377,7 @@
         },
         "exchange": {
           "label": "交易所",
-          "description": "交易所代码",
+          "description": "TuShare 官方交易所代码：SSE、SZSE、BSE",
           "type": "string",
           "default": null
         },

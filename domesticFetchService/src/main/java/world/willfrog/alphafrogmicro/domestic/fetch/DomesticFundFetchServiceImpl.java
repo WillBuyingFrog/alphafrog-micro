@@ -8,6 +8,7 @@ import org.springframework.stereotype.Service;
 import world.willfrog.alphafrogmicro.common.utils.DateConvertUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.DomesticFundStoreUtils;
 import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareRequestUtils;
+import world.willfrog.alphafrogmicro.domestic.fetch.utils.TuShareResponseUtils;
 import world.willfrog.alphafrogmicro.domestic.idl.*;
 import world.willfrog.alphafrogmicro.domestic.idl.DubboDomesticFundFetchServiceTriple.DomesticFundFetchServiceImplBase;
 
@@ -471,10 +472,15 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                     .setStatus("failure").setFetchedItemsCount(-1).build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
+        TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(response, "etf_share_size");
+        if (wrapper == null) {
+            log.warn("TuShare etf_share_size 响应不可用: ts_code={}, trade_date={}, start_date={}, end_date={}, exchange={}, offset={}, limit={}",
+                    tsCode, tradeDate, startDate, endDate, exchange, offset, effectiveLimit);
+            return DomesticEtfShareSizeFetchByTradeDateResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
 
-        int result = domesticFundStoreUtils.storeEtfShareSizeByRawTuShareOutput(data, fields);
+        int result = domesticFundStoreUtils.storeEtfShareSizeByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
 
         if (result < 0) {
             return DomesticEtfShareSizeFetchByTradeDateResponse.newBuilder()
@@ -522,9 +528,12 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                     .setStatus("failure").setFetchedItemsCount(-1).build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
-        int result = domesticFundStoreUtils.storeEtfInfoByRawTuShareOutput(data, fields);
+        TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(response, "etf_basic");
+        if (wrapper == null) {
+            return DomesticEtfInfoFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+        int result = domesticFundStoreUtils.storeEtfInfoByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
         if (result < 0) {
             return DomesticEtfInfoFetchResponse.newBuilder()
                     .setStatus("failure").setFetchedItemsCount(result).build();
@@ -574,9 +583,14 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                     .setStatus("failure").setFetchedItemsCount(-1).build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
-        int result = domesticFundStoreUtils.storeEtfDailyByRawTuShareOutput(data, fields);
+        TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(response, "fund_daily");
+        if (wrapper == null) {
+            log.warn("TuShare fund_daily 响应不可用: ts_code={}, trade_date={}, start_date={}, end_date={}, offset={}, limit={}",
+                    tsCode, tradeDate, startDate, endDate, offset, effectiveLimit);
+            return DomesticEtfDailyFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+        int result = domesticFundStoreUtils.storeEtfDailyByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
         if (result < 0) {
             return DomesticEtfDailyFetchResponse.newBuilder()
                     .setStatus("failure").setFetchedItemsCount(result).build();
@@ -626,9 +640,12 @@ public class DomesticFundFetchServiceImpl extends DomesticFundFetchServiceImplBa
                     .setStatus("failure").setFetchedItemsCount(-1).build();
         }
 
-        JSONArray data = response.getJSONObject("data").getJSONArray("items");
-        JSONArray fields = response.getJSONObject("data").getJSONArray("fields");
-        int result = domesticFundStoreUtils.storeEtfAdjFactorByRawTuShareOutput(data, fields);
+        TuShareResponseUtils.DataWrapper wrapper = TuShareResponseUtils.extractData(response, "fund_adj");
+        if (wrapper == null) {
+            return DomesticEtfAdjFactorFetchResponse.newBuilder()
+                    .setStatus("failure").setFetchedItemsCount(-1).build();
+        }
+        int result = domesticFundStoreUtils.storeEtfAdjFactorByRawTuShareOutput(wrapper.getItems(), wrapper.getFields());
         if (result < 0) {
             return DomesticEtfAdjFactorFetchResponse.newBuilder()
                     .setStatus("failure").setFetchedItemsCount(result).build();

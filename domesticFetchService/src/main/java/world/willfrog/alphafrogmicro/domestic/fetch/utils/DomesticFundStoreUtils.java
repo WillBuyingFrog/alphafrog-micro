@@ -479,6 +479,14 @@ public class DomesticFundStoreUtils {
 
 
     public int storeEtfShareSizeByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        if (fields == null) {
+            log.warn("EtfShareSize TuShare fields is null");
+            return -1;
+        }
+        if (data == null || data.isEmpty()) {
+            return 0;
+        }
+
         List<EtfShareSize> list = new ArrayList<>();
 
         try {
@@ -557,6 +565,14 @@ public class DomesticFundStoreUtils {
     }
 
     public int storeEtfInfoByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        if (fields == null) {
+            log.warn("EtfInfo TuShare fields is null");
+            return -1;
+        }
+        if (data == null || data.isEmpty()) {
+            return 0;
+        }
+
         List<EtfInfo> list = new ArrayList<>();
 
         try {
@@ -638,6 +654,14 @@ public class DomesticFundStoreUtils {
     }
 
     public int storeEtfDailyByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        if (fields == null) {
+            log.warn("EtfDaily TuShare fields is null");
+            return -1;
+        }
+        if (data == null || data.isEmpty()) {
+            return 0;
+        }
+
         List<EtfDaily> list = new ArrayList<>();
 
         try {
@@ -713,6 +737,14 @@ public class DomesticFundStoreUtils {
     }
 
     public int storeEtfAdjFactorByRawTuShareOutput(JSONArray data, JSONArray fields) {
+        if (fields == null) {
+            log.warn("EtfAdjFactor TuShare fields is null");
+            return -1;
+        }
+        if (data == null || data.isEmpty()) {
+            return 0;
+        }
+
         List<EtfAdjFactor> list = new ArrayList<>();
 
         try {
