@@ -21,7 +21,6 @@ import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
-import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartsRequest;
@@ -69,6 +68,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.TraceDetailResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TraceSpanItem;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
+import world.willfrog.alphafrogmicro.frontend.service.agent.AgentRunResultCacheService;
 
 import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
@@ -93,6 +93,7 @@ public class AgentController {
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private final AgentRunResultCacheService runResultCacheService;
 
     @PostMapping
     public ResponseWrapper<AgentRunResponse> create(Authentication authentication,
@@ -527,12 +528,7 @@ public class AgentController {
             return ResponseEntity.status(401).body(ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在"));
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             AgentRunResultResponse body = new AgentRunResultResponse(
                     result.getId(),
                     result.getStatus(),
@@ -602,12 +598,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             String observabilityJson = result.getObservabilityJson();
             if (observabilityJson != null
                     && observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {
@@ -640,12 +631,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             String obsJson = result.getObservabilityJson();
             if (obsJson == null || obsJson.isBlank()) {
                 return ResponseWrapper.success(new TraceListResponse(List.of(),
@@ -751,12 +737,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             String obsJson = result.getObservabilityJson();
             if (obsJson == null || obsJson.isBlank()) {
                 return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "trace 不存在");
@@ -1239,6 +1220,10 @@ public class AgentController {
         return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, action + "失败");
     }
 
+    private AgentRunResultMessage loadRunResult(String userId, String runId) {
+        return runResultCacheService.getRunResult(userId, runId);
+    }
+
     private String nvl(String value) {
         return value == null ? "" : value;
     }
@@ -1263,12 +1248,7 @@ public class AgentController {
             return;
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             String observabilityJson = result.getObservabilityJson();
             if (observabilityJson == null || observabilityJson.isBlank()
                     || observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {

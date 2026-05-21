@@ -53,6 +53,10 @@ alphafrog:
       admin-token: ${AF_RAG_INGEST_TOKEN:}
       external-info-service-url: ${AF_EXTERNAL_INFO_SERVICE_URL:http://alphafrog-external-info-service:18096}
 
+agent:
+  run-result:
+    cache-ttl-seconds: ${AF_AGENT_RUN_RESULT_CACHE_TTL_SECONDS:30}
+
 dubbo:
   consumer:
     # 允许 frontend 在部分下游服务暂时不可用时先启动，由具体接口调用返回错误而不是整站启动失败

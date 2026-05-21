@@ -19,6 +19,7 @@ import world.willfrog.alphafrogmicro.common.pojo.user.User;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
+import world.willfrog.alphafrogmicro.frontend.service.agent.AgentRunResultCacheService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertTrue;
@@ -31,6 +32,7 @@ class AgentControllerTest {
 
     private AgentDubboService agentDubboService;
     private AuthService authService;
+    private AgentRunResultCacheService runResultCacheService;
     private AgentController controller;
     private Authentication authentication;
 
@@ -38,7 +40,10 @@ class AgentControllerTest {
     void setUp() {
         agentDubboService = mock(AgentDubboService.class);
         authService = mock(AuthService.class);
-        controller = new AgentController(authService, new ObjectMapper());
+        runResultCacheService = new AgentRunResultCacheService();
+        ReflectionTestUtils.setField(runResultCacheService, "agentDubboService", agentDubboService);
+        ReflectionTestUtils.setField(runResultCacheService, "cacheTtlSeconds", 30L);
+        controller = new AgentController(authService, new ObjectMapper(), runResultCacheService);
         ReflectionTestUtils.setField(controller, "agentDubboService", agentDubboService);
 
         authentication = mock(Authentication.class);
