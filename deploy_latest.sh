@@ -22,6 +22,7 @@ BUSINESS_SERVICES=(
   domestic-stock-service
   domestic-index-service
   domestic-fund-service
+  domestic-listed-asset-service
   domestic-fetch-service
   admin-service
   portfolio-service
@@ -51,6 +52,7 @@ Services:
   domestic-stock-service
   domestic-index-service
   domestic-fund-service
+  domestic-listed-asset-service
   domestic-fetch-service
   admin-service
   portfolio-service
@@ -67,32 +69,56 @@ Services:
 EOF
 }
 
-declare -A SERVICE_BUILD=(
-  [domestic-stock-service]="domesticStockService/docker_build.sh"
-  [domestic-index-service]="domesticIndexService/docker_build.sh"
-  [domestic-fund-service]="domesticFundService/docker_build.sh"
-  [domestic-fetch-service]="domesticFetchService/docker_build.sh"
-  [admin-service]="adminService/docker_build.sh"
-  [portfolio-service]="portfolioService/docker_build.sh"
-  [agent-service]="agentService/docker_build.sh"
-  [external-info-service]="externalInfoService/docker_build.sh"
-  [python-sandbox-service]="pythonSandboxService/docker_build.sh"
-  [python-sandbox-gateway-service]="pythonSandboxGatewayService/docker_build.sh"
-  [frontend]="frontend/docker_build.sh"
-)
+service_build_script() {
+  case "$1" in
+    domestic-stock-service) echo "domesticStockService/docker_build.sh" ;;
+    domestic-index-service) echo "domesticIndexService/docker_build.sh" ;;
+    domestic-fund-service) echo "domesticFundService/docker_build.sh" ;;
+    domestic-listed-asset-service) echo "domesticListedAssetService/docker_build.sh" ;;
+    domestic-fetch-service) echo "domesticFetchService/docker_build.sh" ;;
+    admin-service) echo "adminService/docker_build.sh" ;;
+    portfolio-service) echo "portfolioService/docker_build.sh" ;;
+    agent-service) echo "agentService/docker_build.sh" ;;
+    external-info-service) echo "externalInfoService/docker_build.sh" ;;
+    python-sandbox-service) echo "pythonSandboxService/docker_build.sh" ;;
+    python-sandbox-gateway-service) echo "pythonSandboxGatewayService/docker_build.sh" ;;
+    frontend) echo "frontend/docker_build.sh" ;;
+    *) return 1 ;;
+  esac
+}
 
-declare -A SERVICE_MODULE=(
-  [domestic-stock-service]="domesticStockService"
-  [domestic-index-service]="domesticIndexService"
-  [domestic-fund-service]="domesticFundService"
-  [domestic-fetch-service]="domesticFetchService"
-  [admin-service]="adminService"
-  [portfolio-service]="portfolioService"
-  [agent-service]="agentService"
-  [external-info-service]="externalInfoService"
-  [python-sandbox-gateway-service]="pythonSandboxGatewayService"
-  [frontend]="frontend"
-)
+service_module() {
+  case "$1" in
+    domestic-stock-service) echo "domesticStockService" ;;
+    domestic-index-service) echo "domesticIndexService" ;;
+    domestic-fund-service) echo "domesticFundService" ;;
+    domestic-listed-asset-service) echo "domesticListedAssetService" ;;
+    domestic-fetch-service) echo "domesticFetchService" ;;
+    admin-service) echo "adminService" ;;
+    portfolio-service) echo "portfolioService" ;;
+    agent-service) echo "agentService" ;;
+    external-info-service) echo "externalInfoService" ;;
+    python-sandbox-gateway-service) echo "pythonSandboxGatewayService" ;;
+    frontend) echo "frontend" ;;
+    *) return 1 ;;
+  esac
+}
+
+is_in_list() {
+  local needle="$1"
+  shift
+  local item
+  for item in "$@"; do
+    if [[ "$item" == "$needle" ]]; then
+      return 0
+    fi
+  done
+  return 1
+}
+
+service_known() {
+  service_build_script "$1" >/dev/null 2>&1 || is_in_list "$1" "${INFRA_SERVICES[@]}"
+}
 
 # 参数解析
 RAW_SERVICES=()
@@ -167,7 +193,7 @@ else
   # 指定了具体服务
   declare -A seen=()
   for svc in "${SERVICES[@]}"; do
-    if [[ -z "${SERVICE_BUILD[$svc]:-}" ]]; then
+    if ! service_known "$svc"; then
       echo "Unknown service: $svc" >&2
       usage
       exit 1
@@ -199,7 +225,7 @@ if [[ "$DEPLOY_ONLY" != true ]]; then
   else
     MODULES=()
     for svc in "${SELECTED[@]}"; do
-      mod="${SERVICE_MODULE[$svc]:-}"
+      mod="$(service_module "$svc" 2>/dev/null || true)"
       if [[ -n "$mod" ]]; then
         MODULES+=("$mod")
       fi
@@ -214,9 +240,10 @@ if [[ "$DEPLOY_ONLY" != true ]]; then
   # Docker 构建镜像
   echo "=== Building Docker images ==="
   for svc in "${SELECTED[@]}"; do
-    if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
+    build_script="$(service_build_script "$svc" 2>/dev/null || true)"
+    if [[ -n "$build_script" ]]; then
       echo "Building: $svc"
-      bash "${SERVICE_BUILD[$svc]}"
+      bash "$build_script"
     fi
   done
 else
@@ -250,7 +277,7 @@ fi
 BUSINESS_TO_RECREATE=()
 for svc in "${SELECTED[@]}"; do
   # 检查是否是业务服务（有build脚本且在BUSINESS_SERVICES或PYTHON_SERVICES中）
-  if [[ -n "${SERVICE_BUILD[$svc]:-}" ]]; then
+  if service_build_script "$svc" >/dev/null 2>&1; then
     BUSINESS_TO_RECREATE+=("$svc")
   fi
 done
