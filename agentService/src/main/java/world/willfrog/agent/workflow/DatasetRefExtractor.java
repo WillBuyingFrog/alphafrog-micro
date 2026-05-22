@@ -84,6 +84,12 @@ final class DatasetRefExtractor {
                 }
             }
         }
+        JsonNode results = data.path("results");
+        if (results.isArray()) {
+            for (JsonNode result : results) {
+                added += registerFromDataNode(result.path("data"), datasetRefs);
+            }
+        }
         return added;
     }
 

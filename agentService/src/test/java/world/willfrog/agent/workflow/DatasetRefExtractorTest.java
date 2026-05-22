@@ -43,6 +43,20 @@ class DatasetRefExtractorTest {
     }
 
     @Test
+    void registerFromJson_shouldRegisterDatasetIdsFromBatchResults() {
+        Map<String, String> refs = new HashMap<>();
+        int added = DatasetRefExtractor.registerFromJson("""
+                {"ok":true,"data":{"mode":"batch","results":[
+                  {"ts_code":"512400.SH","ok":true,"data":{"dataset_id":"unknown-etf-512400.SH-20250101-20251231-aaaaaaaa","dataset_ids":["unknown-etf-512400.SH-20250101-20251231-aaaaaaaa"]}},
+                  {"ts_code":"159915.SZ","ok":true,"data":{"dataset_id":"unknown-etf-159915.SZ-20250101-20251231-bbbbbbbb","dataset_ids":["unknown-etf-159915.SZ-20250101-20251231-bbbbbbbb"]}}
+                ]}}
+                """, refs);
+        assertEquals(2, added);
+        assertTrue(refs.containsKey("unknown-etf-512400.SH-20250101-20251231-aaaaaaaa"));
+        assertTrue(refs.containsKey("unknown-etf-159915.SZ-20250101-20251231-bbbbbbbb"));
+    }
+
+    @Test
     void registerFromMessageHistory_shouldUseToolResultsOnly() {
         Map<String, String> refs = new HashMap<>();
         List<CompletedTodoInfo.ChatMessageSnapshot> history = List.of(
