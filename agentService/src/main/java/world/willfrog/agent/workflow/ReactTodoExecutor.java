@@ -25,6 +25,7 @@ import org.springframework.stereotype.Component;
 import world.willfrog.agent.context.AgentContext;
 import world.willfrog.agent.graph.SubAgentRunner;
 import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.service.AgentEventService;
 import world.willfrog.agent.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
 import world.willfrog.agent.service.AgentRunStateStore;
@@ -92,6 +93,10 @@ public class ReactTodoExecutor {
     private final ObjectMapper objectMapper;
     /** 观测数据服务，记录每次 LLM 调用和工具调用的 trace */
     private final AgentObservabilityService observabilityService;
+
+    @Autowired(required = false)
+    @Setter
+    private AgentEventService eventService;
 
     /**
      * SubAgentRunner — 可选注入（@Autowired(required = false)），
@@ -220,7 +225,9 @@ public class ReactTodoExecutor {
 
             // 如果 ReAct 循环失败且仍有重试配额，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES && !isConvergenceStop(record)) {
-                String errorHint = extractErrorHint(record.getOutput());
+                String errorHint = record.getSummary() != null && record.getSummary().startsWith("missing_required_tool:")
+                        ? record.getSummary()
+                        : extractErrorHint(record.getOutput());
                 log.warn("Todo execution failed, will retry {}/{}: {}, error: {}",
                         retryCount + 1, MAX_RETRIES, description, errorHint);
 
@@ -286,6 +293,7 @@ public class ReactTodoExecutor {
 
         int callCount = 0;
         int toolCallsUsed = 0;
+        boolean truncatedRetryInjected = false;
         String lastLlmTraceId = null;
         String lastOutput = "";
         Map<String, Integer> failedToolCallCounts = new HashMap<>();
@@ -350,6 +358,7 @@ public class ReactTodoExecutor {
             }
             lastLlmTraceId = llmTraceId;
             callCount++;
+            emitOutputIntegrityEvent(runId, response, phase);
 
             // 读取 LLM 返回的 tool_calls（LangChain4j 原生协议）
             List<ToolExecutionRequest> toolRequests = aiMessage == null || aiMessage.toolExecutionRequests() == null
@@ -379,8 +388,7 @@ public class ReactTodoExecutor {
 
                     toolCallsUsed++;
                     lastOutput = outcome.result();
-                    // 若工具返回了 dataset_id，自动注册到上下文中供后续 todo 使用
-                    extractAndRegisterDatasetRef(outcome.result(), context);
+                    DatasetRefExtractor.registerFromJson(outcome.result(), context.getDatasetRefs());
                     // 工具结果以 ToolExecutionResultMessage 形式追加到消息历史
                     messages.add(ToolExecutionResultMessage.builder()
                             .id(toolRequest.id())
@@ -415,7 +423,29 @@ public class ReactTodoExecutor {
                 continue;
             }
 
-            // ── LLM 输出纯文本（无 tool_calls），任务完成 ──
+            // ── LLM 输出纯文本（无 tool_calls）──
+            LlmResponseIntegrity.OutputIntegrityLevel integrityLevel =
+                    LlmResponseIntegrity.classify(response);
+            if (integrityLevel == LlmResponseIntegrity.OutputIntegrityLevel.TRUNCATED) {
+                if (!truncatedRetryInjected) {
+                    truncatedRetryInjected = true;
+                    clearReasoningForRetry();
+                    messages.add(new UserMessage(LlmResponseIntegrity.TRUNCATED_RETRY_HINT));
+                    log.warn("Todo LLM response truncated with empty content; retrying once without reasoning");
+                    continue;
+                }
+                return TodoExecutionRecord.builder()
+                        .success(false)
+                        .output(nvl(llmOutput))
+                        .summary("output_truncated:empty_content")
+                        .llmTraceId(lastLlmTraceId)
+                        .retryCount(retryCount)
+                        .toolCallsUsed(toolCallsUsed)
+                        .messageHistory(convertMessagesToSnapshots(messages))
+                        .build();
+            }
+
+            // 视为任务完成
             return TodoExecutionRecord.builder()
                     .success(true)
                     .output(nvl(llmOutput))
@@ -513,7 +543,13 @@ public class ReactTodoExecutor {
         StringBuilder detailedHint = new StringBuilder();
         detailedHint.append("错误信息：").append(errorHint).append("\n\n");
 
-        if (errorHint.contains("dataset_ids") || errorHint.contains("MISSING_DATASET_IDS")) {
+        if (errorHint.contains("missing_required_tool:executePython")) {
+            detailedHint.append("修正建议：\n");
+            detailedHint.append("1. 当前 todo 必须使用 executePython 完成，不能用 Markdown 汇总代替\n");
+            detailedHint.append("2. 必须传入 dataset_ids（来自已有数据集）和 Python code\n");
+            detailedHint.append("3. 下一条 assistant 消息必须是 executePython 工具调用\n\n");
+            detailedHint.append("正确示例：通过原生工具调用 executePython，并传入 dataset_ids=\"dataset_xxx\"、code=\"import pandas as pd; ...\"");
+        } else if (errorHint.contains("dataset_ids") || errorHint.contains("MISSING_DATASET_IDS")) {
             detailedHint.append("修正建议：\n");
             detailedHint.append("1. executePython 工具需要 dataset_ids 参数，该参数是必需的\n");
             detailedHint.append("2. dataset_ids 必须使用上述'已有数据集'中的ID\n");
@@ -554,6 +590,31 @@ public class ReactTodoExecutor {
                 && record.getSummary().startsWith("repeated_tool_call:");
     }
 
+    private void clearReasoningForRetry() {
+        AgentContext.clearReasoningEffort();
+    }
+
+    private void emitOutputIntegrityEvent(String runId, ChatResponse response, String phase) {
+        if (eventService == null || runId == null || runId.isBlank()) {
+            return;
+        }
+        LlmResponseIntegrity.OutputIntegrityLevel level = LlmResponseIntegrity.classify(response);
+        String eventType = LlmResponseIntegrity.eventType(level);
+        if (eventType == null) {
+            return;
+        }
+        String userId = AgentContext.getUserId();
+        if (userId == null || userId.isBlank()) {
+            return;
+        }
+        eventService.append(runId, userId, eventType, Map.of(
+                "phase", phase != null ? phase : "dag_execution",
+                "finish_reason", response.metadata() != null && response.metadata().finishReason() != null
+                        ? response.metadata().finishReason().name()
+                        : "unknown"
+        ));
+    }
+
     /**
      * 从工具调用结果的 JSON 中提取 dataset_id 并注册到执行上下文。
      *
@@ -565,21 +626,7 @@ public class ReactTodoExecutor {
      * @param context    执行上下文
      */
     private void extractAndRegisterDatasetRef(String toolResult, TodoExecutionContext context) {
-        try {
-            Map<String, Object> result = objectMapper.readValue(toolResult, Map.class);
-            if (result.containsKey("data")) {
-                @SuppressWarnings("unchecked")
-                Map<String, Object> data = (Map<String, Object>) result.get("data");
-                if (data != null && data.containsKey("dataset_id")) {
-                    String datasetId = data.get("dataset_id").toString();
-                    String path = "/sandbox/input/" + datasetId;
-                    context.getDatasetRefs().put(datasetId, path);
-                    log.info("Registered dataset ref: {} -> {}", datasetId, path);
-                }
-            }
-        } catch (Exception e) {
-            log.debug("No dataset_id found in tool result");
-        }
+        DatasetRefExtractor.registerFromJson(toolResult, context.getDatasetRefs());
     }
 
     // ──────────────────────────────────────────────────────────────────

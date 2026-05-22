@@ -184,6 +184,7 @@ public class AgentLlmProperties {
         private Judge judge = new Judge();
         private MultiTurn multiTurn = new MultiTurn();
         private RunBudget runBudget = new RunBudget();
+        private FinalAnswerStage finalAnswer = new FinalAnswerStage();
 
         public Resume getResume() {
             return resume;
@@ -256,6 +257,14 @@ public class AgentLlmProperties {
         public void setRunBudget(RunBudget runBudget) {
             this.runBudget = runBudget == null ? new RunBudget() : runBudget;
         }
+
+        public FinalAnswerStage getFinalAnswer() {
+            return finalAnswer;
+        }
+
+        public void setFinalAnswer(FinalAnswerStage finalAnswer) {
+            this.finalAnswer = finalAnswer == null ? new FinalAnswerStage() : finalAnswer;
+        }
     }
 
     public static class Resume {
@@ -317,6 +326,8 @@ public class AgentLlmProperties {
         private String endpointName;
         /** Planning 阶段专用 model，未配置则使用 execution 阶段模型 */
         private String modelName;
+        /** 单次 LLM 输出 token 上限 */
+        private Integer maxTokens;
         /** OpenRouter reasoning (thinking) 配置 */
         private Reasoning reasoning = new Reasoning();
         private StructuredOutput structuredOutput = new StructuredOutput();
@@ -353,6 +364,14 @@ public class AgentLlmProperties {
             this.modelName = modelName;
         }
 
+        public Integer getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Integer maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
         public Reasoning getReasoning() {
             return reasoning;
         }
@@ -367,6 +386,27 @@ public class AgentLlmProperties {
 
         public void setStructuredOutput(StructuredOutput structuredOutput) {
             this.structuredOutput = structuredOutput == null ? new StructuredOutput() : structuredOutput;
+        }
+    }
+
+    public static class FinalAnswerStage {
+        private Integer maxTokens;
+        private Reasoning reasoning = new Reasoning();
+
+        public Integer getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Integer maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
+        public Reasoning getReasoning() {
+            return reasoning;
+        }
+
+        public void setReasoning(Reasoning reasoning) {
+            this.reasoning = reasoning == null ? new Reasoning() : reasoning;
         }
     }
 
@@ -387,6 +427,8 @@ public class AgentLlmProperties {
         private String defaultExecutionMode;
         /** 为 true 时才允许抓取/查询 ETF 复权因子并暴露 getEtfAdj */
         private Boolean adjFactorEnabled = false;
+        /** 单次 LLM 输出 token 上限（execution 阶段） */
+        private Integer maxTokens;
         /** OpenRouter reasoning (thinking) 配置 */
         private Reasoning reasoning = new Reasoning();
 
@@ -508,6 +550,14 @@ public class AgentLlmProperties {
 
         public void setAdjFactorEnabled(Boolean adjFactorEnabled) {
             this.adjFactorEnabled = adjFactorEnabled;
+        }
+
+        public Integer getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Integer maxTokens) {
+            this.maxTokens = maxTokens;
         }
 
         public Reasoning getReasoning() {

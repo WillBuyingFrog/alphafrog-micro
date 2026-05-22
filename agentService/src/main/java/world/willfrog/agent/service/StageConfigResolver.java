@@ -27,6 +27,10 @@ import java.util.List;
 @Slf4j
 public class StageConfigResolver {
 
+    private static final int DEFAULT_PLANNING_MAX_TOKENS = 8192;
+    private static final int DEFAULT_EXECUTION_MAX_TOKENS = 20000;
+    private static final int DEFAULT_FINAL_ANSWER_MAX_TOKENS = 20000;
+
     private final AgentLlmProperties llmProperties;
     private final AgentLlmLocalConfigLoader localConfigLoader;
     private final ObjectMapper objectMapper;
@@ -130,6 +134,7 @@ public class StageConfigResolver {
         // 构建 execution 配置（execution 在 local config 中没有独立的 endpoint/model，
         // 使用 defaultEndpoint/defaultModel）
         config.setExecution(buildExecutionFromProperties(local));
+        config.setFinalAnswer(buildFinalAnswerFromProperties(local));
         // 构建 sub_agent 配置
         config.setSubAgent(buildSubAgentFromProperties(local));
 
@@ -143,6 +148,7 @@ public class StageConfigResolver {
             AgentLlmProperties.Planning planning = local.getRuntime().getPlanning();
             setIfNotBlank(cfg, planning.getEndpointName(), planning.getModelName());
             cfg.setReasoningEffort(resolveReasoningEffort(planning.getReasoning()));
+            cfg.setMaxTokens(resolvePlanningMaxTokens(planning.getMaxTokens()));
             return cfg;
         }
         // fallback 到 base properties
@@ -150,8 +156,39 @@ public class StageConfigResolver {
             AgentLlmProperties.Planning planning = llmProperties.getRuntime().getPlanning();
             setIfNotBlank(cfg, planning.getEndpointName(), planning.getModelName());
             cfg.setReasoningEffort(resolveReasoningEffort(planning.getReasoning()));
+            cfg.setMaxTokens(resolvePlanningMaxTokens(planning.getMaxTokens()));
         }
         return cfg;
+    }
+
+    private StageLlmConfig buildFinalAnswerFromProperties(AgentLlmProperties local) {
+        StageLlmConfig cfg = new StageLlmConfig();
+        AgentLlmProperties.FinalAnswerStage finalAnswer = null;
+        if (local != null && local.getRuntime() != null) {
+            finalAnswer = local.getRuntime().getFinalAnswer();
+        }
+        if (finalAnswer == null && llmProperties.getRuntime() != null) {
+            finalAnswer = llmProperties.getRuntime().getFinalAnswer();
+        }
+        if (finalAnswer != null) {
+            cfg.setMaxTokens(resolveFinalAnswerMaxTokens(finalAnswer.getMaxTokens()));
+            cfg.setReasoningEffort(resolveReasoningEffort(finalAnswer.getReasoning()));
+        } else {
+            cfg.setMaxTokens(DEFAULT_FINAL_ANSWER_MAX_TOKENS);
+        }
+        return cfg;
+    }
+
+    private Integer resolvePlanningMaxTokens(Integer configured) {
+        return configured != null && configured > 0 ? configured : DEFAULT_PLANNING_MAX_TOKENS;
+    }
+
+    private Integer resolveExecutionMaxTokens(Integer configured) {
+        return configured != null && configured > 0 ? configured : DEFAULT_EXECUTION_MAX_TOKENS;
+    }
+
+    private Integer resolveFinalAnswerMaxTokens(Integer configured) {
+        return configured != null && configured > 0 ? configured : DEFAULT_FINAL_ANSWER_MAX_TOKENS;
     }
 
     private StageLlmConfig buildExecutionFromProperties(AgentLlmProperties local) {
@@ -160,7 +197,11 @@ public class StageConfigResolver {
         if (local != null) {
             setIfNotBlank(cfg, local.getDefaultEndpoint(), local.getDefaultModel());
             if (local.getRuntime() != null && local.getRuntime().getExecution() != null) {
-                cfg.setReasoningEffort(resolveReasoningEffort(local.getRuntime().getExecution().getReasoning()));
+                AgentLlmProperties.Execution execution = local.getRuntime().getExecution();
+                cfg.setReasoningEffort(resolveReasoningEffort(execution.getReasoning()));
+                cfg.setMaxTokens(resolveExecutionMaxTokens(execution.getMaxTokens()));
+            } else {
+                cfg.setMaxTokens(DEFAULT_EXECUTION_MAX_TOKENS);
             }
             if (cfg.isValid()) {
                 return cfg;
@@ -168,7 +209,11 @@ public class StageConfigResolver {
         }
         setIfNotBlank(cfg, llmProperties.getDefaultEndpoint(), llmProperties.getDefaultModel());
         if (llmProperties.getRuntime() != null && llmProperties.getRuntime().getExecution() != null) {
-            cfg.setReasoningEffort(resolveReasoningEffort(llmProperties.getRuntime().getExecution().getReasoning()));
+            AgentLlmProperties.Execution execution = llmProperties.getRuntime().getExecution();
+            cfg.setReasoningEffort(resolveReasoningEffort(execution.getReasoning()));
+            cfg.setMaxTokens(resolveExecutionMaxTokens(execution.getMaxTokens()));
+        } else {
+            cfg.setMaxTokens(DEFAULT_EXECUTION_MAX_TOKENS);
         }
         return cfg;
     }

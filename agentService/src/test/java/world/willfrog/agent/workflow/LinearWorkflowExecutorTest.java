@@ -340,6 +340,47 @@ class LinearWorkflowExecutorTest {
         assertTrue(finalUserMessage.contains("相关性需谨慎"));
     }
 
+    @Test
+    void execute_shouldFailWhenSummarizerReturnsEmptyEvenIfTodoHasOutput() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("todo markdown output")
+                .summary("ok")
+                .toolCallsUsed(1)
+                .build());
+        when(model.chat(any(List.class))).thenReturn(ChatResponse.builder()
+                .aiMessage(new AiMessage(""))
+                .build());
+
+        WorkflowExecutionResult result = executor.execute(request("run-empty-summary", planWithTools(1)));
+
+        assertFalse(result.isSuccess());
+        assertEquals("empty_final_answer", result.getFailureReason());
+        assertEquals("", result.getFinalAnswer());
+    }
+
+    @Test
+    void execute_shouldFailWhenFinalAnswerEmptyAndNoTodoFallback() {
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(ReactTodoExecutor.TodoExecutionRecord.builder()
+                .success(true)
+                .output("")
+                .summary("ok")
+                .toolCallsUsed(1)
+                .build());
+        when(model.chat(any(List.class))).thenReturn(ChatResponse.builder()
+                .aiMessage(new AiMessage(""))
+                .build());
+
+        WorkflowExecutionResult result = executor.execute(request("run-empty-final", planWithTools(1)));
+
+        assertFalse(result.isSuccess());
+        assertEquals("empty_final_answer", result.getFailureReason());
+    }
+
     private WorkflowRequest request(String runId, TodoPlan plan) {
         AgentRun run = new AgentRun();
         run.setId(runId);

@@ -201,8 +201,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
 
             // ── 执行成功 ──
             if (record.isSuccess()) {
-                // 将本次执行产生的 dataset 引用合并到全局映射
+                DatasetRefExtractor.mergeRecordDatasetRefs(record, todoContext.getDatasetRefs());
                 datasetRefs.putAll(todoContext.getDatasetRefs());
+                emitDatasetHandoffMismatchEvent(runId, userId, item, index, record.getOutput(), datasetRefs);
                 completedTodoIds.add(item.getId());
                 completedTodos.add(CompletedTodoInfo.builder()
                         .todoId(item.getId())
@@ -353,7 +354,13 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                 userGoal,
                 completedTodos,
                 finalAnswerModel,
-                request.getFinalAnswerReasoningEffort());
+                request.getFinalAnswerReasoningEffort(),
+                runId,
+                userId);
+        if (finalAnswer.answer() == null || finalAnswer.answer().isBlank()) {
+            appendDebugArtifactEvent(runId, userId, completedTodos, "empty_final_answer");
+            return buildFailureResult(completedTodos, "empty_final_answer");
+        }
         return WorkflowExecutionResult.builder()
                 .success(true)
                 .finalAnswer(finalAnswer.answer())
@@ -427,7 +434,9 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
     private FinalAnswerResult generateFinalAnswer(String userGoal,
                                                   List<CompletedTodoInfo> completedTodos,
                                                   ChatModel model,
-                                                  String finalAnswerReasoningEffort) {
+                                                  String finalAnswerReasoningEffort,
+                                                  String runId,
+                                                  String userId) {
         // 构建引用来源映射表（按 URL 去重、重新编号）
         AgentCitationService.CitationMap citationMap = citationService.buildCitationMap(completedTodos);
         try {
@@ -465,7 +474,6 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
             try {
                 response = model.chat(messages);
             } finally {
-                // 恢复 AgentContext 的原始 phase/stage/reasoningEffort
                 if (previousPhase == null || previousPhase.isBlank()) {
                     AgentContext.clearPhase();
                 } else {
@@ -482,33 +490,127 @@ public class LinearWorkflowExecutor implements WorkflowExecutor {
                     AgentContext.setReasoningEffort(previousReasoningEffort);
                 }
             }
-            return new FinalAnswerResult(response.aiMessage() != null ? response.aiMessage().text() : "", citationMap);
+            String answer = response != null && response.aiMessage() != null ? nvl(response.aiMessage().text()) : "";
+            LlmResponseIntegrity.OutputIntegrityLevel integrityLevel =
+                    LlmResponseIntegrity.classify(response);
+            emitFinalAnswerIntegrityEvent(runId, userId, integrityLevel, response);
+            if (integrityLevel == LlmResponseIntegrity.OutputIntegrityLevel.TRUNCATED && answer.isBlank()) {
+                String previousReasoningForRetry = AgentContext.getReasoningEffort();
+                try {
+                    AgentContext.clearReasoningEffort();
+                    ChatResponse retryResponse = model.chat(messages);
+                    answer = retryResponse != null && retryResponse.aiMessage() != null
+                            ? nvl(retryResponse.aiMessage().text())
+                            : "";
+                    emitFinalAnswerIntegrityEvent(runId, userId,
+                            LlmResponseIntegrity.classify(retryResponse), retryResponse);
+                } finally {
+                    if (previousReasoningForRetry == null || previousReasoningForRetry.isBlank()) {
+                        AgentContext.clearReasoningEffort();
+                    } else {
+                        AgentContext.setReasoningEffort(previousReasoningForRetry);
+                    }
+                }
+            } else if (answer.isBlank()) {
+                String previousReasoningForRetry = AgentContext.getReasoningEffort();
+                try {
+                    AgentContext.clearReasoningEffort();
+                    ChatResponse retryResponse = model.chat(messages);
+                    answer = retryResponse != null && retryResponse.aiMessage() != null
+                            ? nvl(retryResponse.aiMessage().text())
+                            : "";
+                } finally {
+                    if (previousReasoningForRetry == null || previousReasoningForRetry.isBlank()) {
+                        AgentContext.clearReasoningEffort();
+                    } else {
+                        AgentContext.setReasoningEffort(previousReasoningForRetry);
+                    }
+                }
+            }
+            answer = FinalAnswerSupport.resolveAnswerOrEmpty(answer);
+            return new FinalAnswerResult(answer, citationMap);
         } catch (Exception e) {
             log.error("Failed to generate final answer", e);
-            return new FinalAnswerResult("无法生成回答: " + e.getMessage(), citationMap);
+            return new FinalAnswerResult("", citationMap);
         }
+    }
+
+    private void emitFinalAnswerIntegrityEvent(String runId,
+                                               String userId,
+                                               LlmResponseIntegrity.OutputIntegrityLevel level,
+                                               ChatResponse response) {
+        if (level == LlmResponseIntegrity.OutputIntegrityLevel.OK || runId == null || userId == null) {
+            return;
+        }
+        String eventType = LlmResponseIntegrity.eventType(level);
+        if (eventType == null) {
+            return;
+        }
+        eventService.append(runId, userId, eventType, Map.of(
+                "phase", PHASE_LINEAR_EXECUTION,
+                "stage", "final_answer",
+                "finish_reason", response != null && response.metadata() != null && response.metadata().finishReason() != null
+                        ? response.metadata().finishReason().name()
+                        : "unknown"
+        ));
+    }
+
+    private void emitDatasetHandoffMismatchEvent(String runId,
+                                                 String userId,
+                                                 TodoItem item,
+                                                 int todoIndex,
+                                                 String todoOutput,
+                                                 Map<String, String> datasetRefs) {
+        DatasetRefHandoffSupport.HandoffMismatch mismatch =
+                DatasetRefHandoffSupport.detect(todoOutput, datasetRefs);
+        if (mismatch == null) {
+            return;
+        }
+        eventService.append(runId, userId, "DATASET_REFS_HANDOFF_MISMATCH", Map.of(
+                "todoId", item.getId(),
+                "todoIndex", todoIndex + 1,
+                "phase", PHASE_LINEAR_EXECUTION,
+                "datasetRefsCount", mismatch.datasetRefsCount(),
+                "mentionedDatasetIdsCount", mismatch.mentionedDatasetIdsCount(),
+                "missingDatasetIdsSample", mismatch.missingDatasetIdsSample(),
+                "registeredDatasetIdsSample", mismatch.registeredDatasetIdsSample(),
+                "source", "completed_todo_output_vs_dataset_refs_map"
+        ));
+    }
+
+    private void appendDebugArtifactEvent(String runId,
+                                          String userId,
+                                          List<CompletedTodoInfo> completedTodos,
+                                          String reason) {
+        String artifact = FinalAnswerSupport.lastNonBlankTodoOutput(completedTodos);
+        if (artifact.isBlank()) {
+            return;
+        }
+        eventService.append(runId, userId, "FINAL_ANSWER_DEBUG_ARTIFACT", Map.of(
+                "reason", reason,
+                "artifact_preview", preview(artifact, 500)
+        ));
+    }
+
+    private String preview(String text, int maxLen) {
+        if (text == null) {
+            return "";
+        }
+        if (text.length() <= maxLen) {
+            return text;
+        }
+        return text.substring(0, maxLen) + "...";
     }
 
     /**
      * 构建失败结果。
      *
-     * <p>将所有已完成 Todo 的 output 拼接为 finalAnswer（确保即使失败，
-     * 用户也能看到已经完成了哪些工作），并基于已完成 Todo 构建引用表。</p>
-     *
-     * @param completedTodos 已完成的任务列表
-     * @param errorMessage   失败原因
-     * @return 失败的工作流执行结果
+     * <p>失败时不把 todo output 写入 {@code finalAnswer}，避免 Matrix 将 harness fallback 误判为模型回答。</p>
      */
     private WorkflowExecutionResult buildFailureResult(List<CompletedTodoInfo> completedTodos, String errorMessage) {
-        StringBuilder combinedOutput = new StringBuilder();
-        for (CompletedTodoInfo todo : completedTodos) {
-            if (todo.getOutput() != null && !todo.getOutput().isEmpty()) {
-                combinedOutput.append(todo.getOutput()).append("\n");
-            }
-        }
         return WorkflowExecutionResult.builder()
                 .success(false)
-                .finalAnswer(combinedOutput.toString())
+                .finalAnswer("")
                 .failureReason(errorMessage)
                 .citationMap(citationService.buildCitationMap(completedTodos))
                 .completedItems(new ArrayList<>())

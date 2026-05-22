@@ -140,6 +140,7 @@
     "planning": {
       "maxTodos": 10,
       "maxTodosClientCap": 10,
+      "maxTokens": 8192,
       "endpointName": "openrouter",
       "modelName": "anthropic/claude-3.5-sonnet",
       "structuredOutput": {
@@ -155,6 +156,7 @@
     },
     "execution": {
       "mode": "LINEAR_WORKFLOW",
+      "maxTokens": 20000,
       "maxToolCalls": 20,
       "maxToolCallsPerSubAgent": 10,
       "maxRetriesPerTodo": 3,
@@ -169,6 +171,9 @@
       "failFast": false,
       "defaultExecutionMode": "AUTO",
       "adjFactorEnabled": false
+    },
+    "finalAnswer": {
+      "maxTokens": 20000
     },
     "runBudget": {
       "maxWallClockMs": 1200000,

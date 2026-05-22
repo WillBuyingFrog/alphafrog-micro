@@ -337,7 +337,7 @@ langchain4j:
     api-key: ${AF_AGENT_API_KEY:demo}
     base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
     model-name: ${AF_AGENT_MODEL_NAME:openai/gpt-4o}
-    max-tokens: ${AF_AGENT_MAX_TOKENS:4096}
+    max-tokens: ${AF_AGENT_MAX_TOKENS:16384}
     temperature: ${AF_AGENT_TEMPERATURE:0.7}
     # Reasoning 配置 (OpenRouter 兼容)
     # 参考: https://openrouter.ai/docs/guides/best-practices/reasoning-tokens

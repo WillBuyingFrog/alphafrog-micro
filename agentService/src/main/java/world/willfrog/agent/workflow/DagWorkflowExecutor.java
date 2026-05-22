@@ -181,6 +181,17 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
             // 成功：生成最终回答并返回
             if (outcome.success()) {
                 FinalAnswerResult finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
+                if (finalAnswer.answer() == null || finalAnswer.answer().isBlank()) {
+                    recordDagCompletion(runId, userId, false, startedAt, "empty_final_answer", outcome.totalToolCallsUsed());
+                    appendFinalAnswerDebugArtifact(runId, userId, outcome.sharedContext(), "empty_final_answer");
+                    return WorkflowExecutionResult.builder()
+                            .success(false)
+                            .failureReason("empty_final_answer")
+                            .finalAnswer("")
+                            .citationMap(finalAnswer.citationMap())
+                            .toolCallsUsed(outcome.totalToolCallsUsed())
+                            .build();
+                }
                 recordDagCompletion(runId, userId, true, startedAt, null, outcome.totalToolCallsUsed());
                 return WorkflowExecutionResult.builder()
                         .success(true)
@@ -269,6 +280,17 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 int totalToolCalls = outcome.totalToolCallsUsed() + fallbackResult.toolCallsUsed();
                 if (fallbackResult.success()) {
                     FinalAnswerResult finalAnswer = generateFinalAnswer(outcome.sharedContext(), request);
+                    if (finalAnswer.answer() == null || finalAnswer.answer().isBlank()) {
+                        recordDagCompletion(runId, userId, false, startedAt, "empty_final_answer", totalToolCalls);
+                        appendFinalAnswerDebugArtifact(runId, userId, outcome.sharedContext(), "empty_final_answer");
+                        return WorkflowExecutionResult.builder()
+                                .success(false)
+                                .failureReason("empty_final_answer")
+                                .finalAnswer("")
+                                .citationMap(finalAnswer.citationMap())
+                                .toolCallsUsed(totalToolCalls)
+                                .build();
+                    }
                     recordDagCompletion(runId, userId, true, startedAt, null, totalToolCalls);
                     return WorkflowExecutionResult.builder()
                             .success(true)
@@ -789,36 +811,9 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
      * @param context 共享执行上下文
      */
     private void extractDatasetIds(ReactTodoExecutor.TodoExecutionRecord record, SharedExecutionContext context) {
-        try {
-            JsonNode root = objectMapper.readTree(nvl(record.getOutput()));
-            JsonNode data = root.path("data");
-            if (data.isObject()) {
-                String datasetId = data.path("dataset_id").asText("");
-                if (!datasetId.isBlank()) {
-                    context.registerDatasetRef(datasetId, "/sandbox/input/" + datasetId);
-                }
-                JsonNode ids = data.path("dataset_ids");
-                if (ids.isArray()) {
-                    for (JsonNode idNode : ids) {
-                        String id = idNode.asText("");
-                        if (!id.isBlank()) {
-                            context.registerDatasetRef(id, "/sandbox/input/" + id);
-                        }
-                    }
-                } else if (ids.isTextual()) {
-                    // 兼容逗号分隔字符串
-                    for (String id : ids.asText("").split(",")) {
-                        String trimmed = id.trim();
-                        if (!trimmed.isBlank()) {
-                            context.registerDatasetRef(trimmed, "/sandbox/input/" + trimmed);
-                        }
-                    }
-                }
-            }
-        } catch (Exception e) {
-            // 节点输出不是 JSON 是常态（例如纯文本回答），降级到 debug
-            log.debug("Failed to extract dataset ids from record output: {}", e.getMessage());
-        }
+        Map<String, String> extracted = new HashMap<>();
+        DatasetRefExtractor.mergeRecordDatasetRefs(record, extracted);
+        extracted.forEach(context::registerDatasetRef);
     }
 
     /**
@@ -910,17 +905,42 @@ public class DagWorkflowExecutor implements WorkflowExecutor {
                 }
             }
             var aiMessage = response == null ? null : response.aiMessage();
-            return new FinalAnswerResult(aiMessage != null ? aiMessage.text() : "", citationMap);
+            String answer = aiMessage != null ? nvl(aiMessage.text()) : "";
+            if (answer.isBlank()) {
+                String previousReasoningForRetry = AgentContext.getReasoningEffort();
+                try {
+                    AgentContext.clearReasoningEffort();
+                    ChatResponse retryResponse = finalAnswerModel.chat(messages);
+                    var retryMessage = retryResponse == null ? null : retryResponse.aiMessage();
+                    answer = retryMessage != null ? nvl(retryMessage.text()) : "";
+                } finally {
+                    if (previousReasoningForRetry == null || previousReasoningForRetry.isBlank()) {
+                        AgentContext.clearReasoningEffort();
+                    } else {
+                        AgentContext.setReasoningEffort(previousReasoningForRetry);
+                    }
+                }
+            }
+            answer = FinalAnswerSupport.resolveAnswerOrEmpty(answer);
+            return new FinalAnswerResult(answer, citationMap);
         } catch (Exception e) {
             log.error("Failed to generate DAG final answer", e);
-            // 降级：把最后一个完成节点的 output 当作回答返回，确保用户能看到点东西
-            List<CompletedTodoInfo> completed = context.getCompletedTodos();
-            if (completed.isEmpty()) {
-                return new FinalAnswerResult("无执行结果", citationMap);
-            }
-            String fallback = completed.get(completed.size() - 1).getOutput();
-            return new FinalAnswerResult(fallback != null ? fallback : "无法生成回答: " + e.getMessage(), citationMap);
+            return new FinalAnswerResult("", citationMap);
         }
+    }
+
+    private void appendFinalAnswerDebugArtifact(String runId,
+                                                String userId,
+                                                SharedExecutionContext context,
+                                                String reason) {
+        String artifact = FinalAnswerSupport.lastNonBlankTodoOutput(context.getCompletedTodos());
+        if (artifact.isBlank()) {
+            return;
+        }
+        eventService.append(runId, userId, "FINAL_ANSWER_DEBUG_ARTIFACT", Map.of(
+                "reason", reason,
+                "artifact_preview", artifact.length() > 500 ? artifact.substring(0, 500) + "..." : artifact
+        ));
     }
 
     /**

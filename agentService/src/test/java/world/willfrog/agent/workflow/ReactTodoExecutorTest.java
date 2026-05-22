@@ -492,6 +492,30 @@ class ReactTodoExecutorTest {
                 .build();
     }
 
+    private ToolSpecification executePythonSpec() {
+        return ToolSpecification.builder()
+                .name("executePython")
+                .description("执行 Python 代码")
+                .parameters(JsonObjectSchema.builder()
+                        .addStringProperty("code")
+                        .addStringProperty("dataset_ids")
+                        .addStringProperty("libraries")
+                        .required("code", "dataset_ids")
+                        .additionalProperties(false)
+                        .build())
+                .build();
+    }
+
+    private ReactTodoExecutor.TodoExecutionContext pythonComputationContext(java.util.Map<String, String> datasets) {
+        return ReactTodoExecutor.TodoExecutionContext.builder()
+                .userGoal("行业回测")
+                .availableTools(Set.of("executePython"))
+                .toolSpecifications(List.of(executePythonSpec()))
+                .completedTodos(List.of())
+                .datasetRefs(datasets)
+                .build();
+    }
+
     private ToolSpecification searchWebSpec() {
         return ToolSpecification.builder()
                 .name("searchWeb")
@@ -770,5 +794,60 @@ class ReactTodoExecutorTest {
 
         assertTrue(record.isSuccess());
         assertTrue(elapsed.toMillis() < 550, "waitForSubAgent 应并发等待多个子代理");
+    }
+
+    @Test
+    void executeWithObservability_shouldFailWhenTruncatedEmptyAfterRetry() {
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(""))
+                        .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
+                                .finishReason(dev.langchain4j.model.output.FinishReason.LENGTH)
+                                .build())
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage(""))
+                        .metadata(dev.langchain4j.model.chat.response.ChatResponseMetadata.builder()
+                                .finishReason(dev.langchain4j.model.output.FinishReason.LENGTH)
+                                .build())
+                        .build());
+
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "整理结果",
+                contextWithMarketSpecs(),
+                model,
+                "run-truncated",
+                "dag_execution"
+        );
+
+        assertFalse(record.isSuccess());
+        assertEquals("output_truncated:empty_content", record.getSummary());
+    }
+
+    @Test
+    void executeWithObservability_shouldRegisterPluralDatasetIdsFromToolResult() {
+        when(model.chat(any(ChatRequest.class)))
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(toolCallMessage("call_daily", "getExchangeAssetDaily", "{}"))
+                        .build())
+                .thenReturn(ChatResponse.builder()
+                        .aiMessage(new AiMessage("done"))
+                        .build());
+        when(toolRouter.invokeWithMeta(eq("getExchangeAssetDaily"), anyMap()))
+                .thenReturn(invocationResult("""
+                        {"ok":true,"data":{"dataset_ids":["aff1111111111111111","aff2222222222222222"]}}
+                        """, true));
+
+        ReactTodoExecutor.TodoExecutionContext ctx = contextWithMarketSpecs();
+        ReactTodoExecutor.TodoExecutionRecord record = executor.executeWithObservability(
+                "拉取数据",
+                ctx,
+                model,
+                "run-plural-datasets",
+                "dag_execution"
+        );
+
+        assertTrue(record.isSuccess());
+        assertEquals(2, ctx.getDatasetRefs().size());
     }
 }
