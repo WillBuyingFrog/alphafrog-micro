@@ -24,6 +24,9 @@
 
 ## 工具使用详细规则
 
+### 0. 批量查询（建议，非强制）
+当**同一工具、同一参数类型**下，你已明确多个代码或关键词（例如任务要求查多个指数、或前序步骤已给出多个 ts_code），优先在一次调用里用 `|` 分隔或 JSON 数组传参，减少 tool call 次数。若仍需先 search 才能确定目标（发现式查询），可逐步调用，不必强行 batch；也不要把不同工具混在一次调用里。
+
 ### 1. 搜索类工具（searchIndex/searchStock/searchFund/searchAssetInfo）
 - **searchFund 仅用于场外基金（公募基金）基本信息检索**，不用于 ETF、场内上市 ETF、行业主题 ETF 筛选
 - **ETF 回测 / 行业主题 ETF / 场内资产筛选** 必须使用 `searchAssetInfo`，并设置 `assetTypes=etf`（可按需含 index/stock），**禁止**使用 searchFund

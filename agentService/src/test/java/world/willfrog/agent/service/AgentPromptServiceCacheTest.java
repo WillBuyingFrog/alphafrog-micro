@@ -169,4 +169,13 @@ class AgentPromptServiceCacheTest {
         assertTrue(instruction.contains("[Stage: FINAL_ANSWER]"),
                 "final answer 阶段指令应包含 Stage 标记");
     }
+
+    @Test
+    void dagReactSystemPrompt_shouldSuggestSoftBatchGuidance() {
+        String prompt = promptService.dagReactSystemPrompt();
+        assertTrue(prompt.contains("批量查询（建议，非强制）"),
+                "ReAct system prompt 应包含软性的批量查询建议");
+        assertTrue(prompt.contains("发现式查询"),
+                "ReAct system prompt 应保留发现式逐步查询的边界说明");
+    }
 }

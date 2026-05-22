@@ -139,6 +139,7 @@ agent:
         3. 当市场数据工具返回 dataset_id（s）后，必须调用 executePython 对数据进行计算与分析。
         4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。
         5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
+        6. 同类市场数据查询（同一工具、同一参数类型）且已明确多个代码或关键词时，优先用 | 或 JSON 数组批量传参以减少 tool call；发现式检索（需先 search 才能确定代码）仍允许逐步查询，不必强行合并。
       todo-planner-system-prompt-template: >
         你是任务规划器。请将用户目标拆解为 Todo List，只输出 JSON。
         格式：{"analysis":"...","items":[{"id":"todo_1","sequence":1,"type":"TOOL_CALL","toolName":"searchIndex","params":{"keyword":"沪深300"},"reasoning":"...","executionMode":"AUTO"}]}。
