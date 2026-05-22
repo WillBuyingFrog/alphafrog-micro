@@ -13,8 +13,13 @@ import java.util.regex.Pattern;
  */
 final class DatasetRefHandoffSupport {
 
-    /** 与 v4 observability 中 dataset_id 格式对齐，仅用于 mention 计数。 */
-    private static final Pattern MENTIONED_DATASET_ID = Pattern.compile("aff[a-f0-9]{16,}", Pattern.CASE_INSENSITIVE);
+    /**
+     * {@link world.willfrog.agent.tool.DatasetWriter} 完整 ID：
+     * {@code <runId>-<assetType>-<tsCode>-<start>-<end>-<uuid>}，仅用于 mention 计数。
+     */
+    private static final Pattern MENTIONED_DATASET_ID = Pattern.compile(
+            "aff[a-f0-9]{16,}-[a-zA-Z0-9_]+-[a-zA-Z0-9.]+-\\d{8}-\\d{8}-[a-f0-9]{8}",
+            Pattern.CASE_INSENSITIVE);
 
     private DatasetRefHandoffSupport() {
     }

@@ -225,9 +225,7 @@ public class ReactTodoExecutor {
 
             // 如果 ReAct 循环失败且仍有重试配额，进行重试
             if (!record.isSuccess() && retryCount < MAX_RETRIES && !isConvergenceStop(record)) {
-                String errorHint = record.getSummary() != null && record.getSummary().startsWith("missing_required_tool:")
-                        ? record.getSummary()
-                        : extractErrorHint(record.getOutput());
+                String errorHint = extractErrorHint(record.getOutput());
                 log.warn("Todo execution failed, will retry {}/{}: {}, error: {}",
                         retryCount + 1, MAX_RETRIES, description, errorHint);
 
@@ -543,13 +541,7 @@ public class ReactTodoExecutor {
         StringBuilder detailedHint = new StringBuilder();
         detailedHint.append("错误信息：").append(errorHint).append("\n\n");
 
-        if (errorHint.contains("missing_required_tool:executePython")) {
-            detailedHint.append("修正建议：\n");
-            detailedHint.append("1. 当前 todo 必须使用 executePython 完成，不能用 Markdown 汇总代替\n");
-            detailedHint.append("2. 必须传入 dataset_ids（来自已有数据集）和 Python code\n");
-            detailedHint.append("3. 下一条 assistant 消息必须是 executePython 工具调用\n\n");
-            detailedHint.append("正确示例：通过原生工具调用 executePython，并传入 dataset_ids=\"dataset_xxx\"、code=\"import pandas as pd; ...\"");
-        } else if (errorHint.contains("dataset_ids") || errorHint.contains("MISSING_DATASET_IDS")) {
+        if (errorHint.contains("dataset_ids") || errorHint.contains("MISSING_DATASET_IDS")) {
             detailedHint.append("修正建议：\n");
             detailedHint.append("1. executePython 工具需要 dataset_ids 参数，该参数是必需的\n");
             detailedHint.append("2. dataset_ids 必须使用上述'已有数据集'中的ID\n");

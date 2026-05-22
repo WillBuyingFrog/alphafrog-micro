@@ -362,6 +362,45 @@ class LinearWorkflowExecutorTest {
     }
 
     @Test
+    void execute_shouldPassAllDatasetRefsFromFirstTodoToSecondTodo() {
+        String id1 = "aff1111111111111111-etf-512400.SH-20250101-20251231-aaaaaaaa";
+        String id2 = "aff1111111111111111-etf-159915.SZ-20250101-20251231-bbbbbbbb";
+        String firstOutput = """
+                {"ok":true,"data":{"dataset_ids":["%s","%s"]}}
+                """.formatted(id1, id2);
+
+        when(reactTodoExecutor.executeWithObservability(
+                anyString(), any(), any(), anyString(), anyString()
+        )).thenReturn(
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .output(firstOutput)
+                        .summary("ok")
+                        .toolCallsUsed(1)
+                        .build(),
+                ReactTodoExecutor.TodoExecutionRecord.builder()
+                        .success(true)
+                        .output("{\"ok\":true}")
+                        .summary("ok")
+                        .toolCallsUsed(1)
+                        .build()
+        );
+
+        WorkflowExecutionResult result = executor.execute(request("run-handoff", planWithTools(2)));
+
+        assertTrue(result.isSuccess());
+        ArgumentCaptor<ReactTodoExecutor.TodoExecutionContext> contextCaptor =
+                ArgumentCaptor.forClass(ReactTodoExecutor.TodoExecutionContext.class);
+        verify(reactTodoExecutor, times(2)).executeWithObservability(
+                anyString(), contextCaptor.capture(), any(), anyString(), anyString());
+
+        ReactTodoExecutor.TodoExecutionContext secondContext = contextCaptor.getAllValues().get(1);
+        assertEquals(2, secondContext.getDatasetRefs().size());
+        assertTrue(secondContext.getDatasetRefs().containsKey(id1));
+        assertTrue(secondContext.getDatasetRefs().containsKey(id2));
+    }
+
+    @Test
     void execute_shouldFailWhenFinalAnswerEmptyAndNoTodoFallback() {
         when(reactTodoExecutor.executeWithObservability(
                 anyString(), any(), any(), anyString(), anyString()
