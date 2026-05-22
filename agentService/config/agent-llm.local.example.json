@@ -280,7 +280,9 @@
     "openrouter": {
       "costEnrichment": {
         "enabled": true,
-        "timeoutMs": 5000
+        "timeoutMs": 5000,
+        "maxAttempts": 3,
+        "retryDelayMs": 1000
       }
     }
   },

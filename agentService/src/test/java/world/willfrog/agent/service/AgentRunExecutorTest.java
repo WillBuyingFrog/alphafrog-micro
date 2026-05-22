@@ -90,6 +90,8 @@ class AgentRunExecutorTest {
     private StageConfigValidator stageConfigValidator;
     @Mock
     private AgentSimpleToolFastPathService simpleToolFastPathService;
+    @Mock
+    private OpenRouterCostService openRouterCostService;
 
     private AgentRunExecutor executor;
 
@@ -118,6 +120,7 @@ class AgentRunExecutorTest {
                 new AgentFinalAnswerParser(new ObjectMapper()),
                 new AgentCitationService(new ObjectMapper()),
                 simpleToolFastPathService,
+                openRouterCostService,
                 new ThreadPoolTaskExecutor()
         );
         executor.init();
@@ -164,6 +167,44 @@ class AgentRunExecutorTest {
         verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
         verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
         verify(creditService).recordRunConsumeLedger(eq("run-ok"), eq("u1"), eq(0));
+    }
+
+    @Test
+    void execute_shouldBatchEnrichOpenRouterCostsBeforeCompletedSnapshot() {
+        AgentRun run = run("run-openrouter-cost");
+        when(runMapper.findById("run-openrouter-cost")).thenReturn(run);
+        when(eventService.isRunnable("run-openrouter-cost", "u1")).thenReturn(true);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString()))
+                .thenReturn(new AgentLlmResolver.ResolvedLlm(
+                        "openrouter",
+                        "https://openrouter.ai/api/v1",
+                        "moonshotai/kimi-k2.6",
+                        "sk-test",
+                        null,
+                        List.of()
+                ));
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-openrouter-cost");
+
+        verify(openRouterCostService).enrichMissingCostInfo(
+                eq("run-openrouter-cost"),
+                eq("sk-test"),
+                eq("https://openrouter.ai/api/v1")
+        );
+        verify(runMapper).updateSnapshot(eq("run-openrouter-cost"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
     }
 
     @Test

@@ -164,6 +164,71 @@ class AgentObservabilityServiceCacheTest {
             assertEquals(0.0012, trace.getUpstreamCost());
             assertEquals(0.0002, trace.getCacheDiscount());
             assertFalse(trace.getIsByok());
+            assertEquals(0.0015, state.getSummary().getEstimatedCost());
+        } catch (Exception e) {
+            fail("Failed to parse stored state: " + e.getMessage());
+        }
+    }
+
+    @Test
+    void recordLlmCallWithRawHttp_shouldExtractOpenRouterCostFromUsageResponse() {
+        String runId = "test-run-cost-from-usage";
+        AtomicReference<String> savedJson = new AtomicReference<>();
+
+        when(stateStore.loadObservability(eq(runId))).thenAnswer(inv -> {
+            String json = savedJson.get();
+            return json == null ? Optional.empty() : Optional.of(json);
+        });
+        doAnswer(inv -> {
+            savedJson.set(inv.getArgument(1));
+            return null;
+        }).when(stateStore).saveObservability(eq(runId), anyString());
+
+        RawHttpLogger.HttpResponseRecord response = RawHttpLogger.HttpResponseRecord.builder()
+                .statusCode(200)
+                .body("""
+                        {
+                          "id": "gen-test-1",
+                          "usage": {
+                            "prompt_tokens": 100,
+                            "completion_tokens": 20,
+                            "total_tokens": 120,
+                            "cost": 0.00042,
+                            "is_byok": false,
+                            "cost_details": {
+                              "upstream_inference_prompt_cost": 0.0003,
+                              "upstream_inference_completions_cost": 0.0001
+                            }
+                          }
+                        }
+                        """)
+                .durationMs(100)
+                .timestamp(123L)
+                .build();
+
+        String traceId = service.recordLlmCallWithRawHttp(
+                runId, "planning",
+                new TokenUsage(100, 20, 120), 0,
+                100L, 10L, 110L,
+                "openrouter", "moonshotai/kimi-k2.6", null,
+                null, response, null
+        );
+
+        String stored = savedJson.get();
+        assertNotNull(stored);
+
+        try {
+            AgentObservabilityService.ObservabilityState state =
+                    objectMapper.readValue(stored, AgentObservabilityService.ObservabilityState.class);
+            AgentObservabilityService.LlmTrace trace = state.getDiagnostics().getLlmTraces().stream()
+                    .filter(t -> traceId.equals(t.getTraceId()))
+                    .findFirst()
+                    .orElseThrow();
+            assertEquals("gen-test-1", trace.getGenerationId());
+            assertEquals(0.00042, trace.getActualCost());
+            assertEquals(0.0004, trace.getUpstreamCost(), 0.000000001);
+            assertFalse(trace.getIsByok());
+            assertEquals(0.00042, state.getSummary().getEstimatedCost());
         } catch (Exception e) {
             fail("Failed to parse stored state: " + e.getMessage());
         }

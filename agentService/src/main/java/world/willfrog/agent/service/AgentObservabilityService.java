@@ -1,6 +1,7 @@
 package world.willfrog.agent.service;
 
 import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.model.output.TokenUsage;
@@ -699,6 +700,57 @@ public class AgentObservabilityService {
         });
     }
 
+    private SpendingExtraction extractOpenRouterSpending(String rawResponseBody) {
+        if (rawResponseBody == null || rawResponseBody.isBlank()) {
+            return SpendingExtraction.empty();
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawResponseBody);
+            JsonNode usage = root.path("usage");
+            if (usage.isMissingNode() || usage.isNull()) {
+                return SpendingExtraction.empty();
+            }
+
+            Double actualCost = readDouble(usage.get("cost"));
+            Boolean isByok = usage.has("is_byok") && !usage.get("is_byok").isNull()
+                    ? usage.get("is_byok").asBoolean()
+                    : null;
+
+            JsonNode details = usage.path("cost_details");
+            Double upstreamCost = readDouble(details.get("upstream_inference_cost"));
+            if (upstreamCost == null && !details.isMissingNode() && !details.isNull()) {
+                Double promptCost = readDouble(details.get("upstream_inference_prompt_cost"));
+                Double completionCost = readDouble(details.get("upstream_inference_completions_cost"));
+                if (promptCost != null || completionCost != null) {
+                    upstreamCost = (promptCost == null ? 0D : promptCost)
+                            + (completionCost == null ? 0D : completionCost);
+                }
+            }
+
+            return new SpendingExtraction(actualCost, upstreamCost, null, isByok);
+        } catch (Exception e) {
+            log.debug("Failed to extract OpenRouter spending from response body: {}", e.getMessage());
+            return SpendingExtraction.empty();
+        }
+    }
+
+    private Double readDouble(JsonNode node) {
+        if (node == null || node.isMissingNode() || node.isNull()) {
+            return null;
+        }
+        if (node.isNumber()) {
+            return node.asDouble();
+        }
+        if (node.isTextual()) {
+            try {
+                return Double.parseDouble(node.asText());
+            } catch (NumberFormatException ignored) {
+                return null;
+            }
+        }
+        return null;
+    }
+
     /**
      * 记录一次工具调用 trace 并更新 run 级与 phase 级指标。
      *
@@ -1193,7 +1245,27 @@ public class AgentObservabilityService {
         long end = summary.getCompletedAtMillis() > 0 ? summary.getCompletedAtMillis() : now;
         summary.setTotalDurationMs(Math.max(0, end - summary.getStartedAtMillis()));
         recomputeCacheHitRate(summary);
+        recomputeEstimatedCost(summary, state.getDiagnostics());
         state.getDiagnostics().setUpdatedAt(OffsetDateTime.now().toString());
+    }
+
+    private void recomputeEstimatedCost(Summary summary, Diagnostics diagnostics) {
+        if (summary == null || diagnostics == null || diagnostics.getLlmTraces() == null) {
+            return;
+        }
+        if (diagnostics.getLlmTraces().isEmpty()) {
+            summary.setEstimatedCost(null);
+            return;
+        }
+        double total = 0D;
+        boolean found = false;
+        for (LlmTrace trace : diagnostics.getLlmTraces()) {
+            if (trace.getActualCost() != null) {
+                total += Math.max(0D, trace.getActualCost());
+                found = true;
+            }
+        }
+        summary.setEstimatedCost(found ? total : null);
     }
 
     /** applyTokens 的快捷重载，cachedTokens 默认为 null。 */
@@ -1613,6 +1685,13 @@ public class AgentObservabilityService {
             trace.setTotalTokens(tokenUsage.totalTokenCount() != null ? tokenUsage.totalTokenCount().longValue() : null);
         }
         trace.setCachedTokens(captureCachedTokens ? cachedTokens : null);
+
+        SpendingExtraction spending = extractOpenRouterSpending(httpResponse == null ? null : httpResponse.getBody());
+        trace.setActualCost(spending.actualCost());
+        trace.setUpstreamCost(spending.upstreamCost());
+        trace.setCacheDiscount(spending.cacheDiscount());
+        trace.setIsByok(spending.isByok());
+        trace.setGenerationId(extractOpenRouterGenerationId(httpResponse == null ? null : httpResponse.getBody()));
         
         // 设置原始 HTTP 请求信息
         if (httpRequest != null) {
@@ -1669,6 +1748,20 @@ public class AgentObservabilityService {
         int limit = llmTraceCallLimit();
         while (traces.size() > limit) {
             traces.remove(0);
+        }
+    }
+
+    private String extractOpenRouterGenerationId(String rawResponseBody) {
+        if (rawResponseBody == null || rawResponseBody.isBlank()) {
+            return null;
+        }
+        try {
+            JsonNode root = objectMapper.readTree(rawResponseBody);
+            JsonNode id = root.get("id");
+            return id != null && id.isTextual() && !id.asText().isBlank() ? id.asText() : null;
+        } catch (Exception e) {
+            log.debug("Failed to extract OpenRouter generation id from response body: {}", e.getMessage());
+            return null;
         }
     }
 
@@ -2215,6 +2308,8 @@ public class AgentObservabilityService {
         private Double cacheDiscount;
         /** OpenRouter: 是否 BYOK */
         private Boolean isByok;
+        /** OpenRouter generation id，用于 run 结束后补采集费用。 */
+        private String generationId;
 
         // ========== ALP-25 新增：原始 HTTP 信息 ==========
 
@@ -2401,6 +2496,23 @@ public class AgentObservabilityService {
         /** 是否存在非空 reasoning 文本。 */
         private boolean hasText() {
             return text != null && !text.isBlank();
+        }
+    }
+
+    /**
+     * 从 OpenRouter Chat Completion 响应 usage 字段中提取的费用信息。
+     *
+     * <p>OpenRouter 的官方文档说明 usage.cost 是可选字段；如果响应体未携带，
+     * 后续仍可由 Generation API 异步补充。</p>
+     */
+    private record SpendingExtraction(
+            Double actualCost,
+            Double upstreamCost,
+            Double cacheDiscount,
+            Boolean isByok) {
+
+        private static SpendingExtraction empty() {
+            return new SpendingExtraction(null, null, null, null);
         }
     }
 

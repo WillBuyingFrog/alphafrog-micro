@@ -265,12 +265,8 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             
             // ALP-25：上报成功观测
             if (shouldCapture && observabilityService != null) {
-                String traceId = reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
+                reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
                         reasoningContent, progressSnapshot, attemptResult.attempts());
-                String runId = AgentContext.getRunId();
-                if (shouldEnrichOpenRouterCost(runId, traceId, completion.id())) {
-                    openRouterCostService.enrichCostInfoAsync(runId, traceId, completion.id(), apiKey, baseUrl);
-                }
             }
             
             return ChatResponse.builder()
@@ -377,16 +373,6 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
         );
         AgentContext.setProviderLlmTraceId(traceId);
         return traceId;
-    }
-
-    private boolean shouldEnrichOpenRouterCost(String runId, String traceId, String generationId) {
-        return isOpenRouterEndpoint(baseUrl)
-                && openRouterCostService != null
-                && runId != null
-                && !runId.isBlank()
-                && traceId != null
-                && generationId != null
-                && !generationId.isBlank();
     }
 
     private StreamingProgressTracker createStreamingProgressTracker() {

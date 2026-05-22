@@ -1291,6 +1291,8 @@ public class AgentLlmProperties {
     public static class CostEnrichment {
         private Boolean enabled = false;
         private Integer timeoutMs = 5000;
+        private Integer maxAttempts = 3;
+        private Integer retryDelayMs = 1000;
 
         public Boolean getEnabled() {
             return enabled;
@@ -1306,6 +1308,22 @@ public class AgentLlmProperties {
         
         public void setTimeoutMs(Integer timeoutMs) {
             this.timeoutMs = timeoutMs;
+        }
+
+        public Integer getMaxAttempts() {
+            return maxAttempts;
+        }
+
+        public void setMaxAttempts(Integer maxAttempts) {
+            this.maxAttempts = maxAttempts;
+        }
+
+        public Integer getRetryDelayMs() {
+            return retryDelayMs;
+        }
+
+        public void setRetryDelayMs(Integer retryDelayMs) {
+            this.retryDelayMs = retryDelayMs;
         }
     }
 

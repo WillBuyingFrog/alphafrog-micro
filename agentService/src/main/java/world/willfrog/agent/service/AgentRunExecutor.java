@@ -121,6 +121,8 @@ public class AgentRunExecutor {
     private final AgentCitationService citationService;
     /** 简单单工具查询 fast-path，命中时跳过 Planning/ReAct。 */
     private final AgentSimpleToolFastPathService simpleToolFastPathService;
+    /** OpenRouter 费用补采集服务。 */
+    private final OpenRouterCostService openRouterCostService;
     @Qualifier("agentRunTaskExecutor")
     private final Executor agentRunTaskExecutor;
 
@@ -413,7 +415,7 @@ public class AgentRunExecutor {
                             .items(List.of())
                             .extractedEntities(List.of())
                             .build();
-                    handleWorkflowResult(run, userId, userGoal, endpointName, modelName, fastPathPlan, fastPathResult);
+                    handleWorkflowResult(run, userId, userGoal, endpointName, endpointBaseUrl, modelName, fastPathPlan, fastPathResult);
                     return;
                 }
                 eventService.append(runId, userId, "FAST_PATH_SKIPPED", mapOf("reason", decision.reason()));
@@ -479,7 +481,7 @@ public class AgentRunExecutor {
                     .build());
 
             // ── 11. 处理执行结果 ──
-            handleWorkflowResult(run, userId, userGoal, endpointName, modelName, todoPlan, result);
+            handleWorkflowResult(run, userId, userGoal, endpointName, endpointBaseUrl, modelName, todoPlan, result);
         } catch (Exception e) {
             // ── 未预期的异常 ──
             String err = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
@@ -504,6 +506,7 @@ public class AgentRunExecutor {
                                       String userId,
                                       String userGoal,
                                       String endpointName,
+                                      String endpointBaseUrl,
                                       String modelName,
                                       TodoPlan todoPlan,
                                       WorkflowExecutionResult result) {
@@ -516,6 +519,7 @@ public class AgentRunExecutor {
         }
 
         if (result.isSuccess()) {
+            enrichOpenRouterCosts(runId, endpointName, endpointBaseUrl);
             String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.COMPLETED, runId);
             runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshotJson, true, null);
             int totalCreditsConsumed = creditService.calculateRunTotalCredits(
@@ -555,6 +559,7 @@ public class AgentRunExecutor {
         }
 
         String reason = nvl(result.getFailureReason());
+        enrichOpenRouterCosts(runId, endpointName, endpointBaseUrl);
         String snapshotJson = buildSnapshotJson(userGoal, todoPlan, result.getCompletedItems(), result.getFinalAnswer(), result.getContext(), result.getCitationMap(), AgentRunStatus.FAILED, runId);
         runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshotJson, true, reason);
         runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.FAILED, eventService.nextInterruptedExpiresAt());
@@ -563,6 +568,24 @@ public class AgentRunExecutor {
                 "tool_calls_used", result.getToolCallsUsed()
         ));
         stateStore.markRunStatus(runId, AgentRunStatus.FAILED.name());
+    }
+
+    private void enrichOpenRouterCosts(String runId, String endpointName, String endpointBaseUrl) {
+        if (!isOpenRouterEndpoint(endpointName, endpointBaseUrl)) {
+            return;
+        }
+        try {
+            AgentLlmResolver.ResolvedLlm resolved = aiServiceFactory.resolveLlm(endpointName, "");
+            openRouterCostService.enrichMissingCostInfo(runId, resolved.apiKey(), endpointBaseUrl);
+        } catch (Exception e) {
+            log.warn("Failed to enrich OpenRouter costs for runId={}: {}", runId, e.getMessage());
+        }
+    }
+
+    private boolean isOpenRouterEndpoint(String endpointName, String endpointBaseUrl) {
+        String endpoint = endpointName == null ? "" : endpointName.toLowerCase();
+        String baseUrl = endpointBaseUrl == null ? "" : endpointBaseUrl.toLowerCase();
+        return endpoint.contains("openrouter") || baseUrl.contains("openrouter.ai");
     }
 
     /**

@@ -90,6 +90,8 @@ agent:
       cost-enrichment:
         enabled: ${AF_AGENT_OBS_OPENROUTER_COST_ENABLED:false}
         timeout-ms: ${AF_AGENT_OBS_OPENROUTER_COST_TIMEOUT_MS:5000}
+        max-attempts: ${AF_AGENT_OBS_OPENROUTER_COST_MAX_ATTEMPTS:3}
+        retry-delay-ms: ${AF_AGENT_OBS_OPENROUTER_COST_RETRY_DELAY_MS:1000}
   artifact:
     retention-days:
       normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}
