@@ -109,15 +109,14 @@ public class AgentSimpleToolFastPathService {
         if (isIndexQuery(text) && availableTools.contains("searchIndex")) {
             return Optional.of(FastPathDecision.selected("searchIndex", Map.of("keyword", keyword)));
         }
-        if (availableTools.contains("searchAssetInfo")
-                && (text.toUpperCase(Locale.ROOT).contains("ETF") || text.contains("etf"))) {
+        if (availableTools.contains("searchAssetInfo") && shouldPreferEtfSearch(text)) {
             return Optional.of(FastPathDecision.selected("searchAssetInfo", Map.of(
                     "query", keyword,
                     "assetTypes", "etf",
                     "marketScope", "domestic"
             )));
         }
-        if (text.contains("基金") && availableTools.contains("searchFund")) {
+        if (text.contains("基金") && availableTools.contains("searchFund") && !shouldPreferEtfSearch(text)) {
             return Optional.of(FastPathDecision.selected("searchFund", Map.of("keyword", keyword)));
         }
         if ((text.contains("股票") || text.contains("股价") || text.contains("个股")) && availableTools.contains("searchStock")) {
@@ -137,6 +136,20 @@ public class AgentSimpleToolFastPathService {
                 || text.contains("中证1000")
                 || text.contains("创业板指")
                 || text.contains("上证指数");
+    }
+
+    private boolean shouldPreferEtfSearch(String text) {
+        if (text == null || text.isBlank()) {
+            return false;
+        }
+        String upper = text.toUpperCase(Locale.ROOT);
+        return upper.contains("ETF")
+                || text.contains("etf")
+                || text.contains("场内")
+                || text.contains("上市")
+                || text.contains("行业主题")
+                || text.contains("主题ETF")
+                || text.contains("主题etf");
     }
 
     private String extractKeyword(String text) {

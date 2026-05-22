@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.springframework.test.util.ReflectionTestUtils;
+import world.willfrog.agent.config.AgentLlmProperties;
 
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -146,6 +147,36 @@ class AgentLlmLocalConfigLoaderTest {
         assertFalse(tools.get("getStockDaily").isRequiresAdjFactorEnabled());
         assertFalse(tools.get("getStockDaily").getRequiresAdjFactorEnabled());
         assertTrue(tools.get("getEtfAdj").isRequiresAdjFactorEnabled());
+    }
+
+    @Test
+    void load_shouldParseRunBudgetFields() throws Exception {
+        Path configFile = tempDir.resolve("agent-llm.local.json");
+        Files.writeString(configFile, """
+                {
+                  "runtime": {
+                    "runBudget": {
+                      "maxWallClockMs": 120000,
+                      "maxLlmCalls": 10,
+                      "maxToolCalls": 60,
+                      "maxTokens": 50000,
+                      "maxHttpAttemptsPerLogicalCall": 3
+                    }
+                  }
+                }
+                """, StandardCharsets.UTF_8);
+
+        AgentLlmLocalConfigLoader loader = new AgentLlmLocalConfigLoader(new ObjectMapper());
+        ReflectionTestUtils.setField(loader, "configFile", configFile.toString());
+        loader.load();
+
+        AgentLlmProperties.RunBudget runBudget = loader.current().orElseThrow()
+                .getRuntime().getRunBudget();
+        assertEquals(120000L, runBudget.getMaxWallClockMs());
+        assertEquals(10L, runBudget.getMaxLlmCalls());
+        assertEquals(60L, runBudget.getMaxToolCalls());
+        assertEquals(50000L, runBudget.getMaxTokens());
+        assertEquals(3, runBudget.getMaxHttpAttemptsPerLogicalCall());
     }
 
     @Test

@@ -167,7 +167,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或基金名称关键词（例如 510300、沪深300ETF）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"沪深300ETF|中证500ETF\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("按关键词搜索场外基金（公募基金），不用于 ETF 或场内上市基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或名称关键词（例如 005827、易方达蓝筹精选）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch、data.results、success_count、failure_count。ETF 请改用 searchAssetInfo(assetTypes=etf)。")
     public String searchFund(String keyword) {
         List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
         if (queries.size() > 1) {

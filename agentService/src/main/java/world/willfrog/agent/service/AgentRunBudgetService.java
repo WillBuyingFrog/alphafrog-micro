@@ -3,8 +3,10 @@ package world.willfrog.agent.service;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
 
 import java.util.LinkedHashMap;
@@ -12,6 +14,8 @@ import java.util.Map;
 
 /**
  * Run 级资源预算检查。
+ *
+ * <p>生效优先级：agent-llm.json（Nacos 热加载） &gt; agent.llm.runtime.runBudget &gt; agent.run.budget（@Value 启动默认）。</p>
  */
 @Service
 @RequiredArgsConstructor
@@ -20,21 +24,25 @@ public class AgentRunBudgetService {
     private final AgentRunStateStore stateStore;
     private final AgentEventService eventService;
     private final ObjectMapper objectMapper;
+    private final AgentLlmProperties llmProperties;
+
+    @Autowired(required = false)
+    private AgentLlmLocalConfigLoader localConfigLoader;
 
     @Value("${agent.run.budget.max-wall-clock-ms:600000}")
-    private long maxWallClockMs;
+    private long defaultMaxWallClockMs;
 
     @Value("${agent.run.budget.max-llm-calls:50}")
-    private long maxLlmCalls;
+    private long defaultMaxLlmCalls;
 
     @Value("${agent.run.budget.max-tool-calls:30}")
-    private long maxToolCalls;
+    private long defaultMaxToolCalls;
 
     @Value("${agent.run.budget.max-tokens:300000}")
-    private long maxTokens;
+    private long defaultMaxTokens;
 
     @Value("${agent.run.budget.max-http-attempts-per-logical-call:2}")
-    private int maxHttpAttemptsPerLogicalCall;
+    private int defaultMaxHttpAttemptsPerLogicalCall;
 
     public void checkBeforeLlmCall() {
         check("llm_call");
@@ -45,7 +53,20 @@ public class AgentRunBudgetService {
     }
 
     public int maxHttpAttemptsPerLogicalCall() {
-        return Math.max(1, maxHttpAttemptsPerLogicalCall);
+        return Math.max(1, effectiveConfig().maxHttpAttemptsPerLogicalCall());
+    }
+
+    public EffectiveRunBudget effectiveConfig() {
+        AgentLlmProperties.RunBudget local = resolveLocalRunBudget();
+        AgentLlmProperties.RunBudget spring = resolveSpringRunBudget();
+        return new EffectiveRunBudget(
+                resolveLong(local, spring, defaultMaxWallClockMs, AgentLlmProperties.RunBudget::getMaxWallClockMs),
+                resolveLong(local, spring, defaultMaxLlmCalls, AgentLlmProperties.RunBudget::getMaxLlmCalls),
+                resolveLong(local, spring, defaultMaxToolCalls, AgentLlmProperties.RunBudget::getMaxToolCalls),
+                resolveLong(local, spring, defaultMaxTokens, AgentLlmProperties.RunBudget::getMaxTokens),
+                resolveInt(local, spring, defaultMaxHttpAttemptsPerLogicalCall,
+                        AgentLlmProperties.RunBudget::getMaxHttpAttemptsPerLogicalCall)
+        );
     }
 
     public void checkHttpAttempt(int nextAttempt) {
@@ -60,23 +81,24 @@ public class AgentRunBudgetService {
         if (runId == null || runId.isBlank()) {
             return;
         }
+        EffectiveRunBudget budget = effectiveConfig();
         Map<String, Object> summary = loadSummary(runId);
         long startedAt = toLong(summary.get("startedAtMillis"));
         long elapsed = startedAt <= 0 ? 0 : Math.max(0, System.currentTimeMillis() - startedAt);
-        if (maxWallClockMs > 0 && elapsed > maxWallClockMs) {
-            throw exceeded("wall_clock_ms", elapsed, maxWallClockMs);
+        if (budget.maxWallClockMs() > 0 && elapsed > budget.maxWallClockMs()) {
+            throw exceeded("wall_clock_ms", elapsed, budget.maxWallClockMs());
         }
         long llmCalls = toLong(summary.get("llmCalls"));
-        if ("llm_call".equals(operation) && maxLlmCalls > 0 && llmCalls >= maxLlmCalls) {
-            throw exceeded("llm_calls", llmCalls, maxLlmCalls);
+        if ("llm_call".equals(operation) && budget.maxLlmCalls() > 0 && llmCalls >= budget.maxLlmCalls()) {
+            throw exceeded("llm_calls", llmCalls, budget.maxLlmCalls());
         }
         long toolCalls = toLong(summary.get("toolCalls"));
-        if ("tool_call".equals(operation) && maxToolCalls > 0 && toolCalls >= maxToolCalls) {
-            throw exceeded("tool_calls", toolCalls, maxToolCalls);
+        if ("tool_call".equals(operation) && budget.maxToolCalls() > 0 && toolCalls >= budget.maxToolCalls()) {
+            throw exceeded("tool_calls", toolCalls, budget.maxToolCalls());
         }
         long tokens = toLong(summary.get("totalTokens"));
-        if (maxTokens > 0 && tokens >= maxTokens) {
-            throw exceeded("tokens", tokens, maxTokens);
+        if (budget.maxTokens() > 0 && tokens >= budget.maxTokens()) {
+            throw exceeded("tokens", tokens, budget.maxTokens());
         }
     }
 
@@ -91,6 +113,49 @@ public class AgentRunBudgetService {
             eventService.append(runId, userId, "RUN_BUDGET_EXCEEDED", payload);
         }
         return new IllegalStateException("RUN_BUDGET_EXCEEDED:" + dimension + ":" + actual + "/" + limit);
+    }
+
+    private AgentLlmProperties.RunBudget resolveLocalRunBudget() {
+        if (localConfigLoader == null) {
+            return null;
+        }
+        return localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getRunBudget)
+                .orElse(null);
+    }
+
+    private AgentLlmProperties.RunBudget resolveSpringRunBudget() {
+        if (llmProperties.getRuntime() == null) {
+            return null;
+        }
+        return llmProperties.getRuntime().getRunBudget();
+    }
+
+    private long resolveLong(AgentLlmProperties.RunBudget local,
+                             AgentLlmProperties.RunBudget spring,
+                             long applicationDefault,
+                             java.util.function.Function<AgentLlmProperties.RunBudget, Long> getter) {
+        if (local != null && getter.apply(local) != null) {
+            return getter.apply(local);
+        }
+        if (spring != null && getter.apply(spring) != null) {
+            return getter.apply(spring);
+        }
+        return applicationDefault;
+    }
+
+    private int resolveInt(AgentLlmProperties.RunBudget local,
+                           AgentLlmProperties.RunBudget spring,
+                           int applicationDefault,
+                           java.util.function.Function<AgentLlmProperties.RunBudget, Integer> getter) {
+        if (local != null && getter.apply(local) != null) {
+            return getter.apply(local);
+        }
+        if (spring != null && getter.apply(spring) != null) {
+            return getter.apply(spring);
+        }
+        return applicationDefault;
     }
 
     private Map<String, Object> loadSummary(String runId) {
@@ -124,5 +189,14 @@ public class AgentRunBudgetService {
         } catch (Exception e) {
             return 0L;
         }
+    }
+
+    public record EffectiveRunBudget(
+            long maxWallClockMs,
+            long maxLlmCalls,
+            long maxToolCalls,
+            long maxTokens,
+            int maxHttpAttemptsPerLogicalCall
+    ) {
     }
 }

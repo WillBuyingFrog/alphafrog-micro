@@ -501,7 +501,7 @@ public class AgentPromptService {
                 case "getStockDaily" -> capabilities.add(
                     "- getStockDaily: 查询股票日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000001.SZ|600519.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchAssetInfo" -> capabilities.add(
-                    "- searchAssetInfo: 搜索股票/ETF/指数/场外基金基本信息。query 支持 | 分隔或 JSON 数组；assetTypes 可选 stock,etf,index,off_exchange_fund。");
+                    "- searchAssetInfo: 统一搜索股票/ETF/指数/场外基金。ETF 回测或行业主题 ETF 筛选优先用此工具并设 assetTypes=etf；场外基金用 assetTypes=off_exchange_fund。query 支持 | 分隔或 JSON 数组。");
                 case "getExchangeAssetDaily" -> capabilities.add(
                     "- getExchangeAssetDaily: 查询场内资产日线（股票/ETF/指数）。tsCode 支持批量；ETF 需 A5 服务就绪。");
                 case "getOffExchangeAssetDaily" -> capabilities.add(
@@ -515,7 +515,7 @@ public class AgentPromptService {
                 case "searchStock" -> capabilities.add(
                     "- searchStock: 搜索股票代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"平安银行|万科A\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchFund" -> capabilities.add(
-                    "- searchFund: 搜索基金代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"沪深300ETF|中证500ETF\"；批量返回 data.mode=batch 和 data.results。");
+                    "- searchFund: 仅搜索场外基金（公募基金）基本信息，不用于 ETF 场内资产筛选。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch 和 data.results。");
                 case "executePython" -> capabilities.add(
                     "- executePython: 执行 Python 代码进行数据分析。支持批量处理多个数据集（dataset_ids 用逗号分隔）。");
                 case "getIndexInfo" -> capabilities.add(

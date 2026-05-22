@@ -183,6 +183,7 @@ public class AgentLlmProperties {
         private SubAgent subAgent = new SubAgent();
         private Judge judge = new Judge();
         private MultiTurn multiTurn = new MultiTurn();
+        private RunBudget runBudget = new RunBudget();
 
         public Resume getResume() {
             return resume;
@@ -246,6 +247,14 @@ public class AgentLlmProperties {
 
         public void setMultiTurn(MultiTurn multiTurn) {
             this.multiTurn = multiTurn == null ? new MultiTurn() : multiTurn;
+        }
+
+        public RunBudget getRunBudget() {
+            return runBudget;
+        }
+
+        public void setRunBudget(RunBudget runBudget) {
+            this.runBudget = runBudget == null ? new RunBudget() : runBudget;
         }
     }
 
@@ -507,6 +516,57 @@ public class AgentLlmProperties {
 
         public void setReasoning(Reasoning reasoning) {
             this.reasoning = reasoning == null ? new Reasoning() : reasoning;
+        }
+    }
+
+    /**
+     * Run 级资源预算（agent-llm.json runtime.runBudget，Nacos 推送后可热生效）。
+     */
+    public static class RunBudget {
+        private Long maxWallClockMs;
+        private Long maxLlmCalls;
+        private Long maxToolCalls;
+        private Long maxTokens;
+        private Integer maxHttpAttemptsPerLogicalCall;
+
+        public Long getMaxWallClockMs() {
+            return maxWallClockMs;
+        }
+
+        public void setMaxWallClockMs(Long maxWallClockMs) {
+            this.maxWallClockMs = maxWallClockMs;
+        }
+
+        public Long getMaxLlmCalls() {
+            return maxLlmCalls;
+        }
+
+        public void setMaxLlmCalls(Long maxLlmCalls) {
+            this.maxLlmCalls = maxLlmCalls;
+        }
+
+        public Long getMaxToolCalls() {
+            return maxToolCalls;
+        }
+
+        public void setMaxToolCalls(Long maxToolCalls) {
+            this.maxToolCalls = maxToolCalls;
+        }
+
+        public Long getMaxTokens() {
+            return maxTokens;
+        }
+
+        public void setMaxTokens(Long maxTokens) {
+            this.maxTokens = maxTokens;
+        }
+
+        public Integer getMaxHttpAttemptsPerLogicalCall() {
+            return maxHttpAttemptsPerLogicalCall;
+        }
+
+        public void setMaxHttpAttemptsPerLogicalCall(Integer maxHttpAttemptsPerLogicalCall) {
+            this.maxHttpAttemptsPerLogicalCall = maxHttpAttemptsPerLogicalCall;
         }
     }
 

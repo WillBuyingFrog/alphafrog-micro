@@ -44,6 +44,43 @@ class AgentSimpleToolFastPathServiceTest {
     }
 
     @Test
+    void decide_shouldSelectSearchAssetInfoForEtfQuery() {
+        Optional<AgentSimpleToolFastPathService.FastPathDecision> decision = service.decide(
+                "查一下半导体行业主题ETF",
+                List.of(spec("searchFund"), spec("searchAssetInfo"))
+        );
+
+        assertTrue(decision.isPresent());
+        assertTrue(decision.get().selected());
+        assertEquals("searchAssetInfo", decision.get().toolName());
+        assertEquals("etf", decision.get().params().get("assetTypes"));
+    }
+
+    @Test
+    void decide_shouldSelectSearchFundForOffExchangeFundQuery() {
+        Optional<AgentSimpleToolFastPathService.FastPathDecision> decision = service.decide(
+                "查一下易方达蓝筹精选混合型基金",
+                List.of(spec("searchFund"), spec("searchAssetInfo"))
+        );
+
+        assertTrue(decision.isPresent());
+        assertTrue(decision.get().selected());
+        assertEquals("searchFund", decision.get().toolName());
+    }
+
+    @Test
+    void decide_shouldPreferSearchAssetInfoWhenTextContainsListedMarketSignal() {
+        Optional<AgentSimpleToolFastPathService.FastPathDecision> decision = service.decide(
+                "查一下消费行业主题场内基金",
+                List.of(spec("searchFund"), spec("searchAssetInfo"))
+        );
+
+        assertTrue(decision.isPresent());
+        assertTrue(decision.get().selected());
+        assertEquals("searchAssetInfo", decision.get().toolName());
+    }
+
+    @Test
     void decide_shouldSkipComplexMultiStepQuestion() {
         Optional<AgentSimpleToolFastPathService.FastPathDecision> decision = service.decide(
                 "去年每个月定投沪深300和中证500，然后今年专家观点怎么看",

@@ -386,6 +386,9 @@ public class AgentLlmLocalConfigLoader {
         if (cfg.getRuntime().getJudge() == null) {
             cfg.getRuntime().setJudge(null);
         }
+        if (cfg.getRuntime().getRunBudget() == null) {
+            cfg.getRuntime().setRunBudget(null);
+        }
         if (cfg.getRuntime().getJudge().getRoutes() == null) {
             cfg.getRuntime().getJudge().setRoutes(null);
         } else {

@@ -1130,7 +1130,7 @@ public class ReactTodoExecutor {
         return switch (toolName) {
             case "searchIndex" -> "{\"keyword\": \"<搜索关键词>\"}";
             case "searchStock" -> "{\"keyword\": \"<搜索关键词>\"}";
-            case "searchFund" -> "{\"keyword\": \"<搜索关键词>\"}";
+            case "searchFund" -> "{\"keyword\": \"<场外基金关键词>\"}";
             case "getIndexDaily" -> "{\"ts_code\": \"<指数代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
             case "getStockDaily" -> "{\"ts_code\": \"<股票代码>\", \"start_date\": \"YYYYMMDD\", \"end_date\": \"YYYYMMDD\"}";
             case "searchAssetInfo" -> "{\"query\": \"<搜索关键词>\", \"assetTypes\": \"stock,etf,index\", \"marketScope\": \"domestic\"}";
