@@ -11,6 +11,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
@@ -116,7 +117,8 @@ class AgentRunExecutorTest {
                 stageConfigValidator,
                 new AgentFinalAnswerParser(new ObjectMapper()),
                 new AgentCitationService(new ObjectMapper()),
-                simpleToolFastPathService
+                simpleToolFastPathService,
+                new ThreadPoolTaskExecutor()
         );
         executor.init();
 

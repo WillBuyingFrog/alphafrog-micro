@@ -7,6 +7,7 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
@@ -14,6 +15,7 @@ import world.willfrog.agent.mapper.AgentRunEventMapper;
 import world.willfrog.agent.mapper.AgentRunMapper;
 import world.willfrog.agent.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
@@ -27,9 +29,11 @@ import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
+import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
@@ -37,6 +41,7 @@ import static org.mockito.ArgumentMatchers.argThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -153,6 +158,82 @@ class AgentDubboServiceImplTest {
                 service.resumeRun(ResumeAgentRunRequest.newBuilder().setUserId("u1").setId("run-1").build())
         );
         org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("SNAPSHOT_VERSION_INCOMPATIBLE"));
+    }
+
+    @Test
+    void createRun_shouldAppendRunEnqueuedAfterExecuteAsync() {
+        User user = new User();
+        user.setUserId(1127L);
+        when(userDao.getUserById(1127L)).thenReturn(user);
+
+        AgentRun run = new AgentRun();
+        run.setId("run-enqueue");
+        run.setUserId("1127");
+        run.setStatus(AgentRunStatus.RECEIVED);
+        when(eventService.createRun(
+                eq("1127"),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString()
+        )).thenReturn(run);
+
+        service.createRun(CreateAgentRunRequest.newBuilder()
+                .setUserId("1127")
+                .setMessage("hello")
+                .setEndpointName("openrouter")
+                .setModelName("moonshotai/kimi-k2.6")
+                .build());
+
+        verify(executor).executeAsync("run-enqueue");
+        verify(eventService).append(eq("run-enqueue"), eq("1127"), eq("RUN_ENQUEUED"), argThat(payload ->
+                payload instanceof Map<?, ?> map
+                        && "run-enqueue".equals(map.get("run_id"))
+                        && "agentRunTaskExecutor".equals(map.get("executor"))
+        ));
+    }
+
+    @Test
+    void createRun_shouldRecordEnqueueFailureWhenExecutorRejects() {
+        User user = new User();
+        user.setUserId(1127L);
+        when(userDao.getUserById(1127L)).thenReturn(user);
+
+        AgentRun run = new AgentRun();
+        run.setId("run-reject");
+        run.setUserId("1127");
+        run.setStatus(AgentRunStatus.RECEIVED);
+        when(eventService.createRun(
+                eq("1127"),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString()
+        )).thenReturn(run);
+        doThrow(new TaskRejectedException("queue full")).when(executor).executeAsync("run-reject");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                service.createRun(CreateAgentRunRequest.newBuilder()
+                        .setUserId("1127")
+                        .setMessage("hello")
+                        .setEndpointName("openrouter")
+                        .setModelName("moonshotai/kimi-k2.6")
+                        .build())
+        );
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("run-reject"));
+        verify(eventService).append(eq("run-reject"), eq("1127"), eq("RUN_ENQUEUE_FAILED"), any());
     }
 
     @Test

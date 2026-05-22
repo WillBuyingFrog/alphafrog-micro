@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.core.task.TaskRejectedException;
 import world.willfrog.agent.entity.AgentRun;
 import world.willfrog.agent.entity.AgentRunEvent;
 import world.willfrog.agent.entity.AgentRunMessage;
@@ -144,7 +145,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 request.getDebugMode(),
                 request.getStageConfigJson()
         );
-        executor.executeAsync(run.getId());
+        enqueueRunExecution(run.getId(), userId);
         return toRunMessage(run);
     }
 
@@ -413,7 +414,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         runMapper.resetForResume(run.getId(), run.getUserId(), eventService.nextTtlExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "WORKFLOW_RESUMED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.RECEIVED.name());
-        executor.executeAsync(run.getId());
+        enqueueRunExecution(run.getId(), run.getUserId());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
 
@@ -776,8 +777,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 "message_seq", userMessage.getSeq()
         ));
 
-        // 触发异步执行
-        executor.executeAsync(runId);
+        enqueueRunExecution(runId, userId);
 
         return SendAgentMessageResponse.newBuilder()
                 .setMessageId(userMessage.getId())
@@ -1155,6 +1155,23 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
 
     private int nonNegativeInt(Integer v) {
         return v == null ? 0 : Math.max(0, v);
+    }
+
+    private void enqueueRunExecution(String runId, String userId) {
+        try {
+            executor.executeAsync(runId);
+            eventService.append(runId, userId, "RUN_ENQUEUED", Map.of(
+                    "run_id", runId,
+                    "executor", "agentRunTaskExecutor"
+            ));
+        } catch (TaskRejectedException e) {
+            log.error("Agent run enqueue rejected: runId={} userId={}", runId, userId, e);
+            eventService.append(runId, userId, "RUN_ENQUEUE_FAILED", Map.of(
+                    "run_id", runId,
+                    "reason", e.getMessage() == null ? "executor queue full" : e.getMessage()
+            ));
+            throw new IllegalStateException("agent run executor queue full, runId=" + runId, e);
+        }
     }
 
     private void ensureUserActive(String userId) {

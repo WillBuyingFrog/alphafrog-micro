@@ -73,6 +73,7 @@ test-secrets.yml
 /agent-working-docs
 /agent-working-guide
 /coding-agent-report
+agent-interview-guide/
 AGENTS.md
 CLAUDE.md
 

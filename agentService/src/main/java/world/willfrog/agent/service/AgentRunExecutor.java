@@ -10,7 +10,9 @@ import io.micrometer.core.instrument.Timer;
 import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.scheduling.annotation.Async;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.config.RunStageConfig;
@@ -36,6 +38,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Executor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -118,6 +121,8 @@ public class AgentRunExecutor {
     private final AgentCitationService citationService;
     /** 简单单工具查询 fast-path，命中时跳过 Planning/ReAct。 */
     private final AgentSimpleToolFastPathService simpleToolFastPathService;
+    @Qualifier("agentRunTaskExecutor")
+    private final Executor agentRunTaskExecutor;
 
     /** 当前正在执行的 Agent Run 数量（用于 Micrometer Gauge） */
     private final AtomicInteger activeRuns = new AtomicInteger(0);
@@ -150,8 +155,18 @@ public class AgentRunExecutor {
      *
      * @param runId 待执行的 Agent Run ID
      */
-    @Async
+    @Async("agentRunTaskExecutor")
     public void executeAsync(String runId) {
+        AgentRun run = runMapper.findById(runId);
+        String status = run != null && run.getStatus() != null ? run.getStatus().name() : "unknown";
+        int activeCount = -1;
+        int queueSize = -1;
+        if (agentRunTaskExecutor instanceof ThreadPoolTaskExecutor taskExecutor) {
+            activeCount = taskExecutor.getActiveCount();
+            queueSize = taskExecutor.getThreadPoolExecutor().getQueue().size();
+        }
+        log.info("Agent run executeAsync entered: runId={} status={} thread={} activeCount={} queueSize={}",
+                runId, status, Thread.currentThread().getName(), activeCount, queueSize);
         try {
             execute(runId);
         } catch (Exception e) {
