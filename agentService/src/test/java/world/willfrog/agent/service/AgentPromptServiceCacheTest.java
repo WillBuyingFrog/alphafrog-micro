@@ -177,5 +177,11 @@ class AgentPromptServiceCacheTest {
                 "ReAct system prompt 应包含软性的批量查询建议");
         assertTrue(prompt.contains("发现式查询"),
                 "ReAct system prompt 应保留发现式逐步查询的边界说明");
+        assertTrue(prompt.contains("searchAssetInfo"),
+                "ReAct system prompt 应列举支持批量的工具名");
+        assertTrue(prompt.contains("单次最多 3 个查询"),
+                "ReAct system prompt 应标明搜索类工具批量上限");
+        assertTrue(prompt.contains("单次最多 2 个查询"),
+                "ReAct system prompt 应标明日线类工具批量上限");
     }
 }
