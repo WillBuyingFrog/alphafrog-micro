@@ -9,6 +9,7 @@ import world.willfrog.agent.platform.PlatformModuleMarker;
 import world.willfrog.agent.tools.router.ToolRouter;
 import world.willfrog.agentlangchain.config.LangchainServiceProperties;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
+import world.willfrog.agentlangchain.routing.LangchainTrafficRouter;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
@@ -20,6 +21,7 @@ public class AgentLangchainHealthController {
 
     private final LangchainServiceProperties properties;
     private final AgentLangchainOrchestrator orchestrator;
+    private final LangchainTrafficRouter trafficRouter;
 
     @Value("${agent.langchain.service.version:P0-skeleton}")
     private String serviceVersion;
@@ -30,6 +32,8 @@ public class AgentLangchainHealthController {
         body.put("service", "agentLangchainService");
         body.put("version", serviceVersion);
         body.put("providerEnabled", properties.getProvider().isEnabled());
+        body.put("dubboGroup", properties.getProvider().getDubboGroup());
+        body.put("canaryPercent", properties.getTraffic().getCanaryPercent());
         body.put("orchestrationStatus", orchestrator.unimplementedStatus());
         body.put("platformSharedLoaded", isClassLoaded(PlatformModuleMarker.class));
         body.put("toolsSharedLoaded", isClassLoaded(ToolRouter.class));

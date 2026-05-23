@@ -5,5 +5,6 @@ import org.springframework.context.annotation.Configuration;
 
 @Configuration
 @EnableConfigurationProperties(LangchainServiceProperties.class)
+@org.springframework.context.annotation.Import({LangchainToolsConfiguration.class, LangchainRunAsyncConfig.class})
 public class LangchainAiServiceConfig {
 }

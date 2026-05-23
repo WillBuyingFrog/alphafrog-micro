@@ -3,6 +3,7 @@ package world.willfrog.agentlangchain.facade;
 import lombok.RequiredArgsConstructor;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
+import world.willfrog.agentlangchain.facade.AgentLangchainRunService;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
@@ -48,17 +49,17 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 
-@DubboService
+@DubboService(group = "${agent.langchain.provider.dubbo-group:langchain}")
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class AgentLangchainDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {
 
+    private final AgentLangchainRunService runService;
     private final AgentLangchainOrchestrator orchestrator;
 
     @Override
     public AgentRunMessage createRun(CreateAgentRunRequest request) {
-        orchestrator.assertRunExecutionDisabled();
-        throw new UnsupportedOperationException("unreachable");
+        return runService.createRun(request);
     }
 
     @Override

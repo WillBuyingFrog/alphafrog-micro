@@ -13,8 +13,11 @@ agent:
   langchain:
     provider:
       enabled: false
+      dubbo-group: langchain
     service:
       version: P0-skeleton
+    traffic:
+      canary-percent: 0
 
 management:
   endpoints:

@@ -9,6 +9,7 @@ import world.willfrog.agentlangchain.config.LangchainAiServiceConfig;
 import world.willfrog.agentlangchain.config.LangchainServiceProperties;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
 import world.willfrog.agentlangchain.orchestration.UnsupportedOrchestrationService;
+import world.willfrog.agentlangchain.routing.LangchainTrafficRouter;
 
 import static org.hamcrest.Matchers.is;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
@@ -19,7 +20,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @Import({
         LangchainAiServiceConfig.class,
         UnsupportedOrchestrationService.class,
-        AgentLangchainOrchestrator.class
+        AgentLangchainOrchestrator.class,
+        LangchainTrafficRouter.class
 })
 class AgentLangchainHealthControllerTest {
 
