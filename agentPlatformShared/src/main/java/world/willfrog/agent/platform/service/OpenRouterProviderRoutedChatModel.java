@@ -123,7 +123,7 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             );
             // 默认启用流式输出。SSE 聚合器负责还原 content/reasoning/tool_calls。
             requestJsonMap.put("stream", true);
-            applyStreamingOptions(requestJsonMap, baseUrl);
+            applyStreamingOptions(requestJsonMap, baseUrl, AgentContext.getPhase());
             applyEndpointSamplingDefaults(requestJsonMap, baseUrl);
 
             // OpenRouter 特有：添加 providerOrder 与结构化输出参数
@@ -586,6 +586,14 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     }
 
     public static void applyStreamingOptions(Map<String, Object> requestJsonMap, String baseUrl) {
+        applyStreamingOptions(requestJsonMap, baseUrl, AgentContext.getPhase());
+    }
+
+    /**
+     * OpenRouter 流式选项。planning 阶段跳过 {@code stream_options}，避免在
+     * {@code provider.require_parameters=true} 时因 provider 未声明支持该字段而被误过滤。
+     */
+    public static void applyStreamingOptions(Map<String, Object> requestJsonMap, String baseUrl, String phase) {
         if (requestJsonMap == null) {
             return;
         }
@@ -593,6 +601,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             // Fireworks 当前 API 文档没有列出 stream_options；流式 perf metrics 通过最终 chunk 返回。
             requestJsonMap.remove("stream_options");
             requestJsonMap.put("perf_metrics_in_response", true);
+            return;
+        }
+        if (AgentObservabilityService.PHASE_PLANNING.equals(phase)) {
+            requestJsonMap.remove("stream_options");
+            requestJsonMap.remove("perf_metrics_in_response");
             return;
         }
         requestJsonMap.put("stream_options", Map.of("include_usage", true));

@@ -53,7 +53,8 @@ class OpenRouterProviderRoutedChatModelTest {
 
         OpenRouterProviderRoutedChatModel.applyStreamingOptions(
                 payload,
-                "https://api.fireworks.ai/inference/v1"
+                "https://api.fireworks.ai/inference/v1",
+                null
         );
 
         assertFalse(payload.containsKey("stream_options"));
@@ -68,11 +69,29 @@ class OpenRouterProviderRoutedChatModelTest {
 
         OpenRouterProviderRoutedChatModel.applyStreamingOptions(
                 payload,
-                "https://openrouter.ai/api/v1"
+                "https://openrouter.ai/api/v1",
+                "execution"
         );
 
         assertFalse(payload.containsKey("perf_metrics_in_response"));
         assertEquals(Map.of("include_usage", true), payload.get("stream_options"));
+    }
+
+    @Test
+    void applyStreamingOptions_shouldSkipStreamOptionsForPlanningPhaseOnOpenRouter() {
+        Map<String, Object> payload = new LinkedHashMap<>();
+        payload.put("stream", true);
+        payload.put("stream_options", Map.of("include_usage", true));
+
+        OpenRouterProviderRoutedChatModel.applyStreamingOptions(
+                payload,
+                "https://openrouter.ai/api/v1",
+                AgentObservabilityService.PHASE_PLANNING
+        );
+
+        assertFalse(payload.containsKey("stream_options"));
+        assertFalse(payload.containsKey("perf_metrics_in_response"));
+        assertEquals(true, payload.get("stream"));
     }
 
     @Test

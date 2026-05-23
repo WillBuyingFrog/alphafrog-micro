@@ -16,6 +16,7 @@ import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.mapper.AgentRunMapper;
 import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.platform.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agentlangchain.tools.LangchainToolInvocationKeys;
 
@@ -35,6 +36,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ToolProvider> toolProviderProvider;
     private final ObjectProvider<AgentRunStateStore> stateStoreProvider;
+    private final ObjectProvider<AgentObservabilityService> observabilityServiceProvider;
     private final Executor langchainRunTaskExecutor;
 
     public LangchainLinearRunPipelineImpl(LangchainLinearWorkflowExecutor workflowExecutor,
@@ -44,6 +46,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                                           ObjectMapper objectMapper,
                                           ObjectProvider<ToolProvider> toolProviderProvider,
                                           ObjectProvider<AgentRunStateStore> stateStoreProvider,
+                                          ObjectProvider<AgentObservabilityService> observabilityServiceProvider,
                                           @Qualifier("agentLangchainRunTaskExecutor") Executor langchainRunTaskExecutor) {
         this.workflowExecutor = workflowExecutor;
         this.stageModelResolver = stageModelResolver;
@@ -52,6 +55,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         this.objectMapper = objectMapper;
         this.toolProviderProvider = toolProviderProvider;
         this.stateStoreProvider = stateStoreProvider;
+        this.observabilityServiceProvider = observabilityServiceProvider;
         this.langchainRunTaskExecutor = langchainRunTaskExecutor;
     }
 
@@ -86,6 +90,15 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
             ));
 
             LangchainRunStageModelResolver.StageModels stageModels = stageModelResolver.resolve(run);
+            boolean captureLlmRequests = eventService.extractCaptureLlmRequests(run.getExt());
+            AgentObservabilityService observabilityService = observabilityServiceProvider.getIfAvailable();
+            if (observabilityService != null) {
+                observabilityService.initializeRun(
+                        runId,
+                        firstNonBlank(stageModels.planningEndpointName(), eventService.extractEndpointName(run.getExt())),
+                        firstNonBlank(stageModels.planningModelName(), eventService.extractModelName(run.getExt())),
+                        captureLlmRequests);
+            }
             String userGoal = eventService.extractUserGoal(run.getExt());
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
             AgentContext.setWebSearchEnabled(runConfig.webSearchEnabled());
@@ -111,7 +124,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
 
             runMapper.updatePlanJson(runId, userId, writeJson(result.getPlan()));
             if (result.isSuccess()) {
-                String snapshot = buildSnapshot(userGoal, result, AgentRunStatus.COMPLETED);
+                String snapshot = attachObservability(runId, buildSnapshot(userGoal, result, AgentRunStatus.COMPLETED), AgentRunStatus.COMPLETED, null);
                 runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshot, true, null);
                 markRunStatus(runId, AgentRunStatus.COMPLETED);
                 eventService.append(runId, userId, "WORKFLOW_COMPLETED", Map.of(
@@ -120,20 +133,24 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                         "engine", "agentLangchainService"
                 ));
             } else {
-                String snapshot = buildSnapshot(userGoal, result, AgentRunStatus.FAILED);
+                String failureReason = nvl(result.getFailureReason());
+                String snapshot = attachObservability(
+                        runId, buildSnapshot(userGoal, result, AgentRunStatus.FAILED), AgentRunStatus.FAILED, failureReason);
                 runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshot, true, result.getFailureReason());
                 markRunStatus(runId, AgentRunStatus.FAILED);
                 eventService.append(runId, userId, "WORKFLOW_FAILED", Map.of(
-                        "reason", nvl(result.getFailureReason()),
+                        "reason", failureReason,
                         "engine", "agentLangchainService"
                 ));
             }
         } catch (Exception e) {
             log.error("LangChain linear run failed: runId={}", runId, e);
-            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, "{}", true, e.getMessage());
+            String err = nvl(e.getMessage());
+            String snapshot = attachObservability(runId, "{}", AgentRunStatus.FAILED, err);
+            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshot, true, e.getMessage());
             markRunStatus(runId, AgentRunStatus.FAILED);
             eventService.append(runId, userId, "WORKFLOW_FAILED", Map.of(
-                    "reason", nvl(e.getMessage()),
+                    "reason", err,
                     "engine", "agentLangchainService"
             ));
         } finally {
@@ -200,5 +217,23 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private String firstNonBlank(String primary, String fallback) {
+        if (!isBlank(primary)) {
+            return primary;
+        }
+        return fallback == null ? "" : fallback;
+    }
+
+    private String attachObservability(String runId, String snapshot, AgentRunStatus status, String failureReason) {
+        AgentObservabilityService observabilityService = observabilityServiceProvider.getIfAvailable();
+        if (observabilityService == null) {
+            return snapshot;
+        }
+        if (status == AgentRunStatus.FAILED && !isBlank(failureReason)) {
+            observabilityService.recordFailure(runId, "WorkflowFailed", failureReason);
+        }
+        return observabilityService.attachObservabilityToSnapshot(runId, snapshot, status);
     }
 }

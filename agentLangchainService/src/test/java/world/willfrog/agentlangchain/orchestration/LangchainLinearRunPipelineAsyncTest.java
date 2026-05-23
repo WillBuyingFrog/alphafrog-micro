@@ -37,6 +37,7 @@ class LangchainLinearRunPipelineAsyncTest {
                 mock(ObjectMapper.class),
                 mock(ObjectProvider.class),
                 mock(ObjectProvider.class),
+                mock(ObjectProvider.class),
                 taskExecutor
         ) {
             @Override

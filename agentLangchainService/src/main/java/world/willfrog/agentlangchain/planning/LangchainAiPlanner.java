@@ -56,7 +56,7 @@ public class LangchainAiPlanner {
                         TODO_PLAN_SCHEMA_NAME,
                         structuredOutputSettings.structuredStrict(),
                         structuredOutputSettings.todoPlanningJsonSchema(),
-                        structuredOutputSettings.requireProviderParameters(),
+                        structuredOutputSettings.requireProviderParameters(request.getPlanningEndpointName()),
                         structuredOutputSettings.allowProviderFallbacks()
                 ));
             } else {
@@ -94,7 +94,7 @@ public class LangchainAiPlanner {
                 request.getPlanningProviderOrder() == null ? "[]" : request.getPlanningProviderOrder(),
                 structuredEnabled,
                 structuredOutputSettings.structuredStrict(),
-                structuredOutputSettings.requireProviderParameters(),
+                structuredOutputSettings.requireProviderParameters(request.getPlanningEndpointName()),
                 structuredOutputSettings.allowProviderFallbacks(),
                 structuredEnabled ? TODO_PLAN_SCHEMA_NAME : ""
         );

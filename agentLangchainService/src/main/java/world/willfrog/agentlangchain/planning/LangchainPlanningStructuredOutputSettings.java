@@ -52,7 +52,19 @@ public class LangchainPlanningStructuredOutputSettings {
         return base == null || base;
     }
 
-    public boolean requireProviderParameters() {
+    /**
+     * OpenRouter: do not set {@code provider.require_parameters=true} for planning — it narrows routing
+     * to providers that natively support every request field (often only deepseek for Kimi), which
+     * conflicts with explicit client provider order.
+     */
+    public boolean requireProviderParameters(String planningEndpointName) {
+        if (isOpenRouterPlanningEndpoint(planningEndpointName)) {
+            return false;
+        }
+        return requireProviderParametersFromConfig();
+    }
+
+    private boolean requireProviderParametersFromConfig() {
         Optional<Boolean> local = localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
                 .map(AgentLlmProperties.Runtime::getPlanning)
@@ -67,6 +79,11 @@ public class LangchainPlanningStructuredOutputSettings {
                 .map(AgentLlmProperties.StructuredOutput::getRequireProviderParameters)
                 .orElse(null);
         return base == null || base;
+    }
+
+    private static boolean isOpenRouterPlanningEndpoint(String planningEndpointName) {
+        return planningEndpointName != null
+                && "openrouter".equalsIgnoreCase(planningEndpointName.trim());
     }
 
     public boolean allowProviderFallbacks() {
