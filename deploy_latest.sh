@@ -236,7 +236,7 @@ if [[ "$DEPLOY_ONLY" != true ]]; then
   if [[ "$SKIP_MAVEN" != true ]]; then
     if [[ ${#SERVICES[@]} -eq 0 ]]; then
       echo "=== Building all Java modules ==="
-      mvn -DskipTests compile install
+      mvn -DskipTests install
     else
       MODULES=()
       for svc in "${SELECTED[@]}"; do
@@ -248,7 +248,7 @@ if [[ "$DEPLOY_ONLY" != true ]]; then
       if [[ ${#MODULES[@]} -gt 0 ]]; then
         echo "=== Building modules: ${MODULES[*]} ==="
         MODULE_LIST=$(IFS=','; echo "${MODULES[*]}")
-        mvn -DskipTests -pl "$MODULE_LIST" -am compile install
+        mvn -DskipTests -pl "$MODULE_LIST" -am install
       fi
     fi
   else
