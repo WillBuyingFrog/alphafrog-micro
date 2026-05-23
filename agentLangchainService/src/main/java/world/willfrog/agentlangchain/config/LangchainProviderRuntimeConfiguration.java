@@ -13,7 +13,7 @@ import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
 
 @Configuration
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
-@EnableDubbo
+@EnableDubbo(scanBasePackages = "world.willfrog.agentlangchain")
 @EnableScheduling
 @EnableAsync
 @MapperScan({
