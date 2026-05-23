@@ -32,9 +32,10 @@ BUSINESS_SERVICES=(
   frontend
 )
 
-# 所有服务
+# 所有服务（含 opt-in；默认全量 deploy 仍只用 BUSINESS_SERVICES）
 ALL_SERVICES=(
   "${BUSINESS_SERVICES[@]}"
+  agent-langchain-service
 )
 
 usage() {
@@ -58,7 +59,7 @@ Services:
   admin-service
   portfolio-service
   agent-service
-  agent-langchain-service
+  agent-langchain-service   # opt-in only (in ALL_SERVICES, not BUSINESS_SERVICES)
   external-info-service
   python-sandbox-gateway-service
   frontend
