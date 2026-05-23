@@ -21,7 +21,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/agent")
+@RequestMapping("/api/agent-legacy")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentConfigController {

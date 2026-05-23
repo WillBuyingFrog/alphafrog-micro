@@ -22,7 +22,7 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 @RestController
-@RequestMapping("/api/agent/credits")
+@RequestMapping("/api/agent-legacy/credits")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentCreditController {

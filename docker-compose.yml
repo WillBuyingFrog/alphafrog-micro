@@ -739,6 +739,8 @@ services:
         condition: service_started
       agent-service:
         condition: service_started
+      agent-langchain-service:
+        condition: service_started
       external-info-service:
         condition: service_started
     environment:
@@ -761,6 +763,7 @@ services:
       AF_RAG_INGEST_TOKEN: ${AF_RAG_INGEST_TOKEN:-}
       AF_CONFIG_NACOS_ENABLED: "true"
       AF_CONFIG_NACOS_NAMESPACE: ${AF_CONFIG_NACOS_NAMESPACE:-}
+      AGENT_LANGCHAIN_PROVIDER_DUBBO_GROUP: ${AGENT_LANGCHAIN_PROVIDER_DUBBO_GROUP:-langchain}
       # Memory Optimization (Medium)
       JAVA_TOOL_OPTIONS: "-Xms384m -Xmx512m"
     ports:
