@@ -4,6 +4,7 @@ import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.Tool;
 import org.apache.dubbo.config.annotation.DubboReference;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.config.AgentLlmProperties;
 import world.willfrog.agent.context.AgentContext;
@@ -22,6 +23,7 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+@Slf4j
 @Component
 public class MarketDataTools {
 
@@ -374,7 +376,7 @@ public class MarketDataTools {
         return ok("searchAssetInfo", data);
     }
 
-    @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。")
+    @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。对于 ETF，若数据库中有复权因子数据，返回的 dataset 会额外包含 adj_factor 列，可用于后复权计算。")
     public String getExchangeAssetDaily(String tsCode, String assetType, String startDate, String endDate, String priceMode) {
         String type = normalizeAssetType(assetType);
         if (type.isBlank()) {
@@ -695,25 +697,53 @@ public class MarketDataTools {
                 ));
             }
 
+            // ── 复权因子：ETF 尝试补充 adj_factor 列 ──
+            Map<Long, Double> adjFactorMap = new LinkedHashMap<>();
+            if ("etf".equals(assetType)) {
+                try {
+                    ListedAssetAdjFactorRequest adjRequest = ListedAssetAdjFactorRequest.newBuilder()
+                            .setTsCode(tsCode)
+                            .setStartDate(convertToMsTimestamp(startDateStr))
+                            .setEndDate(convertToMsTimestamp(endDateStr))
+                            .build();
+                    ListedAssetAdjFactorResponse adjResponse = domesticListedAssetService.getListedAssetAdjFactors(adjRequest);
+                    adjResponse.getItemsList().forEach(item -> adjFactorMap.put(item.getTradeDate(), item.getAdjFactor()));
+                } catch (Exception e) {
+                    log.warn("Adj factor fetch failed for {}, continuing without: {}", tsCode, e.getMessage());
+                }
+            }
+
+            List<String> effectiveHeaders = new ArrayList<>(headers);
+            boolean hasAdjFactor = !adjFactorMap.isEmpty();
+            if (hasAdjFactor) {
+                effectiveHeaders.add("adj_factor");
+            }
+
             if (datasetWriter.isEnabled()) {
                 String runId = AgentContext.getRunId();
                 String prefix = (runId != null ? runId : "unknown") + "-" + assetType;
-                String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), headers, item -> Arrays.asList(
-                        item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(),
-                        item.hasPreClose() ? item.getPreClose() : null,
-                        item.hasChange() ? item.getChange() : null,
-                        item.hasPctChg() ? item.getPctChg() : null,
-                        item.hasVol() ? item.getVol() : null,
-                        item.hasAmount() ? item.getAmount() : null
-                ));
+                String datasetId = datasetWriter.writeDataset(prefix, tsCode, startDateStr, endDateStr, response.getItemsList(), effectiveHeaders, item -> {
+                    List<Object> row = new ArrayList<>(Arrays.asList(
+                            item.getTsCode(), item.getTradeDate(), item.getOpen(), item.getHigh(), item.getLow(), item.getClose(),
+                            item.hasPreClose() ? item.getPreClose() : null,
+                            item.hasChange() ? item.getChange() : null,
+                            item.hasPctChg() ? item.getPctChg() : null,
+                            item.hasVol() ? item.getVol() : null,
+                            item.hasAmount() ? item.getAmount() : null
+                    ));
+                    if (hasAdjFactor) {
+                        row.add(adjFactorMap.get(item.getTradeDate()));
+                    }
+                    return row;
+                });
                 if (datasetRegistry.isEnabled()) {
-                    datasetRegistry.registerDataset(datasetKind, tsCode, startDateStr, endDateStr, headers, datasetId, response.getItemsCount());
+                    datasetRegistry.registerDataset(datasetKind, tsCode, startDateStr, endDateStr, effectiveHeaders, datasetId, response.getItemsCount());
                 }
                 return ok(toolName, datasetData(
                         tsCode,
                         startDateStr,
                         endDateStr,
-                        headers,
+                        effectiveHeaders,
                         datasetId,
                         response.getItemsCount(),
                         "created",
@@ -727,13 +757,16 @@ public class MarketDataTools {
                 Map<String, Object> row = new LinkedHashMap<>();
                 row.put("trade_date", item.getTradeDate());
                 row.put("close", item.getClose());
+                if (hasAdjFactor) {
+                    row.put("adj_factor", adjFactorMap.get(item.getTradeDate()));
+                }
                 previewRows.add(row);
             });
             Map<String, Object> data = datasetData(
                     tsCode,
                     startDateStr,
                     endDateStr,
-                    headers,
+                    effectiveHeaders,
                     "",
                     response.getItemsCount(),
                     "inline",

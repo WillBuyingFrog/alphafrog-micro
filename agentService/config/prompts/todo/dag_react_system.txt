@@ -13,7 +13,7 @@
 | getIndexDaily | `{"ts_code": "<指数代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
 | getStockDaily | `{"ts_code": "<股票代码；可用 | 分隔多个代码或传 JSON 数组>", "start_date": "YYYYMMDD", "end_date": "YYYYMMDD"}` |
 | searchAssetInfo | `{"query": "<搜索关键词；可用 | 分隔或 JSON 数组>", "assetTypes": "stock,etf,index,off_exchange_fund", "marketScope": "domestic"}` |
-| getExchangeAssetDaily | `{"tsCode": "<代码；可用 | 分隔或 JSON 数组>", "assetType": "stock|etf|index", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD", "priceMode": "raw_ohlc"}` |
+| getExchangeAssetDaily | `{"tsCode": "<代码；可用 | 分隔或 JSON 数组>", "assetType": "stock|etf|index", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD", "priceMode": "raw_ohlc"}` | 对 ETF，若数据库有复权因子，返回的 dataset 会额外包含 `adj_factor` 列 |
 | getOffExchangeAssetDaily | `{"tsCode": "<基金代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD"}` |
 | getListedAssetShareSize | `{"tsCode": "<ETF代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD", "exchange": "SSE|SZSE|BSE"}` |
 | getEtfAdj | `{"tsCode": "<ETF代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD"}` |
@@ -50,6 +50,12 @@
 - `ts_code` 必须从搜索结果中获取，不要猜测
 - 多个已知代码使用同一日期区间时，优先合并为一次批量调用：`ts_code="000300.SH|000905.SH"`，也可传 JSON 数组字符串；不要改用逗号分隔
 - 批量返回 `data.mode=batch`、`data.results`、`success_count`、`failure_count`
+
+#### ETF 复权因子说明
+- 调用 `getExchangeAssetDaily(assetType="etf")` 时，若数据库中存在该 ETF 的复权因子数据，返回的 dataset CSV 会**自动追加 `adj_factor` 列**
+- 进行 ETF 回测或收益率计算时，若 `adj_factor` 列存在，**应优先使用复权价格**（`close * adj_factor`）而非原始 `close`，以避免因拆分（split）导致的伪暴跌
+- 若 `adj_factor` 列不存在，说明该 ETF 暂无复权因子数据，继续使用原始价格即可
+- `getEtfAdj` 工具仍可用，但仅在需要单独获取复权因子序列时使用；常规回测直接通过 `getExchangeAssetDaily` 获取即可
 
 ### 2.1 联网搜索工具（searchWeb）
 - 用于查询互联网实时信息、新闻、政策变化、公司或行业最新公开信息。
