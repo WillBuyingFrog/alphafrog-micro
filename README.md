@@ -52,6 +52,12 @@ AlphaFrog-Micro 是一个基于 **Java Spring Boot + Apache Dubbo + RabbitMQ** �
 
 ---
 
+## 本地协作提示
+
+- 如果使用 `slock` 启动本项目相关 agent，且本机访问外网需要走代理，请显式开启 Node 环境代理：`NODE_USE_ENV_PROXY=1 npx @slock-ai/daemon --server-url https://api.slock.ai --api-key <your-key>`。
+
+---
+
 ## 快速部署
 
 ### 全新部署（最简单方式）

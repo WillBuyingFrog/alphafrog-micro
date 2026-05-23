@@ -29,7 +29,11 @@
 - searchAssetInfo、searchStock、searchIndex、searchFund、getStockInfo、getIndexInfo（单次最多 3 个查询）
 - getExchangeAssetDaily、getStockDaily、getIndexDaily（单次最多 2 个查询）
 
-例如：已确定要查 6 只 ETF 的日线，应分 3 次调用 getExchangeAssetDaily（每次 2 个代码），而不是 6 次单代码调用。若仍需先 search 才能确定目标（发现式查询），可逐步调用，不必强行 batch；也不要把不同工具混在一次调用里。
+示例：
+（不失一般性，假定当前你拿到的工具描述中，拉取各种资产走势的工具，单次最多查询M个不同资产的走势；同时假定你当前拿到的工具描述中，查询各种资产基本信息的工具，单次最多查询K个不同资产的信息）
+
+- 已确定要查 `3*M` 只 ETF 的日线，应分 3 次调用 getExchangeAssetDaily（每次 M 个代码），而不是 `3*M` 次单代码调用。
+- 已确定要使用 `K+1` 个不同的关键词查询**中国大陆境内场内资产**信息，并还需要使用 `K-1` 个不同的关键词查询**中国大陆境内场外基金**信息，那么调用两次 searchAssetInfo 即可完成查询 `K+1` 个指数，再调用一次 searchFund 即可完成查询 **中国大陆境内场外基金**信息。
 
 ### 1. 搜索类工具（searchIndex/searchStock/searchFund/searchAssetInfo）
 - **searchFund 仅用于场外基金（公募基金）基本信息检索**，不用于 ETF、场内上市 ETF、行业主题 ETF 筛选
