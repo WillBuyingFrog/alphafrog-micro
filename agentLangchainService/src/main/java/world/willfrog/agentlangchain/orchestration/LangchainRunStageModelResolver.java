@@ -52,13 +52,18 @@ public class LangchainRunStageModelResolver {
         StageLlmConfig planningStageCfg = chooseEffectiveStageConfig(
                 requestedEndpointName, requestedModelName, stageConfig.getPlanning(), run.getExt(), "planning");
         ChatModel planningModel = executionModel;
+        String planningEndpointName = firstNonBlank(execStageCfg.getEndpointName(), requestedEndpointName);
+        String planningModelName = firstNonBlank(execStageCfg.getModelName(), requestedModelName);
+        List<String> planningProviderOrder = providerOrder;
         if (planningStageCfg != null && planningStageCfg.isValid()) {
             AgentLlmResolver.ResolvedLlm planningResolved = aiServiceFactory.resolveLlm(
                     planningStageCfg.getEndpointName(), planningStageCfg.getModelName());
-            var planningProviderOrder = mergeProviderOrder(
+            planningProviderOrder = mergeProviderOrder(
                     resolveStageProviderOrder(planningStageCfg, userProviderOrder), planningResolved.validProviders());
             planningModel = aiServiceFactory.buildChatModelWithProviderOrder(
                     planningResolved, planningProviderOrder, planningStageCfg.getMaxTokens());
+            planningEndpointName = firstNonBlank(planningStageCfg.getEndpointName(), requestedEndpointName);
+            planningModelName = firstNonBlank(planningStageCfg.getModelName(), requestedModelName);
         }
 
         ChatModel finalAnswerModel = executionModel;
@@ -73,10 +78,22 @@ public class LangchainRunStageModelResolver {
                     finalResolved, finalProviderOrder, finalAnswerStageCfg.getMaxTokens());
         }
 
-        return new StageModels(planningModel, executionModel, finalAnswerModel);
+        return new StageModels(
+                planningModel,
+                executionModel,
+                finalAnswerModel,
+                planningEndpointName,
+                planningModelName,
+                planningProviderOrder);
     }
 
-    public record StageModels(ChatModel planningModel, ChatModel executionModel, ChatModel finalAnswerModel) {
+    public record StageModels(
+            ChatModel planningModel,
+            ChatModel executionModel,
+            ChatModel finalAnswerModel,
+            String planningEndpointName,
+            String planningModelName,
+            List<String> planningProviderOrder) {
     }
 
     private StageLlmConfig chooseEffectiveStageConfig(String requestedEndpointName,

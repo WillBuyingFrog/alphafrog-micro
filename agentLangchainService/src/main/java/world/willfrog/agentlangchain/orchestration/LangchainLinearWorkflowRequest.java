@@ -25,6 +25,9 @@ public class LangchainLinearWorkflowRequest {
     private Integer maxToolRoundTrips;
     private Boolean webSearchEnabled;
     private Boolean codeInterpreterEnabled;
+    private String planningEndpointName;
+    private String planningModelName;
+    private List<String> planningProviderOrder;
 
     ChatModel planningModelOrDefault() {
         return planningModel == null ? model : planningModel;

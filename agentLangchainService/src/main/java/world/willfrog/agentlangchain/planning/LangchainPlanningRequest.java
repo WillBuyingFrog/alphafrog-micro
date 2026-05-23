@@ -20,4 +20,10 @@ public class LangchainPlanningRequest {
     private List<ToolSpecification> toolSpecifications;
     private PlanExecutionMode executionMode;
     private Integer maxTodos;
+    /** Resolved planning endpoint (diagnostics). */
+    private String planningEndpointName;
+    /** Resolved planning model (diagnostics). */
+    private String planningModelName;
+    /** Provider order sent to OpenRouter for planning (diagnostics). */
+    private List<String> planningProviderOrder;
 }

@@ -4,7 +4,10 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoItem;
@@ -19,11 +22,14 @@ import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
+@Slf4j
 public class LangchainAiPlanner {
 
     private static final int DEFAULT_MAX_TODOS = 10;
+    private static final String TODO_PLAN_SCHEMA_NAME = "todo_plan";
 
     private final AgentPromptService promptService;
+    private final LangchainPlanningStructuredOutputSettings structuredOutputSettings;
 
     public LangchainTodoPlan plan(LangchainPlanningRequest request) {
         validate(request);
@@ -37,14 +43,65 @@ public class LangchainAiPlanner {
                 .chatModel(request.getModel())
                 .systemMessageProvider(ignored -> promptService.todoPlannerSystemPrompt(toolList, maxTodos))
                 .build();
-        LangchainTodoPlanResponse response = service.plan(
-                promptService.dynamicContextPrefix() + "\n" + nvl(request.getUserGoal()),
-                nvl(request.getDialogueContext()),
-                toolList,
-                mode.name(),
-                maxTodos
+
+        AgentContext.StructuredOutputSpec previousSpec = AgentContext.getStructuredOutputSpec();
+        String previousStage = AgentContext.getStage();
+        AgentContext.setPhase(AgentObservabilityService.PHASE_PLANNING);
+        AgentContext.setStage("planning_todos");
+        boolean structuredEnabled = structuredOutputSettings.structuredEnabled();
+        logPlanningSelection(request, structuredEnabled);
+        try {
+            if (structuredEnabled) {
+                AgentContext.setStructuredOutputSpec(new AgentContext.StructuredOutputSpec(
+                        TODO_PLAN_SCHEMA_NAME,
+                        structuredOutputSettings.structuredStrict(),
+                        structuredOutputSettings.todoPlanningJsonSchema(),
+                        structuredOutputSettings.requireProviderParameters(),
+                        structuredOutputSettings.allowProviderFallbacks()
+                ));
+            } else {
+                AgentContext.clearStructuredOutputSpec();
+            }
+            LangchainTodoPlanResponse response = service.plan(
+                    promptService.dynamicContextPrefix() + "\n" + nvl(request.getUserGoal()),
+                    nvl(request.getDialogueContext()),
+                    toolList,
+                    mode.name(),
+                    maxTodos
+            );
+            return normalize(response, maxTodos, mode);
+        } finally {
+            if (previousSpec == null) {
+                AgentContext.clearStructuredOutputSpec();
+            } else {
+                AgentContext.setStructuredOutputSpec(previousSpec);
+            }
+            if (previousStage == null || previousStage.isBlank()) {
+                AgentContext.clearStage();
+            } else {
+                AgentContext.setStage(previousStage);
+            }
+        }
+    }
+
+    private void logPlanningSelection(LangchainPlanningRequest request, boolean structuredEnabled) {
+        log.info(
+                "[LangchainAiPlanner] runId={} planningModel={} planningEndpoint={} providerOrder={} "
+                        + "structuredOutput.enabled={} strict={} requireProviderParameters={} allowProviderFallbacks={} schemaName={}",
+                nvl(request.getRunId()),
+                blankToLog(request.getPlanningModelName()),
+                blankToLog(request.getPlanningEndpointName()),
+                request.getPlanningProviderOrder() == null ? "[]" : request.getPlanningProviderOrder(),
+                structuredEnabled,
+                structuredOutputSettings.structuredStrict(),
+                structuredOutputSettings.requireProviderParameters(),
+                structuredOutputSettings.allowProviderFallbacks(),
+                structuredEnabled ? TODO_PLAN_SCHEMA_NAME : ""
         );
-        return normalize(response, maxTodos, mode);
+    }
+
+    private String blankToLog(String value) {
+        return isBlank(value) ? "-" : value.trim();
     }
 
     private void validate(LangchainPlanningRequest request) {

@@ -7,6 +7,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
+import world.willfrog.agent.platform.context.AgentContext;
 import world.willfrog.agentlangchain.support.LangchainTestFixtures;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoStatus;
@@ -19,6 +20,26 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 class LangchainAiPlannerTest {
 
     private final LangchainAiPlanner planner = LangchainTestFixtures.planner();
+
+    @Test
+    void plan_shouldSetStructuredOutputSpecWhileCallingModel() {
+        StructuredOutputCapturingChatModel model = new StructuredOutputCapturingChatModel("""
+                {
+                  "analysis": "ok",
+                  "items": [{"id":"todo_1","sequence":1,"description":"查数据"}],
+                  "extractedEntities": []
+                }
+                """);
+
+        LangchainTestFixtures.planner().plan(LangchainPlanningRequest.builder()
+                .runId("run-structured")
+                .userGoal("分析沪深300")
+                .model(model)
+                .build());
+
+        assertThat(model.structuredOutputSeen).isTrue();
+        assertThat(AgentContext.getStructuredOutputSpec()).isNull();
+    }
 
     @Test
     void plan_shouldUseAiServiceStructuredOutputAndNormalizeTodoPlan() {
@@ -88,6 +109,20 @@ class LangchainAiPlannerTest {
                 .build()))
                 .isInstanceOf(IllegalStateException.class)
                 .hasMessageContaining("todo_plan_empty");
+    }
+
+    static class StructuredOutputCapturingChatModel extends RecordingChatModel {
+        private boolean structuredOutputSeen;
+
+        StructuredOutputCapturingChatModel(String response) {
+            super(response);
+        }
+
+        @Override
+        public ChatResponse doChat(ChatRequest request) {
+            structuredOutputSeen = AgentContext.getStructuredOutputSpec() != null;
+            return super.doChat(request);
+        }
     }
 
     static class RecordingChatModel implements ChatModel {
