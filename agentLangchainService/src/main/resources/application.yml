@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: agentLangchainService
+  autoconfigure:
+    exclude:
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboAutoConfiguration
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboRelaxedBinding2AutoConfiguration
+
+server:
+  port: ${AGENT_LANGCHAIN_SERVER_PORT:50158}
+
+agent:
+  langchain:
+    provider:
+      enabled: false
+    service:
+      version: P0-skeleton
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when_authorized

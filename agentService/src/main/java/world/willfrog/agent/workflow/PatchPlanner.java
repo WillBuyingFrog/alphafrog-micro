@@ -10,7 +10,7 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.ReactConversationContext;
+import world.willfrog.agent.platform.service.ReactConversationContext;
 
 import java.util.LinkedHashMap;
 import java.util.List;

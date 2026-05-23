@@ -4,7 +4,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatModel;
 import lombok.Builder;
 import lombok.Data;
-import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRun;
 
 import java.util.List;
 

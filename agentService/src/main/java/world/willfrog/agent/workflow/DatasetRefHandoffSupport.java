@@ -14,9 +14,9 @@ import java.util.regex.Pattern;
 final class DatasetRefHandoffSupport {
 
     /**
-     * {@link world.willfrog.agent.tool.DatasetWriter} 完整 ID：
+     * {@link world.willfrog.agent.tools.dataset.DatasetWriter} 完整 ID：
      * {@code <prefix>-<tsCode>-<start>-<end>-<uuid>}，其中 prefix 为
-     * {@code (runId|unknown)-<assetType>}（见 {@link world.willfrog.agent.tool.MarketDataTools}）。
+     * {@code (runId|unknown)-<assetType>}（见 {@link world.willfrog.agent.tools.market.MarketDataTools}）。
      * 仅用于 mention 计数，不用于注册。
      */
     private static final Pattern MENTIONED_DATASET_ID = Pattern.compile(

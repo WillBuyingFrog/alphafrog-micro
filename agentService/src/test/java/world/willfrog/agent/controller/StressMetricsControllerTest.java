@@ -8,7 +8,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
-import world.willfrog.agent.config.StressTestProperties;
+import world.willfrog.agent.platform.config.StressTestProperties;
 import world.willfrog.agent.model.StressConfigRequest;
 import world.willfrog.agent.model.StressMetricsResponse;
 

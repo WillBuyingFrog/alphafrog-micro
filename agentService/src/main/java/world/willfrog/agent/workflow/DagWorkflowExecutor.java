@@ -11,15 +11,15 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.config.AgentLlmProperties;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.service.AgentCitationService;
-import world.willfrog.agent.service.AgentEventService;
-import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
-import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.platform.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -47,7 +47,7 @@ import java.util.stream.Collectors;
  *
  * <h3>在整体架构中的位置</h3>
  * 本执行器是 {@link WorkflowExecutor} 接口的两种实现之一（另一个是 {@link LinearWorkflowExecutor}）。
- * 由 {@link world.willfrog.agent.service.AgentRunExecutor} 在 Plan 生成后通过
+ * 由 {@link world.willfrog.agent.platform.service.AgentRunExecutor} 在 Plan 生成后通过
  * {@link WorkflowExecutorFactory} 选择本执行器或线性执行器；通常仅当 Plan 中存在显式 dependsOn
  * 关系且 executionMode 为 DAG / AUTO（具备可并行结构）时本执行器才会被选中。
  *

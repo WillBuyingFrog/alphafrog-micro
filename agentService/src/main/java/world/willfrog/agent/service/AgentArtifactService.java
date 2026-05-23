@@ -8,9 +8,9 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.entity.AgentRunEvent;
-import world.willfrog.agent.mapper.AgentRunEventMapper;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRunEvent;
+import world.willfrog.agent.platform.mapper.AgentRunEventMapper;
 import world.willfrog.alphafrogmicro.agent.idl.AgentArtifactMessage;
 
 import java.nio.charset.StandardCharsets;

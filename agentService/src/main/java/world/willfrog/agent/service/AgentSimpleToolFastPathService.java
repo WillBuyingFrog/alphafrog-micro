@@ -3,7 +3,7 @@ package world.willfrog.agent.service;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.tools.router.ToolRouter;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
 
 import java.util.LinkedHashMap;

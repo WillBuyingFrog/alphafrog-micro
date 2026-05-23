@@ -14,7 +14,7 @@ import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
 @EnableAsync
 @EnableScheduling
 @Import(NacosConfigBridge.class)
-@MapperScan({"world.willfrog.agent.mapper", "world.willfrog.alphafrogmicro.common.dao"})
+@MapperScan({"world.willfrog.agent.platform.mapper", "world.willfrog.alphafrogmicro.common.dao"})
 public class AgentApplication {
     public static void main(String[] args) {
         SpringApplication.run(AgentApplication.class, args);

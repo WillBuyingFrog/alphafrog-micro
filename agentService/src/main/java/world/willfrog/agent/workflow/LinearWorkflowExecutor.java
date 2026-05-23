@@ -10,14 +10,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.model.AgentRunStatus;
-import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentCitationService;
-import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -34,7 +34,7 @@ import java.util.stream.Collectors;
  *
  * <h3>在整体架构中的位置</h3>
  * 本执行器是 {@link WorkflowExecutor} 接口的两种实现之一（另一个是 {@link DagWorkflowExecutor}）。
- * 由 {@link world.willfrog.agent.service.AgentRunExecutor} 在 Plan 生成后通过
+ * 由 {@link world.willfrog.agent.platform.service.AgentRunExecutor} 在 Plan 生成后通过
  * {@link WorkflowExecutorFactory} 选择本执行器或 DAG 执行器。
  *
  * <h3>核心执行流程（{@link #execute}）</h3>

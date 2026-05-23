@@ -4,7 +4,7 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.tools.router.ToolRouter;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
 
 import java.util.List;

@@ -15,11 +15,11 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.service.AgentCitationService;
-import world.willfrog.agent.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
 
 import java.util.List;
 import java.util.Map;

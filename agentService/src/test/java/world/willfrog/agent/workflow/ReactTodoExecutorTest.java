@@ -14,11 +14,11 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentRunStateStore;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
+import world.willfrog.agent.tools.router.ToolRouter;
 
 import java.time.Duration;
 import java.util.List;

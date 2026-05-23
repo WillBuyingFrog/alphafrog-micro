@@ -1,11 +1,12 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;

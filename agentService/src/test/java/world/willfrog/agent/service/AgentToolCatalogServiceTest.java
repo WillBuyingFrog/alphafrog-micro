@@ -1,9 +1,10 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
-import world.willfrog.agent.tool.SearchTools;
+import world.willfrog.agent.tools.search.SearchTools;
 import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 
 import java.util.List;

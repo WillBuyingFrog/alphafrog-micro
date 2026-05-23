@@ -1,5 +1,6 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -9,11 +10,11 @@ import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.entity.AgentRunEvent;
-import world.willfrog.agent.mapper.AgentRunEventMapper;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRunEvent;
+import world.willfrog.agent.platform.mapper.AgentRunEventMapper;
+import world.willfrog.agent.platform.mapper.AgentRunMapper;
+import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;

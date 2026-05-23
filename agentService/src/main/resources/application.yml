@@ -22,7 +22,7 @@ spring:
       password: ${AF_REDIS_PASSWORD:}
 
 mybatis:
-  mapper-locations: classpath:mapper/*.xml
+  mapper-locations: classpath*:mapper/*.xml
   configuration:
     map-underscore-to-camel-case: true
 

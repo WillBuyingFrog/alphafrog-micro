@@ -16,10 +16,10 @@ import dev.langchain4j.model.chat.request.json.JsonStringSchema;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import world.willfrog.agent.tool.MarketDataTools;
-import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.tool.RagTools;
-import world.willfrog.agent.tool.SearchTools;
+import world.willfrog.agent.tools.market.MarketDataTools;
+import world.willfrog.agent.tools.python.PythonSandboxTools;
+import world.willfrog.agent.tools.rag.RagTools;
+import world.willfrog.agent.tools.search.SearchTools;
 import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 
 import java.util.ArrayList;

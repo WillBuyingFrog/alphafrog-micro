@@ -8,9 +8,9 @@ import org.junit.jupiter.api.io.TempDir;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.entity.AgentRunEvent;
-import world.willfrog.agent.mapper.AgentRunEventMapper;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRunEvent;
+import world.willfrog.agent.platform.mapper.AgentRunEventMapper;
 
 import java.nio.file.Files;
 import java.nio.file.Path;

@@ -16,21 +16,21 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.config.AgentLlmProperties;
-import world.willfrog.agent.config.RunStageConfig;
-import world.willfrog.agent.config.StageLlmConfig;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.service.AgentEventService;
-import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
-import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
-import world.willfrog.agent.service.AgentObservabilityService;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
+import world.willfrog.agent.platform.config.RunStageConfig;
+import world.willfrog.agent.platform.config.StageLlmConfig;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
+import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentMessageService;
-import world.willfrog.agent.service.AgentContextCompressor;
-import world.willfrog.agent.service.ReactConversationContext;
-import world.willfrog.agent.entity.AgentRunMessage;
-import world.willfrog.agent.service.AgentRunStateStore;
-import world.willfrog.agent.context.AgentContext;
+import world.willfrog.agent.platform.service.AgentMessageService;
+import world.willfrog.agent.platform.service.AgentContextCompressor;
+import world.willfrog.agent.platform.service.ReactConversationContext;
+import world.willfrog.agent.platform.entity.AgentRunMessage;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
+import world.willfrog.agent.platform.context.AgentContext;
 
 import java.time.Instant;
 import java.util.ArrayList;
@@ -45,7 +45,7 @@ import java.util.stream.Collectors;
  * Todo Plan 生成器：把用户自然语言目标转化为可执行的 {@link TodoPlan}。
  *
  * <h3>角色与位置</h3>
- * 本组件由 {@link world.willfrog.agent.service.AgentRunExecutor} 在 Planning 阶段调用，
+ * 本组件由 {@link world.willfrog.agent.platform.service.AgentRunExecutor} 在 Planning 阶段调用，
  * 生成的 Plan 会被传递给 {@link LinearWorkflowExecutor} 或 {@link DagWorkflowExecutor}
  * 进行实际执行。Planner 还要为 Plan 选择 {@link PlanExecutionMode}（LINEAR / DAG / AUTO），
  * 影响后续执行器的选择。
@@ -1207,7 +1207,7 @@ public class TodoPlanner {
     /**
      * Planning 请求 DTO：封装本次 plan 调用所需的所有参数。
      *
-     * <p>构造方通常是 {@link world.willfrog.agent.service.AgentRunExecutor}，
+     * <p>构造方通常是 {@link world.willfrog.agent.platform.service.AgentRunExecutor}，
      * 它在完成 run 加载、stage 配置解析、工具注册后，把所有上下文打包成此对象传给 Planner。</p>
      */
     @Data

@@ -1,9 +1,10 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.config.AgentLlmProperties;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;

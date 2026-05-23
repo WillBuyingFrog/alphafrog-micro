@@ -1,5 +1,6 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatModel;
@@ -12,17 +13,17 @@ import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
-import world.willfrog.agent.config.AgentLlmProperties;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.config.RunStageConfig;
-import world.willfrog.agent.config.StageLlmConfig;
-import world.willfrog.agent.tool.MarketDataTools;
-import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.tool.RagTools;
-import world.willfrog.agent.tool.SearchTools;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.mapper.AgentRunMapper;
+import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.config.RunStageConfig;
+import world.willfrog.agent.platform.config.StageLlmConfig;
+import world.willfrog.agent.tools.market.MarketDataTools;
+import world.willfrog.agent.tools.python.PythonSandboxTools;
+import world.willfrog.agent.tools.rag.RagTools;
+import world.willfrog.agent.tools.search.SearchTools;
 
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
