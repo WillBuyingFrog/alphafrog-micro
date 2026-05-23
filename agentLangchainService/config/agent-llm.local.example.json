@@ -1,0 +1,323 @@
+{
+  "defaultEndpoint": "openrouter",
+  "defaultModel": "moonshotai/kimi-k2.5",
+  "models": [
+    "moonshotai/kimi-k2.5",
+    "openai/gpt-5.2",
+    "qwen/qwen3-max-thinking",
+    "accounts/fireworks/models/kimi-k2p5",
+    "qwen3.6-max-preview",
+    "qwen3.6-plus",
+    "qwen3.5-plus",
+    "qwen3.5-flash"
+  ],
+  "endpoints": {
+    "openrouter": {
+      "baseUrl": "https://openrouter.ai/api/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_OPENROUTER_API_KEY}",
+      "models": {
+        "openai/gpt-5.2": {
+          "displayName": "GPT-5.2",
+          "baseRate": 1.0
+        },
+        "moonshotai/kimi-k2.5": {
+          "displayName": "Kimi K2.5",
+          "baseRate": 0.3,
+          "validProviders": ["moonshotai/int4", "fireworks"]
+        },
+        "qwen/qwen3-max-thinking": {
+          "displayName": "Qwen3 Max Thinking",
+          "baseRate": 0.5
+        }
+      }
+    },
+    "fireworks": {
+      "baseUrl": "https://api.fireworks.ai/inference/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_FIREWORKS_API_KEY}",
+      "models": {
+        "accounts/fireworks/models/kimi-k2p5": {
+          "displayName": "Kimi K2.5 (Fireworks)",
+          "baseRate": 0.1
+        }
+      }
+    },
+    "openai": {
+      "baseUrl": "https://api.openai.com/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_OPENAI_API_KEY}"
+    },
+    "dashscope": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_API_KEY}",
+      "region": "singapore",
+      "models": {
+        "qwen3.6-max-preview": {
+          "displayName": "Qwen 3.6 Max Preview",
+          "baseRate": 0.5,
+          "features": ["thinking"]
+        },
+        "qwen3.6-plus": {
+          "displayName": "Qwen 3.6 Plus",
+          "baseRate": 0.3,
+          "features": ["thinking"]
+        },
+        "qwen3.5-plus": {
+          "displayName": "Qwen 3.5 Plus",
+          "baseRate": 0.2,
+          "features": ["thinking"]
+        },
+        "qwen3.5-flash": {
+          "displayName": "Qwen 3.5 Flash",
+          "baseRate": 0.1,
+          "features": ["thinking"]
+        }
+      }
+    },
+    "dashscope-sg": {
+      "baseUrl": "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_SG_API_KEY}",
+      "region": "singapore",
+      "models": {
+        "qwen3.6-max-preview": {
+          "displayName": "Qwen 3.6 Max Preview (DashScope SG)",
+          "baseRate": 0.5,
+          "features": ["thinking"]
+        },
+        "qwen3.6-plus": {
+          "displayName": "Qwen 3.6 Plus (DashScope SG)",
+          "baseRate": 0.3,
+          "features": ["thinking"]
+        },
+        "qwen3.5-plus": {
+          "displayName": "Qwen 3.5 Plus (DashScope SG)",
+          "baseRate": 0.2,
+          "features": ["thinking"]
+        },
+        "qwen3.5-flash": {
+          "displayName": "Qwen 3.5 Flash (DashScope SG)",
+          "baseRate": 0.1,
+          "features": ["thinking"]
+        }
+      }
+    },
+    "dashscope-cn": {
+      "baseUrl": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "apiKey": "${AF_AGENT_ENDPOINT_DASHSCOPE_CN_API_KEY}",
+      "region": "cn",
+      "models": {
+        "qwen3.6-max-preview": {
+          "displayName": "Qwen 3.6 Max Preview (DashScope CN)",
+          "baseRate": 0.5,
+          "features": ["thinking"]
+        },
+        "qwen3.6-plus": {
+          "displayName": "Qwen 3.6 Plus (DashScope CN)",
+          "baseRate": 0.3,
+          "features": ["thinking"]
+        },
+        "qwen3.5-plus": {
+          "displayName": "Qwen 3.5 Plus (DashScope CN)",
+          "baseRate": 0.2,
+          "features": ["thinking"]
+        },
+        "qwen3.5-flash": {
+          "displayName": "Qwen 3.5 Flash (DashScope CN)",
+          "baseRate": 0.1,
+          "features": ["thinking"]
+        }
+      }
+    }
+  },
+  "runtime": {
+    "resume": {
+      "interruptedTtlDays": 7
+    },
+    "cache": {
+      "version": "v1",
+      "searchTtlSeconds": 3600,
+      "infoTtlSeconds": 21600,
+      "datasetTtlSeconds": 604800
+    },
+    "planning": {
+      "maxTodos": 10,
+      "maxTodosClientCap": 10,
+      "maxTokens": 8192,
+      "endpointName": "openrouter",
+      "modelName": "anthropic/claude-3.5-sonnet",
+      "structuredOutput": {
+        "enabled": true,
+        "strategyStageEnabled": true,
+        "strategyMaxDetailLength": 500,
+        "maxAttempts": 3,
+        "strict": true,
+        "failOnExhaustedRetries": true,
+        "requireProviderParameters": true,
+        "allowProviderFallbacks": false
+      }
+    },
+    "execution": {
+      "mode": "LINEAR_WORKFLOW",
+      "maxTokens": 20000,
+      "maxToolCalls": 20,
+      "maxToolCallsPerSubAgent": 10,
+      "maxRetriesPerTodo": 3,
+      "staticPrecheckEnabled": true,
+      "maxStaticRecoveryRetries": 2,
+      "maxRuntimeRecoveryRetries": 2,
+      "maxSemanticRecoveryRetries": 1,
+      "maxTotalRecoveryRetries": 2,
+      "staticFixEndpoint": "openrouter",
+      "staticFixModel": "openai/gpt-5.2",
+      "staticFixTemperature": 0.0,
+      "failFast": false,
+      "defaultExecutionMode": "AUTO",
+      "adjFactorEnabled": false
+    },
+    "finalAnswer": {
+      "maxTokens": 20000
+    },
+    "runBudget": {
+      "maxWallClockMs": 1200000,
+      "maxLlmCalls": 80,
+      "maxToolCalls": 120,
+      "maxTokens": 600000,
+      "maxHttpAttemptsPerLogicalCall": 2
+    },
+    "parallel": {
+      "maxParallelSearchQueries": 3,
+      "maxParallelDailyQueries": 2,
+      "dagThreadPoolSize": 4,
+      "externalSearch": {
+        "maxConcurrent": 2,
+        "providerLimits": {
+          "perplexity": 1,
+          "exa": 2,
+          "tavily": 2
+        }
+      },
+      "toolWeightedLimit": {
+        "enabled": true,
+        "maxWeight": 12,
+        "defaultWeight": 2,
+        "tools": {
+          "searchAssetInfo": { "weight": 1, "maxBatchItems": 8 },
+          "getExchangeAssetDaily": { "weight": 3, "maxBatchItems": 6 },
+          "getOffExchangeAssetDaily": { "weight": 3, "maxBatchItems": 6 },
+          "getEtfAdj": { "weight": 2, "maxBatchItems": 8, "requiresAdjFactorEnabled": true },
+          "getListedAssetShareSize": { "weight": 2, "maxBatchItems": 8 },
+          "ragSearch": { "weight": 2, "maxBatchItems": 1 },
+          "executePython": { "weight": 4, "maxBatchItems": 1 }
+        }
+      }
+    },
+    "subAgent": {
+      "enabled": true,
+      "complexityThreshold": "MEDIUM",
+      "maxSteps": 6,
+      "maxCount": 3,
+      "endpointName": "openrouter",
+      "modelName": "openai/gpt-5.2",
+      "lowComplexityModelName": "moonshotai/kimi-k2.5",
+      "mediumComplexityModelName": "openai/gpt-5.2",
+      "highComplexityModelName": "qwen/qwen3-max-thinking",
+      "structuredOutput": {
+        "enabled": true,
+        "maxAttempts": 3,
+        "strict": true,
+        "requireProviderParameters": true,
+        "allowProviderFallbacks": false
+      },
+      "placeholder": {
+        "resolveStepAlias": true,
+        "resolveTodoAlias": true
+      }
+    },
+    "judge": {
+      "enabled": false,
+      "semanticEnabled": false,
+      "temperature": 0.0,
+      "maxAttempts": 2,
+      "failOpen": true,
+      "blockOnInsufficientEvidence": false,
+      "routes": [
+        {
+          "endpointName": "openrouter",
+          "models": [
+            "openai/gpt-5.2",
+            "moonshotai/kimi-k2.5",
+            "qwen/qwen3-max-thinking"
+          ]
+        },
+        {
+          "endpointName": "fireworks",
+          "models": [
+            "accounts/fireworks/models/kimi-k2p5"
+          ]
+        }
+      ]
+    },
+    "multiTurn": {
+      "compression": {
+        "enabled": true,
+        "strategy": "LLM_SUMMARY",
+        "summaryEndpoint": "openrouter",
+        "summaryModel": "qwen/qwen3-max-thinking",
+        "summaryProviderOrder": [
+          "fireworks"
+        ],
+        "minMessagesForCompression": 4,
+        "summaryMaxChars": 1200,
+        "summaryTemperature": 0.2,
+        "minMessagesForSummary": 6,
+        "summaryMaxMessages": 20
+      }
+    }
+  },
+  "observability": {
+    "streamingProgress": {
+      "enabled": true,
+      "updateIntervalMs": 3000
+    },
+    "openrouter": {
+      "costEnrichment": {
+        "enabled": true,
+        "timeoutMs": 5000,
+        "maxAttempts": 3,
+        "retryDelayMs": 1000
+      }
+    }
+  },
+  "openrouter": {
+    "http-referer": "https://alpha.frogwch.com",
+    "title": "AlphaFrog",
+    "categories": "cloud-agent,programming-app"
+  },
+  "debug": {
+    "logLlmCurl": false,
+    "logStageConfig": false,
+    "logSseProgress": false
+  },
+  "prompts": {
+    "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt",
+    "todoPlannerSystemPromptTemplate": "file:prompts/todo/todo_planner_system.txt",
+    "workflowFinalSystemPrompt": "file:prompts/workflow/workflow_final_system.txt",
+    "workflowTodoRecoverySystemPrompt": "file:prompts/workflow/workflow_todo_recovery_system.txt",
+    "parallelPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_planner_system.txt",
+    "parallelFinalSystemPrompt": "file:prompts/parallel/parallel_final_system.txt",
+    "parallelPatchPlannerSystemPromptTemplate": "file:prompts/parallel/parallel_patch_planner_system.txt",
+    "planJudgeSystemPromptTemplate": "file:prompts/plan/plan_judge_system.txt",
+    "planJudgeRuntimeSystemPromptTemplate": "file:prompts/plan/plan_judge_runtime_system.txt",
+    "semanticJudgeSystemPromptTemplate": "file:prompts/judge/semantic_judge_system.txt",
+    "subAgentPlannerSystemPromptTemplate": "file:prompts/sub_agent/sub_agent_planner_system.txt",
+    "subAgentSummarySystemPrompt": "file:prompts/sub_agent/sub_agent_summary_system.txt",
+    "pythonRefineSystemPrompt": "file:prompts/python/python_refine_system.txt",
+    "pythonRefineRequirementsFile": "prompts/python/python_refine_requirements.txt",
+    "pythonRefineOutputInstruction": "file:prompts/python/python_refine_output_instruction.txt",
+    "datasetFieldSpecsFile": "prompts/python/dataset_field_specs.json",
+    "orchestratorPlanningSystemPrompt": "file:prompts/orchestrator/orchestrator_planning_system.txt",
+    "orchestratorSummarySystemPrompt": "file:prompts/orchestrator/orchestrator_summary_system.txt",
+    "dagReactSystemPromptFile": "file:prompts/todo/dag_react_system.txt",
+    "dagModeGuidancePromptFile": "file:prompts/todo/dag_mode_guidance.txt",
+    "planningStrategyStageFile": "file:prompts/todo/planning_strategy_stage.txt",
+    "planningTodosStageFile": "file:prompts/todo/planning_todos_stage.txt"
+  }
+}

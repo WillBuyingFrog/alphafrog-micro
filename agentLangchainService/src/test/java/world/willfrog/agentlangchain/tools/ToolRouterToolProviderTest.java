@@ -72,6 +72,7 @@ class ToolRouterToolProviderTest {
     @AfterEach
     void tearDown() {
         AgentContext.clear();
+        LangchainDatasetRefContext.clear();
     }
 
     @Test
@@ -132,6 +133,40 @@ class ToolRouterToolProviderTest {
 
         assertEquals("{\"ok\":true}", output);
         verify(toolRouter).invokeWithMeta(eq("searchWeb"), eq(Map.of("query", "512800")));
+    }
+
+    @Test
+    void toolExecutor_shouldAppendDatasetRetryHintForInvalidExecutePythonDataset() {
+        LangchainDatasetRefContext.set(new java.util.LinkedHashMap<>(Map.of(
+                "dataset-hs300", "/sandbox/input/dataset-hs300",
+                "dataset-zz500", "/sandbox/input/dataset-zz500"
+        )));
+        when(toolRouter.invokeWithMeta(eq("executePython"), anyMap()))
+                .thenReturn(ToolRouter.ToolInvocationResult.builder()
+                        .output("{\"ok\":false,\"error\":{\"code\":\"TASK_FAILED\",\"message\":\"dataset_id directory not found\"}}")
+                        .success(false)
+                        .durationMs(1)
+                        .build());
+
+        ToolProviderResult result = provider.provideTools(request(Map.of(
+                LangchainToolInvocationKeys.CODE_INTERPRETER_ENABLED, true
+        )));
+
+        ToolExecutor executor = result.toolExecutorByName("executePython");
+        assertNotNull(executor);
+
+        String output = executor.execute(
+                ToolExecutionRequest.builder()
+                        .name("executePython")
+                        .arguments("{\"dataset_ids\":\"placeholder\",\"code\":\"print(1)\"}")
+                        .build(),
+                "memory-1"
+        );
+
+        assertTrue(output.contains("_retry_hint_"));
+        assertTrue(output.contains("dataset-hs300"));
+        assertTrue(output.contains("dataset-zz500"));
+        assertTrue(output.contains("placeholder/data/test"));
     }
 
     @Test

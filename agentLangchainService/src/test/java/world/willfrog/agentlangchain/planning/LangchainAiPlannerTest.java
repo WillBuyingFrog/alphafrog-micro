@@ -85,7 +85,7 @@ class LangchainAiPlannerTest {
         assertThat(plan.getItems().get(0).getDependsOn()).containsExactly("todo_0");
         assertThat(plan.getItems().get(0).isParallelizable()).isTrue();
         assertThat(model.lastRequest.toString()).contains("searchIndex");
-        assertThat(model.lastRequest.toString()).contains("Maximum todo count: 5");
+        assertThat(model.lastRequest.toString()).contains("步骤数尽可能少，上限 5");
     }
 
     @Test

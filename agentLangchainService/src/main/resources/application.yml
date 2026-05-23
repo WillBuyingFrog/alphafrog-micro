@@ -2,7 +2,9 @@ spring:
   application:
     name: agentLangchainService
   config:
-    import: classpath:application-agent-platform-shared.yml
+    import:
+      - classpath:application-agent-platform-shared.yml
+      - classpath:application-agent-llm-prompts.yml
   autoconfigure:
     exclude:
       - org.apache.dubbo.spring.boot.autoconfigure.DubboAutoConfiguration

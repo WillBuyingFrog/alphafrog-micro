@@ -11,6 +11,11 @@ class LangchainPlanningStructuredOutputSettingsTest {
       LangchainTestFixtures.structuredOutputSettings();
 
   @Test
+  void structuredStrict_shouldDefaultToFalseWhenUnset() {
+    assertThat(settings.structuredStrict()).isFalse();
+  }
+
+  @Test
   void requireProviderParameters_shouldBeFalseForOpenRouterPlanningEndpoint() {
     assertThat(settings.requireProviderParameters("openrouter")).isFalse();
     assertThat(settings.requireProviderParameters("OpenRouter")).isFalse();

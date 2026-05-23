@@ -83,6 +83,45 @@ class LangchainLinearWorkflowExecutorTest {
         assertThat(result.getFinalAnswer()).isNull();
     }
 
+    @Test
+    void execute_shouldInjectDatasetRefsIntoLaterTodoPrompt() {
+        QueueChatModel model = new QueueChatModel(
+                """
+                {
+                  "analysis": "linear",
+                  "items": [
+                    {"id":"todo_1","sequence":1,"description":"获取指数数据"},
+                    {"id":"todo_2","sequence":2,"description":"用 Python 计算收益","dependsOn":["todo_1"]}
+                  ],
+                  "extractedEntities": ["沪深300"]
+                }
+                """,
+                "{\"ok\":true,\"tool\":\"getIndexDaily\",\"data\":{\"dataset_id\":\"dataset-hs300\"}}",
+                "calculated result",
+                "final answer"
+        );
+        LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
+                LangchainTestFixtures.planner(),
+                LangchainTestFixtures.promptService(),
+                Optional.empty()
+        );
+
+        LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
+                .runId("run-dataset-1")
+                .userId("user-1")
+                .userGoal("计算收益")
+                .model(model)
+                .maxTodos(5)
+                .build());
+
+        assertThat(result.isSuccess()).isTrue();
+        assertThat(model.requests()).hasSize(4);
+        assertThat(model.requests().get(2).toString())
+                .contains("已有数据集")
+                .contains("dataset-hs300")
+                .contains("dataset_ids");
+    }
+
     static class QueueChatModel implements ChatModel {
         private final List<String> responses;
         private final List<ChatRequest> requests = new ArrayList<>();

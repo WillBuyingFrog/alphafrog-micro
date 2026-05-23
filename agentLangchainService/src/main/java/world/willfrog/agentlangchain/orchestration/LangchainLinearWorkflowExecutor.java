@@ -8,12 +8,14 @@ import world.willfrog.agent.platform.context.AgentContext;
 import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoItem;
+import world.willfrog.agent.workflow.DatasetRefRegistry;
 import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
 import world.willfrog.agentlangchain.planning.LangchainPlanningRequest;
 import world.willfrog.agentlangchain.planning.LangchainTodoPlan;
-
+import world.willfrog.agentlangchain.tools.LangchainDatasetRefContext;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -49,36 +51,47 @@ public class LangchainLinearWorkflowExecutor {
             AgentContext.setExtractedEntities(plan.getExtractedEntities());
 
             List<LangchainCompletedTodo> completedTodos = new ArrayList<>();
+            Map<String, String> datasetRefs = LangchainTodoUserMessageBuilder.newDatasetRefMap();
             for (TodoItem item : plan.getItems()) {
                 AgentContext.setPhase("linear_execution");
                 AgentContext.setStage("todo_execution");
                 AgentContext.setTodoContext(item.getId(), item.getSequence());
-                String output = buildTodoExecutor(request, toolCalls)
-                        .execute(
-                                promptService.dynamicContextPrefix() + "\n" + request.getUserGoal(),
-                                renderCompletedTodos(completedTodos),
-                                item.getDescription()
-                        );
+                String userMessage = LangchainTodoUserMessageBuilder.buildTodoUserMessage(
+                        promptService,
+                        request.getUserGoal(),
+                        completedTodos,
+                        datasetRefs,
+                        item.getDescription(),
+                        request.getToolSpecifications());
+                String output;
+                LangchainDatasetRefContext.set(datasetRefs);
+                try {
+                    output = buildTodoExecutor(request, toolCalls, datasetRefs)
+                            .execute(userMessage);
+                } finally {
+                    LangchainDatasetRefContext.clear();
+                }
                 if (isBlank(output)) {
                     return failure(plan, completedTodos, "empty_todo_output:" + item.getId(), toolCalls.get());
                 }
+                String trimmed = output.trim();
+                DatasetRefRegistry.registerFromJson(trimmed, datasetRefs);
                 completedTodos.add(LangchainCompletedTodo.builder()
                         .todoId(item.getId())
                         .sequence(item.getSequence())
                         .description(item.getDescription())
-                        .output(output.trim())
-                        .summary(output.trim())
+                        .output(trimmed)
+                        .summary(trimmed)
                         .build());
             }
 
             AgentContext.setPhase("summarizing");
             AgentContext.setStage("final_answer");
             String finalAnswer = buildFinalAnswerWriter(request)
-                    .answer(
-                            promptService.dynamicContextPrefix() + "\n"
-                                    + promptService.finalAnswerStageInstruction() + "\n\n"
-                                    + request.getUserGoal(),
-                            renderCompletedTodos(completedTodos));
+                    .answer(LangchainTodoUserMessageBuilder.buildFinalUserMessage(
+                            promptService,
+                            request.getUserGoal(),
+                            completedTodos));
             if (isBlank(finalAnswer)) {
                 return failure(plan, completedTodos, "empty_final_answer", toolCalls.get());
             }
@@ -101,13 +114,19 @@ public class LangchainLinearWorkflowExecutor {
     }
 
     private LangchainTodoExecutionAiService buildTodoExecutor(LangchainLinearWorkflowRequest request,
-                                                              AtomicInteger toolCalls) {
+                                                              AtomicInteger toolCalls,
+                                                              Map<String, String> datasetRefs) {
         AiServices<LangchainTodoExecutionAiService> builder = AiServices
                 .builder(LangchainTodoExecutionAiService.class)
                 .chatModel(request.executionModelOrDefault())
                 .systemMessageProvider(ignored -> promptService.dagReactSystemPrompt())
                 .maxToolCallingRoundTrips(resolveMaxToolRoundTrips(request.getMaxToolRoundTrips()))
-                .afterToolExecution(ignored -> toolCalls.incrementAndGet());
+                .afterToolExecution(result -> {
+                    toolCalls.incrementAndGet();
+                    if (result != null && result.result() != null) {
+                        DatasetRefRegistry.registerFromJson(result.result(), datasetRefs);
+                    }
+                });
         toolProvider.ifPresent(builder::toolProvider);
         return builder.build();
     }
@@ -115,7 +134,7 @@ public class LangchainLinearWorkflowExecutor {
     private LangchainFinalAnswerAiService buildFinalAnswerWriter(LangchainLinearWorkflowRequest request) {
         return AiServices.builder(LangchainFinalAnswerAiService.class)
                 .chatModel(request.finalAnswerModelOrDefault())
-                .systemMessageProvider(ignored -> promptService.workflowFinalSystemPrompt())
+                .systemMessageProvider(ignored -> promptService.dagReactSystemPrompt())
                 .build();
     }
 
@@ -159,23 +178,6 @@ public class LangchainLinearWorkflowExecutor {
             return DEFAULT_MAX_TOOL_ROUND_TRIPS;
         }
         return Math.max(1, Math.min(requested, 30));
-    }
-
-    private String renderCompletedTodos(List<LangchainCompletedTodo> completedTodos) {
-        if (completedTodos == null || completedTodos.isEmpty()) {
-            return "none";
-        }
-        StringBuilder builder = new StringBuilder();
-        for (LangchainCompletedTodo todo : completedTodos) {
-            builder.append("- ")
-                    .append(todo.getTodoId())
-                    .append(" / ")
-                    .append(todo.getDescription())
-                    .append("\n  output: ")
-                    .append(todo.getOutput())
-                    .append("\n");
-        }
-        return builder.toString();
     }
 
     private boolean isBlank(String value) {

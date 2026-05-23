@@ -1,0 +1,68 @@
+[
+  {
+    "name": "ts_code",
+    "meaning": "资产代码（股票/指数唯一标识）",
+    "dataType": "string",
+    "dataFormat": "交易所后缀代码，如 000300.SH"
+  },
+  {
+    "name": "trade_date",
+    "meaning": "交易日期",
+    "dataType": "string",
+    "dataFormat": "YYYYMMDD（8位日期字符串）或 13 位毫秒时间戳"
+  },
+  {
+    "name": "open",
+    "meaning": "当日开盘价",
+    "dataType": "float",
+    "dataFormat": "十进制数值"
+  },
+  {
+    "name": "high",
+    "meaning": "当日最高价",
+    "dataType": "float",
+    "dataFormat": "十进制数值"
+  },
+  {
+    "name": "low",
+    "meaning": "当日最低价",
+    "dataType": "float",
+    "dataFormat": "十进制数值"
+  },
+  {
+    "name": "close",
+    "meaning": "当日收盘价",
+    "dataType": "float",
+    "dataFormat": "十进制数值"
+  },
+  {
+    "name": "pre_close",
+    "meaning": "前一交易日收盘价",
+    "dataType": "float",
+    "dataFormat": "十进制数值"
+  },
+  {
+    "name": "change",
+    "meaning": "绝对涨跌额",
+    "dataType": "float",
+    "dataFormat": "当日收盘价-前收盘价"
+  },
+  {
+    "name": "pct_chg",
+    "meaning": "涨跌幅百分比",
+    "dataType": "float",
+    "dataFormat": "百分比数值（如 1.23 表示 1.23%）"
+  },
+  {
+    "name": "vol",
+    "meaning": "成交量",
+    "dataType": "float",
+    "dataFormat": "原始成交量数值（单位依数据源定义）"
+  },
+  {
+    "name": "amount",
+    "meaning": "成交额",
+    "dataType": "float",
+    "dataFormat": "原始成交额数值（单位依数据源定义）"
+  }
+]

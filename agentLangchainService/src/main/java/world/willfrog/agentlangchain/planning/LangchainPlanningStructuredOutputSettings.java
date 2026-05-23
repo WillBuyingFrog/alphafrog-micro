@@ -49,7 +49,7 @@ public class LangchainPlanningStructuredOutputSettings {
                 .map(AgentLlmProperties.Planning::getStructuredOutput)
                 .map(AgentLlmProperties.StructuredOutput::getStrict)
                 .orElse(null);
-        return base == null || base;
+        return Boolean.TRUE.equals(base);
     }
 
     /**
@@ -106,6 +106,64 @@ public class LangchainPlanningStructuredOutputSettings {
     /**
      * JSON schema aligned with legacy {@code StructuredPlanningSupport#todoPlanningJsonSchema()}.
      */
+    public boolean strategyStageEnabled() {
+        Optional<Boolean> local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyStageEnabled);
+        if (local.isPresent()) {
+            return Boolean.TRUE.equals(local.get());
+        }
+        Boolean base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyStageEnabled)
+                .orElse(null);
+        return base == null || base;
+    }
+
+    public int strategyMaxDetailLength() {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyMaxDetailLength)
+                .orElse(0);
+        if (local > 0) {
+            return local;
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getStructuredOutput)
+                .map(AgentLlmProperties.StructuredOutput::getStrategyMaxDetailLength)
+                .orElse(0);
+        return base > 0 ? base : 500;
+    }
+
+    public int resolveMaxTodos(int defaultMaxTodos) {
+        int local = localConfigLoader.current()
+                .map(AgentLlmProperties::getRuntime)
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getMaxTodos)
+                .orElse(0);
+        if (local > 0) {
+            return clamp(local, 1, 50);
+        }
+        int base = Optional.ofNullable(llmProperties.getRuntime())
+                .map(AgentLlmProperties.Runtime::getPlanning)
+                .map(AgentLlmProperties.Planning::getMaxTodos)
+                .orElse(0);
+        if (base > 0) {
+            return clamp(base, 1, 50);
+        }
+        return clamp(defaultMaxTodos, 1, 50);
+    }
+
+    private static int clamp(int value, int min, int max) {
+        return Math.max(min, Math.min(value, max));
+    }
+
     public Map<String, Object> todoPlanningJsonSchema() {
         return Map.of(
                 "type", "object",
