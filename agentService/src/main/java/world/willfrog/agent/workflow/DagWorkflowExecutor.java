@@ -18,7 +18,7 @@ import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 
 import java.time.Instant;

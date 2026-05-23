@@ -18,7 +18,7 @@ import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agent.platform.service.AgentMessageService;
 import world.willfrog.agent.platform.service.AgentContextCompressor;
@@ -88,7 +88,7 @@ class TodoPlannerTest {
         lenient().when(promptService.planningStructuredStageInstruction()).thenReturn("[Stage: PLANNING_STRUCTURED]");
         lenient().when(promptService.planningStrategyStageInstruction(anyString(), any(Integer.class), any(Integer.class)))
                 .thenReturn("[Stage: PLANNING_STRATEGY]");
-        lenient().when(promptService.planningTodosStageInstruction(any(), anyString(), any(Integer.class)))
+        lenient().when(promptService.planningTodosStageInstruction(anyString(), anyString(), anyString(), any(Integer.class)))
                 .thenReturn("[Stage: PLANNING_TODOS]");
         lenient().when(promptService.dynamicContextPrefix()).thenReturn("今天是2026年03月08日。");
         lenient().when(stateStore.isPlanOverride(anyString())).thenReturn(false);

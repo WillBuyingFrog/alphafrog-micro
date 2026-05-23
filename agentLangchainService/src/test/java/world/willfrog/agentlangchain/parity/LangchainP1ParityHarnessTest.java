@@ -5,6 +5,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
+import world.willfrog.agentlangchain.support.LangchainTestFixtures;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
 import world.willfrog.agentlangchain.planning.LangchainPlanningRequest;
@@ -18,7 +19,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
  */
 class LangchainP1ParityHarnessTest {
 
-    private final LangchainAiPlanner planner = new LangchainAiPlanner();
+    private final LangchainAiPlanner planner = LangchainTestFixtures.planner();
 
     @Test
     void linear_simple_success_plan() {

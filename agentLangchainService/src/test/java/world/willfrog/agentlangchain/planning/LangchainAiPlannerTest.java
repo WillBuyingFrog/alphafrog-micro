@@ -7,6 +7,7 @@ import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
+import world.willfrog.agentlangchain.support.LangchainTestFixtures;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoStatus;
 
@@ -17,7 +18,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 class LangchainAiPlannerTest {
 
-    private final LangchainAiPlanner planner = new LangchainAiPlanner();
+    private final LangchainAiPlanner planner = LangchainTestFixtures.planner();
 
     @Test
     void plan_shouldUseAiServiceStructuredOutputAndNormalizeTodoPlan() {

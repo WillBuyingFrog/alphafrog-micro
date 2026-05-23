@@ -11,7 +11,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.service.AgentCitationService;
 import world.willfrog.agent.platform.service.AgentEventService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agent.workflow.LinearWorkflowExecutor;
 import world.willfrog.agent.workflow.PlanJudge;

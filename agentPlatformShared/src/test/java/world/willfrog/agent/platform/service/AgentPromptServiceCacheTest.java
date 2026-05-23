@@ -1,4 +1,4 @@
-package world.willfrog.agent.service;
+package world.willfrog.agent.platform.service;
 
 import world.willfrog.agent.platform.service.*;
 import org.junit.jupiter.api.BeforeEach;

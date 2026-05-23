@@ -24,7 +24,7 @@ import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentMessageService;
 import world.willfrog.agent.platform.service.AgentContextCompressor;
 import world.willfrog.agent.platform.service.ReactConversationContext;
@@ -355,7 +355,8 @@ public class TodoPlanner {
                 ctx.addAssistantMessage(strategyRaw);
 
                 // ── Step 2：任务拆解阶段 ──
-                String todosStage = promptService.planningTodosStageInstruction(overallPlan, toolList, maxTodos);
+                String todosStage = promptService.planningTodosStageInstruction(
+                        overallPlan.mode(), overallPlan.detail(), toolList, maxTodos);
                 ctx.addUserMessage(todosStage);
 
                 AgentContext.setStage("planning_todos");

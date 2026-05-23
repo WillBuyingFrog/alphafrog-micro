@@ -1,6 +1,5 @@
-package world.willfrog.agent.service;
+package world.willfrog.agent.platform.service;
 
-import world.willfrog.agent.platform.service.*;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
@@ -544,19 +543,19 @@ public class AgentPromptService {
      * <p>会根据 overallPlan.mode() 注入不同的 mode guidance:DAG 模式提示通过 dependsOn 表达依赖,
      * LINEAR 模式提示按 sequence 顺序执行。</p>
      */
-    public String planningTodosStageInstruction(world.willfrog.agent.workflow.StructuredPlanningSupport.OverallPlan overallPlan,
+    public String planningTodosStageInstruction(String mode, String detail,
                                                   String toolWhitelist, int maxTodos) {
         String template = firstNonBlank(
                 currentPrompts().getPlanningTodosStage(),
                 loadPromptFileFromClasspath("prompts/todo/planning_todos_stage.txt")
         );
-        String modeGuidance = "DAG".equalsIgnoreCase(overallPlan.mode())
+        String modeGuidance = "DAG".equalsIgnoreCase(mode)
                 ? "当前是 DAG 模式，请通过 dependsOn 表达任务依赖关系。"
                 : "当前是 LINEAR 模式，按 sequence 顺序执行即可。";
 
         return render(template, Map.of(
-                "mode", overallPlan.mode(),
-                "detail", overallPlan.detail(),
+                "mode", safe(mode),
+                "detail", safe(detail),
                 "modeGuidance", modeGuidance,
                 "toolWhitelist", safe(toolWhitelist),
                 "maxTodos", String.valueOf(maxTodos)

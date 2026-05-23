@@ -16,7 +16,7 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.test.util.ReflectionTestUtils;
 import world.willfrog.agent.platform.context.AgentContext;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agent.tools.router.ToolRouter;
 

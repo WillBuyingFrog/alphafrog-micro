@@ -3,7 +3,9 @@ package world.willfrog.agentlangchain.planning;
 import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.AiServices;
+import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoStatus;
@@ -16,9 +18,12 @@ import java.util.Set;
 import java.util.stream.Collectors;
 
 @Service
+@RequiredArgsConstructor
 public class LangchainAiPlanner {
 
     private static final int DEFAULT_MAX_TODOS = 10;
+
+    private final AgentPromptService promptService;
 
     public LangchainTodoPlan plan(LangchainPlanningRequest request) {
         validate(request);
@@ -26,14 +31,16 @@ public class LangchainAiPlanner {
         PlanExecutionMode mode = request.getExecutionMode() == null
                 ? PlanExecutionMode.LINEAR
                 : request.getExecutionMode();
+        String toolList = buildToolList(request.getToolSpecifications());
 
         LangchainPlannerAiService service = AiServices.builder(LangchainPlannerAiService.class)
                 .chatModel(request.getModel())
+                .systemMessageProvider(ignored -> promptService.todoPlannerSystemPrompt(toolList, maxTodos))
                 .build();
         LangchainTodoPlanResponse response = service.plan(
-                nvl(request.getUserGoal()),
+                promptService.dynamicContextPrefix() + "\n" + nvl(request.getUserGoal()),
                 nvl(request.getDialogueContext()),
-                buildToolList(request.getToolSpecifications()),
+                toolList,
                 mode.name(),
                 maxTodos
         );

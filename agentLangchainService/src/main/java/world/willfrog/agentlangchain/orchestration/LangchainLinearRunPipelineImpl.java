@@ -5,7 +5,6 @@ import dev.langchain4j.agent.tool.ToolSpecification;
 import dev.langchain4j.data.message.UserMessage;
 import dev.langchain4j.invocation.InvocationContext;
 import dev.langchain4j.invocation.InvocationParameters;
-import dev.langchain4j.model.chat.ChatModel;
 import dev.langchain4j.service.tool.ToolProvider;
 import dev.langchain4j.service.tool.ToolProviderRequest;
 import lombok.extern.slf4j.Slf4j;
@@ -16,7 +15,6 @@ import world.willfrog.agent.platform.context.AgentContext;
 import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.mapper.AgentRunMapper;
 import world.willfrog.agent.platform.model.AgentRunStatus;
-import world.willfrog.agent.platform.service.AgentAiServiceFactory;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agentlangchain.tools.LangchainToolInvocationKeys;
@@ -31,26 +29,26 @@ import java.util.concurrent.Executor;
 public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipeline {
 
     private final LangchainLinearWorkflowExecutor workflowExecutor;
+    private final LangchainRunStageModelResolver stageModelResolver;
     private final AgentRunMapper runMapper;
     private final AgentEventService eventService;
-    private final AgentAiServiceFactory aiServiceFactory;
     private final ObjectMapper objectMapper;
     private final ObjectProvider<ToolProvider> toolProviderProvider;
     private final ObjectProvider<AgentRunStateStore> stateStoreProvider;
     private final Executor langchainRunTaskExecutor;
 
     public LangchainLinearRunPipelineImpl(LangchainLinearWorkflowExecutor workflowExecutor,
+                                          LangchainRunStageModelResolver stageModelResolver,
                                           AgentRunMapper runMapper,
                                           AgentEventService eventService,
-                                          AgentAiServiceFactory aiServiceFactory,
                                           ObjectMapper objectMapper,
                                           ObjectProvider<ToolProvider> toolProviderProvider,
                                           ObjectProvider<AgentRunStateStore> stateStoreProvider,
                                           @Qualifier("agentLangchainRunTaskExecutor") Executor langchainRunTaskExecutor) {
         this.workflowExecutor = workflowExecutor;
+        this.stageModelResolver = stageModelResolver;
         this.runMapper = runMapper;
         this.eventService = eventService;
-        this.aiServiceFactory = aiServiceFactory;
         this.objectMapper = objectMapper;
         this.toolProviderProvider = toolProviderProvider;
         this.stateStoreProvider = stateStoreProvider;
@@ -87,9 +85,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     "workflow", "linear"
             ));
 
-            String endpointName = eventService.extractEndpointName(run.getExt());
-            String modelName = eventService.extractModelName(run.getExt());
-            ChatModel model = aiServiceFactory.buildChatModel(endpointName, modelName);
+            LangchainRunStageModelResolver.StageModels stageModels = stageModelResolver.resolve(run);
             String userGoal = eventService.extractUserGoal(run.getExt());
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
             AgentContext.setWebSearchEnabled(runConfig.webSearchEnabled());
@@ -101,7 +97,10 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     .userId(userId)
                     .userGoal(userGoal)
                     .dialogueContext("")
-                    .model(model)
+                    .model(stageModels.executionModel())
+                    .planningModel(stageModels.planningModel())
+                    .executionModel(stageModels.executionModel())
+                    .finalAnswerModel(stageModels.finalAnswerModel())
                     .toolSpecifications(toolSpecifications)
                     .webSearchEnabled(runConfig.webSearchEnabled())
                     .codeInterpreterEnabled(runConfig.codeInterpreterEnabled())

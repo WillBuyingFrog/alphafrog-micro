@@ -32,6 +32,8 @@ dubbo:
     use-as-metadata-center: false
   consumer:
     check: false
+  provider:
+    timeout: ${AF_DUBBO_PROVIDER_TIMEOUT_MS:10000}
 
 agent:
   langchain:

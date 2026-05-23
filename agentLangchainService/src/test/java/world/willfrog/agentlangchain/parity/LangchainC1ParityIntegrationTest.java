@@ -11,7 +11,7 @@ import world.willfrog.agentlangchain.orchestration.LangchainLinearRunPipelineImp
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowExecutor;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowRequest;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowResult;
-import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
+import world.willfrog.agentlangchain.support.LangchainTestFixtures;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -27,7 +27,8 @@ import static org.assertj.core.api.Assertions.assertThat;
 class LangchainC1ParityIntegrationTest {
 
     private final LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
-            new LangchainAiPlanner(),
+            LangchainTestFixtures.planner(),
+            LangchainTestFixtures.promptService(),
             Optional.empty()
     );
 

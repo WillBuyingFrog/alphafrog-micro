@@ -27,7 +27,7 @@ import world.willfrog.agent.graph.SubAgentRunner;
 import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agent.tools.router.ToolRouter;
 

@@ -16,7 +16,7 @@ import world.willfrog.agent.platform.context.AgentContext;
 import world.willfrog.agent.platform.config.CodeRefineProperties;
 import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.CodeRefineLocalConfigLoader;
 import world.willfrog.agent.tools.router.ToolRouter;
 

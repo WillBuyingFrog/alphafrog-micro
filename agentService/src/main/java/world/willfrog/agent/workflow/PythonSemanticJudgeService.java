@@ -19,7 +19,7 @@ import world.willfrog.agent.platform.service.AgentAiServiceFactory;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.platform.service.JudgeModelSelectorService;
 
 import java.util.ArrayList;

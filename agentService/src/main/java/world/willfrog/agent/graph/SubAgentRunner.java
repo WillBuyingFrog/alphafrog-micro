@@ -21,7 +21,7 @@ import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.tools.router.ToolRouter;
 import world.willfrog.agent.workflow.StructuredPlanningSupport;
 import world.willfrog.agent.workflow.TodoExecutionRecord;

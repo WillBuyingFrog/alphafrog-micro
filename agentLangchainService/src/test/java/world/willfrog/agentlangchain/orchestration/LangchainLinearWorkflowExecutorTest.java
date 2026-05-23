@@ -6,7 +6,7 @@ import dev.langchain4j.model.chat.request.ChatRequest;
 import dev.langchain4j.model.chat.response.ChatResponse;
 import org.junit.jupiter.api.Test;
 import world.willfrog.agent.platform.context.AgentContext;
-import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
+import world.willfrog.agentlangchain.support.LangchainTestFixtures;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +34,8 @@ class LangchainLinearWorkflowExecutorTest {
                 "final answer"
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
-                new LangchainAiPlanner(),
+                LangchainTestFixtures.planner(),
+                LangchainTestFixtures.promptService(),
                 Optional.empty()
         );
 
@@ -67,7 +68,8 @@ class LangchainLinearWorkflowExecutorTest {
                 "   "
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
-                new LangchainAiPlanner(),
+                LangchainTestFixtures.planner(),
+                LangchainTestFixtures.promptService(),
                 Optional.empty()
         );
 

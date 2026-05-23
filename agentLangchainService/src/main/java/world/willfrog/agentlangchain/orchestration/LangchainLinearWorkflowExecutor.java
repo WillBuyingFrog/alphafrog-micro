@@ -5,6 +5,7 @@ import dev.langchain4j.service.tool.ToolProvider;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.service.AgentPromptService;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
@@ -23,6 +24,7 @@ public class LangchainLinearWorkflowExecutor {
     private static final int DEFAULT_MAX_TOOL_ROUND_TRIPS = 8;
 
     private final LangchainAiPlanner planner;
+    private final AgentPromptService promptService;
     private final Optional<ToolProvider> toolProvider;
 
     public LangchainLinearWorkflowResult execute(LangchainLinearWorkflowRequest request) {
@@ -50,7 +52,7 @@ public class LangchainLinearWorkflowExecutor {
                 AgentContext.setTodoContext(item.getId(), item.getSequence());
                 String output = buildTodoExecutor(request, toolCalls)
                         .execute(
-                                request.getUserGoal(),
+                                promptService.dynamicContextPrefix() + "\n" + request.getUserGoal(),
                                 renderCompletedTodos(completedTodos),
                                 item.getDescription()
                         );
@@ -69,7 +71,11 @@ public class LangchainLinearWorkflowExecutor {
             AgentContext.setPhase("summarizing");
             AgentContext.setStage("final_answer");
             String finalAnswer = buildFinalAnswerWriter(request)
-                    .answer(request.getUserGoal(), renderCompletedTodos(completedTodos));
+                    .answer(
+                            promptService.dynamicContextPrefix() + "\n"
+                                    + promptService.finalAnswerStageInstruction() + "\n\n"
+                                    + request.getUserGoal(),
+                            renderCompletedTodos(completedTodos));
             if (isBlank(finalAnswer)) {
                 return failure(plan, completedTodos, "empty_final_answer", toolCalls.get());
             }
@@ -96,6 +102,7 @@ public class LangchainLinearWorkflowExecutor {
         AiServices<LangchainTodoExecutionAiService> builder = AiServices
                 .builder(LangchainTodoExecutionAiService.class)
                 .chatModel(request.executionModelOrDefault())
+                .systemMessageProvider(ignored -> promptService.dagReactSystemPrompt())
                 .maxToolCallingRoundTrips(resolveMaxToolRoundTrips(request.getMaxToolRoundTrips()))
                 .afterToolExecution(ignored -> toolCalls.incrementAndGet());
         toolProvider.ifPresent(builder::toolProvider);
@@ -105,6 +112,7 @@ public class LangchainLinearWorkflowExecutor {
     private LangchainFinalAnswerAiService buildFinalAnswerWriter(LangchainLinearWorkflowRequest request) {
         return AiServices.builder(LangchainFinalAnswerAiService.class)
                 .chatModel(request.finalAnswerModelOrDefault())
+                .systemMessageProvider(ignored -> promptService.workflowFinalSystemPrompt())
                 .build();
     }
 

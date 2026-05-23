@@ -6,6 +6,7 @@ import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.context.annotation.ComponentScan;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Import;
+import org.springframework.scheduling.annotation.EnableAsync;
 import org.springframework.scheduling.annotation.EnableScheduling;
 import world.willfrog.agent.tools.AgentToolsAutoConfiguration;
 import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
@@ -14,11 +15,12 @@ import world.willfrog.alphafrogmicro.common.config.nacos.NacosConfigBridge;
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
 @EnableDubbo
 @EnableScheduling
-@MapperScan("world.willfrog.agent.platform.mapper")
-@ComponentScan(basePackages = {
-        "world.willfrog.agent.platform",
+@EnableAsync
+@MapperScan({
+        "world.willfrog.agent.platform.mapper",
         "world.willfrog.alphafrogmicro.common.dao"
 })
+@ComponentScan(basePackages = "world.willfrog.agent.platform")
 @Import({AgentToolsAutoConfiguration.class, NacosConfigBridge.class})
 public class LangchainProviderRuntimeConfiguration {
 }
