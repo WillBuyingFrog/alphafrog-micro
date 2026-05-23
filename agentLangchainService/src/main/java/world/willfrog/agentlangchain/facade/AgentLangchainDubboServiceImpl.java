@@ -2,6 +2,7 @@ package world.willfrog.agentlangchain.facade;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.apache.dubbo.config.annotation.Method;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import world.willfrog.agentlangchain.facade.AgentLangchainRunService;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
@@ -49,7 +50,13 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 
-@DubboService(group = "${agent.langchain.provider.dubbo-group:langchain}")
+@DubboService(
+        group = "${agent.langchain.provider.dubbo-group:langchain}",
+        methods = {
+                @Method(name = "createRun"),
+                @Method(name = "createRunAsync")
+        }
+)
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class AgentLangchainDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {
