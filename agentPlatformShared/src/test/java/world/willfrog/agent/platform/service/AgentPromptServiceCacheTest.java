@@ -19,12 +19,7 @@ import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.when;
 
 /**
- * AgentPromptService 的 Prompt 完全静态化测试。
- *
- * <p>验证系统 Prompt 不包含任何动态内容（如日期），使 System Prompt
- * 在不同请求间保持字节级相同，最大化 LLM provider 的 Prompt Caching 命中率。</p>
- *
- * <p>动态上下文（日期）应通过 {@code dynamicContextPrefix()} 注入到 User Message。</p>
+ * AgentPromptService 的 system prompt 组装与时间基准测试。
  */
 @ExtendWith(MockitoExtension.class)
 class AgentPromptServiceCacheTest {
@@ -48,25 +43,22 @@ class AgentPromptServiceCacheTest {
     }
 
     @Test
-    void composeSystemPrompt_globalPromptShouldBeAtBeginning() {
+    void composeSystemPrompt_shouldInjectTimeBaselineBeforeGlobal() {
         String prompt = promptService.agentRunSystemPrompt();
-        assertTrue(prompt.startsWith(GLOBAL_PROMPT),
-                "系统 Prompt 应以全局指令开头（静态前缀），当前: " + prompt.substring(0, Math.min(prompt.length(), 50)));
+        LocalDate today = LocalDate.now();
+        assertTrue(prompt.startsWith("当前时间：" + today.format(CN_DATE_FORMATTER)),
+                "系统 Prompt 应以时间基准前缀开头");
+        assertTrue(prompt.contains(GLOBAL_PROMPT), "时间基准后应拼接全局指令");
     }
 
     @Test
-    void composeSystemPrompt_shouldNotContainDate() {
+    void composeSystemPrompt_shouldMapRelativeYearsFromToday() {
         String prompt = promptService.agentRunSystemPrompt();
-        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
-        assertFalse(prompt.contains(todayLine),
-                "System Prompt 不应包含日期（日期应通过 dynamicContextPrefix 注入到 User Message）");
-    }
-
-    @Test
-    void composeSystemPrompt_shouldBeFullyStatic() {
-        String prompt = promptService.agentRunSystemPrompt();
-        assertEquals(GLOBAL_PROMPT, prompt,
-                "仅含全局指令时，System Prompt 应完全等于全局指令（无动态后缀）");
+        int thisYear = LocalDate.now().getYear();
+        assertTrue(prompt.contains("说去年，指" + (thisYear - 1) + "年"),
+                "时间基准应包含由当前年推算的去年示例");
+        assertTrue(prompt.contains("说再上一年，指" + (thisYear - 2) + "年"),
+                "时间基准应包含由当前年推算的再上一年示例");
     }
 
     @Test
@@ -77,38 +69,35 @@ class AgentPromptServiceCacheTest {
     }
 
     @Test
-    void todoPlannerPrompt_globalPrefixShouldBeStable() {
+    void todoPlannerPrompt_timeBaselinePrefixShouldBeStableAcrossTemplates() {
         String prompt1 = promptService.todoPlannerSystemPrompt("searchIndex, queryFund", 5);
         String prompt2 = promptService.todoPlannerSystemPrompt("differentTool", 10);
-        assertTrue(prompt1.startsWith(GLOBAL_PROMPT), "全局指令应在 Prompt 开头");
-        assertTrue(prompt2.startsWith(GLOBAL_PROMPT), "全局指令应在 Prompt 开头");
-        String prefix1 = prompt1.substring(0, GLOBAL_PROMPT.length());
-        String prefix2 = prompt2.substring(0, GLOBAL_PROMPT.length());
-        assertEquals(prefix1, prefix2, "不同动态参数下，全局指令前缀应字节级相同");
+        assertTrue(prompt1.startsWith("当前时间：" + LocalDate.now().format(CN_DATE_FORMATTER)),
+                "todo planner 应以时间基准前缀开头");
+        int globalAt1 = prompt1.indexOf(GLOBAL_PROMPT);
+        int globalAt2 = prompt2.indexOf(GLOBAL_PROMPT);
+        assertTrue(globalAt1 > 0 && globalAt2 > 0);
+        assertEquals(prompt1.substring(0, globalAt1), prompt2.substring(0, globalAt2),
+                "不同模板下，时间基准前缀应字节级一致");
     }
 
     @Test
-    void todoPlannerPrompt_shouldNotContainDate() {
-        String prompt = promptService.todoPlannerSystemPrompt("searchIndex", 5);
-        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
-        assertFalse(prompt.contains(todayLine),
-                "todo planner 的 System Prompt 不应包含日期");
-    }
-
-    @Test
-    void dynamicContextPrefix_shouldContainTodayDate() {
+    void dynamicContextPrefix_shouldContainTodayDateOnly() {
         String prefix = promptService.dynamicContextPrefix();
-        String todayLine = "今天是" + LocalDate.now().format(CN_DATE_FORMATTER) + "。";
-        assertEquals(todayLine, prefix, "动态上下文前缀应包含今天日期");
+        LocalDate today = LocalDate.now();
+        String todayLine = "今天是" + today.format(CN_DATE_FORMATTER) + "。";
+        assertEquals(todayLine, prefix, "动态上下文前缀应仅包含今天日期，不做短语级硬编码替换");
     }
 
     // ─── ReAct 统一 System Prompt + Stage Instruction 测试 ───
 
     @Test
-    void reactSystemPrompt_shouldReturnGlobalOnly() {
+    void reactSystemPrompt_shouldReturnGlobalWithTimeBaseline() {
         String reactSys = promptService.reactSystemPrompt();
-        assertEquals(GLOBAL_PROMPT, reactSys,
-                "reactSystemPrompt 应只返回全局指令，不包含任何 stage-specific 内容");
+        assertTrue(reactSys.startsWith("当前时间：" + LocalDate.now().format(CN_DATE_FORMATTER)),
+                "reactSystemPrompt 应含时间基准前缀");
+        assertTrue(reactSys.contains(GLOBAL_PROMPT),
+                "reactSystemPrompt 应包含全局指令，不包含 stage-specific 内容");
     }
 
     @Test

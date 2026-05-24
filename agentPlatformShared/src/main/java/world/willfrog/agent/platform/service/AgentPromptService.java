@@ -7,6 +7,7 @@ import world.willfrog.agent.platform.config.AgentLlmProperties;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -19,7 +20,7 @@ import java.util.Locale;
  * <ul>
  *   <li><b>全局 System Prompt</b>:{@code agentRunSystemPrompt} 角色与全局指令,在所有阶段共享。</li>
  *   <li><b>阶段 System Prompt</b>:为每个阶段提供专用 prompt(planner / final / recovery / judge 等)。</li>
- *   <li><b>Stage Instruction</b>(#28 重构):为兼顾 KV 前缀缓存命中率,统一 System Prompt 改为静态,
+ *   <li><b>Stage Instruction</b>(#28 重构):为兼顾 KV 前缀缓存命中率,统一 System Prompt 只保留通用上下文,
  *       阶段差异通过 {@link #planningAnalysisStageInstruction}、
  *       {@link #finalAnswerStageInstruction}、{@link #planJudgeStageInstruction}
  *       等方法返回的指令注入到 User Message。</li>
@@ -27,10 +28,10 @@ import java.util.Locale;
  *       由 ReactTodoExecutor 在构造系统消息时使用。</li>
  * </ul>
  *
- * <h3>动态内容隔离</h3>
- * 日期等会逐天变化的内容已从 System Prompt 中移除,改为通过 {@link #dynamicContextPrefix()}
- * 注入到 User Message 开头。这样 System Prompt 在整次 run 中字节级一致,
- * 最大化 Fireworks / OpenRouter 的 KV 前缀缓存命中率。
+ * <h3>时间基准（harness）</h3>
+ * {@link #composeSystemPrompt(String)} 在所有阶段 system prompt 开头注入当前时间与相对日期推理规则
+ * （{@code LocalDate.now()}，含示例年份映射）。User message 仍可通过 {@link #dynamicContextPrefix()}
+ * 重复「今天是…」作为第二锚点。按日变化的 system 前缀会削弱跨日 KV 缓存命中，但优先保证时间推理正确。
  *
  * <h3>配置加载优先级</h3>
  * 所有 prompts 字段都通过 {@link #currentPrompts()} 合并加载,优先级为:
@@ -426,11 +427,10 @@ public class AgentPromptService {
     // ─────────────────────────────────────────────────────────────
 
     /**
-     * 统一的 ReAct System Prompt —— 仅包含全局指令，所有阶段共享。
+     * 统一的 ReAct System Prompt —— 仅包含时间基准与全局指令，所有阶段共享。
      *
      * <p>Stage-specific 指令改为通过 {@code stageInstruction()} 方法注入到 User Message，
-     * 使得 System Prompt 在整个 Agent Run 生命周期内保持字节级一致，
-     * 最大化 Fireworks / OpenRouter 的 KV 前缀缓存命中率。</p>
+     * 使得 System Prompt 在整个 Agent Run 生命周期内保持稳定的通用前缀。</p>
      *
      * @see #planningAnalysisStageInstruction(String, int)
      * @see #planningStructuredStageInstruction()
@@ -438,7 +438,7 @@ public class AgentPromptService {
      * @see #finalAnswerStageInstruction()
      */
     public String reactSystemPrompt() {
-        return firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), "");
+        return composeSystemPrompt(firstNonBlank(currentPrompts().getAgentRunSystemPrompt(), ""));
     }
 
     /**
@@ -655,19 +655,10 @@ public class AgentPromptService {
     }
 
     /**
-     * 组合系统 Prompt（Cache 优化版本）。
+     * 组合系统 Prompt：时间基准前缀 + 全局指令 + 阶段/角色指令。
      *
-     * <p>Prompt 完全静态化：仅包含不变的全局指令 + 角色/任务指令，
-     * 日期等动态内容由调用方通过 {@link #dynamicContextPrefix()} 注入到 User Message，
-     * 实现 System Prompt 字节级一致，最大化 LLM provider 的 Prompt Caching 命中率。</p>
-     *
-     * <pre>
-     * ┌────────────────────────────────────┐
-     * │ [完全静态 - 100% 可缓存]            │
-     * │ ├── 全局系统指令 (global)           │
-     * │ └── 角色/任务指令 (specific)        │
-     * └────────────────────────────────────┘
-     * </pre>
+     * <p>首段为动态的「当前时间」与相对日期示例（由 {@code LocalDate.now()} 计算），
+     * 其后为配置中的 global / specific 静态正文。</p>
      *
      * @see #dynamicContextPrefix()
      */
@@ -676,6 +667,20 @@ public class AgentPromptService {
         String specific = firstNonBlank(specificPrompt, "");
 
         List<String> parts = new ArrayList<>();
+        // 时间基准：让 LLM 正确推理相对日期表述
+        LocalDate today = LocalDate.now();
+        int thisYear = today.getYear();
+        int lastYear = thisYear - 1;
+        int yearBeforeLast = thisYear - 2;
+        parts.add(String.format(
+                "当前时间：%s（%s）。所有涉及日期、时间、年份的推理必须以当前时间为基准。"
+                + "例如：用户说%d年，指%d年；说去年，指%d年；说今年，指%d年；"
+                + "说上一年，指%d年；说再上一年，指%d年。",
+                today.format(CN_DATE_FORMATTER),
+                today.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.CHINESE),
+                thisYear, thisYear,
+                lastYear, thisYear,
+                lastYear, yearBeforeLast));
         if (!global.isBlank()) {
             parts.add(global);
         }
