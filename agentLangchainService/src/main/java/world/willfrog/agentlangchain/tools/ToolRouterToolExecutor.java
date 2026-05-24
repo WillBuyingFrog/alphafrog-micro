@@ -27,11 +27,17 @@ final class ToolRouterToolExecutor implements ToolExecutor {
     @Override
     public String execute(ToolExecutionRequest request, Object memoryId) {
         Map<String, Object> params = parseArguments(request.arguments());
+        LangchainRepeatedToolCallGuard.Decision repeatDecision =
+                LangchainRepeatedToolCallGuard.beforeInvoke(request.name(), params, objectMapper);
+        if (repeatDecision.blocked()) {
+            return repeatDecision.outputOrHint();
+        }
         String output = toolRouter.invokeWithMeta(request.name(), params).getOutput();
         Map<String, String> datasetRefs = LangchainDatasetRefContext.snapshot();
         DatasetRefRegistry.registerFromJson(output, datasetRefs);
         LangchainDatasetRefContext.set(datasetRefs);
-        return appendDatasetRetryHintIfNeeded(output, datasetRefs);
+        output = appendDatasetRetryHintIfNeeded(output, datasetRefs);
+        return appendRepeatedToolCallHintIfNeeded(output, repeatDecision);
     }
 
     @Override
@@ -62,8 +68,10 @@ final class ToolRouterToolExecutor implements ToolExecutor {
         }
         String lower = output.toLowerCase();
         boolean datasetError = lower.contains("missing_dataset_ids")
-                || lower.contains("dataset_ids")
-                || lower.contains("dataset_id directory not found");
+                || lower.contains("missing dataset_ids")
+                || lower.contains("invalid dataset_ids")
+                || lower.contains("dataset_id directory not found")
+                || (lower.contains("dataset_ids") && containsFailureWord(lower));
         if (!datasetError) {
             return output;
         }
@@ -77,5 +85,23 @@ final class ToolRouterToolExecutor implements ToolExecutor {
             hint.append("Call a market data tool first and use the returned data.dataset_id or data.dataset_ids exactly.");
         }
         return hint.toString();
+    }
+
+    private boolean containsFailureWord(String lowerOutput) {
+        return lowerOutput.contains("error")
+                || lowerOutput.contains("failed")
+                || lowerOutput.contains("failure")
+                || lowerOutput.contains("missing")
+                || lowerOutput.contains("invalid")
+                || lowerOutput.contains("not found");
+    }
+
+    private String appendRepeatedToolCallHintIfNeeded(String output,
+                                                      LangchainRepeatedToolCallGuard.Decision repeatDecision) {
+        if (repeatDecision == null || !repeatDecision.repeated() || repeatDecision.blocked()) {
+            return output;
+        }
+        String base = output == null ? "" : output;
+        return base + "\n\n_retry_hint_: " + repeatDecision.outputOrHint();
     }
 }

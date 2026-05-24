@@ -18,6 +18,13 @@ import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
+import world.willfrog.agent.workflow.PlanExecutionMode;
+import world.willfrog.agentlangchain.orchestration.dag.LangchainDagWorkflowExecutor;
+import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
+import world.willfrog.agentlangchain.planning.LangchainPlanningRequest;
+import world.willfrog.agentlangchain.planning.LangchainTodoPlan;
+import world.willfrog.agentlangchain.failure.LangchainFailureDecision;
+import world.willfrog.agentlangchain.failure.LangchainFailureMapper;
 import world.willfrog.agentlangchain.tools.LangchainToolInvocationKeys;
 
 import java.util.LinkedHashMap;
@@ -29,7 +36,9 @@ import java.util.concurrent.Executor;
 @Slf4j
 public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipeline {
 
-    private final LangchainLinearWorkflowExecutor workflowExecutor;
+    private final LangchainAiPlanner planner;
+    private final LangchainLinearWorkflowExecutor linearWorkflowExecutor;
+    private final LangchainDagWorkflowExecutor dagWorkflowExecutor;
     private final LangchainRunStageModelResolver stageModelResolver;
     private final AgentRunMapper runMapper;
     private final AgentEventService eventService;
@@ -37,9 +46,12 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
     private final ObjectProvider<ToolProvider> toolProviderProvider;
     private final ObjectProvider<AgentRunStateStore> stateStoreProvider;
     private final ObjectProvider<AgentObservabilityService> observabilityServiceProvider;
+    private final LangchainFailureMapper failureMapper;
     private final Executor langchainRunTaskExecutor;
 
-    public LangchainLinearRunPipelineImpl(LangchainLinearWorkflowExecutor workflowExecutor,
+    public LangchainLinearRunPipelineImpl(LangchainAiPlanner planner,
+                                          LangchainLinearWorkflowExecutor linearWorkflowExecutor,
+                                          LangchainDagWorkflowExecutor dagWorkflowExecutor,
                                           LangchainRunStageModelResolver stageModelResolver,
                                           AgentRunMapper runMapper,
                                           AgentEventService eventService,
@@ -47,8 +59,11 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                                           ObjectProvider<ToolProvider> toolProviderProvider,
                                           ObjectProvider<AgentRunStateStore> stateStoreProvider,
                                           ObjectProvider<AgentObservabilityService> observabilityServiceProvider,
+                                          LangchainFailureMapper failureMapper,
                                           @Qualifier("agentLangchainRunTaskExecutor") Executor langchainRunTaskExecutor) {
-        this.workflowExecutor = workflowExecutor;
+        this.planner = planner;
+        this.linearWorkflowExecutor = linearWorkflowExecutor;
+        this.dagWorkflowExecutor = dagWorkflowExecutor;
         this.stageModelResolver = stageModelResolver;
         this.runMapper = runMapper;
         this.eventService = eventService;
@@ -56,6 +71,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         this.toolProviderProvider = toolProviderProvider;
         this.stateStoreProvider = stateStoreProvider;
         this.observabilityServiceProvider = observabilityServiceProvider;
+        this.failureMapper = failureMapper;
         this.langchainRunTaskExecutor = langchainRunTaskExecutor;
     }
 
@@ -75,6 +91,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         }
         String runId = run.getId();
         String userId = run.getUserId();
+        String userGoal = "";
         try {
             AgentContext.setRunId(runId);
             AgentContext.setUserId(userId);
@@ -86,7 +103,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
             eventService.append(runId, userId, "EXECUTION_STARTED", Map.of(
                     "run_id", runId,
                     "engine", "agentLangchainService",
-                    "workflow", "linear"
+                    "workflow", "pending_plan"
             ));
 
             LangchainRunStageModelResolver.StageModels stageModels = stageModelResolver.resolve(run);
@@ -99,13 +116,13 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                         firstNonBlank(stageModels.planningModelName(), eventService.extractModelName(run.getExt())),
                         captureLlmRequests);
             }
-            String userGoal = eventService.extractUserGoal(run.getExt());
+            userGoal = eventService.extractUserGoal(run.getExt());
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
             AgentContext.setWebSearchEnabled(runConfig.webSearchEnabled());
             AgentContext.setWebSearchConfig(runConfig.webSearchConfig());
 
             List<ToolSpecification> toolSpecifications = resolveToolSpecifications(runConfig, userGoal);
-            LangchainLinearWorkflowResult result = workflowExecutor.execute(LangchainLinearWorkflowRequest.builder()
+            LangchainLinearWorkflowRequest workflowRequest = LangchainLinearWorkflowRequest.builder()
                     .runId(runId)
                     .userId(userId)
                     .userGoal(userGoal)
@@ -120,11 +137,37 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     .toolSpecifications(toolSpecifications)
                     .webSearchEnabled(runConfig.webSearchEnabled())
                     .codeInterpreterEnabled(runConfig.codeInterpreterEnabled())
+                    .build();
+
+            AgentContext.setPhase("planning");
+            LangchainTodoPlan plan = planner.plan(LangchainPlanningRequest.builder()
+                    .runId(runId)
+                    .userId(userId)
+                    .userGoal(userGoal)
+                    .dialogueContext("")
+                    .model(stageModels.planningModel())
+                    .planningEndpointName(stageModels.planningEndpointName())
+                    .planningModelName(stageModels.planningModelName())
+                    .planningProviderOrder(stageModels.planningProviderOrder())
+                    .toolSpecifications(toolSpecifications)
+                    .executionMode(PlanExecutionMode.AUTO)
                     .build());
+
+            boolean useDag = LangchainWorkflowRouting.shouldUseDag(plan);
+            eventService.append(runId, userId, "PLAN_READY", Map.of(
+                    "execution_mode", plan.getExecutionMode() == null ? "AUTO" : plan.getExecutionMode().name(),
+                    "workflow", useDag ? "dag" : "linear",
+                    "todo_count", plan.getItems() == null ? 0 : plan.getItems().size()
+            ));
+
+            LangchainLinearWorkflowResult result = useDag
+                    ? dagWorkflowExecutor.executePlanned(workflowRequest, plan)
+                    : linearWorkflowExecutor.executePlanned(workflowRequest, plan);
 
             runMapper.updatePlanJson(runId, userId, writeJson(result.getPlan()));
             if (result.isSuccess()) {
-                String snapshot = attachObservability(runId, buildSnapshot(userGoal, result, AgentRunStatus.COMPLETED), AgentRunStatus.COMPLETED, null);
+                String snapshot = attachObservability(
+                        runId, buildSnapshot(userGoal, result, AgentRunStatus.COMPLETED), AgentRunStatus.COMPLETED, null, null);
                 runMapper.updateSnapshot(runId, userId, AgentRunStatus.COMPLETED, snapshot, true, null);
                 markRunStatus(runId, AgentRunStatus.COMPLETED);
                 eventService.append(runId, userId, "WORKFLOW_COMPLETED", Map.of(
@@ -133,26 +176,17 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                         "engine", "agentLangchainService"
                 ));
             } else {
-                String failureReason = nvl(result.getFailureReason());
-                String snapshot = attachObservability(
-                        runId, buildSnapshot(userGoal, result, AgentRunStatus.FAILED), AgentRunStatus.FAILED, failureReason);
-                runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshot, true, result.getFailureReason());
-                markRunStatus(runId, AgentRunStatus.FAILED);
-                eventService.append(runId, userId, "WORKFLOW_FAILED", Map.of(
-                        "reason", failureReason,
-                        "engine", "agentLangchainService"
-                ));
+                publishFailure(runId, userId, userGoal, result, null);
             }
         } catch (Exception e) {
-            log.error("LangChain linear run failed: runId={}", runId, e);
-            String err = nvl(e.getMessage());
-            String snapshot = attachObservability(runId, "{}", AgentRunStatus.FAILED, err);
-            runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshot, true, e.getMessage());
-            markRunStatus(runId, AgentRunStatus.FAILED);
-            eventService.append(runId, userId, "WORKFLOW_FAILED", Map.of(
-                    "reason", err,
-                    "engine", "agentLangchainService"
-            ));
+            log.error("LangChain run failed: runId={}", runId, e);
+            publishFailure(runId, userId, userGoal,
+                    LangchainLinearWorkflowResult.builder()
+                            .success(false)
+                            .failureReason(e.getMessage())
+                            .toolCallsUsed(0)
+                            .build(),
+                    e);
         } finally {
             AgentContext.clear();
         }
@@ -226,13 +260,47 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         return fallback == null ? "" : fallback;
     }
 
-    private String attachObservability(String runId, String snapshot, AgentRunStatus status, String failureReason) {
+    private void publishFailure(String runId,
+                                String userId,
+                                String userGoal,
+                                LangchainLinearWorkflowResult result,
+                                Throwable throwable) {
+        String failureReason = nvl(result == null ? null : result.getFailureReason());
+        LangchainFailureDecision decision = failureMapper.map(
+                AgentContext.getPhase(),
+                AgentContext.getTodoId(),
+                null,
+                failureReason,
+                null,
+                throwable,
+                result == null ? null : result.getToolCallsUsed());
+        String snapshot = attachObservability(
+                runId,
+                buildSnapshot(userGoal, result, AgentRunStatus.FAILED),
+                AgentRunStatus.FAILED,
+                decision.getObservabilityFailureType(),
+                decision.getReason());
+        runMapper.updateSnapshot(runId, userId, AgentRunStatus.FAILED, snapshot, true, decision.getReason());
+        markRunStatus(runId, AgentRunStatus.FAILED);
+        Map<String, Object> payload = new LinkedHashMap<>(decision.getEventPayload());
+        payload.put("engine", "agentLangchainService");
+        eventService.append(runId, userId, decision.getEventType(), payload);
+    }
+
+    private String attachObservability(String runId,
+                                       String snapshot,
+                                       AgentRunStatus status,
+                                       String observabilityFailureType,
+                                       String failureReason) {
         AgentObservabilityService observabilityService = observabilityServiceProvider.getIfAvailable();
         if (observabilityService == null) {
             return snapshot;
         }
         if (status == AgentRunStatus.FAILED && !isBlank(failureReason)) {
-            observabilityService.recordFailure(runId, "WorkflowFailed", failureReason);
+            observabilityService.recordFailure(
+                    runId,
+                    isBlank(observabilityFailureType) ? "WorkflowFailed" : observabilityFailureType,
+                    failureReason);
         }
         return observabilityService.attachObservabilityToSnapshot(runId, snapshot, status);
     }

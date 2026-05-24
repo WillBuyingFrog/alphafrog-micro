@@ -11,7 +11,7 @@
     <artifactId>agentLangchainService</artifactId>
     <packaging>jar</packaging>
     <name>agentLangchainService</name>
-    <description>P0 skeleton: LangChain4j-based agent microservice</description>
+    <description>LangChain4j-based agent microservice (P1 Linear; P2 DAG + agentic POC profile)</description>
 
     <dependencies>
         <dependency>
@@ -104,4 +104,52 @@
             </plugin>
         </plugins>
     </build>
+
+    <profiles>
+        <!-- P2-D: langchain4j-agentic beta; not on default compile/test classpath -->
+        <profile>
+            <id>agentic-poc</id>
+            <dependencies>
+                <dependency>
+                    <groupId>dev.langchain4j</groupId>
+                    <artifactId>langchain4j-agentic</artifactId>
+                </dependency>
+            </dependencies>
+            <build>
+                <plugins>
+                    <plugin>
+                        <groupId>org.codehaus.mojo</groupId>
+                        <artifactId>build-helper-maven-plugin</artifactId>
+                        <version>3.5.0</version>
+                        <executions>
+                            <execution>
+                                <id>add-agentic-poc-sources</id>
+                                <phase>generate-sources</phase>
+                                <goals>
+                                    <goal>add-source</goal>
+                                </goals>
+                                <configuration>
+                                    <sources>
+                                        <source>src/agentic-poc/java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                            <execution>
+                                <id>add-agentic-poc-test-sources</id>
+                                <phase>generate-test-sources</phase>
+                                <goals>
+                                    <goal>add-test-source</goal>
+                                </goals>
+                                <configuration>
+                                    <sources>
+                                        <source>src/agentic-poc/test-java</source>
+                                    </sources>
+                                </configuration>
+                            </execution>
+                        </executions>
+                    </plugin>
+                </plugins>
+            </build>
+        </profile>
+    </profiles>
 </project>

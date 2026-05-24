@@ -28,8 +28,7 @@ class LangchainC1ParityIntegrationTest {
 
     private final LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
             LangchainTestFixtures.planner(),
-            LangchainTestFixtures.promptService(),
-            Optional.empty()
+            LangchainTestFixtures.todoNodeExecutor()
     );
 
     @Test

@@ -5,8 +5,12 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import world.willfrog.agent.platform.config.AgentLlmProperties;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentPromptService;
+import org.springframework.beans.factory.ObjectProvider;
+import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeExecutor;
 import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
 import world.willfrog.agentlangchain.planning.LangchainPlanningStructuredOutputSettings;
+
+import java.util.Optional;
 
 public final class LangchainTestFixtures {
 
@@ -43,5 +47,55 @@ public final class LangchainTestFixtures {
 
     public static LangchainAiPlanner planner() {
         return new LangchainAiPlanner(promptService(), structuredOutputSettings(), JsonMapper.builder().build());
+    }
+
+    public static LangchainTodoNodeExecutor todoNodeExecutor() {
+        ObjectProvider<dev.langchain4j.service.tool.ToolProvider> provider = new ObjectProvider<>() {
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getObject() {
+                return null;
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getObject(Object... args) {
+                return null;
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getIfAvailable() {
+                return null;
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getIfUnique() {
+                return null;
+            }
+        };
+        return new LangchainTodoNodeExecutor(promptService(), provider);
+    }
+
+    public static LangchainTodoNodeExecutor todoNodeExecutor(Optional<dev.langchain4j.service.tool.ToolProvider> toolProvider) {
+        ObjectProvider<dev.langchain4j.service.tool.ToolProvider> provider = new ObjectProvider<>() {
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getObject() {
+                return toolProvider.orElse(null);
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getObject(Object... args) {
+                return toolProvider.orElse(null);
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getIfAvailable() {
+                return toolProvider.orElse(null);
+            }
+
+            @Override
+            public dev.langchain4j.service.tool.ToolProvider getIfUnique() {
+                return toolProvider.orElse(null);
+            }
+        };
+        return new LangchainTodoNodeExecutor(promptService(), provider);
     }
 }

@@ -30,7 +30,9 @@ class LangchainLinearRunPipelineAsyncTest {
         taskExecutor.initialize();
 
         LangchainLinearRunPipelineImpl pipeline = new LangchainLinearRunPipelineImpl(
+                mock(world.willfrog.agentlangchain.planning.LangchainAiPlanner.class),
                 mock(LangchainLinearWorkflowExecutor.class),
+                mock(world.willfrog.agentlangchain.orchestration.dag.LangchainDagWorkflowExecutor.class),
                 mock(LangchainRunStageModelResolver.class),
                 mock(world.willfrog.agent.platform.mapper.AgentRunMapper.class),
                 mock(AgentEventService.class),
@@ -38,6 +40,7 @@ class LangchainLinearRunPipelineAsyncTest {
                 mock(ObjectProvider.class),
                 mock(ObjectProvider.class),
                 mock(ObjectProvider.class),
+                new world.willfrog.agentlangchain.failure.LangchainFailureMapper(),
                 taskExecutor
         ) {
             @Override

@@ -34,6 +34,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -73,6 +74,7 @@ class ToolRouterToolProviderTest {
     void tearDown() {
         AgentContext.clear();
         LangchainDatasetRefContext.clear();
+        LangchainRepeatedToolCallContext.clear();
     }
 
     @Test
@@ -167,6 +169,37 @@ class ToolRouterToolProviderTest {
         assertTrue(output.contains("dataset-hs300"));
         assertTrue(output.contains("dataset-zz500"));
         assertTrue(output.contains("placeholder/data/test"));
+    }
+
+    @Test
+    void toolExecutor_shouldWarnThenBlockRepeatedIdenticalToolCalls() {
+        when(toolRouter.invokeWithMeta(eq("searchWeb"), anyMap()))
+                .thenReturn(ToolRouter.ToolInvocationResult.builder()
+                        .output("{\"ok\":true}")
+                        .success(true)
+                        .durationMs(1)
+                        .build());
+
+        ToolProviderResult result = provider.provideTools(request(Map.of(
+                LangchainToolInvocationKeys.WEB_SEARCH_ENABLED, true
+        )));
+        ToolExecutor executor = result.toolExecutorByName("searchWeb");
+        assertNotNull(executor);
+        ToolExecutionRequest toolRequest = ToolExecutionRequest.builder()
+                .name("searchWeb")
+                .arguments("{\"query\":\"512800\",\"limit\":3}")
+                .build();
+
+        String first = executor.execute(toolRequest, "memory-1");
+        String second = executor.execute(toolRequest, "memory-1");
+        String third = executor.execute(toolRequest, "memory-1");
+
+        assertEquals("{\"ok\":true}", first);
+        assertTrue(second.contains("_retry_hint_"));
+        assertTrue(second.contains("Do not call searchWeb again with identical arguments"));
+        assertTrue(third.contains("\"code\":\"REPEATED_TOOL_CALL\""));
+        assertTrue(third.contains("_retry_hint_"));
+        verify(toolRouter, times(2)).invokeWithMeta(eq("searchWeb"), eq(Map.of("query", "512800", "limit", 3)));
     }
 
     @Test

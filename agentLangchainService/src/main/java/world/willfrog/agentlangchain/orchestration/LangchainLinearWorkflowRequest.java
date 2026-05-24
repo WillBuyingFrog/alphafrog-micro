@@ -29,15 +29,15 @@ public class LangchainLinearWorkflowRequest {
     private String planningModelName;
     private List<String> planningProviderOrder;
 
-    ChatModel planningModelOrDefault() {
+    public ChatModel planningModelOrDefault() {
         return planningModel == null ? model : planningModel;
     }
 
-    ChatModel executionModelOrDefault() {
+    public ChatModel executionModelOrDefault() {
         return executionModel == null ? model : executionModel;
     }
 
-    ChatModel finalAnswerModelOrDefault() {
+    public ChatModel finalAnswerModelOrDefault() {
         return finalAnswerModel == null ? model : finalAnswerModel;
     }
 }

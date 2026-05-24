@@ -35,8 +35,7 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.promptService(),
-                Optional.empty()
+                LangchainTestFixtures.todoNodeExecutor()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
@@ -69,8 +68,7 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.promptService(),
-                Optional.empty()
+                LangchainTestFixtures.todoNodeExecutor()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
@@ -102,8 +100,7 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.promptService(),
-                Optional.empty()
+                LangchainTestFixtures.todoNodeExecutor()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
