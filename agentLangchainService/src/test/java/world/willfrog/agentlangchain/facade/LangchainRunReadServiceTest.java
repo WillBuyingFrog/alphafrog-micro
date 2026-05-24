@@ -111,13 +111,12 @@ class LangchainRunReadServiceTest {
     }
 
     @Test
-    void getStatusSeparatesFullObservabilityFromSummary() {
+    void getStatusReturnsLightweightObservabilitySummaryOnly() {
         AgentRun run = run("{\"run_provider\":\"langchain\"}");
         run.setPlanJson("{\"items\":[]}");
         when(runMapper.findByIdAndUser("r1", "u1")).thenReturn(run);
         when(stateStore.loadPlan("r1")).thenReturn(java.util.Optional.empty());
         when(stateStore.buildProgressJson("r1", run.getPlanJson())).thenReturn("{\"progress\":true}");
-        when(observabilityService.loadObservabilityJson("r1", run.getSnapshotJson())).thenReturn("{\"full\":true}");
         when(observabilityService.loadObservabilitySummaryJson("r1", run.getSnapshotJson())).thenReturn("{\"summary\":true}");
         when(observabilityService.isFullObservabilityAvailable("r1", run.getSnapshotJson())).thenReturn(true);
         when(eventMapper.listByRunId("r1")).thenReturn(List.of());
@@ -128,9 +127,10 @@ class LangchainRunReadServiceTest {
                 .setId("r1")
                 .build());
 
-        assertEquals("{\"full\":true}", status.getObservabilityJson());
+        assertEquals("", status.getObservabilityJson());
         assertEquals("{\"summary\":true}", status.getObservabilitySummaryJson());
         assertTrue(status.getObservabilityFullAvailable());
+        verify(observabilityService, never()).loadObservabilityJson(anyString(), any());
     }
 
     private AgentRun run(String ext) {

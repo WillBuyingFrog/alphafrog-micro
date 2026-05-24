@@ -197,7 +197,6 @@ public class LangchainRunReadService {
             planJson = cachedPlan.get();
         }
         String progressJson = planJson.isBlank() ? "" : stateStore.buildProgressJson(run.getId(), planJson);
-        String observabilityJson = observabilityService.loadObservabilityJson(run.getId(), run.getSnapshotJson());
         String observabilitySummaryJson = observabilityService.loadObservabilitySummaryJson(run.getId(), run.getSnapshotJson());
         boolean observabilityFullAvailable = observabilityService.isFullObservabilityAvailable(run.getId(), run.getSnapshotJson());
         int totalCredits = creditService.calculateRunTotalCredits(run, eventMapper.listByRunId(run.getId()), observabilitySummaryJson);
@@ -207,7 +206,7 @@ public class LangchainRunReadService {
                 latestEvent,
                 planJson,
                 progressJson,
-                observabilityJson,
+                "",
                 observabilitySummaryJson,
                 observabilityFullAvailable,
                 totalCredits,
