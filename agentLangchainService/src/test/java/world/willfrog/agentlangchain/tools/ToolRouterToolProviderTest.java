@@ -91,7 +91,23 @@ class ToolRouterToolProviderTest {
         assertFalse(toolNames.contains("searchWeb"));
         assertFalse(toolNames.contains("executePython"));
         assertTrue(toolNames.contains("getStockInfo"));
+        assertTrue(toolNames.contains("checkParallelLimits"));
         assertTrue(toolNames.contains("ragSearch"));
+    }
+
+    @Test
+    void provideTools_shouldExposeParallelLimitToolAndDynamicBatchGuidance() {
+        ToolProviderResult result = provider.provideTools(request(Map.of()));
+        Map<String, ToolSpecification> specsByName = result.tools().keySet().stream()
+                .collect(Collectors.toMap(ToolSpecification::name, specification -> specification));
+
+        assertTrue(specsByName.containsKey("checkParallelLimits"));
+        assertTrue(specsByName.get("checkParallelLimits").description().contains("maxItems"));
+
+        String dailyDescription = specsByName.get("getExchangeAssetDaily").description();
+        assertTrue(dailyDescription.contains("checkParallelLimits"));
+        assertFalse(dailyDescription.contains("默认最多2个"));
+        assertFalse(dailyDescription.contains("默认最多3个"));
     }
 
     @Test

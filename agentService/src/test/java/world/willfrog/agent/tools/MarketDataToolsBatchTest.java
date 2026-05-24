@@ -24,6 +24,7 @@ import java.util.Optional;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.mock;
@@ -111,5 +112,37 @@ class MarketDataToolsBatchTest {
         assertNotNull(data);
         assertEquals("batch", data.get("mode"));
         assertEquals(2, ((List<?>) data.get("results")).size());
+    }
+
+    @Test
+    void checkParallelLimits_shouldExposeHotLoadedLimits() throws Exception {
+        String response = tools.checkParallelLimits();
+        Map<?, ?> root = objectMapper.readValue(response, Map.class);
+        Map<?, ?> data = (Map<?, ?>) root.get("data");
+        Map<?, ?> search = (Map<?, ?>) data.get("search");
+        Map<?, ?> daily = (Map<?, ?>) data.get("daily");
+
+        assertEquals(5, search.get("maxItems"));
+        assertEquals(5, daily.get("maxItems"));
+        assertTrue(((List<?>) search.get("tools")).contains("searchAssetInfo"));
+        assertTrue(((List<?>) daily.get("tools")).contains("getExchangeAssetDaily"));
+    }
+
+    @Test
+    void searchStock_shouldRejectBatchAboveHotLoadedLimit() throws Exception {
+        AgentLlmProperties limited = new AgentLlmProperties();
+        AgentLlmProperties.Runtime runtime = new AgentLlmProperties.Runtime();
+        AgentLlmProperties.Parallel parallel = new AgentLlmProperties.Parallel();
+        parallel.setMaxParallelSearchQueries(1);
+        runtime.setParallel(parallel);
+        limited.setRuntime(runtime);
+        when(localConfigLoader.current()).thenReturn(Optional.of(limited));
+
+        String response = tools.searchStock("平安|万科");
+        Map<?, ?> root = objectMapper.readValue(response, Map.class);
+        Map<?, ?> error = (Map<?, ?>) root.get("error");
+
+        assertEquals(false, root.get("ok"));
+        assertEquals("BATCH_LIMIT_EXCEEDED", error.get("code"));
     }
 }

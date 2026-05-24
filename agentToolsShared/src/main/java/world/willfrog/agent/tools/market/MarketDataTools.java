@@ -59,9 +59,14 @@ public class MarketDataTools {
         this.objectMapper = objectMapper;
     }
 
-    @Tool("查询单只或多只股票基础信息。参数要求：tsCode 支持 | 分隔的多个代码（默认最多3个）或 JSON 数组，每个代码必须是 TuShare 格式如 000001.SZ。批量示例：\"000001.SZ|600519.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("查询单只或多只股票基础信息。参数要求：tsCode 支持 | 分隔的多个代码或 JSON 数组，每个代码必须是 TuShare 格式如 000001.SZ。具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量。批量示例：\"000001.SZ|600519.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getStockInfo(String tsCode) {
-        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> tsCodes = parseBatchValues(tsCode);
+        String limitError = batchLimitFailureIfExceeded("getStockInfo", "tsCode", tsCodes, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (tsCodes.size() > 1) {
             return batchSearch("getStockInfo", tsCodes, this::getStockInfoSingle);
         }
@@ -87,9 +92,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码（默认最多2个）或 JSON 数组，如 \"000001.SZ|600519.SH\"；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("查询股票区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码或 JSON 数组，如 \"000001.SZ|600519.SH\"，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getStockDaily(String tsCode, String startDateStr, String endDateStr) {
-        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+        int maxItems = resolveMaxParallelDailyQueries();
+        List<String> tsCodes = parseBatchValues(tsCode);
+        String limitError = batchLimitFailureIfExceeded("getStockDaily", "tsCode", tsCodes, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (tsCodes.size() > 1) {
             return batchGetDaily("getStockDaily", tsCodes, startDateStr, endDateStr, true);
         }
@@ -134,9 +144,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"平安银行|万科A\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("按关键词搜索股票。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入股票代码片段、股票简称、全称或拼音片段（例如 平安银行、000001、pingan）。支持 | 分隔的多个关键词或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量。批量示例：\"平安银行|万科A\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String searchStock(String keyword) {
-        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> queries = parseBatchValues(keyword);
+        String limitError = batchLimitFailureIfExceeded("searchStock", "keyword", queries, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (queries.size() > 1) {
             return batchSearch("searchStock", queries, this::searchStockSingle);
         }
@@ -171,9 +186,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索场外基金（公募基金），不用于 ETF 或场内上市基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或名称关键词（例如 005827、易方达蓝筹精选）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch、data.results、success_count、failure_count。ETF 请改用 searchAssetInfo(assetTypes=etf)。")
+    @Tool("按关键词搜索场外基金（公募基金），不用于 ETF 或场内上市基金。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入基金代码片段或名称关键词（例如 005827、易方达蓝筹精选）。支持 | 分隔的多个关键词或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量。批量示例：\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch、data.results、success_count、failure_count。ETF 请改用 searchAssetInfo(assetTypes=etf)。")
     public String searchFund(String keyword) {
-        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> queries = parseBatchValues(keyword);
+        String limitError = batchLimitFailureIfExceeded("searchFund", "keyword", queries, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (queries.size() > 1) {
             return batchSearch("searchFund", queries, this::searchFundSingle);
         }
@@ -207,9 +227,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询单只或多只指数基础信息。参数要求：tsCode 支持 | 分隔的多个代码（默认最多3个）或 JSON 数组，每个代码必须是 TuShare 指数代码格式如 000300.SH。批量示例：\"000300.SH|000905.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("查询单只或多只指数基础信息。参数要求：tsCode 支持 | 分隔的多个代码或 JSON 数组，每个代码必须是 TuShare 指数代码格式如 000300.SH。具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量。批量示例：\"000300.SH|000905.SH\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getIndexInfo(String tsCode) {
-        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> tsCodes = parseBatchValues(tsCode);
+        String limitError = batchLimitFailureIfExceeded("getIndexInfo", "tsCode", tsCodes, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (tsCodes.size() > 1) {
             return batchSearch("getIndexInfo", tsCodes, this::getIndexInfoSingle);
         }
@@ -235,9 +260,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码（默认最多2个）或 JSON 数组，如 \"000300.SH|000905.SH\"；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("查询指数区间日线数据。参数要求：1) tsCode 必须为“6位数字.交易所后缀”，也支持 | 分隔的多个代码或 JSON 数组，如 \"000300.SH|000905.SH\"，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量；2) startDateStr/endDateStr 必须严格使用 YYYYMMDD（如 20240101），禁止传毫秒时间戳或其他日期格式；3) startDateStr 必须早于或等于 endDateStr。批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String getIndexDaily(String tsCode, String startDateStr, String endDateStr) {
-        List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+        int maxItems = resolveMaxParallelDailyQueries();
+        List<String> tsCodes = parseBatchValues(tsCode);
+        String limitError = batchLimitFailureIfExceeded("getIndexDaily", "tsCode", tsCodes, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (tsCodes.size() > 1) {
             return batchGetDaily("getIndexDaily", tsCodes, startDateStr, endDateStr, false);
         }
@@ -282,9 +312,14 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。支持 | 分隔的多个关键词（默认最多3个）或 JSON 数组，批量示例：\"沪深300|中证500\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
+    @Tool("按关键词搜索指数。参数要求：keyword 必须是非空字符串，建议长度 2-40；可输入指数代码片段或指数名称关键词（例如 000300、沪深300、中证500）。支持 | 分隔的多个关键词或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量。批量示例：\"沪深300|中证500\"；批量返回 data.mode=batch、data.results、success_count、failure_count。")
     public String searchIndex(String keyword) {
-        List<String> queries = parseBatchValues(keyword, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> queries = parseBatchValues(keyword);
+        String limitError = batchLimitFailureIfExceeded("searchIndex", "keyword", queries, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (queries.size() > 1) {
             return batchSearch("searchIndex", queries, this::searchIndexSingle);
         }
@@ -321,7 +356,7 @@ public class MarketDataTools {
         }
     }
 
-    @Tool("统一搜索股票/ETF/指数/场外基金基本信息。参数要求：query 支持 | 分隔或 JSON 数组；assetTypes 可选 stock,etf,index,off_exchange_fund（逗号分隔，默认全部）；marketScope 目前仅支持 domestic。")
+    @Tool("统一搜索股票/ETF/指数/场外基金基本信息。参数要求：query 支持 | 分隔或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量；assetTypes 可选 stock,etf,index,off_exchange_fund（逗号分隔，默认全部）；marketScope 目前仅支持 domestic。")
     public String searchAssetInfo(String query, String assetTypes, String marketScope) {
         String scope = nvl(marketScope).trim();
         if (!scope.isBlank() && !"domestic".equalsIgnoreCase(scope)) {
@@ -329,7 +364,12 @@ public class MarketDataTools {
                     Map.of("marketScope", scope));
         }
         LinkedHashSet<String> types = parseAssetTypes(assetTypes);
-        List<String> queries = parseBatchValues(query, resolveMaxParallelSearchQueries());
+        int maxItems = resolveMaxParallelSearchQueries();
+        List<String> queries = parseBatchValues(query);
+        String limitError = batchLimitFailureIfExceeded("searchAssetInfo", "query", queries, maxItems);
+        if (limitError != null) {
+            return limitError;
+        }
         if (queries.size() > 1) {
             return batchSearch("searchAssetInfo", queries, q -> searchAssetInfoSingle(q, types));
         }
@@ -378,7 +418,7 @@ public class MarketDataTools {
         return ok("searchAssetInfo", data);
     }
 
-    @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。对于 ETF，若数据库中有复权因子数据，返回的 dataset 会额外包含 adj_factor 列，可用于后复权计算。")
+    @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。对于 ETF，若数据库中有复权因子数据，返回的 dataset 会额外包含 adj_factor 列，可用于后复权计算。")
     public String getExchangeAssetDaily(String tsCode, String assetType, String startDate, String endDate, String priceMode) {
         String type = normalizeAssetType(assetType);
         if (type.isBlank()) {
@@ -391,7 +431,12 @@ public class MarketDataTools {
                     Map.of("priceMode", nvl(priceMode)));
         }
         if ("etf".equals(type)) {
-            List<String> tsCodes = parseBatchValues(tsCode, resolveMaxParallelDailyQueries());
+            int maxItems = resolveMaxParallelDailyQueries();
+            List<String> tsCodes = parseBatchValues(tsCode);
+            String limitError = batchLimitFailureIfExceeded("getExchangeAssetDaily", "tsCode", tsCodes, maxItems);
+            if (limitError != null) {
+                return limitError;
+            }
             if (tsCodes.size() > 1) {
                 return batchGetListedAssetDaily("getExchangeAssetDaily", tsCodes, startDate, endDate);
             }
@@ -570,6 +615,37 @@ public class MarketDataTools {
             return fail("getListedAssetShareSize", "TOOL_ERROR", "Error fetching ETF share size",
                     Map.of("message", nvl(e.getMessage())));
         }
+    }
+
+    @Tool("查询当前批量/并行查询限制。返回 search 和 daily 工具组的热加载 maxItems，以及各工具组包含哪些工具。使用任何批量参数前必须先调用本工具；如果没有本工具，默认并行查询关闭。")
+    public String checkParallelLimits() {
+        Map<String, Object> search = new LinkedHashMap<>();
+        search.put("maxItems", resolveMaxParallelSearchQueries());
+        search.put("tools", List.of(
+                "searchAssetInfo",
+                "searchStock",
+                "searchIndex",
+                "searchFund",
+                "getStockInfo",
+                "getIndexInfo"
+        ));
+        search.put("argumentFormat", "Use | separated values or JSON arrays. Do not use comma-separated values.");
+
+        Map<String, Object> daily = new LinkedHashMap<>();
+        daily.put("maxItems", resolveMaxParallelDailyQueries());
+        daily.put("tools", List.of(
+                "getExchangeAssetDaily",
+                "getStockDaily",
+                "getIndexDaily"
+        ));
+        daily.put("argumentFormat", "Use | separated tsCode values or JSON arrays. Do not use comma-separated values.");
+
+        Map<String, Object> data = new LinkedHashMap<>();
+        data.put("search", search);
+        data.put("daily", daily);
+        data.put("fallbackRule", "If checkParallelLimits is unavailable, assume batch/parallel querying is disabled and call tools with one item at a time.");
+        data.put("source", "agent.llm.runtime.parallel from hot-loaded local config first, then application properties");
+        return ok("checkParallelLimits", data);
     }
 
     private String searchListedAssetEtfSingle(String query) {
@@ -865,7 +941,7 @@ public class MarketDataTools {
         ));
     }
 
-    private List<String> parseBatchValues(String raw, int maxItems) {
+    private List<String> parseBatchValues(String raw) {
         if (raw == null || raw.isBlank()) {
             return List.of();
         }
@@ -880,9 +956,6 @@ public class MarketDataTools {
                     if (!value.isBlank()) {
                         values.add(value);
                     }
-                    if (values.size() >= maxItems) {
-                        break;
-                    }
                 }
             } catch (Exception ignore) {
                 // fallback to split mode
@@ -896,20 +969,30 @@ public class MarketDataTools {
                 if (!value.isBlank()) {
                     values.add(value);
                 }
-                if (values.size() >= maxItems) {
-                    break;
-                }
             }
         }
 
         if (values.isEmpty() && !text.isBlank()) {
             values.add(text);
         }
-        return new ArrayList<>(values).subList(0, Math.min(values.size(), Math.max(1, maxItems)));
+        return new ArrayList<>(values);
+    }
+
+    private String batchLimitFailureIfExceeded(String toolName, String argumentName, List<String> values, int maxItems) {
+        if (values == null || values.size() <= Math.max(1, maxItems)) {
+            return null;
+        }
+        Map<String, Object> details = new LinkedHashMap<>();
+        details.put("argument", argumentName);
+        details.put("actual_items", values.size());
+        details.put("max_items", Math.max(1, maxItems));
+        details.put("requested_values", values);
+        details.put("hint", "Call checkParallelLimits before batching, then split the request into batches no larger than max_items.");
+        return fail(toolName, "BATCH_LIMIT_EXCEEDED", "Batch size exceeds the current parallel limit.", details);
     }
 
     private int resolveMaxParallelSearchQueries() {
-        int local = localConfigLoader.current()
+        int local = localConfigLoader == null ? 0 : localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
                 .map(AgentLlmProperties.Runtime::getParallel)
                 .map(AgentLlmProperties.Parallel::getMaxParallelSearchQueries)
@@ -928,7 +1011,7 @@ public class MarketDataTools {
     }
 
     private int resolveMaxParallelDailyQueries() {
-        int local = localConfigLoader.current()
+        int local = localConfigLoader == null ? 0 : localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
                 .map(AgentLlmProperties.Runtime::getParallel)
                 .map(AgentLlmProperties.Parallel::getMaxParallelDailyQueries)

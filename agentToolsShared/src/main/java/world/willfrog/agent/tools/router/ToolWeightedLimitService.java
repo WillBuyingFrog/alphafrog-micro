@@ -35,7 +35,7 @@ public class ToolWeightedLimitService {
         if (!Boolean.TRUE.equals(config.getEnabled())) {
             return Optional.of(WeightLease.noop());
         }
-        if ("searchWeb".equals(toolName)) {
+        if ("searchWeb".equals(toolName) || "checkParallelLimits".equals(toolName)) {
             return Optional.of(WeightLease.noop());
         }
 

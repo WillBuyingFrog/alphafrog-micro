@@ -135,17 +135,21 @@ class AgentPromptServiceCacheTest {
         AgentPromptService service = new AgentPromptService(properties, localConfigLoader);
 
         String instruction = service.planningStrategyStageInstruction(
-                "searchIndex,getIndexDaily,searchStock,getStockDaily",
+                "checkParallelLimits,searchIndex,getIndexDaily,searchStock,getStockDaily",
                 5,
                 500
         );
 
+        assertTrue(instruction.contains("checkParallelLimits"),
+                "规划阶段应要求先查询批量/并行上限");
         assertTrue(instruction.contains("keyword=\"沪深300|中证500\""),
                 "规划阶段应提示 search 类工具使用 | 批量关键词");
         assertTrue(instruction.contains("tsCode=\"000300.SH|000905.SH\""),
                 "规划阶段应提示日线工具使用 | 批量代码");
         assertTrue(instruction.contains("JSON 数组"),
                 "规划阶段应提示可使用 JSON 数组批量参数");
+        assertFalse(instruction.contains("默认最多"),
+                "规划阶段不应硬编码批量上限");
         assertFalse(instruction.contains("ts_code 用逗号分隔"),
                 "行情批量参数不应提示使用逗号分隔");
     }
@@ -181,15 +185,15 @@ class AgentPromptServiceCacheTest {
     @Test
     void dagReactSystemPrompt_shouldSuggestSoftBatchGuidance() {
         String prompt = promptService.dagReactSystemPrompt();
-        assertTrue(prompt.contains("批量查询（建议，非强制）"),
-                "ReAct system prompt 应包含软性的批量查询建议");
+        assertTrue(prompt.contains("批量/并行查询限制（必须先查询）"),
+                "ReAct system prompt 应包含批量上限查询要求");
+        assertTrue(prompt.contains("checkParallelLimits"),
+                "ReAct system prompt 应要求先调用 checkParallelLimits");
         assertTrue(prompt.contains("发现式查询"),
                 "ReAct system prompt 应保留发现式逐步查询的边界说明");
         assertTrue(prompt.contains("searchAssetInfo"),
                 "ReAct system prompt 应列举支持批量的工具名");
-        assertTrue(prompt.contains("单次最多 3 个查询"),
-                "ReAct system prompt 应标明搜索类工具批量上限");
-        assertTrue(prompt.contains("单次最多 2 个查询"),
-                "ReAct system prompt 应标明日线类工具批量上限");
+        assertFalse(prompt.contains("单次最多"),
+                "ReAct system prompt 不应硬编码批量上限");
     }
 }

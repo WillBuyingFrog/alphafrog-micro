@@ -499,14 +499,16 @@ public class AgentPromptService {
         for (String tool : tools) {
             tool = tool.trim();
             switch (tool) {
+                case "checkParallelLimits" -> capabilities.add(
+                    "- checkParallelLimits: 查询当前批量/并行查询限制。任何工具批量调用前应先调用它；若工具列表中没有 checkParallelLimits 或调用失败，默认不要批量。");
                 case "getIndexDaily" -> capabilities.add(
-                    "- getIndexDaily: 查询指数日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000300.SH|000905.SH\"；批量返回 data.mode=batch 和 data.results。");
+                    "- getIndexDaily: 查询指数日线数据。tsCode 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 tsCode=\"000300.SH|000905.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "getStockDaily" -> capabilities.add(
-                    "- getStockDaily: 查询股票日线数据。tsCode 支持 | 分隔或 JSON 数组批量，默认最多2个，如 tsCode=\"000001.SZ|600519.SH\"；批量返回 data.mode=batch 和 data.results。");
+                    "- getStockDaily: 查询股票日线数据。tsCode 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 tsCode=\"000001.SZ|600519.SH\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchAssetInfo" -> capabilities.add(
-                    "- searchAssetInfo: 统一搜索股票/ETF/指数/场外基金。ETF 回测或行业主题 ETF 筛选优先用此工具并设 assetTypes=etf；场外基金用 assetTypes=off_exchange_fund。query 支持 | 分隔或 JSON 数组。");
+                    "- searchAssetInfo: 统一搜索股票/ETF/指数/场外基金。ETF 回测或行业主题 ETF 筛选优先用此工具并设 assetTypes=etf；场外基金用 assetTypes=off_exchange_fund。query 支持 | 分隔或 JSON 数组，具体上限先调用 checkParallelLimits 查询。");
                 case "getExchangeAssetDaily" -> capabilities.add(
-                    "- getExchangeAssetDaily: 查询场内资产日线（股票/ETF/指数）。tsCode 支持批量；ETF 需 A5 服务就绪。");
+                    "- getExchangeAssetDaily: 查询场内资产日线（股票/ETF/指数）。tsCode 支持批量，具体上限先调用 checkParallelLimits 查询；ETF 需 A5 服务就绪。");
                 case "getOffExchangeAssetDaily" -> capabilities.add(
                     "- getOffExchangeAssetDaily: 查询场外基金净值序列，不用于 ETF 场内回测。");
                 case "getListedAssetShareSize" -> capabilities.add(
@@ -514,17 +516,17 @@ public class AgentPromptService {
                 case "getEtfAdj" -> capabilities.add(
                     "- getEtfAdj: 查询 ETF 复权因子；仅当 adjFactorEnabled=true 时可用。");
                 case "searchIndex" -> capabilities.add(
-                    "- searchIndex: 搜索指数代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"沪深300|中证500\"；批量返回 data.mode=batch 和 data.results。");
+                    "- searchIndex: 搜索指数代码。keyword 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 keyword=\"沪深300|中证500\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchStock" -> capabilities.add(
-                    "- searchStock: 搜索股票代码。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"平安银行|万科A\"；批量返回 data.mode=batch 和 data.results。");
+                    "- searchStock: 搜索股票代码。keyword 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 keyword=\"平安银行|万科A\"；批量返回 data.mode=batch 和 data.results。");
                 case "searchFund" -> capabilities.add(
-                    "- searchFund: 仅搜索场外基金（公募基金）基本信息，不用于 ETF 场内资产筛选。keyword 支持 | 分隔或 JSON 数组批量，默认最多3个，如 keyword=\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch 和 data.results。");
+                    "- searchFund: 仅搜索场外基金（公募基金）基本信息，不用于 ETF 场内资产筛选。keyword 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 keyword=\"易方达蓝筹精选|招商中证白酒\"；批量返回 data.mode=batch 和 data.results。");
                 case "executePython" -> capabilities.add(
                     "- executePython: 执行 Python 代码进行数据分析。支持批量处理多个数据集（dataset_ids 用逗号分隔）。");
                 case "getIndexInfo" -> capabilities.add(
-                    "- getIndexInfo: 查询指数基本信息。tsCode 支持 | 分隔或 JSON 数组批量，默认最多3个，如 tsCode=\"000300.SH|000905.SH\"。");
+                    "- getIndexInfo: 查询指数基本信息。tsCode 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 tsCode=\"000300.SH|000905.SH\"。");
                 case "getStockInfo" -> capabilities.add(
-                    "- getStockInfo: 查询股票基本信息。tsCode 支持 | 分隔或 JSON 数组批量，默认最多3个，如 tsCode=\"000001.SZ|600519.SH\"。");
+                    "- getStockInfo: 查询股票基本信息。tsCode 支持 | 分隔或 JSON 数组批量；具体上限先调用 checkParallelLimits 查询，如 tsCode=\"000001.SZ|600519.SH\"。");
                 case "getFinancialReport" -> capabilities.add(
                     "- getFinancialReport: 查询财务报表数据（利润表、资产负债表、现金流量表）。");
                 case "ragSearch" -> capabilities.add(
@@ -678,7 +680,8 @@ public class AgentPromptService {
         parts.add(String.format(
                 "当前时间：%s（%s，%d年%d月%d日）。所有涉及日期、时间、年份的推理必须以当前时间为基准。"
                 + "例如：用户说%d年，指%d年；说去年，指%d年；说今年，指%d年；"
-                + "说上一年，指%d年；说再上一年，指%d年。",
+                + "说上一年，指%d年；说再上一年，指%d年。"
+                + "所有输出内容须标明具体公历年份，禁止使用仅含「去年」「明年」「上一年」「再上一年」等未标明具体年份的表述。",
                 today.format(CN_DATE_FORMATTER),
                 today.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.CHINESE),
                 thisYear, today.getMonthValue(), today.getDayOfMonth(),

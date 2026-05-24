@@ -19,17 +19,26 @@
 | getEtfAdj | `{"tsCode": "<ETF代码>", "startDate": "YYYYMMDD", "endDate": "YYYYMMDD"}` |
 | getIndexInfo | `{"ts_code": "<指数代码>"}` |
 | getStockInfo | `{"ts_code": "<股票代码>"}` |
+| checkParallelLimits | `{}` |
 | executePython | `{"code": "<Python代码>", "dataset_ids": "<数据集ID列表>"}` |
 | searchWeb | `{"query": "<搜索查询文本>", "scene": "general|finance|news", "backend": "perplexity|tavily|exa|", "strength": "<搜索强度，可空>", "skipHotCache": true|false, "skipRagPrefetch": true|false, "timeRangeStart": "<ISO8601，可空>", "timeRangeEnd": "<ISO8601，可空>", "maxResults": 5}` |
 
 ## 工具使用详细规则
 
-### 0. 批量查询（建议，非强制）
-以下工具均支持 `|` 分隔或 JSON 数组批量传参，请合理规划入参，将同类查询合并到单次工具调用中，减少总调用次数：
-- searchAssetInfo、searchStock、searchIndex、searchFund、getStockInfo、getIndexInfo（单次最多 3 个查询）
-- getExchangeAssetDaily、getStockDaily、getIndexDaily（单次最多 2 个查询）
+### 0. 批量/并行查询限制（必须先查询）
+工作时，并行查询工具的并行限制请调用 `checkParallelLimits` 查询。`checkParallelLimits` 会返回 search、daily 等工具组当前可用的 `maxItems`，这些限制可能由配置热加载改变。
 
-例如：已确定要查 6 只 ETF 的日线，应分 3 次调用 getExchangeAssetDaily（每次 2 个代码），而不是 6 次单代码调用。若仍需先 search 才能确定目标（发现式查询），可逐步调用，不必强行 batch；也不要把不同工具混在一次调用里。
+以下工具支持 `|` 分隔或 JSON 数组批量传参，但每次批量前必须按 `checkParallelLimits` 的返回值拆批：
+- searchAssetInfo、searchStock、searchIndex、searchFund、getStockInfo、getIndexInfo：使用 `data.search.maxItems`
+- getExchangeAssetDaily、getStockDaily、getIndexDaily：使用 `data.daily.maxItems`
+
+如果当前工具列表中没有 `checkParallelLimits`，或调用失败/返回不可解析，默认并行查询关闭：每次只查 1 个标的或关键词。不要根据旧经验猜测上限，不要使用逗号分隔批量参数。发现式查询仍允许逐步搜索，不必在目标尚未明确时强行批量。
+
+示例：
+（假定 `checkParallelLimits` 返回 daily.maxItems=M、search.maxItems=K）
+
+- 已确定要查 `3*M` 只 ETF 的日线，应分 3 次调用 getExchangeAssetDaily（每次 M 个代码），而不是 `3*M` 次单代码调用。
+- 已确定要使用 `K+1` 个不同的关键词查询**中国大陆境内场内资产**信息，并还需要使用 `K-1` 个不同的关键词查询**中国大陆境内场外基金**信息，那么调用两次 searchAssetInfo 即可完成查询 `K+1` 个场内资产，再调用一次 searchFund 即可完成查询 **中国大陆境内场外基金**信息。
 
 ### 1. 搜索类工具（searchIndex/searchStock/searchFund/searchAssetInfo）
 - **searchFund 仅用于场外基金（公募基金）基本信息检索**，不用于 ETF、场内上市 ETF、行业主题 ETF 筛选

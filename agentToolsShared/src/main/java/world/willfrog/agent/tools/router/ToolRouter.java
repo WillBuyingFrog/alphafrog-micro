@@ -151,7 +151,7 @@ public class ToolRouter {
      */
     public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
         // 预算检查：可能抛出 RunBudgetExceededException 中断本次工具调用
-        if (budgetService != null) {
+        if (budgetService != null && !"checkParallelLimits".equals(toolName)) {
             budgetService.checkBeforeToolCall();
         }
         debugLog("tool invoke request: runId={}, tool={}, params={}",
@@ -211,8 +211,11 @@ public class ToolRouter {
         boolean success = cached.isSuccess();
         long durationMs = Math.max(0L, cached.getDurationMs());
         ToolResultCacheService.CacheMeta cacheMeta = cached.getCacheMeta();
-        // 记录观测 trace（参数、结果、耗时、缓存命中信息），供 run 详情页展示
-        recordObservability(toolName, params, result, durationMs, success, cacheMeta);
+        // 记录观测 trace（参数、结果、耗时、缓存命中信息），供 run 详情页展示。
+        // checkParallelLimits 是工具目录自检，不计入 run 级 tool_calls 预算/统计。
+        if (!"checkParallelLimits".equals(toolName)) {
+            recordObservability(toolName, params, result, durationMs, success, cacheMeta);
+        }
 
         // 按 toolName 分桶上报耗时指标
         getOrCreateToolCallTimer(nvl(toolName)).record(durationMs, TimeUnit.MILLISECONDS);
@@ -266,6 +269,7 @@ public class ToolRouter {
                 "getIndexDaily",
                 "searchIndex",
                 "searchAssetInfo",
+                "checkParallelLimits",
                 "getExchangeAssetDaily",
                 "getOffExchangeAssetDaily",
                 "getEtfAdj",
@@ -411,6 +415,7 @@ public class ToolRouter {
             }
             // 统一入口负责兼容参数别名（ts_code/code 等），工具实现层只接收标准参数。
             result = switch (toolName) {
+                case "checkParallelLimits" -> marketDataTools.checkParallelLimits();
                 case "getStockInfo" -> marketDataTools.getStockInfo(
                         str(params.get("tsCode"), params.get("ts_code"), params.get("code"), params.get("stock_code"), params.get("arg0"))
                 );

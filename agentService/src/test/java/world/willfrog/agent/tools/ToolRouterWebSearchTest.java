@@ -30,6 +30,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
+import static org.mockito.ArgumentMatchers.anyLong;
 
 class ToolRouterWebSearchTest {
 
@@ -109,5 +110,47 @@ class ToolRouterWebSearchTest {
 
         assertTrue(result.isSuccess());
         verify(searchTools).searchWeb(eq("q"), anyString(), anyString(), anyString(), anyBoolean(), anyBoolean(), anyString(), anyString(), anyInt());
+    }
+
+    @SuppressWarnings("unchecked")
+    @Test
+    void invoke_shouldRouteCheckParallelLimits() {
+        MarketDataTools marketDataTools = mock(MarketDataTools.class);
+        when(marketDataTools.checkParallelLimits())
+                .thenReturn("{\"ok\":true,\"tool\":\"checkParallelLimits\",\"data\":{\"search\":{\"maxItems\":3}},\"error\":null}");
+        ToolResultCacheService cacheService = mock(ToolResultCacheService.class);
+        when(cacheService.executeWithCache(anyString(), any(), anyString(), any())).thenAnswer(inv -> {
+            Supplier<ToolResultCacheService.ToolExecutionOutcome> supplier = inv.getArgument(3);
+            ToolResultCacheService.ToolExecutionOutcome outcome = supplier.get();
+            return ToolResultCacheService.CachedToolCallResult.builder()
+                    .result(outcome.getResult())
+                    .durationMs(outcome.getDurationMs())
+                    .success(outcome.isSuccess())
+                    .build();
+        });
+        AgentObservabilityService observabilityService = mock(AgentObservabilityService.class);
+
+        ToolRouter router = new ToolRouter(
+                marketDataTools,
+                mock(RagTools.class),
+                mock(SearchTools.class),
+                mock(PythonSandboxTools.class),
+                new PythonStaticPrecheckService(),
+                new AgentLlmProperties(),
+                cacheService,
+                observabilityService,
+                new ObjectMapper(),
+                new SimpleMeterRegistry(),
+                new StressTestProperties()
+        );
+
+        ToolRouter.ToolInvocationResult result = router.invokeWithMeta("checkParallelLimits", Map.of());
+
+        assertTrue(result.isSuccess());
+        verify(marketDataTools).checkParallelLimits();
+        verify(observabilityService, never()).recordToolCall(
+                anyString(), anyString(), anyString(), any(), anyString(), anyLong(),
+                anyBoolean(), anyBoolean(), anyBoolean(), anyString(), anyString(), anyLong(), anyLong(), anyString()
+        );
     }
 }
