@@ -132,12 +132,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 normalizeOpenRouterTokenLimit(requestJsonMap);
                 Map<String, Object> provider = new LinkedHashMap<>();
                 provider.put("order", providerOrder == null ? List.of() : providerOrder);
+                // 始终禁止 OpenRouter 自动 fallback 到其它 provider
+                provider.put("allow_fallbacks", false);
                 if (structuredOutputSpec != null) {
                     requestJsonMap.put("response_format", structuredOutputSpec.asResponseFormat());
                     provider.put("require_parameters", structuredOutputSpec.requireProviderParameters());
-                    boolean allowFallbacks = structuredOutputSpec.allowProviderFallbacks() 
-                            || (providerOrder != null && providerOrder.size() > 1);
-                    provider.put("allow_fallbacks", allowFallbacks);
                 }
                 requestJsonMap.put("provider", provider);
 
