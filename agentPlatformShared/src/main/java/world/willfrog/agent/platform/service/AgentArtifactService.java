@@ -1,4 +1,4 @@
-package world.willfrog.agent.service;
+package world.willfrog.agent.platform.service;
 
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -268,6 +268,8 @@ public class AgentArtifactService {
                 }
                 String preview = readAsString(payload.get("result_preview"));
                 JsonNode outputNode = parseToolOutput(preview);
+                // FIFO pairing of STARTED/FINISHED by event order (legacy agentService behavior).
+                // Parallel executePython may interleave; precise match would need tool_execution_id in events.
                 if (!pendingToolRefs.isEmpty()) {
                     String ref = pendingToolRefs.remove(0);
                     MutableInvocation invocation = invocationByRef.get(ref);
@@ -515,6 +517,7 @@ public class AgentArtifactService {
         }
     }
 
+    // Artifact snapshots assume per-run tool execution is effectively serialized by the workflow executor.
     private Path snapshotDatasetFile(String runId, String datasetId, Path sourceFile) {
         if (runId == null || runId.isBlank() || datasetId == null || datasetId.isBlank()) {
             return null;

@@ -64,6 +64,10 @@ class LangchainLinearRunPipelineObservabilityTest {
         when(linearWorkflowExecutor.executePlanned(any(), any())).thenReturn(
                 LangchainLinearWorkflowResult.builder().success(true).finalAnswer("ok").build());
 
+        LangchainFollowUpContextSupport followUpContextSupport = mock(LangchainFollowUpContextSupport.class);
+        when(followUpContextSupport.resolve(run)).thenReturn(
+                new LangchainFollowUpContextSupport.ExecutionContext("goal", ""));
+
         LangchainLinearRunPipelineImpl pipeline = new LangchainLinearRunPipelineImpl(
                 planner,
                 linearWorkflowExecutor,
@@ -76,6 +80,9 @@ class LangchainLinearRunPipelineObservabilityTest {
                 mock(ObjectProvider.class),
                 observabilityProvider,
                 new LangchainFailureMapper(),
+                followUpContextSupport,
+                mock(world.willfrog.agent.platform.service.AgentMessageService.class),
+                mock(LangchainRunExecutionGuard.class),
                 taskExecutor
         );
 

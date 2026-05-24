@@ -16,7 +16,7 @@ public class AgentRunResultCacheService {
 
     private final ConcurrentHashMap<String, CacheEntry> cache = new ConcurrentHashMap<>();
 
-    @DubboReference
+    @DubboReference(check = false)
     private AgentDubboService agentDubboService;
 
     @Value("${agent.run-result.cache-ttl-seconds:30}")

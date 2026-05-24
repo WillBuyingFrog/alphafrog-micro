@@ -41,6 +41,9 @@ class LangchainLinearRunPipelineAsyncTest {
                 mock(ObjectProvider.class),
                 mock(ObjectProvider.class),
                 new world.willfrog.agentlangchain.failure.LangchainFailureMapper(),
+                mock(LangchainFollowUpContextSupport.class),
+                mock(world.willfrog.agent.platform.service.AgentMessageService.class),
+                mock(LangchainRunExecutionGuard.class),
                 taskExecutor
         ) {
             @Override

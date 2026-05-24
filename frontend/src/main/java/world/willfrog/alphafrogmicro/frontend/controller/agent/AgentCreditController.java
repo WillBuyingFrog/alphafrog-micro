@@ -8,7 +8,6 @@ import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest;
@@ -22,18 +21,42 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 @RestController
-@RequestMapping("/api/agent-legacy/credits")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentCreditController {
 
-    @DubboReference
+    @DubboReference(check = false)
     private AgentDubboService agentDubboService;
 
     private final AuthService authService;
 
-    @GetMapping
+    @GetMapping("/api/agent/credits")
     public ResponseWrapper<AgentCreditsResponse> credits(Authentication authentication) {
+        return creditsInternal(authentication);
+    }
+
+    /** @deprecated Use {@code GET /api/agent/credits}. */
+    @Deprecated
+    @GetMapping("/api/agent-legacy/credits")
+    public ResponseWrapper<AgentCreditsResponse> creditsLegacy(Authentication authentication) {
+        return creditsInternal(authentication);
+    }
+
+    @PostMapping("/api/agent/credits/apply")
+    public ResponseWrapper<AgentCreditsApplyResponse> applyCredits(Authentication authentication,
+                                                                   @RequestBody(required = false) AgentCreditsApplyRequest request) {
+        return applyCreditsInternal(authentication, request);
+    }
+
+    /** @deprecated Use {@code POST /api/agent/credits/apply}. */
+    @Deprecated
+    @PostMapping("/api/agent-legacy/credits/apply")
+    public ResponseWrapper<AgentCreditsApplyResponse> applyCreditsLegacy(Authentication authentication,
+                                                                         @RequestBody(required = false) AgentCreditsApplyRequest request) {
+        return applyCreditsInternal(authentication, request);
+    }
+
+    private ResponseWrapper<AgentCreditsResponse> creditsInternal(Authentication authentication) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -58,9 +81,8 @@ public class AgentCreditController {
         }
     }
 
-    @PostMapping("/apply")
-    public ResponseWrapper<AgentCreditsApplyResponse> applyCredits(Authentication authentication,
-                                                                   @RequestBody(required = false) AgentCreditsApplyRequest request) {
+    private ResponseWrapper<AgentCreditsApplyResponse> applyCreditsInternal(Authentication authentication,
+                                                                            AgentCreditsApplyRequest request) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");

@@ -41,8 +41,5 @@ agent:
   langchain:
     provider:
       enabled: true
-      dubbo-group: langchain
     service:
       version: P1-linear
-    traffic:
-      canary-percent: 10

@@ -19,7 +19,6 @@ import world.willfrog.alphafrogmicro.common.pojo.user.User;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
-import world.willfrog.alphafrogmicro.frontend.service.agent.AgentDubboRoutingService;
 import world.willfrog.alphafrogmicro.frontend.service.agent.AgentRunResultCacheService;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
@@ -32,7 +31,6 @@ import static org.mockito.Mockito.when;
 class AgentControllerTest {
 
     private AgentDubboService agentDubboService;
-    private AgentDubboRoutingService agentDubboRoutingService;
     private AuthService authService;
     private AgentRunResultCacheService runResultCacheService;
     private AgentController controller;
@@ -41,12 +39,11 @@ class AgentControllerTest {
     @BeforeEach
     void setUp() {
         agentDubboService = mock(AgentDubboService.class);
-        agentDubboRoutingService = mock(AgentDubboRoutingService.class);
         authService = mock(AuthService.class);
         runResultCacheService = new AgentRunResultCacheService();
         ReflectionTestUtils.setField(runResultCacheService, "agentDubboService", agentDubboService);
         ReflectionTestUtils.setField(runResultCacheService, "cacheTtlSeconds", 30L);
-        controller = new AgentController(authService, new ObjectMapper(), runResultCacheService, agentDubboRoutingService);
+        controller = new AgentController(authService, new ObjectMapper(), runResultCacheService);
         ReflectionTestUtils.setField(controller, "agentDubboService", agentDubboService);
 
         authentication = mock(Authentication.class);

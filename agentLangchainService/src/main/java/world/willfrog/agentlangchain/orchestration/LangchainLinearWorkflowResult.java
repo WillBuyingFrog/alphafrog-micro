@@ -11,6 +11,8 @@ import java.util.List;
 @Builder
 public class LangchainLinearWorkflowResult {
     private boolean success;
+    /** True when canceled/paused mid-flight; pipeline must not overwrite control terminal state. */
+    private boolean interrupted;
     private String failureReason;
     private String finalAnswer;
     private LangchainTodoPlan plan;

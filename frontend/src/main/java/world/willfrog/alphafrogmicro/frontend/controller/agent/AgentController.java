@@ -68,7 +68,6 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.TraceDetailResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TraceSpanItem;
 import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
-import world.willfrog.alphafrogmicro.frontend.service.agent.AgentDubboRoutingService;
 import world.willfrog.alphafrogmicro.frontend.service.agent.AgentRunResultCacheService;
 
 import java.nio.charset.StandardCharsets;
@@ -80,6 +79,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Agent run HTTP API. All Dubbo calls target the default {@code AgentDubboService} provider,
+ * now implemented by {@code agentLangchainService}.
+ * Paths under {@code /api/agent-legacy/*} are deprecated aliases of {@code /api/agent/*}.
+ */
 @RestController
 @RequiredArgsConstructor
 @Slf4j
@@ -91,29 +95,31 @@ public class AgentController {
     private static final int ADMIN_USER_TYPE = 1127;
     private static final int OBSERVABILITY_FULL_MAX_BYTES = 5 * 1024 * 1024;
 
-    @DubboReference
+    @DubboReference(check = false)
     private AgentDubboService agentDubboService;
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
     private final AgentRunResultCacheService runResultCacheService;
-    private final AgentDubboRoutingService agentDubboRoutingService;
 
     @PostMapping(AGENT_RUNS)
     public ResponseWrapper<AgentRunResponse> create(Authentication authentication,
                                                     @RequestBody AgentRunCreateRequest request) {
-        return createRun(authentication, request, true);
+        return createRun(authentication, request);
     }
 
+    /**
+     * @deprecated Use {@link #create(Authentication, AgentRunCreateRequest)} ({@code POST /api/agent/runs}).
+     */
+    @Deprecated
     @PostMapping(AGENT_LEGACY_RUNS)
     public ResponseWrapper<AgentRunResponse> createLegacy(Authentication authentication,
                                                           @RequestBody AgentRunCreateRequest request) {
-        return createRun(authentication, request, false);
+        return createRun(authentication, request);
     }
 
     private ResponseWrapper<AgentRunResponse> createRun(Authentication authentication,
-                                                        AgentRunCreateRequest request,
-                                                        boolean useLangchainProvider) {
+                                                        AgentRunCreateRequest request) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -169,22 +175,7 @@ public class AgentController {
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
             String stageConfigJson = nvl(request.stageConfigJson());
             log.info("[AgentController] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
-            AgentRunMessage run = useLangchainProvider
-                    ? agentDubboRoutingService.createRun(
-                    CreateAgentRunRequest.newBuilder()
-                            .setUserId(userId)
-                            .setMessage(request.message())
-                            .setContextJson(contextJson)
-                            .setIdempotencyKey(nvl(request.idempotencyKey()))
-                            .setModelName(modelName)
-                            .setEndpointName(endpointName)
-                            .setCaptureLlmRequests(captureLlmRequests)
-                            .setProvider(provider)
-                            .setPlannerCandidateCount(plannerCandidateCountForRpc)
-                            .setDebugMode(debugMode)
-                            .setStageConfigJson(stageConfigJson)
-                            .build())
-                    : agentDubboService.createRun(
+            AgentRunMessage run = agentDubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
                             .setMessage(request.message())

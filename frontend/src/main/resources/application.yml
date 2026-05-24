@@ -56,9 +56,6 @@ alphafrog:
 agent:
   run-result:
     cache-ttl-seconds: ${AF_AGENT_RUN_RESULT_CACHE_TTL_SECONDS:30}
-  langchain:
-    provider:
-      dubbo-group: ${AGENT_LANGCHAIN_PROVIDER_DUBBO_GROUP:langchain}
 
 dubbo:
   consumer:

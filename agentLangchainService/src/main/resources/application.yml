@@ -17,11 +17,8 @@ agent:
   langchain:
     provider:
       enabled: false
-      dubbo-group: langchain
     service:
       version: P0-skeleton
-    traffic:
-      canary-percent: 0
   llm:
     config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
     prompt-base-dir: ${AF_AGENT_LLM_PROMPT_BASE_DIR:}

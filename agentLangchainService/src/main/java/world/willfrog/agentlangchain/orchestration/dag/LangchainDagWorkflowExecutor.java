@@ -11,6 +11,7 @@ import world.willfrog.agent.workflow.TodoStatus;
 import world.willfrog.agentlangchain.orchestration.LangchainCompletedTodo;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowRequest;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowResult;
+import world.willfrog.agentlangchain.orchestration.LangchainRunExecutionGuard;
 import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeExecutor;
 import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeResult;
 import world.willfrog.agentlangchain.planning.LangchainTodoPlan;
@@ -26,6 +27,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -38,6 +40,7 @@ public class LangchainDagWorkflowExecutor {
     private final LangchainTodoNodeExecutor todoNodeExecutor;
     private final LangchainDagStateRecorder stateRecorder;
     private final AgentEventService eventService;
+    private final LangchainRunExecutionGuard executionGuard;
 
     @Value("${agent.langchain.dag.thread-pool-size:4}")
     private int dagThreadPoolSize;
@@ -67,8 +70,18 @@ public class LangchainDagWorkflowExecutor {
             DagParallelRun parallelRun = executeDagParallel(graph, items, request, sharedContext, toolCalls);
 
             List<LangchainCompletedTodo> completedTodos = new ArrayList<>(sharedContext.completedTodosSnapshot());
+            Optional<String> stopBeforeAnswer = executionGuard.stopReason(runId, userId);
+            if (stopBeforeAnswer.isPresent()) {
+                return interrupted(plan, completedTodos, stopBeforeAnswer.get(), toolCalls.get());
+            }
+
             for (TodoItem item : items) {
                 LangchainTodoNodeResult nodeResult = parallelRun.results().get(item.getId());
+                if (nodeResult != null && nodeResult.getSummary() != null
+                        && nodeResult.getSummary().startsWith("RUN_INTERRUPTED:")) {
+                    String controlStatus = nodeResult.getSummary().substring("RUN_INTERRUPTED:".length());
+                    return interrupted(plan, completedTodos, controlStatus, toolCalls.get());
+                }
                 if (nodeResult == null || !nodeResult.isSuccess()) {
                     String reason = nodeResult == null ? "No result" : nvl(nodeResult.getSummary());
                     if (!isBlank(runId) && !isBlank(userId)) {
@@ -184,6 +197,16 @@ public class LangchainDagWorkflowExecutor {
         String runId = request.getRunId();
         String userId = request.getUserId();
         try {
+            Optional<String> stop = executionGuard.stopReason(runId, userId);
+            if (stop.isPresent()) {
+                LangchainTodoNodeResult interrupted = LangchainTodoNodeResult.builder()
+                        .success(false)
+                        .summary("RUN_INTERRUPTED:" + stop.get())
+                        .build();
+                results.put(item.getId(), interrupted);
+                nodeSuccess.put(item.getId(), false);
+                return;
+            }
             AgentContext.restoreRunContext(parentContext);
             String failedDependency = findFailedDependency(graph.getDependencies(item.getId()), nodeSuccess);
             if (failedDependency != null) {
@@ -281,6 +304,20 @@ public class LangchainDagWorkflowExecutor {
         return LangchainLinearWorkflowResult.builder()
                 .success(false)
                 .failureReason(reason)
+                .plan(plan)
+                .completedTodos(completedTodos)
+                .toolCallsUsed(toolCallsUsed)
+                .build();
+    }
+
+    private LangchainLinearWorkflowResult interrupted(LangchainTodoPlan plan,
+                                                      List<LangchainCompletedTodo> completedTodos,
+                                                      String controlStatus,
+                                                      int toolCallsUsed) {
+        return LangchainLinearWorkflowResult.builder()
+                .success(false)
+                .interrupted(true)
+                .failureReason("RUN_INTERRUPTED:" + controlStatus)
                 .plan(plan)
                 .completedTodos(completedTodos)
                 .toolCallsUsed(toolCallsUsed)

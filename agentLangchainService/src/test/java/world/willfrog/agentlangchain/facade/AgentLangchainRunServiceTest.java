@@ -10,6 +10,7 @@ import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearRunPipeline;
+import world.willfrog.agentlangchain.routing.LangchainSingleWriterGuard;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -27,12 +28,14 @@ class AgentLangchainRunServiceTest {
     private AgentEventService eventService;
     @Mock
     private LangchainLinearRunPipeline pipeline;
+    @Mock
+    private LangchainSingleWriterGuard singleWriterGuard;
 
     private AgentLangchainRunService runService;
 
     @BeforeEach
     void setUp() {
-        runService = new AgentLangchainRunService(eventServiceProvider, pipelineProvider);
+        runService = new AgentLangchainRunService(eventServiceProvider, pipelineProvider, singleWriterGuard);
     }
 
     @Test
@@ -46,6 +49,7 @@ class AgentLangchainRunServiceTest {
         run.setStatus(AgentRunStatus.RECEIVED);
         when(eventService.createRun(anyString(), anyString(), any(), any(), any(), any(),
                 anyBoolean(), any(), anyInt(), anyBoolean(), any())).thenReturn(run);
+        when(singleWriterGuard.markLangchainOwner(run)).thenReturn(run);
 
         CreateAgentRunRequest request = CreateAgentRunRequest.newBuilder()
                 .setUserId("u1")
@@ -54,6 +58,7 @@ class AgentLangchainRunServiceTest {
 
         var message = runService.createRun(request);
         assertEquals("run123", message.getId());
+        verify(singleWriterGuard).markLangchainOwner(run);
         verify(pipeline).launchAsync(run);
     }
 

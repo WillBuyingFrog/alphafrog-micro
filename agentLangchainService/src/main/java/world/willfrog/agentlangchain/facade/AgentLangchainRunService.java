@@ -7,6 +7,7 @@ import org.springframework.stereotype.Service;
 import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearRunPipeline;
+import world.willfrog.agentlangchain.routing.LangchainSingleWriterGuard;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 
@@ -17,6 +18,7 @@ public class AgentLangchainRunService {
 
     private final ObjectProvider<AgentEventService> eventServiceProvider;
     private final ObjectProvider<LangchainLinearRunPipeline> linearRunPipelineProvider;
+    private final LangchainSingleWriterGuard singleWriterGuard;
 
     public AgentRunMessage createRun(CreateAgentRunRequest request) {
         String userId = request.getUserId();
@@ -46,6 +48,8 @@ public class AgentLangchainRunService {
                 request.getDebugMode(),
                 request.getStageConfigJson()
         );
+
+        run = singleWriterGuard.markLangchainOwner(run);
 
         LangchainLinearRunPipeline pipeline = linearRunPipelineProvider.getIfAvailable();
         if (pipeline != null) {

@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.apache.dubbo.config.annotation.Method;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import world.willfrog.agentlangchain.facade.AgentLangchainRunService;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
@@ -51,10 +50,32 @@ import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 
 @DubboService(
-        group = "${agent.langchain.provider.dubbo-group:langchain}",
         methods = {
                 @Method(name = "createRun"),
-                @Method(name = "createRunAsync")
+                @Method(name = "createRunAsync"),
+                @Method(name = "getRun"),
+                @Method(name = "updateRun"),
+                @Method(name = "listRuns"),
+                @Method(name = "listEvents"),
+                @Method(name = "deleteRun"),
+                @Method(name = "cancelRun"),
+                @Method(name = "pauseRun"),
+                @Method(name = "resumeRun"),
+                @Method(name = "getResult"),
+                @Method(name = "getStatus"),
+                @Method(name = "listTools"),
+                @Method(name = "getConfig"),
+                @Method(name = "listModels"),
+                @Method(name = "getCredits"),
+                @Method(name = "applyCredits"),
+                @Method(name = "submitFeedback"),
+                @Method(name = "exportRun"),
+                @Method(name = "listMessages"),
+                @Method(name = "getSnapshotPartsMeta"),
+                @Method(name = "getSnapshotPart"),
+                @Method(name = "listArtifacts"),
+                @Method(name = "downloadArtifact"),
+                @Method(name = "sendMessage")
         }
 )
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
@@ -62,6 +83,10 @@ import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 public class AgentLangchainDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {
 
     private final AgentLangchainRunService runService;
+    private final LangchainRunReadService readService;
+    private final LangchainRunControlService controlService;
+    private final LangchainFollowUpService followUpService;
+    private final LangchainArtifactFacadeService artifactFacadeService;
     private final AgentLangchainOrchestrator orchestrator;
 
     @Override
@@ -71,117 +96,117 @@ public class AgentLangchainDubboServiceImpl extends DubboAgentDubboServiceTriple
 
     @Override
     public AgentRunMessage getRun(GetAgentRunRequest request) {
-        return reject();
+        return readService.getRun(request);
     }
 
     @Override
     public AgentRunMessage updateRun(UpdateAgentRunRequest request) {
-        return reject();
+        return readService.updateRun(request);
     }
 
     @Override
     public ListAgentRunsResponse listRuns(ListAgentRunsRequest request) {
-        return reject();
+        return readService.listRuns(request);
     }
 
     @Override
     public ListAgentRunEventsResponse listEvents(ListAgentRunEventsRequest request) {
-        return reject();
+        return readService.listEvents(request);
     }
 
     @Override
     public AgentEmpty deleteRun(DeleteAgentRunRequest request) {
-        return reject();
+        return controlService.deleteRun(request);
     }
 
     @Override
     public AgentRunMessage cancelRun(CancelAgentRunRequest request) {
-        return reject();
+        return controlService.cancelRun(request);
     }
 
     @Override
     public AgentRunMessage pauseRun(PauseAgentRunRequest request) {
-        return reject();
+        return controlService.pauseRun(request);
     }
 
     @Override
     public AgentRunMessage resumeRun(ResumeAgentRunRequest request) {
-        return reject();
+        return controlService.resumeRun(request);
     }
 
     @Override
     public AgentRunResultMessage getResult(GetAgentRunResultRequest request) {
-        return reject();
+        return readService.getResult(request);
     }
 
     @Override
     public AgentRunStatusMessage getStatus(GetAgentRunStatusRequest request) {
-        return reject();
+        return readService.getStatus(request);
     }
 
     @Override
     public ListAgentToolsResponse listTools(ListAgentToolsRequest request) {
-        return reject();
+        return readService.listTools(request);
     }
 
     @Override
     public ListAgentArtifactsResponse listArtifacts(ListAgentArtifactsRequest request) {
-        return reject();
+        return artifactFacadeService.listArtifacts(request);
     }
 
     @Override
     public DownloadAgentArtifactResponse downloadArtifact(DownloadAgentArtifactRequest request) {
-        return reject();
+        return artifactFacadeService.downloadArtifact(request);
     }
 
     @Override
     public GetAgentConfigResponse getConfig(GetAgentConfigRequest request) {
-        return reject();
+        return readService.getConfig(request);
     }
 
     @Override
     public ListAgentModelsResponse listModels(ListAgentModelsRequest request) {
-        return reject();
+        return readService.listModels(request);
     }
 
     @Override
     public GetAgentCreditsResponse getCredits(GetAgentCreditsRequest request) {
-        return reject();
+        return readService.getCredits(request);
     }
 
     @Override
     public ApplyAgentCreditsResponse applyCredits(ApplyAgentCreditsRequest request) {
-        return reject();
+        return readService.applyCredits(request);
     }
 
     @Override
     public AgentEmpty submitFeedback(SubmitAgentFeedbackRequest request) {
-        return reject();
+        return readService.submitFeedback(request);
     }
 
     @Override
     public ExportAgentRunResponse exportRun(ExportAgentRunRequest request) {
-        return reject();
+        return readService.exportRun(request);
     }
 
     @Override
     public SendAgentMessageResponse sendMessage(SendAgentMessageRequest request) {
-        return reject();
+        return followUpService.sendMessage(request);
     }
 
     @Override
     public ListAgentMessagesResponse listMessages(ListAgentMessagesRequest request) {
-        return reject();
+        return readService.listMessages(request);
     }
 
     @Override
     public AgentSnapshotPartsMetaMessage getSnapshotPartsMeta(GetAgentSnapshotPartsRequest request) {
-        return reject();
+        return readService.getSnapshotPartsMeta(request);
     }
 
     @Override
     public AgentSnapshotPartMessage getSnapshotPart(GetAgentSnapshotPartRequest request) {
-        return reject();
+        return readService.getSnapshotPart(request);
     }
 
     private <T> T reject() {

@@ -7,6 +7,7 @@ import world.willfrog.agent.platform.service.AgentEventService;
 import world.willfrog.agent.workflow.PlanExecutionMode;
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowRequest;
+import world.willfrog.agentlangchain.orchestration.LangchainRunExecutionGuard;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowResult;
 import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeExecutor;
 import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeResult;
@@ -14,6 +15,7 @@ import world.willfrog.agentlangchain.planning.LangchainTodoPlan;
 
 import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -30,10 +32,13 @@ class LangchainDagWorkflowExecutorTest {
         LangchainTodoNodeExecutor nodeExecutor = mock(LangchainTodoNodeExecutor.class);
         LangchainDagStateRecorder stateRecorder = mock(LangchainDagStateRecorder.class);
         AgentEventService eventService = mock(AgentEventService.class);
+        LangchainRunExecutionGuard executionGuard = mock(LangchainRunExecutionGuard.class);
+        when(executionGuard.stopReason(any(), any())).thenReturn(Optional.empty());
         LangchainDagWorkflowExecutor executor = new LangchainDagWorkflowExecutor(
                 nodeExecutor,
                 stateRecorder,
-                eventService);
+                eventService,
+                executionGuard);
         ReflectionTestUtils.setField(executor, "dagThreadPoolSize", 1);
         when(nodeExecutor.execute(any(), any(), any(), any(), any(AtomicInteger.class)))
                 .thenAnswer(invocation -> {

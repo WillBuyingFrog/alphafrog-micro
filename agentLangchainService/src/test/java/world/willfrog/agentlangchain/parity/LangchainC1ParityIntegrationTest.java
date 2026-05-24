@@ -9,6 +9,7 @@ import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
 import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearRunPipelineImpl;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowExecutor;
+import world.willfrog.agentlangchain.orchestration.LangchainRunExecutionGuard;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowRequest;
 import world.willfrog.agentlangchain.orchestration.LangchainLinearWorkflowResult;
 import world.willfrog.agentlangchain.support.LangchainTestFixtures;
@@ -20,6 +21,9 @@ import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 /**
  * C1: LangChain linear path golden cases aligned with legacy batch-1 parity semantics.
@@ -28,7 +32,8 @@ class LangchainC1ParityIntegrationTest {
 
     private final LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
             LangchainTestFixtures.planner(),
-            LangchainTestFixtures.todoNodeExecutor()
+            LangchainTestFixtures.todoNodeExecutor(),
+            noopExecutionGuard()
     );
 
     @Test
@@ -121,5 +126,11 @@ class LangchainC1ParityIntegrationTest {
                     .aiMessage(AiMessage.from(response))
                     .build();
         }
+    }
+
+    private static LangchainRunExecutionGuard noopExecutionGuard() {
+        LangchainRunExecutionGuard guard = mock(LangchainRunExecutionGuard.class);
+        when(guard.stopReason(any(), any())).thenReturn(Optional.empty());
+        return guard;
     }
 }

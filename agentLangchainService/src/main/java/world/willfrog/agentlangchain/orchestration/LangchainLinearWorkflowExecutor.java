@@ -13,6 +13,7 @@ import world.willfrog.agentlangchain.planning.LangchainTodoPlan;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
 @Service
@@ -21,6 +22,7 @@ public class LangchainLinearWorkflowExecutor {
 
     private final LangchainAiPlanner planner;
     private final LangchainTodoNodeExecutor todoNodeExecutor;
+    private final LangchainRunExecutionGuard executionGuard;
 
     public LangchainLinearWorkflowResult execute(LangchainLinearWorkflowRequest request) {
         validate(request);
@@ -79,6 +81,10 @@ public class LangchainLinearWorkflowExecutor {
         List<LangchainCompletedTodo> completedTodos = new ArrayList<>();
         Map<String, String> datasetRefs = LangchainTodoUserMessageBuilder.newDatasetRefMap();
         for (TodoItem item : plan.getItems()) {
+            Optional<String> stop = executionGuard.stopReason(request.getRunId(), request.getUserId());
+            if (stop.isPresent()) {
+                return interrupted(plan, completedTodos, stop.get(), toolCalls.get());
+            }
             AgentContext.setPhase("linear_execution");
             AgentContext.setStage("todo_execution");
             LangchainTodoNodeResult nodeResult = todoNodeExecutor.execute(
@@ -96,6 +102,11 @@ public class LangchainLinearWorkflowExecutor {
                     .output(trimmed)
                     .summary(nodeResult.getSummary())
                     .build());
+        }
+
+        Optional<String> stopBeforeAnswer = executionGuard.stopReason(request.getRunId(), request.getUserId());
+        if (stopBeforeAnswer.isPresent()) {
+            return interrupted(plan, completedTodos, stopBeforeAnswer.get(), toolCalls.get());
         }
 
         AgentContext.setPhase("summarizing");
@@ -120,6 +131,20 @@ public class LangchainLinearWorkflowExecutor {
         return LangchainLinearWorkflowResult.builder()
                 .success(false)
                 .failureReason(reason)
+                .plan(plan)
+                .completedTodos(completedTodos)
+                .toolCallsUsed(toolCallsUsed)
+                .build();
+    }
+
+    private LangchainLinearWorkflowResult interrupted(LangchainTodoPlan plan,
+                                                      List<LangchainCompletedTodo> completedTodos,
+                                                      String controlStatus,
+                                                      int toolCallsUsed) {
+        return LangchainLinearWorkflowResult.builder()
+                .success(false)
+                .interrupted(true)
+                .failureReason("RUN_INTERRUPTED:" + controlStatus)
                 .plan(plan)
                 .completedTodos(completedTodos)
                 .toolCallsUsed(toolCallsUsed)

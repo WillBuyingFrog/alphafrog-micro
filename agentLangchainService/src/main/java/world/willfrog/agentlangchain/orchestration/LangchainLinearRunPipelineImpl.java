@@ -16,6 +16,7 @@ import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.mapper.AgentRunMapper;
 import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.agent.platform.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentMessageService;
 import world.willfrog.agent.platform.service.AgentObservabilityService;
 import world.willfrog.agent.platform.service.AgentRunStateStore;
 import world.willfrog.agent.workflow.PlanExecutionMode;
@@ -47,6 +48,9 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
     private final ObjectProvider<AgentRunStateStore> stateStoreProvider;
     private final ObjectProvider<AgentObservabilityService> observabilityServiceProvider;
     private final LangchainFailureMapper failureMapper;
+    private final LangchainFollowUpContextSupport followUpContextSupport;
+    private final AgentMessageService messageService;
+    private final LangchainRunExecutionGuard executionGuard;
     private final Executor langchainRunTaskExecutor;
 
     public LangchainLinearRunPipelineImpl(LangchainAiPlanner planner,
@@ -60,6 +64,9 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                                           ObjectProvider<AgentRunStateStore> stateStoreProvider,
                                           ObjectProvider<AgentObservabilityService> observabilityServiceProvider,
                                           LangchainFailureMapper failureMapper,
+                                          LangchainFollowUpContextSupport followUpContextSupport,
+                                          AgentMessageService messageService,
+                                          LangchainRunExecutionGuard executionGuard,
                                           @Qualifier("agentLangchainRunTaskExecutor") Executor langchainRunTaskExecutor) {
         this.planner = planner;
         this.linearWorkflowExecutor = linearWorkflowExecutor;
@@ -72,6 +79,9 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         this.stateStoreProvider = stateStoreProvider;
         this.observabilityServiceProvider = observabilityServiceProvider;
         this.failureMapper = failureMapper;
+        this.followUpContextSupport = followUpContextSupport;
+        this.messageService = messageService;
+        this.executionGuard = executionGuard;
         this.langchainRunTaskExecutor = langchainRunTaskExecutor;
     }
 
@@ -116,7 +126,9 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                         firstNonBlank(stageModels.planningModelName(), eventService.extractModelName(run.getExt())),
                         captureLlmRequests);
             }
-            userGoal = eventService.extractUserGoal(run.getExt());
+            LangchainFollowUpContextSupport.ExecutionContext executionContext = followUpContextSupport.resolve(run);
+            userGoal = executionContext.userGoal();
+            String dialogueContext = executionContext.dialogueContext();
             AgentEventService.RunConfig runConfig = eventService.extractRunConfig(run.getExt());
             AgentContext.setWebSearchEnabled(runConfig.webSearchEnabled());
             AgentContext.setWebSearchConfig(runConfig.webSearchConfig());
@@ -126,7 +138,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     .runId(runId)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .dialogueContext("")
+                    .dialogueContext(dialogueContext)
                     .model(stageModels.executionModel())
                     .planningModel(stageModels.planningModel())
                     .executionModel(stageModels.executionModel())
@@ -144,7 +156,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     .runId(runId)
                     .userId(userId)
                     .userGoal(userGoal)
-                    .dialogueContext("")
+                    .dialogueContext(dialogueContext)
                     .model(stageModels.planningModel())
                     .planningEndpointName(stageModels.planningEndpointName())
                     .planningModelName(stageModels.planningModelName())
@@ -160,9 +172,19 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                     "todo_count", plan.getItems() == null ? 0 : plan.getItems().size()
             ));
 
+            if (abortIfStopped(runId, userId, "before_execution")) {
+                return;
+            }
+
             LangchainLinearWorkflowResult result = useDag
                     ? dagWorkflowExecutor.executePlanned(workflowRequest, plan)
                     : linearWorkflowExecutor.executePlanned(workflowRequest, plan);
+
+            if (result.isInterrupted() || abortIfStopped(runId, userId, "before_persist")) {
+                log.info("LangChain run {} stopped before persist (interrupted={}, reason={})",
+                        runId, result.isInterrupted(), result.getFailureReason());
+                return;
+            }
 
             runMapper.updatePlanJson(runId, userId, writeJson(result.getPlan()));
             if (result.isSuccess()) {
@@ -175,6 +197,7 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
                         "toolCallsUsed", result.getToolCallsUsed(),
                         "engine", "agentLangchainService"
                 ));
+                persistAssistantMessage(runId, userId, stageModels, result.getFinalAnswer());
             } else {
                 publishFailure(runId, userId, userGoal, result, null);
             }
@@ -230,6 +253,38 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         return writeJson(snapshot);
     }
 
+    private void persistAssistantMessage(String runId,
+                                         String userId,
+                                         LangchainRunStageModelResolver.StageModels stageModels,
+                                         String finalAnswer) {
+        if (isBlank(finalAnswer)) {
+            return;
+        }
+        try {
+            String assistantMetaJson = messageService.buildMetaJson(
+                    stageModels.planningModelName(),
+                    stageModels.planningEndpointName(),
+                    null,
+                    null);
+            messageService.createAssistantMessage(runId, finalAnswer, assistantMetaJson);
+            eventService.append(runId, userId, "MESSAGE_COMPLETED", Map.of(
+                    "role", "assistant",
+                    "content_preview", preview(finalAnswer, 200),
+                    "model", nvl(stageModels.planningModelName()),
+                    "endpoint", nvl(stageModels.planningEndpointName()),
+                    "engine", "agentLangchainService"));
+        } catch (Exception e) {
+            log.warn("Failed to create assistant message for runId={}: {}", runId, e.getMessage());
+        }
+    }
+
+    private String preview(String content, int maxLen) {
+        if (content == null) {
+            return "";
+        }
+        return content.length() <= maxLen ? content : content.substring(0, maxLen);
+    }
+
     private void markRunStatus(String runId, AgentRunStatus status) {
         AgentRunStateStore stateStore = stateStoreProvider.getIfAvailable();
         if (stateStore != null) {
@@ -260,11 +315,23 @@ public class LangchainLinearRunPipelineImpl implements LangchainLinearRunPipelin
         return fallback == null ? "" : fallback;
     }
 
+    private boolean abortIfStopped(String runId, String userId, String phase) {
+        return executionGuard.stopReason(runId, userId)
+                .map(reason -> {
+                    log.info("LangChain run {} aborted at {} (control status={})", runId, phase, reason);
+                    return true;
+                })
+                .orElse(false);
+    }
+
     private void publishFailure(String runId,
                                 String userId,
                                 String userGoal,
                                 LangchainLinearWorkflowResult result,
                                 Throwable throwable) {
+        if (abortIfStopped(runId, userId, "before_failure_persist")) {
+            return;
+        }
         String failureReason = nvl(result == null ? null : result.getFailureReason());
         LangchainFailureDecision decision = failureMapper.map(
                 AgentContext.getPhase(),

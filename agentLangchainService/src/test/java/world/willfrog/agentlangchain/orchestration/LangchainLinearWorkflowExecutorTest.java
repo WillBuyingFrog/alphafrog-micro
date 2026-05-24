@@ -13,6 +13,9 @@ import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 class LangchainLinearWorkflowExecutorTest {
 
@@ -35,7 +38,8 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.todoNodeExecutor()
+                LangchainTestFixtures.todoNodeExecutor(),
+                noopExecutionGuard()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
@@ -68,7 +72,8 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.todoNodeExecutor()
+                LangchainTestFixtures.todoNodeExecutor(),
+                noopExecutionGuard()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
@@ -100,7 +105,8 @@ class LangchainLinearWorkflowExecutorTest {
         );
         LangchainLinearWorkflowExecutor executor = new LangchainLinearWorkflowExecutor(
                 LangchainTestFixtures.planner(),
-                LangchainTestFixtures.todoNodeExecutor()
+                LangchainTestFixtures.todoNodeExecutor(),
+                noopExecutionGuard()
         );
 
         LangchainLinearWorkflowResult result = executor.execute(LangchainLinearWorkflowRequest.builder()
@@ -140,5 +146,11 @@ class LangchainLinearWorkflowExecutorTest {
         List<ChatRequest> requests() {
             return requests;
         }
+    }
+
+    private static LangchainRunExecutionGuard noopExecutionGuard() {
+        LangchainRunExecutionGuard guard = mock(LangchainRunExecutionGuard.class);
+        when(guard.stopReason(any(), any())).thenReturn(Optional.empty());
+        return guard;
     }
 }
