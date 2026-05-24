@@ -263,7 +263,27 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 AgentContext.setStreamingProgress(progressSnapshot);
             }
             
-            // ALP-25：上报成功观测
+            // 始终记录基本观测（llmCalls/token/duration），即使不开 raw HTTP capture
+            if (observabilityService != null) {
+                String runId = AgentContext.getRunId();
+                if (runId != null && !runId.isBlank()) {
+                    observabilityService.recordLlmCall(
+                            runId,
+                            AgentContext.getPhase() != null ? AgentContext.getPhase() : "unknown",
+                            tokenUsage,
+                            durationMs,
+                            requestStartedAt,
+                            requestStartedAt + durationMs,
+                            endpointName,
+                            modelName,
+                            null,
+                            null,
+                            null
+                    );
+                }
+            }
+
+            // ALP-25：上报成功观测（含 raw HTTP）
             if (shouldCapture && observabilityService != null) {
                 reportLlmCall(requestRecord, responseRecord, curlCommand, requestStartedAt, durationMs, null,
                         reasoningContent, progressSnapshot, attemptResult.attempts());
