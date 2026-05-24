@@ -33,7 +33,7 @@ public class AgentToolsController {
 
     private static final int ADMIN_USER_TYPE = 1127;
 
-    @DubboReference(check = false)
+    @DubboReference(group = "*", check = false)
     private AgentDubboService agentDubboService;
 
     private final AuthService authService;

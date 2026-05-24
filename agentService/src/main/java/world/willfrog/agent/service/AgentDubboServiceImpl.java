@@ -74,7 +74,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@DubboService
+@DubboService(group = "legacy")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {

@@ -80,9 +80,10 @@ import java.util.Map;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * Agent run HTTP API. All Dubbo calls target the default {@code AgentDubboService} provider,
- * now implemented by {@code agentLangchainService}.
- * Paths under {@code /api/agent-legacy/*} are deprecated aliases of {@code /api/agent/*}.
+ * Agent run HTTP API.
+ * {@code POST /api/agent/runs} routes to the {@code langchain} Dubbo group.
+ * {@code POST /api/agent-legacy/runs} routes to the {@code legacy} Dubbo group.
+ * All other operations use a wildcard group reference for backward compatibility.
  */
 @RestController
 @RequiredArgsConstructor
@@ -95,8 +96,14 @@ public class AgentController {
     private static final int ADMIN_USER_TYPE = 1127;
     private static final int OBSERVABILITY_FULL_MAX_BYTES = 5 * 1024 * 1024;
 
-    @DubboReference(check = false)
+    @DubboReference(group = "*", check = false)
     private AgentDubboService agentDubboService;
+
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
@@ -105,7 +112,7 @@ public class AgentController {
     @PostMapping(AGENT_RUNS)
     public ResponseWrapper<AgentRunResponse> create(Authentication authentication,
                                                     @RequestBody AgentRunCreateRequest request) {
-        return createRun(authentication, request);
+        return createRun(authentication, request, agentDubboServiceLangchain);
     }
 
     /**
@@ -115,11 +122,12 @@ public class AgentController {
     @PostMapping(AGENT_LEGACY_RUNS)
     public ResponseWrapper<AgentRunResponse> createLegacy(Authentication authentication,
                                                           @RequestBody AgentRunCreateRequest request) {
-        return createRun(authentication, request);
+        return createRun(authentication, request, agentDubboServiceLegacy);
     }
 
     private ResponseWrapper<AgentRunResponse> createRun(Authentication authentication,
-                                                        AgentRunCreateRequest request) {
+                                                        AgentRunCreateRequest request,
+                                                        AgentDubboService dubboService) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -175,7 +183,7 @@ public class AgentController {
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
             String stageConfigJson = nvl(request.stageConfigJson());
             log.info("[AgentController] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
-            AgentRunMessage run = agentDubboService.createRun(
+            AgentRunMessage run = dubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
                             .setMessage(request.message())

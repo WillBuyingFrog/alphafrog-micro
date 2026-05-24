@@ -25,7 +25,7 @@ import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 @Slf4j
 public class AgentCreditController {
 
-    @DubboReference(check = false)
+    @DubboReference(group = "*", check = false)
     private AgentDubboService agentDubboService;
 
     private final AuthService authService;

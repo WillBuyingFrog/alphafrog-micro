@@ -24,7 +24,7 @@ import java.util.List;
 @Slf4j
 public class AgentConfigController {
 
-    @DubboReference(check = false)
+    @DubboReference(group = "*", check = false)
     private AgentDubboService agentDubboService;
 
     private final AuthService authService;
