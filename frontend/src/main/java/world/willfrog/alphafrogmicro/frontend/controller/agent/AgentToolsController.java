@@ -1,9 +1,10 @@
 package world.willfrog.alphafrogmicro.frontend.controller.agent;
 
-import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -27,16 +28,33 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequiredArgsConstructor
 @Slf4j
 public class AgentToolsController {
 
     private static final int ADMIN_USER_TYPE = 1127;
 
-    @DubboReference(group = "*", check = false)
-    private AgentDubboService agentDubboService;
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
+
+    @Autowired
+    private HttpServletRequest request;
 
     private final AuthService authService;
+
+    public AgentToolsController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
 
     @GetMapping("/api/agent/tools")
     public ResponseWrapper<List<AgentToolResponse>> tools(Authentication authentication) {
@@ -82,7 +100,7 @@ public class AgentToolsController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.listTools(ListAgentToolsRequest.newBuilder().setUserId(userId).build());
+            var resp = resolveService().listTools(ListAgentToolsRequest.newBuilder().setUserId(userId).build());
             List<AgentToolResponse> tools = new ArrayList<>();
             for (var t : resp.getItemsList()) {
                 tools.add(new AgentToolResponse(t.getName(), t.getDescription(), t.getParametersJson()));
@@ -103,7 +121,7 @@ public class AgentToolsController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.getConfig(
+            var resp = resolveService().getConfig(
                     GetAgentConfigRequest.newBuilder()
                             .setUserId(userId)
                             .build()
@@ -135,7 +153,7 @@ public class AgentToolsController {
             return ResponseEntity.status(401).build();
         }
         try {
-            DownloadAgentArtifactResponse resp = agentDubboService.downloadArtifact(
+            DownloadAgentArtifactResponse resp = resolveService().downloadArtifact(
                     DownloadAgentArtifactRequest.newBuilder()
                             .setUserId(userId)
                             .setArtifactId(artifactId)

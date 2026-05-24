@@ -83,7 +83,7 @@ public class AdminServiceImpl extends AdminServiceImplBase {
     private final TransactionTemplate transactionTemplate;
     private final ObjectMapper objectMapper;
 
-    @DubboReference(group = "*")
+    @DubboReference(group = "langchain")
     private AgentDubboService agentDubboService;
 
     public AdminServiceImpl(UserDao userDao,

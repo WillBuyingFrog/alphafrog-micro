@@ -5,11 +5,14 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
@@ -81,9 +84,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Agent run HTTP API.
- * {@code POST /api/agent/runs} routes to the {@code langchain} Dubbo group.
- * {@code POST /api/agent-legacy/runs} routes to the {@code legacy} Dubbo group.
- * All other operations use a wildcard group reference for backward compatibility.
+ * {@code /api/agent/**} routes exclusively to the {@code langchain} Dubbo group.
+ * {@code /api/agent-legacy/**} routes exclusively to the {@code legacy} Dubbo group.
  */
 @RestController
 @RequiredArgsConstructor
@@ -96,18 +98,30 @@ public class AgentController {
     private static final int ADMIN_USER_TYPE = 1127;
     private static final int OBSERVABILITY_FULL_MAX_BYTES = 5 * 1024 * 1024;
 
-    @DubboReference(group = "*", check = false)
-    private AgentDubboService agentDubboService;
-
     @DubboReference(group = "langchain", check = false)
     private AgentDubboService agentDubboServiceLangchain;
 
     @DubboReference(group = "legacy", check = false)
     private AgentDubboService agentDubboServiceLegacy;
 
+    @Autowired
+    private HttpServletRequest request;
+
     private final AuthService authService;
     private final ObjectMapper objectMapper;
     private final AgentRunResultCacheService runResultCacheService;
+
+    /**
+     * 根据当前 HTTP 请求路径选择对应的 Dubbo provider。
+     * /api/agent/** -> langchain；/api/agent-legacy/** -> legacy。
+     */
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
 
     @PostMapping(AGENT_RUNS)
     public ResponseWrapper<AgentRunResponse> create(Authentication authentication,
@@ -221,7 +235,7 @@ public class AgentController {
         try {
             int resolvedLimit = resolveLimit(limit, size, max);
             int resolvedOffset = resolveOffset(offset, page, resolvedLimit);
-            ListAgentRunsResponse resp = agentDubboService.listRuns(
+            ListAgentRunsResponse resp = resolveService().listRuns(
                     ListAgentRunsRequest.newBuilder()
                             .setUserId(userId)
                             .setLimit(resolvedLimit)
@@ -260,7 +274,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.getRun(GetAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().getRun(GetAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent run");
@@ -278,7 +292,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentSnapshotPartsMetaMessage meta = agentDubboService.getSnapshotPartsMeta(
+            AgentSnapshotPartsMetaMessage meta = resolveService().getSnapshotPartsMeta(
                     GetAgentSnapshotPartsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -304,7 +318,7 @@ public class AgentController {
             return snapshotPartError(401, "UNAUTHORIZED");
         }
         try {
-            AgentSnapshotPartMessage part = agentDubboService.getSnapshotPart(
+            AgentSnapshotPartMessage part = resolveService().getSnapshotPart(
                     GetAgentSnapshotPartRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -347,7 +361,7 @@ public class AgentController {
             return ResponseWrapper.paramError("title 长度不能超过 120");
         }
         try {
-            AgentRunMessage run = agentDubboService.updateRun(
+            AgentRunMessage run = resolveService().updateRun(
                     UpdateAgentRunRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -391,7 +405,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            agentDubboService.deleteRun(DeleteAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            resolveService().deleteRun(DeleteAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success("ok");
         } catch (RpcException e) {
             return handleRpcError(e, "删除 agent run");
@@ -410,7 +424,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            ListAgentRunEventsResponse resp = agentDubboService.listEvents(
+            ListAgentRunEventsResponse resp = resolveService().listEvents(
                     ListAgentRunEventsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -448,7 +462,7 @@ public class AgentController {
         }
         try {
             int safeLimit = Math.min(Math.max(1, limit), 500);
-            ListAgentRunEventsResponse resp = agentDubboService.listEvents(
+            ListAgentRunEventsResponse resp = resolveService().listEvents(
                     ListAgentRunEventsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -501,7 +515,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.cancelRun(CancelAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().cancelRun(CancelAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "取消 agent run");
@@ -518,7 +532,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.pauseRun(PauseAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().pauseRun(PauseAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "暂停 agent run");
@@ -537,7 +551,7 @@ public class AgentController {
         }
         try {
             String planOverrideJson = request == null ? "" : nvl(request.planOverrideJson());
-            AgentRunMessage run = agentDubboService.resumeRun(ResumeAgentRunRequest.newBuilder()
+            AgentRunMessage run = resolveService().resumeRun(ResumeAgentRunRequest.newBuilder()
                     .setUserId(userId)
                     .setId(runId)
                     .setPlanOverrideJson(planOverrideJson)
@@ -588,7 +602,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunStatusMessage status = agentDubboService.getStatus(
+            AgentRunStatusMessage status = resolveService().getStatus(
                     GetAgentRunStatusRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -854,7 +868,7 @@ public class AgentController {
         }
         try {
             boolean isAdmin = isAdmin(authentication);
-            ListAgentArtifactsResponse resp = agentDubboService.listArtifacts(
+            ListAgentArtifactsResponse resp = resolveService().listArtifacts(
                     ListAgentArtifactsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -895,7 +909,7 @@ public class AgentController {
             return ResponseEntity.badRequest().build();
         }
         try {
-            DownloadAgentArtifactResponse resp = agentDubboService.downloadArtifact(
+            DownloadAgentArtifactResponse resp = resolveService().downloadArtifact(
                     DownloadAgentArtifactRequest.newBuilder()
                             .setUserId(userId)
                             .setArtifactId(artifactId)
@@ -951,7 +965,7 @@ public class AgentController {
             int rating = request == null || request.rating() == null ? 0 : request.rating();
             String tagsJson = request == null ? "" : objectMapper.writeValueAsString(request.tags());
             String payloadJson = request == null ? "" : objectMapper.writeValueAsString(request.payload());
-            agentDubboService.submitFeedback(
+            resolveService().submitFeedback(
                     SubmitAgentFeedbackRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -979,7 +993,7 @@ public class AgentController {
         }
         String format = request == null || request.format() == null ? "" : request.format().trim();
         try {
-            ExportAgentRunResponse resp = agentDubboService.exportRun(
+            ExportAgentRunResponse resp = resolveService().exportRun(
                     ExportAgentRunRequest.newBuilder().setUserId(userId).setId(runId).setFormat(nvl(format)).build()
             );
             return ResponseWrapper.success(new AgentExportResponse(
@@ -1030,7 +1044,7 @@ public class AgentController {
         }
 
         try {
-            SendAgentMessageResponse resp = agentDubboService.sendMessage(
+            SendAgentMessageResponse resp = resolveService().sendMessage(
                     SendAgentMessageRequest.newBuilder()
                             .setUserId(userId)
                             .setRunId(runId)
@@ -1074,7 +1088,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            ListAgentMessagesResponse resp = agentDubboService.listMessages(
+            ListAgentMessagesResponse resp = resolveService().listMessages(
                     ListAgentMessagesRequest.newBuilder()
                             .setUserId(userId)
                             .setRunId(runId)

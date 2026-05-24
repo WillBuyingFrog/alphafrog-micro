@@ -1,9 +1,10 @@
 package world.willfrog.alphafrogmicro.frontend.controller.agent;
 
-import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -20,14 +21,31 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequiredArgsConstructor
 @Slf4j
 public class AgentConfigController {
 
-    @DubboReference(group = "*", check = false)
-    private AgentDubboService agentDubboService;
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
+
+    @Autowired
+    private HttpServletRequest request;
 
     private final AuthService authService;
+
+    public AgentConfigController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
 
     @GetMapping("/api/agent/models")
     public ResponseWrapper<AgentModelListResponse> models(Authentication authentication) {
@@ -71,7 +89,7 @@ public class AgentConfigController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.listModels(
+            var resp = resolveService().listModels(
                     ListAgentModelsRequest.newBuilder().setUserId(userId).build()
             );
             List<AgentModelResponse> models = new ArrayList<>();
