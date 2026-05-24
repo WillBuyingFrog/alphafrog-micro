@@ -25,6 +25,7 @@ public class LangchainTodoNodeExecutor {
 
     private final AgentPromptService promptService;
     private final ObjectProvider<ToolProvider> toolProvider;
+    private final LangchainRunExecutionGuard executionGuard;
 
     public LangchainTodoNodeResult execute(LangchainLinearWorkflowRequest request,
                                            TodoItem item,
@@ -46,6 +47,7 @@ public class LangchainTodoNodeExecutor {
         LangchainDatasetRefContext.set(datasetRefs);
         LangchainRepeatedToolCallContext.clear();
         try {
+            ensureRunnable(request);
             String output = buildTodoAiService(request, toolCalls, datasetRefs).execute(userMessage);
             if (isBlank(output)) {
                 return LangchainTodoNodeResult.failure("empty_todo_output:" + item.getId());
@@ -64,6 +66,7 @@ public class LangchainTodoNodeExecutor {
 
     public String writeFinalAnswer(LangchainLinearWorkflowRequest request,
                                    List<LangchainCompletedTodo> completedTodos) {
+        ensureRunnable(request);
         return buildFinalAnswerAiService(request)
                 .answer(LangchainTodoUserMessageBuilder.buildFinalUserMessage(
                         promptService,
@@ -79,6 +82,12 @@ public class LangchainTodoNodeExecutor {
                 .chatModel(request.executionModelOrDefault())
                 .systemMessageProvider(ignored -> promptService.dagReactSystemPrompt())
                 .maxToolCallingRoundTrips(resolveMaxToolRoundTrips(request.getMaxToolRoundTrips()))
+                .chatRequestTransformer(chatRequest -> {
+                    ensureRunnable(request);
+                    return chatRequest;
+                })
+                .beforeToolExecution(ignored -> ensureRunnable(request))
+                .toolExecutionErrorHandler(LangchainTerminalToolErrorHandler::handle)
                 .afterToolExecution(result -> {
                     toolCalls.incrementAndGet();
                     if (result != null && result.result() != null) {
@@ -93,7 +102,21 @@ public class LangchainTodoNodeExecutor {
         return AiServices.builder(LangchainFinalAnswerAiService.class)
                 .chatModel(request.finalAnswerModelOrDefault())
                 .systemMessageProvider(ignored -> promptService.dagReactSystemPrompt())
+                .chatRequestTransformer(chatRequest -> {
+                    ensureRunnable(request);
+                    return chatRequest;
+                })
                 .build();
+    }
+
+    private void ensureRunnable(LangchainLinearWorkflowRequest request) {
+        if (request == null) {
+            return;
+        }
+        Optional<String> stop = executionGuard.stopReason(request.getRunId(), request.getUserId());
+        if (stop.isPresent()) {
+            throw new IllegalStateException("RUN_INTERRUPTED:" + stop.get());
+        }
     }
 
     private int resolveMaxToolRoundTrips(Integer requested) {

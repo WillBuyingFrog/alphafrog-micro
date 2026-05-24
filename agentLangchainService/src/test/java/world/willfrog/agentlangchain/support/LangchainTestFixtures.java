@@ -6,11 +6,16 @@ import world.willfrog.agent.platform.config.AgentLlmProperties;
 import world.willfrog.agent.platform.service.AgentLlmLocalConfigLoader;
 import world.willfrog.agent.platform.service.AgentPromptService;
 import org.springframework.beans.factory.ObjectProvider;
+import world.willfrog.agentlangchain.orchestration.LangchainRunExecutionGuard;
 import world.willfrog.agentlangchain.orchestration.LangchainTodoNodeExecutor;
 import world.willfrog.agentlangchain.planning.LangchainAiPlanner;
 import world.willfrog.agentlangchain.planning.LangchainPlanningStructuredOutputSettings;
 
 import java.util.Optional;
+
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.when;
 
 public final class LangchainTestFixtures {
 
@@ -71,7 +76,7 @@ public final class LangchainTestFixtures {
                 return null;
             }
         };
-        return new LangchainTodoNodeExecutor(promptService(), provider);
+        return new LangchainTodoNodeExecutor(promptService(), provider, noopExecutionGuard());
     }
 
     public static LangchainTodoNodeExecutor todoNodeExecutor(Optional<dev.langchain4j.service.tool.ToolProvider> toolProvider) {
@@ -96,6 +101,12 @@ public final class LangchainTestFixtures {
                 return toolProvider.orElse(null);
             }
         };
-        return new LangchainTodoNodeExecutor(promptService(), provider);
+        return new LangchainTodoNodeExecutor(promptService(), provider, noopExecutionGuard());
+    }
+
+    private static LangchainRunExecutionGuard noopExecutionGuard() {
+        LangchainRunExecutionGuard guard = mock(LangchainRunExecutionGuard.class);
+        when(guard.stopReason(any(), any())).thenReturn(Optional.empty());
+        return guard;
     }
 }
