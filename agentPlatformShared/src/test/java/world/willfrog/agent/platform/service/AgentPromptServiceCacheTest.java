@@ -161,6 +161,13 @@ class AgentPromptServiceCacheTest {
     }
 
     @Test
+    void dagReactSystemPrompt_shouldIncludeTimeBaselinePrefix() {
+        String prompt = promptService.dagReactSystemPrompt();
+        assertTrue(prompt.startsWith("当前时间：" + LocalDate.now().format(CN_DATE_FORMATTER)),
+                "DAG ReAct system prompt 应含与 planning 一致的时间基准前缀");
+    }
+
+    @Test
     void dagReactSystemPrompt_shouldSuggestSoftBatchGuidance() {
         String prompt = promptService.dagReactSystemPrompt();
         assertTrue(prompt.contains("批量查询（建议，非强制）"),

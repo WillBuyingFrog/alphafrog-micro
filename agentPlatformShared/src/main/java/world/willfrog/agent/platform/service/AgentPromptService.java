@@ -327,13 +327,16 @@ public class AgentPromptService {
      * 1. agent.llm.prompts.dagReactSystemPrompt（直接配置内容）
      * 2. agent.llm.prompts.dagReactSystemPromptFile（由 LocalConfigLoader 解析为文本，与其他 file: 字段机制一致）
      * 3. classpath 默认 Prompt（dag_react_system_default.txt）
+     *
+     * <p>与 planning 一致，经 {@link #composeSystemPrompt(String)} 注入时间基准与全局 agent_run 指令。</p>
      */
     public String dagReactSystemPrompt() {
-        return firstNonBlank(
+        String specific = firstNonBlank(
                 currentPrompts().getDagReactSystemPrompt(),
                 currentPrompts().getDagReactSystemPromptFile(),
                 defaultDagReactSystemPrompt()
         );
+        return composeSystemPrompt(specific);
     }
 
     /**
