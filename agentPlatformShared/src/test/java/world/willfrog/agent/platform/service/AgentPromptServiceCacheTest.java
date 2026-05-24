@@ -48,7 +48,18 @@ class AgentPromptServiceCacheTest {
         LocalDate today = LocalDate.now();
         assertTrue(prompt.startsWith("当前时间：" + today.format(CN_DATE_FORMATTER)),
                 "系统 Prompt 应以时间基准前缀开头");
+        assertTrue(prompt.contains(today.getYear() + "年" + today.getMonthValue() + "月" + today.getDayOfMonth() + "日"),
+                "时间基准应包含年月日");
         assertTrue(prompt.contains(GLOBAL_PROMPT), "时间基准后应拼接全局指令");
+    }
+
+    @Test
+    void reactSystemPrompt_shouldRequireExplicitCalendarYearsInOutputs() {
+        String prompt = promptService.reactSystemPrompt();
+        assertTrue(prompt.contains("须标明具体公历年份"),
+                "planning system prompt 应要求输出标明具体年份");
+        assertTrue(prompt.contains("禁止使用仅含"),
+                "planning system prompt 应禁止仅使用去年/明年等相对词");
     }
 
     @Test

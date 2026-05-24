@@ -676,11 +676,12 @@ public class AgentPromptService {
         int lastYear = thisYear - 1;
         int yearBeforeLast = thisYear - 2;
         parts.add(String.format(
-                "当前时间：%s（%s）。所有涉及日期、时间、年份的推理必须以当前时间为基准。"
+                "当前时间：%s（%s，%d年%d月%d日）。所有涉及日期、时间、年份的推理必须以当前时间为基准。"
                 + "例如：用户说%d年，指%d年；说去年，指%d年；说今年，指%d年；"
                 + "说上一年，指%d年；说再上一年，指%d年。",
                 today.format(CN_DATE_FORMATTER),
                 today.getDayOfWeek().getDisplayName(TextStyle.FULL, Locale.CHINESE),
+                thisYear, today.getMonthValue(), today.getDayOfMonth(),
                 thisYear, thisYear,
                 lastYear, thisYear,
                 lastYear, yearBeforeLast));

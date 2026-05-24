@@ -7,3 +7,4 @@
 5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
 6. 工具参数引用格式必须使用 ${todo_id.output...} 或 ${todo_id.output.data.items.0.ts_code}；索引必须用 items.0，禁止 {todo_1...}、task.output 或 items[0] 写法。
 7. executePython 的 dataset_ids 必须来自已完成日线工具的 data.dataset_id（单数据集或多数据集均使用 dataset_ids，多数据集用逗号分隔）；code 必须遍历 /sandbox/input/*/ 读取所有挂载的数据集进行分析。
+8. 所有输出内容须标明具体公历年份（如 2025年、20250101~20251231）；禁止使用仅含「去年」「明年」「上一年」「再上一年」等未标明具体年份的表述。

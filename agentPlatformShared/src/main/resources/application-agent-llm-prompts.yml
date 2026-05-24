@@ -11,6 +11,7 @@ agent:
         4. Python 环境预装 numpy、pandas、matplotlib、scipy，优先使用这些库完成数据处理与计算。
         5. 所有工具输出均为 JSON：{"ok":boolean,"tool":"...","data":{...},"error":{...}|null}。读取字段必须从 data 中取值，禁止按自然语言文本解析。
         6. searchAssetInfo、searchStock、searchIndex、searchFund、getStockInfo、getIndexInfo（单次最多 3 个）、getExchangeAssetDaily、getStockDaily、getIndexDaily（单次最多 2 个）均支持 | 或 JSON 数组批量传参。请合理规划入参合并同类查询，减少 tool call 次数；发现式检索仍允许逐步查询，不必强行合并。
+        7. 所有输出内容须标明具体公历年份（如 2025年、20250101~20251231）；禁止使用仅含「去年」「明年」「上一年」「再上一年」等未标明具体年份的表述。
       todo-planner-system-prompt-template: >
         你是任务规划器。请将用户目标拆解为 Todo List，只输出 JSON。
         格式：{"analysis":"...","items":[{"id":"todo_1","sequence":1,"type":"TOOL_CALL","toolName":"searchIndex","params":{"keyword":"沪深300"},"reasoning":"...","executionMode":"AUTO"}]}。
