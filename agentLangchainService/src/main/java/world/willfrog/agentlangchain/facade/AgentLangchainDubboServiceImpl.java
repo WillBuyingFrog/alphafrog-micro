@@ -2,7 +2,6 @@ package world.willfrog.agentlangchain.facade;
 
 import lombok.RequiredArgsConstructor;
 import org.apache.dubbo.config.annotation.DubboService;
-import org.apache.dubbo.config.annotation.Method;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import world.willfrog.agentlangchain.orchestration.AgentLangchainOrchestrator;
 import world.willfrog.alphafrogmicro.agent.idl.AgentEmpty;
@@ -49,35 +48,7 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 
-@DubboService(
-        methods = {
-                @Method(name = "createRun"),
-                @Method(name = "createRunAsync"),
-                @Method(name = "getRun"),
-                @Method(name = "updateRun"),
-                @Method(name = "listRuns"),
-                @Method(name = "listEvents"),
-                @Method(name = "deleteRun"),
-                @Method(name = "cancelRun"),
-                @Method(name = "pauseRun"),
-                @Method(name = "resumeRun"),
-                @Method(name = "getResult"),
-                @Method(name = "getStatus"),
-                @Method(name = "listTools"),
-                @Method(name = "getConfig"),
-                @Method(name = "listModels"),
-                @Method(name = "getCredits"),
-                @Method(name = "applyCredits"),
-                @Method(name = "submitFeedback"),
-                @Method(name = "exportRun"),
-                @Method(name = "listMessages"),
-                @Method(name = "getSnapshotPartsMeta"),
-                @Method(name = "getSnapshotPart"),
-                @Method(name = "listArtifacts"),
-                @Method(name = "downloadArtifact"),
-                @Method(name = "sendMessage")
-        }
-)
+@DubboService
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor
 public class AgentLangchainDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {

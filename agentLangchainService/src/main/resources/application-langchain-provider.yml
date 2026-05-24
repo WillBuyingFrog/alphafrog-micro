@@ -23,6 +23,8 @@ dubbo:
   application:
     name: agent-langchain-service
     register-mode: interface
+    # Keep method metadata local; do not push full AgentDubboService descriptor to Nacos (1024-byte limit).
+    metadata-type: local
   protocol:
     name: tri
     port: ${AGENT_LANGCHAIN_DUBBO_PORT:50059}
