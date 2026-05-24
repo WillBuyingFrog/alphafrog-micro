@@ -1,8 +1,18 @@
 package world.willfrog.alphafrogmicro.domestic.listedasset;
 
+import com.meilisearch.sdk.Client;
+import com.meilisearch.sdk.Config;
+import com.meilisearch.sdk.Index;
+import com.meilisearch.sdk.SearchRequest;
+import com.meilisearch.sdk.model.SearchResult;
+import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
+import org.springframework.core.env.Environment;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
+import world.willfrog.alphafrogmicro.common.component.MeiliSearchDataSyncService;
+import world.willfrog.alphafrogmicro.common.component.MeiliSearchIndexManager;
 import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfAdjFactorDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfDailyDao;
 import world.willfrog.alphafrogmicro.common.dao.domestic.etf.EtfInfoDao;
@@ -27,10 +37,15 @@ import world.willfrog.alphafrogmicro.domestic.idl.ListedAssetInfoResponse;
 import world.willfrog.alphafrogmicro.domestic.idl.ListedAssetSearchRequest;
 import world.willfrog.alphafrogmicro.domestic.idl.ListedAssetSearchResponse;
 
+import java.util.HashMap;
 import java.util.HashSet;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
+import java.util.Objects;
 import java.util.Set;
+import java.util.function.Function;
 
 @DubboService
 @Service
@@ -41,23 +56,110 @@ public class DomesticListedAssetServiceImpl extends DomesticListedAssetServiceIm
     private static final String ASSET_TYPE_ETF = "etf";
     private static final int DEFAULT_SEARCH_LIMIT = 20;
     private static final int MAX_SEARCH_LIMIT = 100;
+    private static final String MEILI_ETF_INDEX = "etfs";
+    private static final String MEILI_HOST_PROP = "meilisearch.host";
+    private static final String MEILI_API_KEY_PROP = "meilisearch.api-key";
+    private static final String MEILI_ENABLED_PROP = "advanced.meili-enabled";
+    private static final String MEILI_AUTO_SYNC_PROP = "advanced.meili-auto-sync";
+    private static final String DEFAULT_MEILI_HOST = "http://localhost:7700";
+    private static final String DEFAULT_MEILI_API_KEY = "alphafrog_search_key";
 
     private final StockInfoDao stockInfoDao;
     private final StockQuoteDao stockQuoteDao;
     private final EtfInfoDao etfInfoDao;
     private final EtfDailyDao etfDailyDao;
     private final EtfAdjFactorDao etfAdjFactorDao;
+    private final Environment environment;
+    private volatile Client meiliClient;
+    private volatile String meiliClientHost;
+    private volatile String meiliClientApiKey;
+    private volatile MeiliSearchIndexManager etfIndexManager;
+    private volatile MeiliSearchDataSyncService etfSyncService;
 
     public DomesticListedAssetServiceImpl(StockInfoDao stockInfoDao,
                                           StockQuoteDao stockQuoteDao,
                                           EtfInfoDao etfInfoDao,
                                           EtfDailyDao etfDailyDao,
-                                          EtfAdjFactorDao etfAdjFactorDao) {
+                                          EtfAdjFactorDao etfAdjFactorDao,
+                                          Environment environment) {
         this.stockInfoDao = stockInfoDao;
         this.stockQuoteDao = stockQuoteDao;
         this.etfInfoDao = etfInfoDao;
         this.etfDailyDao = etfDailyDao;
         this.etfAdjFactorDao = etfAdjFactorDao;
+        this.environment = environment;
+    }
+
+    @PostConstruct
+    public void initMeiliEtfIndex() {
+        if (!isMeiliEnabled()) {
+            log.info("MeiliSearch 已禁用，跳过 ETF 索引初始化");
+            return;
+        }
+        try {
+            Client client = getMeiliClient();
+            etfIndexManager = new MeiliSearchIndexManager(
+                    client,
+                    MEILI_ETF_INDEX,
+                    new String[]{"name", "ts_code", "full_name", "index_code", "index_name", "mgr_name", "etf_type"},
+                    new String[]{"exchange", "etf_type", "list_status"},
+                    new String[]{"name", "ts_code"}
+            );
+            if (etfIndexManager.initializeIndex()) {
+                log.info("MeiliSearch {} 索引初始化成功", MEILI_ETF_INDEX);
+                etfSyncService = new MeiliSearchDataSyncService(client, MEILI_ETF_INDEX, 500);
+                if (isAutoSyncEnabled()) {
+                    triggerEtfFullSync();
+                } else {
+                    log.info("MeiliSearch ETF 自动同步已禁用，跳过数据导入");
+                }
+            } else {
+                log.error("MeiliSearch {} 索引初始化失败", MEILI_ETF_INDEX);
+            }
+        } catch (Exception e) {
+            log.error("初始化 MeiliSearch ETF 索引失败: {}", e.getMessage(), e);
+        }
+    }
+
+    private void triggerEtfFullSync() {
+        if (etfSyncService == null || etfSyncService.isSyncing()) {
+            return;
+        }
+        int totalCount = etfInfoDao.getEtfInfoCount();
+        MeiliSearchDataSyncService.FetchFunction<EtfInfo> fetchFunction =
+                (offset, limit) -> etfInfoDao.getAllEtfInfo(offset, limit);
+        Function<EtfInfo, Map<String, Object>> docConverter = this::convertEtfToMeiliDocument;
+        etfSyncService.asyncFullSync(fetchFunction, docConverter, totalCount)
+                .thenAccept(result -> {
+                    if (result.isSuccess()) {
+                        log.info("[{}] MeiliSearch 同步完成: {}", MEILI_ETF_INDEX, result.getMessage());
+                    } else {
+                        log.error("[{}] MeiliSearch 同步失败: {}", MEILI_ETF_INDEX, result.getErrorMessage());
+                    }
+                });
+    }
+
+    @Scheduled(cron = "${advanced.meili-sync-cron-etfs:0 45 3 * * ?}")
+    public void scheduledEtfFullSync() {
+        if (!isMeiliEnabled() || !isAutoSyncEnabled()) {
+            return;
+        }
+        log.info("[{}] 定时同步任务触发", MEILI_ETF_INDEX);
+        triggerEtfFullSync();
+    }
+
+    private Map<String, Object> convertEtfToMeiliDocument(EtfInfo etf) {
+        Map<String, Object> doc = new HashMap<>();
+        doc.put("ts_code", MeiliSearchDataSyncService.toMeiliId(etf.getTsCode()));
+        doc.put("name", etf.getName());
+        doc.put("full_name", etf.getFullName());
+        doc.put("exchange", etf.getExchange());
+        doc.put("etf_type", etf.getEtfType());
+        doc.put("index_code", etf.getIndexCode());
+        doc.put("index_name", etf.getIndexName());
+        doc.put("mgr_name", etf.getMgrName());
+        doc.put("list_status", etf.getListStatus());
+        return doc;
     }
 
     @Override
@@ -211,18 +313,132 @@ public class DomesticListedAssetServiceImpl extends DomesticListedAssetServiceIm
     }
 
     private void addEtfSearchResults(ListedAssetSearchResponse.Builder response, String query, int limit) {
+        LinkedHashSet<String> seenTsCodes = new LinkedHashSet<>();
+        int normalizedLimit = normalizeLimit(limit);
         try {
-            List<EtfInfo> rows = etfInfoDao.searchByKeyword(query, limit);
-            if (rows != null) {
-                rows.forEach(row -> response.addItems(toEtfInfoItem(row)));
+            if (isMeiliEnabled()) {
+                searchEtfViaMeili(response, query, normalizedLimit, seenTsCodes);
             }
-            List<EtfInfo> indexRows = etfInfoDao.getByIndexCode(query, limit);
-            if (indexRows != null) {
-                indexRows.forEach(row -> response.addItems(toEtfInfoItem(row)));
+            if (response.getItemsCount() < normalizedLimit) {
+                int remaining = normalizedLimit - response.getItemsCount();
+                List<EtfInfo> rows = etfInfoDao.searchByKeyword(query, remaining);
+                if (rows != null) {
+                    for (EtfInfo row : rows) {
+                        if (appendEtfItemIfNew(response, seenTsCodes, row)) {
+                            if (response.getItemsCount() >= normalizedLimit) {
+                                break;
+                            }
+                        }
+                    }
+                }
+            }
+            if (response.getItemsCount() < normalizedLimit && looksLikeTsCode(query)) {
+                int remaining = normalizedLimit - response.getItemsCount();
+                EtfInfo exact = etfInfoDao.getByTsCode(query);
+                if (exact != null) {
+                    appendEtfItemIfNew(response, seenTsCodes, exact);
+                }
+                List<EtfInfo> indexRows = etfInfoDao.getByIndexCode(query, remaining);
+                if (indexRows != null) {
+                    for (EtfInfo row : indexRows) {
+                        if (appendEtfItemIfNew(response, seenTsCodes, row)) {
+                            if (response.getItemsCount() >= normalizedLimit) {
+                                break;
+                            }
+                        }
+                    }
+                }
             }
         } catch (Exception e) {
             log.error("Error searching ETF info for query={}", query, e);
         }
+    }
+
+    private void searchEtfViaMeili(ListedAssetSearchResponse.Builder response,
+                                   String query,
+                                   int limit,
+                                   LinkedHashSet<String> seenTsCodes) {
+        try {
+            Index index = getMeiliClient().index(MEILI_ETF_INDEX);
+            SearchResult searchResult = (SearchResult) index.search(
+                    SearchRequest.builder().q(query.trim()).limit(Math.min(limit, MAX_SEARCH_LIMIT)).build());
+            for (Object hitObj : searchResult.getHits()) {
+                if (!(hitObj instanceof Map<?, ?> hit)) {
+                    continue;
+                }
+                String tsCode = MeiliSearchDataSyncService.fromMeiliId(stringValue(hit.get("ts_code")));
+                if (tsCode.isBlank() || !seenTsCodes.add(tsCode)) {
+                    continue;
+                }
+                response.addItems(toEtfInfoItemFromMeiliHit(tsCode, hit));
+                if (response.getItemsCount() >= limit) {
+                    break;
+                }
+            }
+        } catch (Exception e) {
+            log.warn("MeiliSearch query failed for ETF search query={}", query, e);
+        }
+    }
+
+    private boolean appendEtfItemIfNew(ListedAssetSearchResponse.Builder response,
+                                       LinkedHashSet<String> seenTsCodes,
+                                       EtfInfo row) {
+        String tsCode = nullToEmpty(row.getTsCode());
+        if (tsCode.isBlank() || !seenTsCodes.add(tsCode)) {
+            return false;
+        }
+        response.addItems(toEtfInfoItem(row));
+        return true;
+    }
+
+    private ListedAssetInfoItem toEtfInfoItemFromMeiliHit(String tsCode, Map<?, ?> hit) {
+        ListedAssetInfoItem.Builder item = ListedAssetInfoItem.newBuilder()
+                .setAssetType(ASSET_TYPE_ETF)
+                .setTsCode(tsCode)
+                .setName(stringValue(hit.get("name")))
+                .setSourceService("domesticListedAssetService");
+        setStringIfPresent(item::setFullName, stringValue(hit.get("full_name")));
+        setStringIfPresent(item::setExchange, stringValue(hit.get("exchange")));
+        setStringIfPresent(item::setEtfType, stringValue(hit.get("etf_type")));
+        setStringIfPresent(item::setIndexCode, stringValue(hit.get("index_code")));
+        setStringIfPresent(item::setIndexName, stringValue(hit.get("index_name")));
+        setStringIfPresent(item::setManagerName, stringValue(hit.get("mgr_name")));
+        return item.build();
+    }
+
+    private String stringValue(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private boolean isMeiliEnabled() {
+        return Boolean.parseBoolean(environment.getProperty(MEILI_ENABLED_PROP, "true"));
+    }
+
+    private boolean isAutoSyncEnabled() {
+        return Boolean.parseBoolean(environment.getProperty(MEILI_AUTO_SYNC_PROP, "true"));
+    }
+
+    private Client getMeiliClient() {
+        String host = environment.getProperty(MEILI_HOST_PROP, DEFAULT_MEILI_HOST);
+        String apiKey = environment.getProperty(MEILI_API_KEY_PROP, DEFAULT_MEILI_API_KEY);
+        Client localClient = meiliClient;
+        if (localClient == null
+                || !Objects.equals(meiliClientHost, host)
+                || !Objects.equals(meiliClientApiKey, apiKey)) {
+            synchronized (this) {
+                localClient = meiliClient;
+                if (localClient == null
+                        || !Objects.equals(meiliClientHost, host)
+                        || !Objects.equals(meiliClientApiKey, apiKey)) {
+                    meiliClient = new Client(new Config(host, apiKey));
+                    meiliClientHost = host;
+                    meiliClientApiKey = apiKey;
+                    localClient = meiliClient;
+                    log.info("MeiliSearch client refreshed for listed asset service, host={}", host);
+                }
+            }
+        }
+        return localClient;
     }
 
     private ListedAssetInfoItem toStockInfoItem(StockInfo stock) {
