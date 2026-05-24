@@ -23,6 +23,7 @@ import world.willfrog.agent.platform.entity.AgentRun;
 import world.willfrog.agent.platform.entity.AgentRunMessage;
 import world.willfrog.agent.platform.mapper.AgentRunMapper;
 import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.agent.tools.catalog.ParallelLimitsToolCatalog;
 import world.willfrog.agent.tools.market.MarketDataTools;
 import world.willfrog.agent.tools.python.PythonSandboxTools;
 import world.willfrog.agent.tools.rag.RagTools;
@@ -396,6 +397,7 @@ public class AgentRunExecutor {
             if (runConfig.codeInterpreterEnabled()) {
                 toolSpecifications.addAll(ToolSpecifications.toolSpecificationsFrom(pythonSandboxTools));
             }
+            toolSpecifications = new ArrayList<>(ParallelLimitsToolCatalog.mergeCanonical(toolSpecifications));
 
             // ── 6a. 简单单工具查询 fast-path ──
             // 命中高确定性的单工具查询时，跳过完整 Planning + ReAct，降低简单问题延迟。

@@ -260,6 +260,80 @@ class NacosConfigBridgeTest {
         assertEquals("{\"updated\":true}", Files.readString(targetFile));
     }
 
+    @Test
+    void refreshSubscriptions_shouldPullLatestConfigWhenListenerMissesUpdate(@TempDir Path tempDir) throws Exception {
+        Path targetFile = tempDir.resolve("agent-llm.local.json");
+        NacosConfigBridge bridge = new NacosConfigBridge(objectMapper, environment);
+        injectValueField(bridge, "enabled", true);
+        injectValueField(bridge, "group", "alphafrog-config");
+
+        ConfigService mockConfigService = mock(ConfigService.class);
+        when(mockConfigService.getConfig(eq("agent-llm.json"), eq("alphafrog-config"), anyLong()))
+                .thenReturn("{\"version\":\"v13\"}", "{\"version\":\"v14\"}");
+
+        java.lang.reflect.Field configServiceField = NacosConfigBridge.class.getDeclaredField("configService");
+        configServiceField.setAccessible(true);
+        configServiceField.set(bridge, mockConfigService);
+
+        java.lang.reflect.Method subscribeMethod = NacosConfigBridge.class.getDeclaredMethod(
+                "subscribe", NacosConfigBridge.Subscription.class);
+        subscribeMethod.setAccessible(true);
+
+        NacosConfigBridge.Subscription sub = new NacosConfigBridge.Subscription();
+        sub.setDataId("agent-llm.json");
+        sub.setGroup("alphafrog-config");
+        sub.setTargetFile(targetFile.toString());
+        subscribeMethod.invoke(bridge, sub);
+
+        assertEquals("{\"version\":\"v13\"}", Files.readString(targetFile));
+
+        bridge.refreshSubscriptions();
+
+        assertEquals("{\"version\":\"v14\"}", Files.readString(targetFile));
+        verify(mockConfigService, times(2)).getConfig("agent-llm.json", "alphafrog-config", 5000L);
+    }
+
+    @Test
+    void subscribe_shouldClearNacosLocalSnapshotBeforeInitialGet(@TempDir Path tempDir) throws Exception {
+        String previousHome = System.getProperty("user.home");
+        System.setProperty("user.home", tempDir.toString());
+        try {
+            NacosConfigBridge bridge = new NacosConfigBridge(objectMapper, environment);
+            injectValueField(bridge, "serverAddr", "nacos:8848");
+            injectValueField(bridge, "namespace", "");
+            injectValueField(bridge, "group", "alphafrog-config");
+
+            Path snapshotFile = tempDir.resolve(Path.of(
+                    "nacos", "config", "fixed-nacos_8848", "nacos",
+                    "snapshot", "alphafrog-config", "agent-llm.json"));
+            Files.createDirectories(snapshotFile.getParent());
+            Files.writeString(snapshotFile, "{\"version\":\"v13\"}");
+
+            ConfigService mockConfigService = mock(ConfigService.class);
+            when(mockConfigService.getConfig(eq("agent-llm.json"), eq("alphafrog-config"), anyLong()))
+                    .thenReturn("{\"version\":\"v14\"}");
+
+            java.lang.reflect.Field configServiceField = NacosConfigBridge.class.getDeclaredField("configService");
+            configServiceField.setAccessible(true);
+            configServiceField.set(bridge, mockConfigService);
+
+            java.lang.reflect.Method subscribeMethod = NacosConfigBridge.class.getDeclaredMethod(
+                    "subscribe", NacosConfigBridge.Subscription.class);
+            subscribeMethod.setAccessible(true);
+
+            NacosConfigBridge.Subscription sub = new NacosConfigBridge.Subscription();
+            sub.setDataId("agent-llm.json");
+            sub.setGroup("alphafrog-config");
+            sub.setTargetFile(tempDir.resolve("agent-llm.local.json").toString());
+            subscribeMethod.invoke(bridge, sub);
+
+            assertFalse(Files.exists(snapshotFile));
+            verify(mockConfigService).getConfig("agent-llm.json", "alphafrog-config", 5000L);
+        } finally {
+            System.setProperty("user.home", previousHome);
+        }
+    }
+
     // ==================== 反射辅助方法 ====================
 
     @SuppressWarnings("unchecked")
@@ -284,7 +358,7 @@ class NacosConfigBridgeTest {
         }
     }
 
-    private void injectValueField(NacosConfigBridge bridge, String fieldName, String value) {
+    private void injectValueField(NacosConfigBridge bridge, String fieldName, Object value) {
         try {
             java.lang.reflect.Field field = NacosConfigBridge.class.getDeclaredField(fieldName);
             field.setAccessible(true);

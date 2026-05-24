@@ -13,6 +13,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.context.properties.bind.Binder;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.core.env.Environment;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -25,7 +26,9 @@ import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
 import java.nio.file.StandardOpenOption;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.Executor;
 
@@ -61,6 +64,7 @@ public class NacosConfigBridge {
     private final Environment environment;
     private ConfigService configService;
     private final List<Subscription> activeSubscriptions = new ArrayList<>();
+    private final Map<String, String> lastWrittenContentBySubscription = new LinkedHashMap<>();
 
     @Autowired
     public NacosConfigBridge(ObjectProvider<ObjectMapper> objectMapperProvider, Environment environment) {
@@ -138,9 +142,10 @@ public class NacosConfigBridge {
 
     private void subscribe(Subscription subscription) throws NacosException {
         String subscriptionGroup = isBlank(subscription.getGroup()) ? group : subscription.getGroup();
+        clearNacosLocalSnapshot(subscription.getDataId(), subscriptionGroup);
         String initialConfig = configService.getConfig(subscription.getDataId(), subscriptionGroup, 5000);
         if (initialConfig != null && !initialConfig.isBlank()) {
-            writeConfigToFile(subscription, initialConfig);
+            writeConfigToFileIfChanged(subscription, initialConfig, "initial-load");
         }
 
         configService.addListener(subscription.getDataId(), subscriptionGroup, new Listener() {
@@ -156,12 +161,91 @@ public class NacosConfigBridge {
                     log.warn("[NacosConfigBridge] 忽略空白配置推送 dataId={}", subscription.getDataId());
                     return;
                 }
-                writeConfigToFile(subscription, config);
+                writeConfigToFileIfChanged(subscription, config, "listener");
             }
         });
-        activeSubscriptions.add(subscription);
+        synchronized (activeSubscriptions) {
+            activeSubscriptions.add(subscription);
+        }
         log.info("[NacosConfigBridge] 已订阅 Nacos 配置 server={} dataId={} group={} filePath={}",
                 serverAddr, subscription.getDataId(), subscriptionGroup, subscription.getTargetFile());
+    }
+
+    /**
+     * Periodic pull refresh for missed Nacos listener events or stale long-poll connections.
+     */
+    @Scheduled(fixedDelayString = "${alphafrog.config.nacos.refresh-interval-ms:30000}")
+    public void refreshSubscriptions() {
+        if (!enabled || configService == null || activeSubscriptions.isEmpty()) {
+            return;
+        }
+        List<Subscription> subscriptionsSnapshot;
+        synchronized (activeSubscriptions) {
+            subscriptionsSnapshot = List.copyOf(activeSubscriptions);
+        }
+        for (Subscription subscription : subscriptionsSnapshot) {
+            String subscriptionGroup = isBlank(subscription.getGroup()) ? group : subscription.getGroup();
+            try {
+                String latest = configService.getConfig(subscription.getDataId(), subscriptionGroup, 5000);
+                if (latest == null || latest.isBlank()) {
+                    log.warn("[NacosConfigBridge] 定时刷新忽略空白配置 dataId={}", subscription.getDataId());
+                    continue;
+                }
+                writeConfigToFileIfChanged(subscription, latest, "periodic-refresh");
+            } catch (Exception e) {
+                log.warn("[NacosConfigBridge] 定时刷新失败 dataId={} group={}",
+                        subscription.getDataId(), subscriptionGroup, e);
+            }
+        }
+    }
+
+    private void writeConfigToFileIfChanged(Subscription subscription, String configContent, String source) {
+        String key = subscriptionKey(subscription);
+        synchronized (lastWrittenContentBySubscription) {
+            String lastWritten = lastWrittenContentBySubscription.get(key);
+            if (configContent.equals(lastWritten) && fileContentEquals(subscription, configContent)) {
+                return;
+            }
+            writeConfigToFile(subscription, configContent);
+            if (fileContentEquals(subscription, configContent)) {
+                lastWrittenContentBySubscription.put(key, configContent);
+                log.info("[NacosConfigBridge] 配置同步完成 dataId={} source={}",
+                        subscription.getDataId(), source);
+            }
+        }
+    }
+
+    private boolean fileContentEquals(Subscription subscription, String configContent) {
+        try {
+            Path targetPath = Paths.get(subscription.getTargetFile()).toAbsolutePath().normalize();
+            return Files.exists(targetPath)
+                    && configContent.equals(Files.readString(targetPath, StandardCharsets.UTF_8));
+        } catch (IOException e) {
+            return false;
+        }
+    }
+
+    private String subscriptionKey(Subscription subscription) {
+        String subscriptionGroup = isBlank(subscription.getGroup()) ? group : subscription.getGroup();
+        return subscription.getDataId() + "\n" + subscriptionGroup + "\n" + subscription.getTargetFile();
+    }
+
+    private void clearNacosLocalSnapshot(String dataId, String subscriptionGroup) {
+        if (isBlank(dataId)) {
+            return;
+        }
+        String effectiveServerAddr = isBlank(serverAddr) ? "127.0.0.1:8848" : serverAddr;
+        String fixedAddr = "fixed-" + effectiveServerAddr.replace(":", "_");
+        String namespaceDir = isBlank(namespace) ? "nacos" : namespace;
+        Path snapshotFile = Paths.get(System.getProperty("user.home"),
+                "nacos", "config", fixedAddr, namespaceDir, "snapshot", subscriptionGroup, dataId);
+        try {
+            if (Files.deleteIfExists(snapshotFile)) {
+                log.info("[NacosConfigBridge] 已清除本地快照: {}", snapshotFile);
+            }
+        } catch (IOException e) {
+            log.warn("[NacosConfigBridge] 清除本地快照失败: {}", snapshotFile, e);
+        }
     }
 
     /**
