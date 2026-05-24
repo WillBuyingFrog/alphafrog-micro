@@ -21,7 +21,8 @@ import java.util.concurrent.atomic.AtomicInteger;
 @RequiredArgsConstructor
 public class LangchainTodoNodeExecutor {
 
-    private static final int DEFAULT_MAX_TOOL_ROUND_TRIPS = 8;
+    /** Per-todo LC4j tool loop cap (LLM↔tool round trips), separate from run-level {@code maxToolCalls}. */
+    private static final int DEFAULT_MAX_TOOL_ROUND_TRIPS = 30;
 
     private final AgentPromptService promptService;
     private final ObjectProvider<ToolProvider> toolProvider;
