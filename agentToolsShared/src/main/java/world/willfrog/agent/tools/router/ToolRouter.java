@@ -35,10 +35,17 @@ import java.util.concurrent.TimeUnit;
  * 工具调用统一路由器，是 LLM 决定调用工具后，所有业务工具（除 spawnSubAgent/waitForSubAgent
  * 这两个子代理控制工具外）的执行入口。
  *
+ * <p>面试里如果只看 agentLangchainService 的 {@code ToolRouterToolExecutor}，
+ * 只能知道 LC4j 的 tool call 如何进入 Java；真正的业务语义在这里：是否允许调用、
+ * 是否超预算、是否命中缓存、结果如何写 observability、异常如何包装成统一 JSON。
+ * 因此本类是「模型工具调用」和「平台业务工具」之间的运行时边界。</p>
+ *
  * <h3>位置与角色</h3>
  * 本路由器是 {@link world.willfrog.agent.workflow.ReactTodoExecutor} 在 ReAct 循环中
  * 处理 LLM 返回的 {@code tool_calls} 时的核心依赖：当 LLM 返回某个 tool_call 后，
  * ReactTodoExecutor 将工具名和参数交给 {@link #invokeWithMeta(String, Map)} 路由执行。
+ * 在 agentLangchainService 中，{@code ToolRouterToolExecutor} 也会调用同一个入口，
+ * 所以 legacy 与 langchain 两条执行链共享同一套工具预算、缓存和观测语义。
  *
  * <h3>核心职责</h3>
  * <ol>
@@ -52,6 +59,8 @@ import java.util.concurrent.TimeUnit;
  *       做缓存复用，节省重复调用成本。</li>
  *   <li><b>观测记录</b>：通过 {@link AgentObservabilityService#recordToolCall} 记录每一次
  *       工具调用 trace（参数、结果、耗时、是否命中缓存等），供 run 观测视图展示。</li>
+ *   <li><b>并发权重限制</b>：通过 {@link ToolWeightedLimitService} 对批量工具调用按有效权重限流，
+ *       避免一次批量日线查询占满下游资源。</li>
  *   <li><b>故障注入</b>：根据 {@link StressTestProperties} 注入模拟延迟/失败，用于压测。</li>
  *   <li><b>指标采集</b>：通过 Micrometer Timer 记录每个工具的调用耗时分布。</li>
  * </ol>
@@ -67,6 +76,7 @@ import java.util.concurrent.TimeUnit;
  * </pre>
  *
  * @see world.willfrog.agent.workflow.ReactTodoExecutor
+ * @see world.willfrog.agentlangchain.tools.ToolRouterToolExecutor
  * @see ToolResultCacheService
  * @see AgentObservabilityService
  */
@@ -114,6 +124,13 @@ public class ToolRouter {
     @Autowired(required = false)
     private AgentLlmLocalConfigLoader localConfigLoader;
 
+    /**
+     * 工具级并发权重限制服务。
+     *
+     * <p>批量查询工具一次调用可能携带多个代码或关键词，run 级 toolCalls 只会计为一次。
+     * 为了避免模型用少量批量调用压垮下游，这里再引入按「有效权重」计算的并发限制。
+     * 该依赖可选，是为了让不需要限流能力的测试上下文仍可启动。</p>
+     */
     @Autowired(required = false)
     private ToolWeightedLimitService toolWeightedLimitService;
 
@@ -150,6 +167,11 @@ public class ToolRouter {
      * @return 包含输出文本、成功标志、耗时、缓存元数据的封装对象
      */
     public ToolInvocationResult invokeWithMeta(String toolName, Map<String, Object> params) {
+        /*
+         * checkParallelLimits 是让模型查询工具并行限制的元工具。它应该暴露给模型，
+         * 但不能消耗 run 的 toolCalls 预算，也不能写入业务 tool trace；否则模型每次
+         * 遵守 prompt 先查限制，都会无意义地污染预算和统计。
+         */
         // 预算检查：可能抛出 RunBudgetExceededException 中断本次工具调用
         if (budgetService != null && !"checkParallelLimits".equals(toolName)) {
             budgetService.checkBeforeToolCall();
@@ -181,6 +203,11 @@ public class ToolRouter {
                     .build();
         }
 
+        /*
+         * 批量工具调用的 run 级计数仍是一次，因此这里用 WeightLease 表示对下游容量的占用。
+         * 获取失败时返回可解析的标准错误，让模型可以缩小批量或稍后重试；获取成功后必须
+         * 在 finally 释放，避免异常路径造成容量泄漏。
+         */
         Optional<ToolWeightedLimitService.WeightLease> weightLease = Optional.empty();
         if (toolWeightedLimitService != null) {
             Optional<ToolWeightedLimitService.WeightLease> acquired = toolWeightedLimitService.tryAcquire(toolName, params);
@@ -260,6 +287,15 @@ public class ToolRouter {
      * @return 不可变的工具名集合
      */
     public Set<String> supportedTools() {
+        /*
+         * 这是平台工具白名单，而不是当前 run 一定可用的工具列表：
+         * - searchWeb 还要受 AgentContext.isWebSearchEnabled 控制；
+         * - getEtfAdj 还要受 adjFactorEnabled 控制；
+         * - checkParallelLimits 是元工具，返回当前配置下的批量上限。
+         *
+         * Planner 和 tool catalog 可以用它了解「系统理论上支持什么」，实际执行仍以
+         * executeDirect 中的能力校验为准。
+         */
         return Set.of(
                 "getStockInfo",
                 "getStockDaily",
@@ -316,6 +352,11 @@ public class ToolRouter {
      * @return 工具执行结果（含结果文本、耗时、成功标志）
      */
     private String invokeExecutePython(Map<String, Object> params) {
+        /*
+         * executePython 是最容易把上游数据、模型生成代码和沙箱执行耦合在一起的工具。
+         * 这里先收集 dataset ids，再做静态预校验，最后才交给 PythonSandboxTools。
+         * 这样可以在真正执行前拦截明显危险或无效的代码，失败结果也仍然走统一 JSON 格式。
+         */
         String code = str(params.get("code"), params.get("arg0"));
         String datasetIds = collectExecutePythonDatasetIds(params);
         if (isStaticPrecheckEnabled()) {
@@ -392,6 +433,14 @@ public class ToolRouter {
     }
 
     private ToolResultCacheService.ToolExecutionOutcome executeDirect(String toolName, Map<String, Object> params) {
+        /*
+         * executeDirect 是「去掉装饰层后的真实工具路由」：
+         * invokeWithMeta 已经处理预算、压测、限流、缓存和观测；
+         * 到这里以后只做能力校验、参数标准化、调用具体工具实现。
+         *
+         * 参数标准化集中在这一层，可以减少每个具体工具对 LLM 参数风格的感知，
+         * 也方便后续新增别名时只改一个地方。
+         */
         long startedAt = System.currentTimeMillis();
         String result;
         try {

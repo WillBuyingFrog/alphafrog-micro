@@ -25,6 +25,33 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
+/**
+ * 本地 LLM 配置热加载器 —— Nacos 推送的 {@code agent-llm.local.json} 通过此组件加载到内存。
+ *
+ * <h2>加载机制</h2>
+ * <ol>
+ *   <li>启动时通过 {@link #load()} 首次加载配置文件（{@code agent.llm.config-file} 指定的路径）</li>
+ *   <li>每 10s（可配）通过 {@code @Scheduled} 轮询文件最后修改时间，
+ *       有变化时重新解析 JSON → 替换内存中的 {@link AgentLlmProperties} 实例</li>
+ *   <li>Nacos→文件→轮询→解析→原子替换，全程不需要重启服务</li>
+ * </ol>
+ *
+ * <h2>{@code file:} 前缀解析</h2>
+ * <p>配置中像 {@code "agentRunSystemPrompt": "file:prompts/agent/agent_run_system.txt"} 的字段，
+ * 会在首次加载和每次重载时解析为文件内容并内联到配置对象中。
+ * 引用的 prompt 文件也参与变更检测——prompt 文件改了同样触发重载。</p>
+ *
+ * <h2>面试常考点</h2>
+ * <ul>
+ *   <li>"配置怎么热更新？"→ Nacos 写文件 → 10s 轮询 → 检测 MD5 变化 → 原子替换</li>
+ *   <li>"为什么不用 Redis pub/sub？"→ 文件轮询更简单，Nacos 本身负责把配置分发到文件，
+ *       不需要额外引入消息通道</li>
+ *   <li>"热加载失败怎么办？"→ 沿用上一次成功加载的配置，不影响正在运行的 agent</li>
+ * </ul>
+ *
+ * @see AgentPromptService#currentPrompts() 消费方
+ * @see AgentLlmProperties 配置结构定义
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
@@ -132,6 +159,13 @@ public class AgentLlmLocalConfigLoader {
                 "agent-llm.json", loadedConfigPath, contentBytes);
     }
 
+    /**
+     * 获取当前内存中已加载的 LLM 配置（热加载生效后的最新版本）。
+     * 如果配置文件不存在或尚未加载成功，返回 {@code Optional.empty()}，
+     * 调用方会 fallback 到 Spring Boot 静态配置（{@code application.yml}）。
+     *
+     * @return 当前生效的配置，可能为 empty
+     */
     public Optional<AgentLlmProperties> current() {
         return Optional.ofNullable(localConfig);
     }

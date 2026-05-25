@@ -36,15 +36,31 @@ import java.util.List;
 import java.util.Map;
 
 /**
- * OpenRouter Provider 路由的 ChatModel 实现 (ALP-25)
- * 
- * <p>本类是 Agent LLM 调用的核心组件，支持：</p>
+ * OpenRouter Provider 路由的 ChatModel 实现 (ALP-25)。
+ *
+ * <p>这个类是 agentLangchainService 真正发起模型请求的位置。上一层
+ * {@link AgentAiServiceFactory} 只负责按阶段构造 ChatModel，到了这里才会把
+ * LangChain4j 的 {@link ChatRequest} 转成 OpenAI 兼容的 chat completions HTTP 请求。
+ * 因此面试里被问到「模型请求里到底带了什么」「为什么 OpenRouter 会走某个 provider」
+ * 「observability 里的 llm trace 从哪里来」时，答案都在这个文件。</p>
+ *
+ * <p>与普通 SDK 封装不同，本类刻意没有直接依赖某个现成 OpenAI client，而是手写
+ * HTTP 请求和 SSE 聚合。原因是 agent 运行需要额外控制 provider order、结构化输出、
+ * raw HTTP 捕获、streaming progress 和预算检查；这些都必须和 {@link AgentContext}
+ * 中的 runId / phase / stage 绑定。</p>
+ *
+ * <p>本类支持：</p>
  * <ol>
  *   <li><b>Provider 优先级路由</b>：通过 providerOrder 指定优先使用的 Provider</li>
  *   <li><b>原始 HTTP 捕获</b>：完整记录请求/响应信息</li>
  *   <li><b>可观测性上报</b>：将 HTTP 观测数据上报到 AgentObservabilityService</li>
  *   <li><b>默认流式输出</b>：对 LLM Provider 使用 stream=true，内部聚合 SSE 流</li>
  * </ol>
+ *
+ * <p>需要特别注意 OpenRouter 的 fallback 语义：只要请求体没有显式写
+ * {@code allow_fallbacks=false}，OpenRouter 可能在指定 provider 不可用时切到其它 provider。
+ * 这会导致账单侧或第三方 provider 后台出现「明明配置了 A，实际走了 B」的现象。
+ * 所以下方构造 provider 字段时始终显式禁止 fallback，把 provider 选择权留在配置层。</p>
  * 
  * @see AgentAiServiceFactory
  * @see RawHttpLogger
@@ -84,6 +100,21 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
 
     @Override
     public ChatResponse doChat(ChatRequest chatRequest) {
+        /*
+         * doChat 是一次逻辑 LLM 调用的完整边界。这里的「一次」对应 observability
+         * 里的 llmCallCount，而不是底层 HTTP attempt：sendWithRetry 可能在 5xx/429
+         * 场景下对同一个逻辑调用重试多次，重试明细会写入 raw HTTP attempts。
+         *
+         * 处理顺序故意保持为：
+         *   1. 预算检查；
+         *   2. 从 ChatRequest 构造 provider-specific request body；
+         *   3. 发送流式 HTTP 并聚合 SSE；
+         *   4. 解析 token usage / finish reason；
+         *   5. 写入轻量 llmCalls 统计与可选 raw HTTP trace。
+         *
+         * 这样做的好处是：即使 raw HTTP capture 没开，预算和 llmCalls 统计仍然完整；
+         * raw body 只作为排障增强能力，不参与主流程正确性。
+         */
         List<ChatMessage> messages = chatRequest.messages();
         List<ToolSpecification> toolSpecifications = chatRequest.toolSpecifications();
         String requestJson = null;
@@ -126,7 +157,14 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             applyStreamingOptions(requestJsonMap, baseUrl, AgentContext.getPhase());
             applyEndpointSamplingDefaults(requestJsonMap, baseUrl);
 
-            // OpenRouter 特有：添加 providerOrder 与结构化输出参数
+            // OpenRouter 特有：添加 providerOrder 与结构化输出参数。
+            //
+            // StructuredOutputSpec 由 planning 阶段通过 AgentContext 注入，最终会落到
+            // OpenRouter 的 response_format=json_schema。Provider 字段必须与它一起处理：
+            // - order 限定 provider 优先级；
+            // - allow_fallbacks=false 阻止 OpenRouter 静默切到列表外 provider；
+            // - require_parameters=true 时，OpenRouter 会过滤不支持 response_format/tools
+            //   等字段的 provider，因此字段名兼容性会直接影响是否 404。
             AgentContext.StructuredOutputSpec structuredOutputSpec = AgentContext.getStructuredOutputSpec();
             if (isOpenRouterEndpoint(baseUrl)) {
                 normalizeOpenRouterTokenLimit(requestJsonMap);
@@ -201,6 +239,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             }
             
             // ========== 2. 发送 HTTP 请求（流式，按 logical call 聚合重试） ==========
+            //
+            // 这里的 retry 是 provider HTTP 层面的恢复，不等同于 agent 的语义重试：
+            // agent 语义重试会重新让模型思考，而 HTTP retry 只是同一份请求体重发。
+            // 因此 retry 次数由 run budget 单独限制，避免一个 LLM step 因 provider 抖动
+            // 消耗过多 wall-clock。
             int maxAttempts = budgetService == null ? 2 : budgetService.maxHttpAttemptsPerLogicalCall();
             AttemptResult attemptResult = sendWithRetry(httpRequestBuilder, shouldCapture, requestRecord, requestStartedAt,
                     maxAttempts, requestTimeout);
@@ -216,7 +259,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             StreamingProgressTracker.StreamingProgressSnapshot progressSnapshot = null;
 
             if (statusCode >= 200 && statusCode < 300) {
-                // 流式响应：解析 SSE
+                // 流式响应：解析 SSE。
+                //
+                // OpenRouter/Fireworks 的流式响应会把 content、reasoning、tool_calls、
+                // usage 等信息拆在多个 chunk 中返回。这里用聚合器还原成一个
+                // ChatCompletionResponse，后续 LangChain4j 才能像非流式响应一样读取
+                // AiMessage 和 TokenUsage。
                 StreamingProgressTracker tracker = createStreamingProgressTracker();
                 OpenAiCompatibleChatModelSupport.SseAggregateResult aggregateResult =
                         OpenAiCompatibleChatModelSupport.aggregateSseStream(
@@ -262,7 +310,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                 AgentContext.setStreamingProgress(progressSnapshot);
             }
             
-            // 始终记录基本观测（llmCalls/token/duration），即使不开 raw HTTP capture
+            // 始终记录基本观测（llmCalls/token/duration），即使不开 raw HTTP capture。
+            //
+            // 这是 run 级统计的基础数据源。raw HTTP capture 可能因为配置、隐私或存储成本关闭，
+            // 但 llmCalls 和 token 预算不能因此缺失；否则 matrix 会看到模型实际在请求，
+            // observability 里却一直是 llm=1 之类的假象。
             if (observabilityService != null) {
                 String runId = AgentContext.getRunId();
                 if (runId != null && !runId.isBlank()) {
@@ -332,6 +384,9 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     
     /**
      * 上报 LLM 调用观测数据（ALP-25）。
+     *
+     * <p>这个重载保留给没有 retry attempts 的旧调用点。实际主路径会调用下面带
+     * attempts 参数的版本，把每次 HTTP attempt 的状态码、耗时、错误摘要一起写入 trace。</p>
      */
     private String reportLlmCall(
             RawHttpLogger.HttpRequestRecord request,
@@ -357,6 +412,12 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
             StreamingProgressTracker.StreamingProgressSnapshot streamingProgress,
             List<Map<String, Object>> attempts) {
         
+        /*
+         * raw HTTP trace 只在 runId 存在时写入，因为它是 run 详情页的一部分。
+         * 这里会再次从 response 中提取 tokenUsage/cachedTokens，而不是复用 doChat
+         * 中的 TokenUsage，原因是异常路径可能没有成功构造 ChatCompletionResponse，
+         * 但 responseRecord 中仍然可能包含 provider 返回的 usage 或错误体。
+         */
         if (observabilityService == null) {
             return null;
         }
@@ -395,6 +456,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     }
 
     private StreamingProgressTracker createStreamingProgressTracker() {
+        /*
+         * StreamingProgressTracker 解决的是长输出阶段「服务端还在流式返回，但前端看起来没动」
+         * 的问题。它会按配置间隔写入 chunk 数、字符数、phase 等轻量进度，使 matrix poll
+         * 能区分卡死、慢 summarizing、正常 tool execution 三种状态。
+         */
         String runId = AgentContext.getRunId();
         String phase = AgentContext.getPhase();
         boolean reportEnabled = isStreamingProgressReportEnabled()
@@ -425,6 +491,11 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
                                         long logicalStartedAt,
                                         int maxAttempts,
                                         Duration requestTimeout) throws IOException, InterruptedException {
+        /*
+         * 这里把多个 HTTP attempt 包装成一个 AttemptResult 返回给 doChat。
+         * 调用方只看到一次 ChatResponse；observability 才会看到每次 attempt 的细节。
+         * 这样可以避免 provider 轻微抖动直接暴露给 agent loop，同时保留排障证据。
+         */
         List<Map<String, Object>> attempts = new ArrayList<>();
         Exception lastException = null;
         RawHttpLogger.HttpResponseRecord lastResponseRecord = null;
@@ -506,6 +577,15 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     }
 
     public static Duration resolveRequestTimeout(String stageValue, String phaseValue) {
+        /*
+         * 超时时间按阶段分层：
+         * - planning / final answer 需要较长时间，因为输出结构化计划或最终答案；
+         * - judge / decision / execute 等小模型决策应快速返回；
+         * - 其它阶段用中间值。
+         *
+         * 这里不是 run wall-clock budget。单次 HTTP timeout 只约束一次模型请求，
+         * run budget 仍由 AgentRunBudgetService 统一判断。
+         */
         String stage = OpenAiCompatibleChatModelSupport.nvl(stageValue).toLowerCase();
         String phase = OpenAiCompatibleChatModelSupport.nvl(phaseValue).toLowerCase();
         if (phase.contains("planning") || stage.contains("planning") || stage.contains("final_answer")) {
@@ -611,6 +691,10 @@ public class OpenRouterProviderRoutedChatModel implements ChatModel {
     /**
      * OpenRouter 流式选项。planning 阶段跳过 {@code stream_options}，避免在
      * {@code provider.require_parameters=true} 时因 provider 未声明支持该字段而被误过滤。
+     *
+     * <p>这个方法看起来像 provider 兼容细节，但实际会影响工具调用是否能启动：
+     * OpenRouter 先按请求参数筛 provider，再转发请求。如果某个可用 provider 没声明
+     * {@code stream_options}，即使它支持模型本身，也可能被过滤成 404。</p>
      */
     public static void applyStreamingOptions(Map<String, Object> requestJsonMap, String baseUrl, String phase) {
         if (requestJsonMap == null) {

@@ -26,37 +26,57 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
 /**
- * Agent Run 观测数据中枢，负责汇集、持久化、查询整次 run 的可观测信息。
+ * Agent Run 观测数据（observability）中枢 —— 汇集、持久化、查询整次 run 的全部可观测信息。
  *
- * <h3>核心职责</h3>
+ * <h2>为什么重要</h2>
+ * <p>每次 agent run 执行期间会产生大量的 LLM 调用、工具调用、阶段切换、失败重试等事件。
+ * 这个类负责把所有非确定性行为（每次 LLM 推理结果不同、工具调用结果变化）记录下来，
+ * 形成完整的时间线和追踪链。排障时 matrix 的 summary/events/traces/observability_full
+ * 都依赖这里的数据。面试被问"你们怎么排查 agent 失败"时，所有答案都来自这个类。</p>
+ *
+ * <h2>核心职责</h2>
  * <ol>
- *   <li><b>LLM 调用 trace 记录</b>：被 {@link world.willfrog.agent.workflow.ReactTodoExecutor}、
- *       LinearWorkflowExecutor、DagWorkflowExecutor 等执行器调用，记录每一次 LLM 调用的请求/响应
- *       预览、token 用量、耗时、错误等。{@link #recordLlmCallWithRawHttp} 系列支持记录完整原始 HTTP（ALP-25）。</li>
- *   <li><b>工具调用 trace 记录</b>：被 {@link world.willfrog.agent.tool.ToolRouter} 调用，
- *       通过 {@link #recordToolCall} 记录工具名、参数、输出、缓存命中、耗时等。</li>
- *   <li><b>Run 级初始化与失败记录</b>：{@link #initializeRun}、{@link #recordFailure}。</li>
+ *   <li><b>LLM 调用 trace</b>：{@link #recordLlmCall} 系列方法记录每次 LLM 调用的 id、phase、
+ *       token 用量、耗时、错误。{@link #recordLlmCallWithRawHttp} 支持记录完整原始 HTTP
+ *       请求/响应（ALP-25），调试复杂问题时至关重要。</li>
+ *   <li><b>工具调用 trace</b>：{@link #recordToolCall} 记录工具名、参数、输出、缓存命中/未命中、
+ *       耗时，由 {@code ToolRouter} 调用。</li>
+ *   <li><b>Run 初始化与失败</b>：{@link #initializeRun} 在 Pipeline 入口调用，设置启动时间、
+ *       endpoint/model、captureLlmRequests 开关。{@link #recordFailure} 在 run 失败时写入
+ *       diagnostics.lastErrorType / lastErrorMessage。</li>
  *   <li><b>阶段（phase）维度聚合</b>：planning / parallel_execution / sub_agent / tool_execution /
- *       summarizing 五个阶段各自统计调用次数、耗时、token、错误数。</li>
+ *       summarizing 五个阶段各自聚合 llmCalls、toolCalls、durationMs、tokens、errors。
+ *       面试可讲"我们的 observability 按阶段聚合，方便定位是 planning 还是 execution 出了问题"。</li>
  *   <li><b>观测视图组装</b>：{@link #attachObservabilityToSnapshot} 在 run 完成时将观测数据
- *       附加到 snapshot JSON；{@link #loadObservabilityJson} 从 Redis 优先、snapshot 兜底加载。
- *       {@link #loadObservabilitySummaryJson} 返回轻量摘要视图（不含完整 trace）。</li>
- *   <li><b>HTTP 重试 attempts 记录</b>：每次 LLM 调用内部的 HTTP 重试明细可通过 attempts 字段附加。</li>
- *   <li><b>缓存命中率统计</b>：自动汇总工具调用的缓存命中/未命中数与节省时长。</li>
+ *       嵌入到 snapshot JSON（落 DB）。{@link #loadObservabilityJson} 优先从 Redis 加载完整观测，
+ *       其次从 snapshot 回退。{@link #loadObservabilitySummaryJson} 返回不含 trace 的轻量摘要。</li>
+ *   <li><b>缓存命中率统计</b>：自动汇总工具调用的 cache hit/miss 数与估算节省时间，
+ *       用于衡量搜索类工具的缓存效果。</li>
  * </ol>
  *
- * <h3>状态存储</h3>
- * <p>观测状态以 JSON 形式存储于 {@link AgentRunStateStore}（Redis），每次 mutate 操作都强制刷新到 Redis。
- * 使用 per-runId 的 {@link #locks} 保证同一 run 的并发写入串行化。</p>
+ * <h2>数据流</h2>
+ * <pre>
+ * LLM 调用 → recordLlmCall() → mutate() → Redis（JSON）→ 定期 flush
+ * 工具调用  → recordToolCall() → mutate() → Redis
+ * Run 结束  → attachObservabilityToSnapshot() → snapshot JSON → DB
+ * Matrix    → loadObservabilityJson() → Redis 优先，snapshot 兜底
+ * </pre>
  *
- * <h3>容量保护</h3>
- * <p>LlmTrace 列表受 {@code agent.observability.llm-trace.max-calls} 限制（默认 100，超出移除最旧），
- * 文本字段受 {@code llm-trace.max-text-chars}、{@code reasoning-max-chars}、
- * {@code tool-trace.max-output-chars} 限制截断。</p>
+ * <h2>容量保护（面试要点）</h2>
+ * <p>生产环境长时间运行的 agent 可能产生数百次 LLM 调用，不加限制会撑爆 Redis 和 DB。
+ * 因此设计了三层容量保护：</p>
+ * <ul>
+ *   <li>{@code llmTraceMaxCalls}：LlmTrace 列表最大长度（默认 100，超出移除最旧）</li>
+ *   <li>{@code llmTraceMaxTextChars}：单条请求/响应文本最大字符数（默认 20K，超出截断）</li>
+ *   <li>{@code toolTraceMaxOutputChars}：单条工具输出最大字符数（默认 100K，超出截断）</li>
+ * </ul>
  *
- * @see AgentRunStateStore
- * @see world.willfrog.agent.tool.ToolRouter
- * @see world.willfrog.agent.workflow.ReactTodoExecutor
+ * <h2>并发安全</h2>
+ * <p>使用 per-runId 的互斥锁保证同一 run 的 mutate 操作串行化——
+ * 整个函数式更新在锁内完成，避免并发 write → read → write 导致旧值覆盖新值。</p>
+ *
+ * @see AgentRunStateStore Redis 状态存储
+ * @see world.willfrog.agent.tool.router.ToolRouter 工具层调用入口
  */
 @Service
 @RequiredArgsConstructor

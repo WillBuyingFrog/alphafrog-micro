@@ -48,6 +48,33 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.SubmitAgentFeedbackRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 
+/**
+ * agentLangchainService 的 Dubbo RPC 入口 —— 实现与 legacy agentService 相同的
+ * {@code DubboAgentDubboService} 接口，但注册在独立的 {@code group=langchain}。
+ *
+ * <h2>设计意图</h2>
+ * 这是整个 langchain 服务的"薄网关层"。所有方法都是简单的委托调用：
+ * <ul>
+ *   <li>写操作（createRun）→ {@link AgentLangchainRunService}</li>
+ *   <li>读操作（getRun、getStatus、listRuns 等）→ {@link LangchainRunReadService}</li>
+ *   <li>控制操作（cancel、pause、resume、delete）→ {@link LangchainRunControlService}</li>
+ * </ul>
+ * 不包含任何业务逻辑，只是 RPC 协议到内部 service 的路由。
+ *
+ * <h2>group=langchain 隔离</h2>
+ * 注册在 {@code group=langchain}，与 legacy agentService（默认 group）隔离。
+ * frontend 通过路径分流（POST /api/agent/runs → langchain，其余 → legacy）
+ * 决定调用哪个 provider。
+ *
+ * <h2>条件装配</h2>
+ * 仅在 {@code agent.langchain.provider.enabled=true} 时激活。
+ * 这个开关同时控制 Nacos 注册——关闭时 langchain 服务不注册 Dubbo provider，
+ * 所有流量自动走 legacy。
+ *
+ * @see AgentLangchainRunService 写路径
+ * @see LangchainRunReadService 读路径
+ * @see LangchainRunControlService 控制路径
+ */
 @DubboService(group = "langchain")
 @ConditionalOnProperty(prefix = "agent.langchain.provider", name = "enabled", havingValue = "true")
 @RequiredArgsConstructor

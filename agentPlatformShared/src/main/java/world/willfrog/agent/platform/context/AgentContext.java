@@ -7,33 +7,26 @@ import java.util.Map;
 import world.willfrog.agent.platform.config.RunStageConfig;
 
 /**
- * Agent 运行时上下文中枢，跨组件共享的 {@link ThreadLocal} 容器。
+ * Agent 运行时上下文中枢 —— 跨组件共享的 {@link ThreadLocal} 容器。
  *
- * <h3>角色</h3>
- * 在一次 Agent Run 内,众多组件(执行器、工具、LLM 包装器、观测服务等)都需要访问当前
- * runId / userId、当前所在阶段、当前 Todo 序号、能力开关(如 webSearch)等运行时状态。
- * 为了避免在每个方法签名中显式传参,本类以 ThreadLocal 形式集中保存这些"环境变量"。
+ * <h2>为什么需要这个类</h2>
+ * <p>一次 Agent Run 涉及几十个组件（Pipeline、Planner、ChatModel、ToolRouter、ObservabilityService 等），
+ * 它们都需要访问 runId、userId、当前 phase、todoId 等运行时状态。
+ * 如果通过方法参数逐层传递，每个方法签名都要多一堆参数且容易漏传。
+ * ThreadLocal 方案让所有组件在同一个线程内隐式共享这些上下文，
+ * 同时保证不同 run 之间天然隔离。</p>
  *
- * <h3>生命周期</h3>
+ * <h2>面试常被追问的三个点</h2>
  * <ul>
- *   <li>主线程入口：{@link world.willfrog.agent.service.AgentRunExecutor#doExecute} 在
- *       开始执行 run 时设置 runId / userId / debugMode / webSearchEnabled 等;
- *       finally 块中调用 {@link #clear()} 清理,防止线程池复用时跨 run 串扰。</li>
- *   <li>子线程入口：DAG / Sub-Agent 在子线程中执行任务时,必须先通过
- *       {@link #captureRunContext()} 在父线程拍快照,再在子线程中调用
- *       {@link #restoreRunContext(ContextSnapshot)} 还原。这是子线程能正确继承父线程
- *       能力配置(尤其是 webSearch 开关、reasoningEffort、stageConfig)的根本机制。</li>
+ *   <li><b>"ThreadLocal 不会被线程池复用时串数据吗？"</b>
+ *       → 入口 finally 块调 {@link #clear()} 清理所有字段，保证线程归还池时是干净的。</li>
+ *   <li><b>"DAG 子线程怎么拿到父线程的 webSearch 开关？"</b>
+ *       → {@link #captureRunContext()} / {@link #restoreRunContext(ContextSnapshot)} 快照-还原机制。
+ *       父线程拍快照 → 传到子线程 → 子线程还原。历史上缺失这套机制时 webSearch 在子线程永远为 false。</li>
+ *   <li><b>"结构化输出（structured output）怎么实现的？"</b>
+ *       → {@link StructuredOutputSpec} 存在 ThreadLocal 中，LLM 包装器检测到后自动注入
+ *       {@code response_format: json_schema} 到请求体。Planner 在调用前 set，调用后 clear。</li>
  * </ul>
- *
- * <h3>{@link #captureRunContext()} 与 {@link #restoreRunContext(ContextSnapshot)}</h3>
- * <p>这一对快照-还原方法是 <b>DAG 子线程能拿到 webSearch 开关</b> 的根本所在。
- * 历史上(v0p7-scale 之前)DAG 子线程没有这套机制,导致父线程开启 webSearch 但子线程
- * 看到的 {@code isWebSearchEnabled()} 始终为 false,从而搜索工具被错误屏蔽。
- * 当前实现确保:任何在子线程跑的 Todo 都能拿到与父线程一致的能力开关。</p>
- *
- * <h3>线程安全</h3>
- * 各字段均为 {@code ThreadLocal},天然线程隔离;不同 run 之间互不干扰,
- * 即便同一线程被线程池复用,只要遵守 {@link #clear()} 约定也不会串扰。
  */
 public class AgentContext {
     /** 当前 Run ID,由 AgentRunExecutor 在执行入口设置 */

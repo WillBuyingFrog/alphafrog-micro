@@ -25,26 +25,70 @@ import java.util.Set;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Function;
 
+/**
+ * 金融数据工具集，暴露给 agent 的底层金融数据查询能力。
+ *
+ * <p>覆盖股票、ETF、指数、场外基金四大资产类型的查询，包括：
+ * 基础信息查询、日线数据查询、关键词搜索、财务报表查询、ETF 复权因子/份额规模查询等。
+ * 所有工具通过 Dubbo 调用内部微服务（domesticStockService / domesticFundService /
+ * domesticIndexService / domesticListedAssetService），返回统一格式的 JSON 响应。</p>
+ *
+ * <p>核心设计模式：</p>
+ * <ul>
+ *   <li><b>批量查询</b>：支持 {@code |} 分隔或 JSON 数组形式的批量参数，通过
+ *       {@link CompletableFuture} 并发执行多个单条查询，显著降低多资产场景的总耗时；</li>
+ *   <li><b>并行限制</b>：所有批量操作必须先调用 {@link #checkParallelLimits} 查询当前限制，
+ *       超过 {@code maxItems} 会返回 {@code BATCH_LIMIT_EXCEEDED} 错误，防止 LLM 无节制发请求；</li>
+ *   <li><b>Dataset 产物</b>：日线/财务等大数据量查询结果通过 {@link DatasetWriter} 写入持久化存储，
+ *       获得 {@code dataset_id}，后续 todo 通过 {@link DatasetRegistry} 复用，避免重复查询；</li>
+ *   <li><b>统一响应格式</b>：所有工具返回 {@code {ok, tool, data, error}} 结构的 JSON，
+ *       便于 LangchainTodoNodeExecutor 统一解析和错误处理。</li>
+ * </ul>
+ *
+ * <p>面试高频追问点：批量查询怎么实现的、checkParallelLimits 的作用、dataset 产物怎么传递、
+ * 复权因子怎么补充的、统一错误码设计。</p>
+ */
 @Slf4j
 @Component
 public class MarketDataTools {
 
+    /**
+     * Dubbo 引用的股票服务，提供股票基础信息、日线、财务数据查询。
+     */
     @DubboReference
     private DomesticStockService domesticStockService;
 
+    /** 基金服务，提供场外基金搜索、净值序列、ETF 份额规模查询。 */
     @DubboReference
     private DomesticFundService domesticFundService;
 
+    /** 指数服务，提供指数基础信息、日线数据查询。 */
     @DubboReference
     private DomesticIndexService domesticIndexService;
 
+    /** 场内资产服务，提供 ETF/股票/指数的统一日线查询、搜索、复权因子查询（含 MeiliSearch 索引）。 */
     @DubboReference
     private DomesticListedAssetService domesticListedAssetService;
 
+    /**
+     * Dataset 写入器：将大体积查询结果（日线、财务数据等）写入持久化存储，生成 dataset_id。
+     * 通过 {@code dataset_id} 可以在后续 todo 中复用，避免对同一数据重复查询。
+     */
     private final DatasetWriter datasetWriter;
+
+    /**
+     * Dataset 注册表：管理已写入 dataset 的元信息（kind、tsCode、日期范围、headers、datasetId），
+     * 支持 {@link #findReusable} 查询是否存在可复用的 dataset。
+     */
     private final DatasetRegistry datasetRegistry;
+
+    /** Nacos 热加载配置读取器，用于动态获取并行查询限制（maxParallelSearchQueries / maxParallelDailyQueries）。 */
     private final AgentLlmLocalConfigLoader localConfigLoader;
+
+    /** 基础配置（classpath / application.yml），作为热加载配置的 fallback。 */
     private final AgentLlmProperties llmProperties;
+
+    /** JSON 序列化器，用于工具返回值的 JSON 编码和批量结果解析。 */
     private final ObjectMapper objectMapper;
 
     public MarketDataTools(DatasetWriter datasetWriter,
@@ -419,6 +463,16 @@ public class MarketDataTools {
     }
 
     @Tool("查询场内资产日线（股票/ETF/指数）。参数要求：tsCode 支持 | 分隔或 JSON 数组，具体批量上限必须先调用 checkParallelLimits 查询；如果没有 checkParallelLimits 工具，默认不要批量；assetType 必填 stock|etf|index；startDate/endDate 为 YYYYMMDD；priceMode 目前仅支持 raw_ohlc。对于 ETF，若数据库中有复权因子数据，返回的 dataset 会额外包含 adj_factor 列，可用于后复权计算。")
+    /**
+     * 查询场内资产日线（股票/ETF/指数），统一入口方法。
+     *
+     * <p>根据 assetType 分发到不同实现：</p>
+     * <ul>
+     *   <li>stock → 委托 {@link #getStockDaily}（走 domesticStockService）；</li>
+     *   <li>index → 委托 {@link #getIndexDaily}（走 domesticIndexService）；</li>
+     *   <li>etf → 走 domesticListedAssetService，支持批量并发、复权因子补充、dataset 产物。</li>
+     * </ul>
+     */
     public String getExchangeAssetDaily(String tsCode, String assetType, String startDate, String endDate, String priceMode) {
         String type = normalizeAssetType(assetType);
         if (type.isBlank()) {
@@ -618,6 +672,18 @@ public class MarketDataTools {
     }
 
     @Tool("查询当前批量/并行查询限制。返回 search 和 daily 工具组的热加载 maxItems，以及各工具组包含哪些工具。使用任何批量参数前必须先调用本工具；如果没有本工具，默认并行查询关闭。")
+    /**
+     * 查询当前批量/并行查询限制，所有支持批量的工具在执行前应当先调用本方法。
+     *
+     * <p>返回两类限制：</p>
+     * <ul>
+     *   <li><b>search 组</b>：搜索类工具（searchStock / searchFund / getStockInfo 等）的 maxItems，默认 3；</li>
+     *   <li><b>daily 组</b>：日线类工具（getStockDaily / getExchangeAssetDaily 等）的 maxItems，默认 2。</li>
+     * </ul>
+     *
+     * <p>配置来源：Nacos 热加载配置优先，fallback 到 classpath 默认配置。
+     * 若本工具不可用，LLM 应当退化为单条查询（one item at a time）。</p>
+     */
     public String checkParallelLimits() {
         Map<String, Object> search = new LinkedHashMap<>();
         search.put("maxItems", resolveMaxParallelSearchQueries());
@@ -674,6 +740,13 @@ public class MarketDataTools {
         }
     }
 
+    /**
+     * ETF 批量日线查询：通过 domesticListedAssetService 并发获取多只 ETF 的日线数据。
+     *
+     * <p>与 {@link #batchGetDaily} 的区别：
+     * batchGetDaily 针对股票/指数，走 domesticStockService / domesticIndexService；
+     * 而 ETF 属于「场内资产」，走 domesticListedAssetService，统一入口为 {@link #fetchListedAssetDailySingle}。</p>
+     */
     private String batchGetListedAssetDaily(String toolName,
                                             List<String> tsCodes,
                                             String startDateStr,
@@ -881,6 +954,17 @@ public class MarketDataTools {
         return row;
     }
 
+    /**
+     * 通用批量搜索执行：为每个查询创建一个 {@link CompletableFuture} 并发执行，最后聚合结果。
+     *
+     * <p>结果格式：统一返回 {@code {mode:"batch", queries, results, success_count, failure_count}}，
+     * 每个 result 包含 {@code {query, ok, data, error}}，便于 LLM 判断哪些查询成功、哪些失败。</p>
+     *
+     * @param toolName   当前工具名
+     * @param queries    查询列表
+     * @param singleCall 单条查询的函数引用（如 {@code this::searchStockSingle}）
+     * @return 批量结果的 JSON 字符串
+     */
     private String batchSearch(String toolName, List<String> queries, Function<String, String> singleCall) {
         List<CompletableFuture<Map<String, Object>>> futures = queries.stream()
                 .map(query -> CompletableFuture.supplyAsync(() -> {
@@ -907,6 +991,11 @@ public class MarketDataTools {
         ));
     }
 
+    /**
+     * 批量日线数据查询：为每个 tsCode 并发执行单条日线查询（股票或指数），最后聚合结果。
+     *
+     * <p>与 {@link #batchSearch} 的区别：日报查询需要额外的日期范围参数，且按 ts_code 聚合而非 query。</p>
+     */
     private String batchGetDaily(String toolName,
                                  List<String> tsCodes,
                                  String startDateStr,
@@ -941,6 +1030,21 @@ public class MarketDataTools {
         ));
     }
 
+    /**
+     * 解析批量参数值，支持两种格式：JSON 数组或 {@code |} 分隔符。
+     *
+     * <p>解析策略（按优先级）：</p>
+     * <ol>
+     *   <li>若参数以 {@code [} 开头且以 {@code ]} 结尾，尝试作为 JSON 数组解析；</li>
+     *   <li>JSON 解析失败或不是数组格式，回退到 {@code |} 分隔符分割；</li>
+     *   <li>若分割后仍为空且原始文本非空，将原始文本作为单个值返回。</li>
+     * </ol>
+     *
+     * <p>使用 {@link LinkedHashSet} 去重同时保留顺序。</p>
+     *
+     * @param raw 原始参数值，如 "000001.SZ|600519.SH" 或 "["000001.SZ","600519.SH"]"
+     * @return 解析后的非空值列表
+     */
     private List<String> parseBatchValues(String raw) {
         if (raw == null || raw.isBlank()) {
             return List.of();
@@ -978,6 +1082,19 @@ public class MarketDataTools {
         return new ArrayList<>(values);
     }
 
+    /**
+     * 检查批量参数是否超过当前并行限制，若超过则返回统一的 BATCH_LIMIT_EXCEEDED 错误响应。
+     *
+     * <p>这是防止 LLM 无节制批量查询的关键防线：
+     * 所有支持批量的工具在调用前都会先调用此方法，若返回值非空则直接将该错误返回给 LLM，
+     * 而不是继续执行可能耗尽资源的批量操作。</p>
+     *
+     * @param toolName     当前工具名，用于构造错误响应
+     * @param argumentName 被检查的参数名，如 "tsCode" / "keyword"
+     * @param values       解析后的批量值列表
+     * @param maxItems     当前允许的并行查询上限（来自 {@link #resolveMaxParallelSearchQueries} 或 {@link #resolveMaxParallelDailyQueries}）
+     * @return 若未超限返回 null；若超限返回 JSON 格式的错误响应字符串
+     */
     private String batchLimitFailureIfExceeded(String toolName, String argumentName, List<String> values, int maxItems) {
         if (values == null || values.size() <= Math.max(1, maxItems)) {
             return null;
@@ -991,6 +1108,14 @@ public class MarketDataTools {
         return fail(toolName, "BATCH_LIMIT_EXCEEDED", "Batch size exceeds the current parallel limit.", details);
     }
 
+    /**
+     * 解析搜索类工具的当前最大并行查询数。
+     *
+     * <p>配置优先级：Nacos 热加载配置 > classpath 默认配置 > 硬编码默认值（3）。
+     * 最终值被钳制在 [1, 20] 范围内，防止配置错误导致过大或过小的限制。</p>
+     *
+     * @return 当前搜索类工具允许的最大并行查询数
+     */
     private int resolveMaxParallelSearchQueries() {
         int local = localConfigLoader == null ? 0 : localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
@@ -1010,6 +1135,14 @@ public class MarketDataTools {
         return 3;
     }
 
+    /**
+     * 解析日线类工具的当前最大并行查询数。
+     *
+     * <p>配置优先级与搜索类相同，硬编码默认值为 2（日线查询通常比搜索更耗时，默认限制更严格）。
+     * 最终值同样被钳制在 [1, 20] 范围内。</p>
+     *
+     * @return 当前日线类工具允许的最大并行查询数
+     */
     private int resolveMaxParallelDailyQueries() {
         int local = localConfigLoader == null ? 0 : localConfigLoader.current()
                 .map(AgentLlmProperties::getRuntime)
@@ -1183,6 +1316,20 @@ public class MarketDataTools {
         }
     }
 
+    /**
+     * 构造包含 dataset 元信息的标准化数据响应体。
+     *
+     * <p>dataset 是 MarketDataTools 的核心设计：大体积查询结果（日线、财务数据等）不直接塞满 LLM 上下文，
+     * 而是写入持久化存储后返回 {@code dataset_id}。后续 todo 或 DAG 下游节点可以通过 {@link DatasetRegistry}
+     * 查询并复用已写入的 dataset，避免重复查询外部服务。</p>
+     *
+     * <p>source 字段含义：
+     * <ul>
+     *   <li>{@code "reused"} — 命中 {@link DatasetRegistry} 缓存，直接返回已有 dataset_id；</li>
+     *   <li>{@code "created"} — 新写入 dataset，返回新生成的 dataset_id；</li>
+     *   <li>{@code "inline"} — dataset 写入未启用，直接在响应中嵌入少量预览行（通常最多 20 行）。</li>
+     * </ul></p>
+     */
     private Map<String, Object> datasetData(String tsCode,
                                             String startDate,
                                             String endDate,
@@ -1241,6 +1388,12 @@ public class MarketDataTools {
         return raw.trim();
     }
 
+    /**
+     * 构造成功响应的 JSON 字符串。
+     *
+     * <p>统一响应格式：{@code {ok: true, tool, data, error: null}}。
+     * 所有工具方法无论成功或失败都返回同一结构，便于 LangchainTodoNodeExecutor 统一解析。</p>
+     */
     private String ok(String tool, Map<String, Object> data) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("ok", true);
@@ -1250,6 +1403,13 @@ public class MarketDataTools {
         return writeJson(payload);
     }
 
+    /**
+     * 构造失败响应的 JSON 字符串。
+     *
+     * <p>统一错误格式：{@code {ok: false, tool, data: {}, error: {code, message, details}}}。
+     * 错误码是结构化字符串（如 BATCH_LIMIT_EXCEEDED / INVALID_ARGUMENT / NO_DATA / TOOL_ERROR），
+     * 不是 HTTP 状态码，便于 FailureMapper 做分类和前端展示。</p>
+     */
     private String fail(String tool, String code, String message, Map<String, Object> details) {
         Map<String, Object> payload = new LinkedHashMap<>();
         payload.put("ok", false);
@@ -1263,6 +1423,12 @@ public class MarketDataTools {
         return writeJson(payload);
     }
 
+    /**
+     * 将工具响应对象序列化为 JSON 字符串。
+     *
+     * <p>序列化失败时返回一个兜底错误 JSON（JSON_SERIALIZE_ERROR），
+     * 确保即使序列化异常也不会抛出未处理异常导致工具调用链中断。</p>
+     */
     private String writeJson(Object payload) {
         try {
             return objectMapper.writeValueAsString(payload);
@@ -1349,6 +1515,9 @@ public class MarketDataTools {
         ));
     }
 
+    /**
+     * 构造服务不可用错误响应，当底层 Dubbo 服务不可用时使用（如 DomesticListedAssetService 尚未部署）。
+     */
     private String serviceUnavailable(String tool, String message) {
         return fail(tool, "SERVICE_UNAVAILABLE", message, Map.of());
     }

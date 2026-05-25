@@ -65,6 +65,45 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 
+/**
+ * Agent 读路径统一入口 —— 所有查询类 RPC 最终都委托到这里。
+ *
+ * <h2>在 agent 架构中的位置</h2>
+ * 上一轮 Top5 覆盖的是"写路径"（创建 run → planning → 执行 → 落库）。
+ * 本类覆盖"读路径"：前端轮询、matrix 脚本、用户查看历史 run 等所有查询操作。
+ * 理解 agent 完整请求链路必须读写两路径都看。
+ *
+ * <h2>核心职责</h2>
+ * <ul>
+ *   <li>run 查询（单个 run 详情、列表分页）</li>
+ *   <li>status 轮询（前端 matrix 最频繁调用的接口，含 phase 推断、计划进度、
+ *       observability 摘要）</li>
+ *   <li>events 增量拉取（通过 afterSeq 游标实现断点续传）</li>
+ *   <li>result 结果查询（含结构化答案、credits 消耗计算）</li>
+ *   <li>配置类查询（可用模型列表、工具列表、credits 余额）</li>
+ *   <li>快照分段下载（大 run 的 snapshot 拆成多 part，分段拉取避免 OOM）</li>
+ * </ul>
+ *
+ * <h2>读写一致性</h2>
+ * langchain 服务和 legacy agentService 共享同一套 PG/Redis 存储。
+ * 本类的读操作依赖 {@link LangchainSingleWriterGuard} 保证：
+ * 当前 langchain 实例有写入权时才允许直接读 PG，避免读到过期的本地缓存。
+ *
+ * <h2>status 方法的 phase 推断</h2>
+ * {@link #getStatus} 不仅返回 run 状态，还根据最近事件类型推断当前阶段
+ * （PLANNING / EXECUTING / EXECUTING_TOOL / SUMMARIZING / PAUSED）。
+ * 这是前端进度展示的核心数据源。面试被问"前端怎么知道 agent 正在干什么"，
+ * 答案就在 {@link #resolvePhase}。
+ *
+ * <h2>过期标记</h2>
+ * {@link #markExpiredIfNeeded} 在每次读取时检查 run 是否已过期（超过 TTL），
+ * 如果是则更新状态并写入 EXPIRED 事件。这种"读时触发写"的模式保证过期状态
+ * 即使没有定时任务也能被及时感知。
+ *
+ * @see LangchainSingleWriterGuard 读写权限守卫
+ * @see LangchainRunControlService 写/控制路径（pause/cancel/resume）
+ * @see AgentLangchainRunService 写路径入口（createRun）
+ */
 @Service
 @RequiredArgsConstructor
 public class LangchainRunReadService {
@@ -188,6 +227,22 @@ public class LangchainRunReadService {
                 .build();
     }
 
+    /**
+     * agent 状态轮询 —— 前端/matrix 最高频的读接口。
+     *
+     * <p>返回当前 run 的完整状态快照，包含：
+     * <ul>
+     *   <li>基础状态（COMPLETED/FAILED/EXECUTING 等）</li>
+     *   <li>阶段推断（PLANNING/EXECUTING/SUMMARIZING，由 {@link #resolvePhase} 推断）</li>
+     *   <li>当前正在执行的 tool 名称（从 TOOL_CALL_STARTED 事件 payload 中提取）</li>
+     *   <li>计划进度（planJson + progressJson）</li>
+     *   <li>observability 数据可用性标记（observabilityFullAvailable）</li>
+     *   <li>credits 消耗</li>
+     *   <li>已用时长（elapsedMs）</li>
+     * </ul>
+     *
+     * <p>这是 agent 前端展示的核心数据源。matrix 脚本在 poll 循环中每 3 秒调一次。
+     */
     public AgentRunStatusMessage getStatus(GetAgentRunStatusRequest request) {
         AgentRun run = requireReadableRun(request.getId(), request.getUserId());
         AgentRunEvent latestEvent = eventMapper.findLatestByRunId(run.getId());
@@ -471,6 +526,15 @@ public class LangchainRunReadService {
                 .build();
     }
 
+    /**
+     * 根据 run 状态和最近事件类型推断当前阶段，用于前端进度展示。
+     *
+     * <p>为什么不只用 status？因为 EXECUTING 状态涵盖多种子阶段
+     * （planning 结束但还没开始执行、正在执行 tool、正在写 final answer 等），
+     * 只靠 status 无法区分。配合最近事件类型可以更精确推断。
+     *
+     * <p>推断优先级：终态 ＞ WAITING（PAUSED） ＞ 事件推断 ＞ status fallback。
+     */
     private String resolvePhase(AgentRunStatus status, String lastEventType) {
         if (status == null) {
             return "";

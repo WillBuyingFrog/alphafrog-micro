@@ -13,7 +13,39 @@ import world.willfrog.agent.tools.router.ToolRouter;
 import java.util.Map;
 
 /**
- * LC4j {@link ToolExecutor} that delegates all tool calls to legacy {@link ToolRouter}.
+ * LC4j {@link ToolExecutor}：模型在 tool loop 里发起一次 tool call 后，由此类把请求转给
+ * legacy {@link ToolRouter}，并处理 langchain 路径特有的防护与提示。
+ *
+ * <p>与 {@link ToolRouterToolProvider} 的配合：Provider 负责「有哪些工具」；本类负责
+ * 「选中某个工具后怎么跑」。所有工具名最终都进入 {@link ToolRouter#invokeWithMeta(String, Map)}，
+ * 因此预算检查、observability trace、结果缓存、统一 JSON 响应格式都在 ToolRouter 内完成，
+ * 本类不重复实现那些横切逻辑。</p>
+ *
+ * <p>单次调用的处理顺序（{@link #execute}）：</p>
+ * <ol>
+ *   <li>把 LC4j 传来的 arguments JSON 解析为 {@code Map<String, Object>}；</li>
+ *   <li>{@link LangchainRepeatedToolCallGuard}：同一 run 内相同工具+相同参数重复超过阈值则直接返回错误文本，
+ *       避免模型死循环刷工具；</li>
+ *   <li>{@link ToolRouter#invokeWithMeta} 执行并取 output 字符串；</li>
+ *   <li>从 output 解析 {@code dataset_id}，写入 {@link DatasetRefRegistry} 与
+ *       {@link LangchainDatasetRefContext}，供 DAG 下游 todo 或 executePython 引用；</li>
+ *   <li>若 output 暗示 dataset 缺失/无效，或发生重复调用，在结果末尾追加 {@code _retry_hint_}
+ *       引导模型改参（不抛异常，让模型在下一轮 tool loop 自行纠正）。</li>
+ * </ol>
+ *
+ * <p>面试常考点：</p>
+ * <ul>
+ *   <li>「LC4j tool call 怎么落到 MarketDataTools？」→ 本类 → ToolRouter → 具体工具 Bean；</li>
+ *   <li>「为什么 cancel 后还能拦住后续工具/LLM？」→ LC4j 层由
+ *       {@link world.willfrog.agentlangchain.orchestration.LangchainRunExecutionGuard} 在发 LLM 前和工具前检查；
+ *       {@link ToolRouter} 负责预算与工具运行时横切逻辑，不承担 cancel 状态机；</li>
+ *   <li>「dataset 怎么跨 todo 传递？」→ 本类注册 ref + TodoNodeExecutor 把 refs 写进 user message。</li>
+ * </ul>
+ *
+ * @see ToolRouterToolProvider 工具目录入口
+ * @see world.willfrog.agent.tools.router.ToolRouter 统一执行与观测
+ * @see LangchainRepeatedToolCallGuard 重复调用防护
+ * @see world.willfrog.agentlangchain.orchestration.LangchainTodoNodeExecutor tool loop 宿主
  */
 @RequiredArgsConstructor
 final class ToolRouterToolExecutor implements ToolExecutor {
@@ -24,6 +56,10 @@ final class ToolRouterToolExecutor implements ToolExecutor {
     private final ToolRouter toolRouter;
     private final ObjectMapper objectMapper;
 
+    /**
+     * LC4j 旧版回调：返回工具输出纯文本。{@link #executeWithContext} 是推荐路径，会先同步
+     * {@link InvocationContext} 里的 run 上下文。
+     */
     @Override
     public String execute(ToolExecutionRequest request, Object memoryId) {
         Map<String, Object> params = parseArguments(request.arguments());
@@ -40,6 +76,10 @@ final class ToolRouterToolExecutor implements ToolExecutor {
         return appendRepeatedToolCallHintIfNeeded(output, repeatDecision);
     }
 
+    /**
+     * LC4j 带上下文执行：先把 {@link InvocationContext#invocationParameters()} 灌进
+     * {@link world.willfrog.agent.platform.context.AgentContext}（经 {@link LangchainRunContextBridge}），再调用 {@link #execute}。
+     */
     @Override
     public ToolExecutionResult executeWithContext(ToolExecutionRequest request, InvocationContext context) {
         if (context != null) {
@@ -51,6 +91,7 @@ final class ToolRouterToolExecutor implements ToolExecutor {
                 .build();
     }
 
+    /** 解析模型输出的 tool arguments JSON；解析失败时保留 raw 字段避免整次调用 NPE。 */
     private Map<String, Object> parseArguments(String arguments) {
         if (arguments == null || arguments.isBlank()) {
             return Map.of();
@@ -62,6 +103,10 @@ final class ToolRouterToolExecutor implements ToolExecutor {
         }
     }
 
+    /**
+     * executePython 等工具若因 dataset_ids 错误失败，把当前 run 已知的 ref 列表写进 hint，
+     * 减少模型编造 placeholder dataset_id。
+     */
     private String appendDatasetRetryHintIfNeeded(String output, Map<String, String> datasetRefs) {
         if (output == null || output.isBlank()) {
             return output;
@@ -96,6 +141,7 @@ final class ToolRouterToolExecutor implements ToolExecutor {
                 || lowerOutput.contains("not found");
     }
 
+    /** 未 blocked 但已重复调用时，在 output 末尾追加提示，供模型下一轮改参。 */
     private String appendRepeatedToolCallHintIfNeeded(String output,
                                                       LangchainRepeatedToolCallGuard.Decision repeatDecision) {
         if (repeatDecision == null || !repeatDecision.repeated() || repeatDecision.blocked()) {

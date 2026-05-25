@@ -16,6 +16,30 @@ import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * LINEAR（线性）工作流执行器 —— 按顺序逐个执行 Todo，一步失败则整个 run 失败。
+ *
+ * <h2>与 DAG 执行器的关系</h2>
+ * DAG 是主线（支持并行依赖图），LINEAR 是降级简化版（顺序执行）。
+ * 当 planning LLM 判断任务无需并行（或 DAG 执行失败触发 FALLBACK_TO_LINEAR）时走此路径。
+ * 面试被问"你们执行模式有几种"，答案在本类和 DAG 执行器。
+ *
+ * <h2>执行流程</h2>
+ * <ol>
+ *   <li>调用 planner 生成 Todo 列表</li>
+ *   <li>逐个执行 Todo（每个 Todo 经过 {@link LangchainTodoNodeExecutor}）</li>
+ *   <li>每完成一个 Todo 后注册 dataset ref，供后续 Todo 引用</li>
+ *   <li>执行前后各检查一次 cancel/pause 状态</li>
+ *   <li>全部完成后调用 final answer 生成</li>
+ * </ol>
+ *
+ * <h2>cancel/pause 防护</h2>
+ * 每个 Todo 执行前和 final answer 生成前都通过
+ * {@link LangchainRunExecutionGuard#stopReason} 检查是否有未处理的 cancel/pause 信号。
+ *
+ * @see LangchainDagWorkflowExecutor DAG 并行执行器
+ * @see LangchainWorkflowRouting 决策 LINEAR vs DAG 的路由逻辑
+ */
 @Service
 @RequiredArgsConstructor
 public class LangchainLinearWorkflowExecutor {
