@@ -1,8 +1,9 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.model.chat.ChatLanguageModel;
+import dev.langchain4j.model.chat.ChatModel;
 import io.micrometer.core.instrument.MeterRegistry;
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry;
 import org.junit.jupiter.api.BeforeEach;
@@ -11,27 +12,41 @@ import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
-import world.willfrog.agent.tool.MarketDataTools;
-import world.willfrog.agent.tool.PythonSandboxTools;
-import world.willfrog.agent.workflow.LinearWorkflowExecutor;
+import org.springframework.scheduling.concurrent.ThreadPoolTaskExecutor;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.mapper.AgentRunMapper;
+import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.agent.platform.config.AgentLlmProperties;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.config.RunStageConfig;
+import world.willfrog.agent.platform.config.StageLlmConfig;
+import world.willfrog.agent.tools.market.MarketDataTools;
+import world.willfrog.agent.tools.python.PythonSandboxTools;
+import world.willfrog.agent.tools.rag.RagTools;
+import world.willfrog.agent.tools.search.SearchTools;
+
 import world.willfrog.agent.workflow.TodoItem;
 import world.willfrog.agent.workflow.TodoPlan;
 import world.willfrog.agent.workflow.TodoPlanner;
 import world.willfrog.agent.workflow.WorkflowExecutionResult;
+import world.willfrog.agent.workflow.WorkflowExecutor;
+import world.willfrog.agent.workflow.WorkflowExecutorFactory;
+import world.willfrog.agent.workflow.WorkflowRequest;
 
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyMap;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 import static org.mockito.Mockito.lenient;
+import static org.mockito.Mockito.times;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
@@ -49,6 +64,10 @@ class AgentRunExecutorTest {
     @Mock
     private PythonSandboxTools pythonSandboxTools;
     @Mock
+    private RagTools ragTools;
+    @Mock
+    private SearchTools searchTools;
+    @Mock
     private AgentRunStateStore stateStore;
     @Mock
     private AgentObservabilityService observabilityService;
@@ -57,11 +76,23 @@ class AgentRunExecutorTest {
     @Mock
     private TodoPlanner todoPlanner;
     @Mock
-    private LinearWorkflowExecutor workflowExecutor;
+    private WorkflowExecutorFactory workflowExecutorFactory;
     @Mock
-    private ChatLanguageModel chatLanguageModel;
+    private WorkflowExecutor workflowExecutor;
+    @Mock
+    private ChatModel chatLanguageModel;
     @Mock
     private AgentMessageService messageService;
+    @Mock
+    private AgentLlmLocalConfigLoader localConfigLoader;
+    @Mock
+    private StageConfigResolver stageConfigResolver;
+    @Mock
+    private StageConfigValidator stageConfigValidator;
+    @Mock
+    private AgentSimpleToolFastPathService simpleToolFastPathService;
+    @Mock
+    private OpenRouterCostService openRouterCostService;
 
     private AgentRunExecutor executor;
 
@@ -73,14 +104,25 @@ class AgentRunExecutorTest {
                 aiServiceFactory,
                 marketDataTools,
                 pythonSandboxTools,
+                ragTools,
+                searchTools,
                 stateStore,
                 observabilityService,
                 creditService,
                 todoPlanner,
-                workflowExecutor,
+                workflowExecutorFactory,
                 messageService,
                 new ObjectMapper(),
-                new SimpleMeterRegistry()
+                new SimpleMeterRegistry(),
+                localConfigLoader,
+                new AgentLlmProperties(),
+                stageConfigResolver,
+                stageConfigValidator,
+                new AgentFinalAnswerParser(new ObjectMapper()),
+                new AgentCitationService(new ObjectMapper()),
+                simpleToolFastPathService,
+                openRouterCostService,
+                new ThreadPoolTaskExecutor()
         );
         executor.init();
 
@@ -91,11 +133,15 @@ class AgentRunExecutorTest {
         when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of());
         when(eventService.extractUserGoal(anyString())).thenReturn("goal");
         when(eventService.extractRunConfig(anyString())).thenReturn(AgentEventService.RunConfig.defaults());
+        when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
+        lenient().when(simpleToolFastPathService.decide(anyString(), any())).thenReturn(Optional.empty());
 
         when(aiServiceFactory.resolveLlm(anyString(), anyString()))
-                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null));
-        when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
+                .thenReturn(new AgentLlmResolver.ResolvedLlm("ep", "base", "model", "", null, List.of()));
+        lenient().when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any())).thenReturn(chatLanguageModel);
+        when(aiServiceFactory.buildChatModelWithProviderOrder(any(), any(), any())).thenReturn(chatLanguageModel);
         lenient().when(creditService.calculateRunTotalCredits(anyString(), anyString(), any())).thenReturn(0);
+        lenient().when(workflowExecutorFactory.select(any())).thenReturn(workflowExecutor);
     }
 
     @Test
@@ -122,6 +168,114 @@ class AgentRunExecutorTest {
         verify(runMapper).updateSnapshot(eq("run-ok"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
         verify(eventService).append(eq("run-ok"), eq("u1"), eq("WORKFLOW_COMPLETED"), anyMap());
         verify(creditService).recordRunConsumeLedger(eq("run-ok"), eq("u1"), eq(0));
+    }
+
+    @Test
+    void execute_shouldBatchEnrichOpenRouterCostsBeforeCompletedSnapshot() {
+        AgentRun run = run("run-openrouter-cost");
+        when(runMapper.findById("run-openrouter-cost")).thenReturn(run);
+        when(eventService.isRunnable("run-openrouter-cost", "u1")).thenReturn(true);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString()))
+                .thenReturn(new AgentLlmResolver.ResolvedLlm(
+                        "openrouter",
+                        "https://openrouter.ai/api/v1",
+                        "moonshotai/kimi-k2.6",
+                        "sk-test",
+                        null,
+                        List.of()
+                ));
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-openrouter-cost");
+
+        verify(openRouterCostService).enrichMissingCostInfo(
+                eq("run-openrouter-cost"),
+                eq("sk-test"),
+                eq("https://openrouter.ai/api/v1")
+        );
+        verify(runMapper).updateSnapshot(eq("run-openrouter-cost"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
+    }
+
+    @Test
+    void execute_shouldUseFastPathBeforePlanningWhenSelected() {
+        AgentRun run = run("run-fast-path");
+        when(runMapper.findById("run-fast-path")).thenReturn(run);
+        when(eventService.isRunnable("run-fast-path", "u1")).thenReturn(true);
+        AgentSimpleToolFastPathService.FastPathDecision decision =
+                AgentSimpleToolFastPathService.FastPathDecision.selected("searchIndex", Map.of("keyword", "沪深300"));
+        when(simpleToolFastPathService.decide(anyString(), any())).thenReturn(Optional.of(decision));
+        when(simpleToolFastPathService.execute(decision)).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .finalAnswer("fast answer")
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-fast-path");
+
+        verify(simpleToolFastPathService).execute(decision);
+        verify(todoPlanner, times(0)).plan(any());
+        verify(eventService).append(eq("run-fast-path"), eq("u1"), eq("FAST_PATH_SELECTED"), anyMap());
+        verify(eventService).append(eq("run-fast-path"), eq("u1"), eq("FAST_PATH_COMPLETED"), anyMap());
+        verify(runMapper).updateSnapshot(eq("run-fast-path"), eq("u1"), eq(AgentRunStatus.COMPLETED), anyString(), eq(true), eq(null));
+    }
+
+    @Test
+    void execute_shouldWriteCitationQualityFlagsIntoSnapshot() throws Exception {
+        AgentRun run = run("run-citation-flags");
+        when(runMapper.findById("run-citation-flags")).thenReturn(run);
+        when(eventService.isRunnable("run-citation-flags", "u1")).thenReturn(true);
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        AgentCitationService.CitationMap citationMap = new AgentCitationService.CitationMap(List.of(
+                new AgentCitationService.Citation(
+                        1,
+                        1,
+                        "低相关来源",
+                        "https://example.com/a",
+                        "todo_1",
+                        false,
+                        true,
+                        "实体不匹配"
+                )
+        ));
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("结论来自低相关来源 [1]。")
+                .citationMap(citationMap)
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any()))
+                .thenAnswer(invocation -> invocation.getArgument(1));
+
+        executor.execute("run-citation-flags");
+
+        ArgumentCaptor<String> snapshotCaptor = ArgumentCaptor.forClass(String.class);
+        verify(observabilityService).attachObservabilityToSnapshot(
+                eq("run-citation-flags"),
+                snapshotCaptor.capture(),
+                eq(AgentRunStatus.COMPLETED)
+        );
+        Map<?, ?> snapshot = new ObjectMapper().readValue(snapshotCaptor.getValue(), Map.class);
+        assertEquals("结论来自低相关来源 [1]。", snapshot.get("answer_markdown"));
+        assertTrue(String.valueOf(snapshot.get("quality_flags")).contains("CITATION_REFERENCE_LOW_RELEVANCE"));
     }
 
     @Test
@@ -156,7 +310,13 @@ class AgentRunExecutorTest {
         when(runMapper.findById("run-no-code")).thenReturn(run);
         when(eventService.isRunnable("run-no-code", "u1")).thenReturn(true);
         when(eventService.extractRunConfig(anyString()))
-                .thenReturn(new AgentEventService.RunConfig(false, false, 0, false));
+                .thenReturn(new AgentEventService.RunConfig(
+                        false,
+                        AgentContext.WebSearchConfig.empty(),
+                        false,
+                        0,
+                        false
+                ));
 
         TodoPlan plan = new TodoPlan();
         plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
@@ -210,6 +370,247 @@ class AgentRunExecutorTest {
         assertTrue(toolNames.contains("executePython"));
     }
 
+    @Test
+    void execute_shouldPreferRequestedModelOverLocalStageFallback() {
+        AgentRun run = run("run-request-model");
+        when(runMapper.findById("run-request-model")).thenReturn(run);
+        when(eventService.isRunnable("run-request-model", "u1")).thenReturn(true);
+        when(eventService.extractEndpointName(anyString())).thenReturn("openrouter");
+        when(eventService.extractModelName(anyString())).thenReturn("moonshotai/kimi-k2.6");
+
+        RunStageConfig localStageConfig = new RunStageConfig();
+        localStageConfig.setPlanning(stage("openrouter", "moonshotai/kimi-k2.5"));
+        localStageConfig.setExecution(stage("openrouter", "moonshotai/kimi-k2.5"));
+        when(stageConfigResolver.resolve(anyString())).thenReturn(localStageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "base",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of()
+        ));
+
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
+
+        executor.execute("run-request-model");
+
+        ArgumentCaptor<TodoPlanner.PlanRequest> planCaptor = ArgumentCaptor.forClass(TodoPlanner.PlanRequest.class);
+        verify(todoPlanner).plan(planCaptor.capture());
+        assertEquals("openrouter", planCaptor.getValue().getEndpointName());
+        assertEquals("moonshotai/kimi-k2.6", planCaptor.getValue().getModelName());
+
+        ArgumentCaptor<WorkflowRequest> workflowCaptor = ArgumentCaptor.forClass(WorkflowRequest.class);
+        verify(workflowExecutor).execute(workflowCaptor.capture());
+        assertEquals("openrouter", workflowCaptor.getValue().getEndpointName());
+        assertEquals("moonshotai/kimi-k2.6", workflowCaptor.getValue().getModelName());
+    }
+
+    @Test
+    void execute_shouldLetPartialPlanningStageOverrideOnlyProvidedField() {
+        AgentRun run = run("run-partial-stage");
+        run.setExt("""
+                {"stage_config_json":{"planning":{"modelName":"stage-model","temperature":0.2}}}
+                """);
+        when(runMapper.findById("run-partial-stage")).thenReturn(run);
+        when(eventService.isRunnable("run-partial-stage", "u1")).thenReturn(true);
+        when(eventService.extractEndpointName(anyString())).thenReturn("request-endpoint");
+        when(eventService.extractModelName(anyString())).thenReturn("request-model");
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        StageLlmConfig planning = stage("local-endpoint", "stage-model");
+        planning.setTemperature(0.2D);
+        stageConfig.setPlanning(planning);
+        stageConfig.setExecution(stage("local-endpoint", "local-model"));
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "base",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of()
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-partial-stage");
+
+        ArgumentCaptor<TodoPlanner.PlanRequest> planCaptor = ArgumentCaptor.forClass(TodoPlanner.PlanRequest.class);
+        verify(todoPlanner).plan(planCaptor.capture());
+        assertEquals("request-endpoint", planCaptor.getValue().getEndpointName());
+        assertEquals("stage-model", planCaptor.getValue().getModelName());
+
+        ArgumentCaptor<WorkflowRequest> workflowCaptor = ArgumentCaptor.forClass(WorkflowRequest.class);
+        verify(workflowExecutor).execute(workflowCaptor.capture());
+        assertEquals("request-endpoint", workflowCaptor.getValue().getEndpointName());
+        assertEquals("request-model", workflowCaptor.getValue().getModelName());
+    }
+
+    @Test
+    void execute_shouldPreferCompleteExplicitPlanningStageOverRunRequest() {
+        AgentRun run = run("run-full-stage");
+        run.setExt("""
+                {"stage_config_json":{"planning":{"endpointName":"stage-endpoint","modelName":"stage-model"}}}
+                """);
+        when(runMapper.findById("run-full-stage")).thenReturn(run);
+        when(eventService.isRunnable("run-full-stage", "u1")).thenReturn(true);
+        when(eventService.extractEndpointName(anyString())).thenReturn("request-endpoint");
+        when(eventService.extractModelName(anyString())).thenReturn("request-model");
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        stageConfig.setPlanning(stage("stage-endpoint", "stage-model"));
+        stageConfig.setExecution(stage("local-endpoint", "local-model"));
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "base",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of()
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-full-stage");
+
+        ArgumentCaptor<TodoPlanner.PlanRequest> planCaptor = ArgumentCaptor.forClass(TodoPlanner.PlanRequest.class);
+        verify(todoPlanner).plan(planCaptor.capture());
+        assertEquals("stage-endpoint", planCaptor.getValue().getEndpointName());
+        assertEquals("stage-model", planCaptor.getValue().getModelName());
+    }
+
+    @Test
+    void execute_shouldUseStageSpecificOpenRouterProviderOrder() {
+        AgentRun run = run("run-stage-provider-order");
+        run.setExt("""
+                {"stage_config_json":{
+                  "planning":{"endpointName":"openrouter","modelName":"planning-model","providerOrder":["moonshotai/int4","novita"]},
+                  "execution":{"endpointName":"openrouter","modelName":"execution-model","provider_order":"fireworks, deepinfra"},
+                  "final_answer":{"endpointName":"openrouter","modelName":"final-model","providers":["novita"],"reasoningEffort":"high"}
+                }}
+                """);
+        when(runMapper.findById("run-stage-provider-order")).thenReturn(run);
+        when(eventService.isRunnable("run-stage-provider-order", "u1")).thenReturn(true);
+        when(eventService.extractOpenRouterProviderOrder(anyString())).thenReturn(List.of("run-level-provider"));
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        StageLlmConfig planning = stage("openrouter", "planning-model");
+        planning.setProviderOrder(List.of("moonshotai/int4", "novita"));
+        StageLlmConfig execution = stage("openrouter", "execution-model");
+        execution.setProviderOrder(List.of("fireworks", "deepinfra"));
+        StageLlmConfig finalAnswer = stage("openrouter", "final-model");
+        finalAnswer.setProviderOrder(List.of("novita"));
+        finalAnswer.setReasoningEffort("high");
+        stageConfig.setPlanning(planning);
+        stageConfig.setExecution(execution);
+        stageConfig.setFinalAnswer(finalAnswer);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of("valid-provider")
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-stage-provider-order");
+
+        ArgumentCaptor<AgentLlmResolver.ResolvedLlm> resolvedCaptor = ArgumentCaptor.forClass(AgentLlmResolver.ResolvedLlm.class);
+        ArgumentCaptor<List> providerCaptor = ArgumentCaptor.forClass(List.class);
+        ArgumentCaptor<Integer> maxTokensCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(
+                resolvedCaptor.capture(), providerCaptor.capture(), maxTokensCaptor.capture());
+
+        assertEquals("execution-model", resolvedCaptor.getAllValues().get(0).modelName());
+        assertEquals(List.of("fireworks", "deepinfra", "valid-provider"), providerCaptor.getAllValues().get(0));
+        assertEquals("planning-model", resolvedCaptor.getAllValues().get(1).modelName());
+        assertEquals(List.of("moonshotai/int4", "novita", "valid-provider"), providerCaptor.getAllValues().get(1));
+        assertEquals("final-model", resolvedCaptor.getAllValues().get(2).modelName());
+        assertEquals(List.of("novita", "valid-provider"), providerCaptor.getAllValues().get(2));
+
+        ArgumentCaptor<WorkflowRequest> workflowCaptor = ArgumentCaptor.forClass(WorkflowRequest.class);
+        verify(workflowExecutor).execute(workflowCaptor.capture());
+        assertEquals(chatLanguageModel, workflowCaptor.getValue().getFinalAnswerModel());
+        assertEquals("high", workflowCaptor.getValue().getFinalAnswerReasoningEffort());
+    }
+
+    @Test
+    void execute_shouldPassStageMaxTokensToChatModelFactory() {
+        AgentRun run = run("run-stage-max-tokens");
+        run.setExt("""
+                {"stage_config_json":{
+                  "planning":{"endpointName":"openrouter","modelName":"planning-model","maxTokens":4096},
+                  "execution":{"endpointName":"openrouter","modelName":"execution-model","maxTokens":8192},
+                  "final_answer":{"endpointName":"openrouter","modelName":"final-model","maxTokens":20000}
+                }}
+                """);
+        when(runMapper.findById("run-stage-max-tokens")).thenReturn(run);
+        when(eventService.isRunnable("run-stage-max-tokens", "u1")).thenReturn(true);
+
+        RunStageConfig stageConfig = new RunStageConfig();
+        StageLlmConfig planning = stage("openrouter", "planning-model");
+        planning.setMaxTokens(4096);
+        StageLlmConfig execution = stage("openrouter", "execution-model");
+        execution.setMaxTokens(8192);
+        StageLlmConfig finalAnswer = stage("openrouter", "final-model");
+        finalAnswer.setMaxTokens(20000);
+        stageConfig.setPlanning(planning);
+        stageConfig.setExecution(execution);
+        stageConfig.setFinalAnswer(finalAnswer);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(stageConfig);
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of("valid-provider")
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-stage-max-tokens");
+
+        ArgumentCaptor<Integer> maxTokensCaptor = ArgumentCaptor.forClass(Integer.class);
+        verify(aiServiceFactory, times(3)).buildChatModelWithProviderOrder(any(), any(), maxTokensCaptor.capture());
+        assertEquals(8192, maxTokensCaptor.getAllValues().get(0));
+        assertEquals(4096, maxTokensCaptor.getAllValues().get(1));
+        assertEquals(20000, maxTokensCaptor.getAllValues().get(2));
+    }
+
+    @Test
+    void execute_shouldUseGlobalDefaultMaxTokensWhenStageMaxTokensMissing() {
+        AgentRun run = run("run-default-max-tokens");
+        when(runMapper.findById("run-default-max-tokens")).thenReturn(run);
+        when(eventService.isRunnable("run-default-max-tokens", "u1")).thenReturn(true);
+        when(stageConfigResolver.resolve(anyString())).thenReturn(new RunStageConfig());
+        when(aiServiceFactory.resolveLlm(anyString(), anyString())).thenAnswer(inv -> new AgentLlmResolver.ResolvedLlm(
+                inv.getArgument(0),
+                "https://openrouter.ai/api/v1",
+                inv.getArgument(1),
+                "",
+                null,
+                List.of()
+        ));
+        stubSuccessfulWorkflow();
+
+        executor.execute("run-default-max-tokens");
+
+        verify(aiServiceFactory, times(1)).buildChatModelWithProviderOrder(any(), any(), isNull());
+    }
+
     private AgentRun run(String id) {
         AgentRun run = new AgentRun();
         run.setId(id);
@@ -218,5 +619,27 @@ class AgentRunExecutorTest {
         run.setExt("{}");
         run.setSnapshotJson("{}");
         return run;
+    }
+
+    private StageLlmConfig stage(String endpointName, String modelName) {
+        StageLlmConfig config = new StageLlmConfig();
+        config.setEndpointName(endpointName);
+        config.setModelName(modelName);
+        return config;
+    }
+
+    private void stubSuccessfulWorkflow() {
+        TodoPlan plan = new TodoPlan();
+        plan.setItems(List.of(TodoItem.builder().id("todo_1").sequence(1).build()));
+        when(todoPlanner.plan(any())).thenReturn(plan);
+        when(workflowExecutor.execute(any())).thenReturn(WorkflowExecutionResult.builder()
+                .success(true)
+                .paused(false)
+                .finalAnswer("answer")
+                .completedItems(plan.getItems())
+                .context(Map.of())
+                .toolCallsUsed(1)
+                .build());
+        when(observabilityService.attachObservabilityToSnapshot(anyString(), anyString(), any())).thenReturn("{}");
     }
 }

@@ -1,16 +1,16 @@
 package world.willfrog.alphafrogmicro.frontend.controller.agent;
 
-import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
@@ -28,26 +28,79 @@ import java.util.ArrayList;
 import java.util.List;
 
 @RestController
-@RequestMapping("/api/agent")
-@RequiredArgsConstructor
 @Slf4j
 public class AgentToolsController {
 
     private static final int ADMIN_USER_TYPE = 1127;
 
-    @DubboReference
-    private AgentDubboService agentDubboService;
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
+
+    @Autowired
+    private HttpServletRequest request;
 
     private final AuthService authService;
 
-    @GetMapping("/tools")
+    public AgentToolsController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
+
+    @GetMapping("/api/agent/tools")
     public ResponseWrapper<List<AgentToolResponse>> tools(Authentication authentication) {
+        return toolsInternal(authentication);
+    }
+
+    /** @deprecated Use {@code GET /api/agent/tools}. */
+    @Deprecated
+    @GetMapping("/api/agent-legacy/tools")
+    public ResponseWrapper<List<AgentToolResponse>> toolsLegacy(Authentication authentication) {
+        return toolsInternal(authentication);
+    }
+
+    @GetMapping("/api/agent/config")
+    public ResponseWrapper<AgentConfigResponse> config(Authentication authentication) {
+        return configInternal(authentication);
+    }
+
+    /** @deprecated Use {@code GET /api/agent/config}. */
+    @Deprecated
+    @GetMapping("/api/agent-legacy/config")
+    public ResponseWrapper<AgentConfigResponse> configLegacy(Authentication authentication) {
+        return configInternal(authentication);
+    }
+
+    @GetMapping("/api/agent/artifacts/{artifactId}/download")
+    public ResponseEntity<byte[]> download(Authentication authentication,
+                                           @PathVariable("artifactId") String artifactId) {
+        return downloadInternal(authentication, artifactId);
+    }
+
+    /** @deprecated Use {@code GET /api/agent/artifacts/{artifactId}/download}. */
+    @Deprecated
+    @GetMapping("/api/agent-legacy/artifacts/{artifactId}/download")
+    public ResponseEntity<byte[]> downloadLegacy(Authentication authentication,
+                                                 @PathVariable("artifactId") String artifactId) {
+        return downloadInternal(authentication, artifactId);
+    }
+
+    private ResponseWrapper<List<AgentToolResponse>> toolsInternal(Authentication authentication) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.listTools(ListAgentToolsRequest.newBuilder().setUserId(userId).build());
+            var resp = resolveService().listTools(ListAgentToolsRequest.newBuilder().setUserId(userId).build());
             List<AgentToolResponse> tools = new ArrayList<>();
             for (var t : resp.getItemsList()) {
                 tools.add(new AgentToolResponse(t.getName(), t.getDescription(), t.getParametersJson()));
@@ -62,14 +115,13 @@ public class AgentToolsController {
         }
     }
 
-    @GetMapping("/config")
-    public ResponseWrapper<AgentConfigResponse> config(Authentication authentication) {
+    private ResponseWrapper<AgentConfigResponse> configInternal(Authentication authentication) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.getConfig(
+            var resp = resolveService().getConfig(
                     GetAgentConfigRequest.newBuilder()
                             .setUserId(userId)
                             .build()
@@ -95,15 +147,13 @@ public class AgentToolsController {
         }
     }
 
-    @GetMapping("/artifacts/{artifactId}/download")
-    public ResponseEntity<byte[]> download(Authentication authentication,
-                                           @PathVariable("artifactId") String artifactId) {
+    private ResponseEntity<byte[]> downloadInternal(Authentication authentication, String artifactId) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            DownloadAgentArtifactResponse resp = agentDubboService.downloadArtifact(
+            DownloadAgentArtifactResponse resp = resolveService().downloadArtifact(
                     DownloadAgentArtifactRequest.newBuilder()
                             .setUserId(userId)
                             .setArtifactId(artifactId)

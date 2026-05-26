@@ -1,0 +1,37 @@
+{
+  "dataType": "stock_info",
+  "label": "股票基本信息",
+  "description": "获取A股股票基本信息，包含股票代码、名称、上市日期、所属行业、交易所等元数据。",
+  "serviceModule": "domesticStockFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按交易所筛选",
+      "description": "根据交易所筛选股票基本信息，market参数映射为exchange字段，支持分页。",
+      "requiredParams": [],
+      "optionalParams": ["market", "offset", "limit"],
+      "paramDefs": {
+        "market": {
+          "label": "交易所代码",
+          "description": "交易所标识，映射API的exchange参数，如SSE、SZSE、BSE等",
+          "type": "string",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    }
+  ],
+  "taskSetVariants": []
+}

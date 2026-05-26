@@ -1,16 +1,18 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboService;
 import org.springframework.beans.factory.annotation.Value;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.entity.AgentRunEvent;
-import world.willfrog.agent.entity.AgentRunMessage;
-import world.willfrog.agent.mapper.AgentRunEventMapper;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
+import org.springframework.core.task.TaskRejectedException;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRunEvent;
+import world.willfrog.agent.platform.entity.AgentRunMessage;
+import world.willfrog.agent.platform.mapper.AgentRunEventMapper;
+import world.willfrog.agent.platform.mapper.AgentRunMapper;
+import world.willfrog.agent.platform.model.AgentRunStatus;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunListItemMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunEventMessage;
 
@@ -54,6 +56,10 @@ import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageRequest;
 import world.willfrog.alphafrogmicro.agent.idl.SendAgentMessageResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentMessagesResponse;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartsMetaMessage;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessageItem;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRetentionConfigMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentFeatureConfigMessage;
@@ -68,7 +74,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
-@DubboService
+@DubboService(group = "legacy")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDubboServiceImplBase {
@@ -86,6 +92,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
     private final UserDao userDao;
     private final ObjectMapper objectMapper;
     private final AgentMessageService messageService;
+    private final AgentToolCatalogService toolCatalogService;
+    private final AgentFinalAnswerParser finalAnswerParser;
+    private final AgentCitationService citationService;
+    private final SnapshotPartService snapshotPartService;
 
     @Value("${agent.run.list.default-days:30}")
     private int listDefaultDays;
@@ -133,9 +143,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 request.getCaptureLlmRequests(),
                 request.getProvider(),
                 request.getPlannerCandidateCount(),
-                request.getDebugMode()
+                request.getDebugMode(),
+                request.getStageConfigJson()
         );
-        executor.executeAsync(run.getId());
+        enqueueRunExecution(run.getId(), userId);
         return toRunMessage(run);
     }
 
@@ -316,10 +327,45 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
-        runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.CANCELED, eventService.nextInterruptedExpiresAt());
-        eventService.append(run.getId(), run.getUserId(), "CANCELED", Map.of("run_id", run.getId()));
-        stateStore.markRunStatus(run.getId(), AgentRunStatus.CANCELED.name());
-        return toRunMessage(requireRun(run.getId(), run.getUserId()));
+        
+        String runId = run.getId();
+        String userId = run.getUserId();
+        
+        // 1. 先标记状态为 CANCELING（让执行线程知道要停止）
+        log.info("Canceling run {}: marking status as CANCELING", runId);
+        stateStore.markRunStatus(runId, AgentRunStatus.CANCELING.name());
+        
+        // 2. 等待一小段时间，让执行线程完成当前的 observability 写入
+        try {
+            Thread.sleep(200);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            log.warn("Cancel run {} interrupted during wait", runId);
+        }
+        
+        // 3. 强制刷新可观测数据到 Redis
+        log.info("Canceling run {}: force flushing observability", runId);
+        observabilityService.forceFlush(runId);
+        
+        // 4. 保存可观测数据到 snapshot
+        String snapshotJson = run.getSnapshotJson();
+        log.info("Canceling run {}: attaching observability to snapshot, current snapshot length: {}", 
+                runId, snapshotJson == null ? 0 : snapshotJson.length());
+        
+        String canceledSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                runId, snapshotJson, AgentRunStatus.CANCELED);
+        
+        // 5. 保存到数据库
+        runMapper.updateSnapshot(runId, userId, AgentRunStatus.CANCELED, 
+                canceledSnapshotJson, false, null);
+        runMapper.updateStatusWithTtl(runId, userId, AgentRunStatus.CANCELED, 
+                eventService.nextInterruptedExpiresAt());
+        
+        eventService.append(runId, userId, "CANCELED", Map.of("run_id", runId));
+        stateStore.markRunStatus(runId, AgentRunStatus.CANCELED.name());
+        
+        log.info("Canceling run {}: completed successfully", runId);
+        return toRunMessage(requireRun(runId, userId));
     }
 
     /**
@@ -334,6 +380,10 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (isTerminal(run.getStatus())) {
             return toRunMessage(run);
         }
+        String waitingSnapshotJson = observabilityService.attachObservabilityToSnapshot(
+                run.getId(), run.getSnapshotJson(), AgentRunStatus.WAITING);
+        runMapper.updateSnapshot(run.getId(), run.getUserId(), AgentRunStatus.WAITING,
+                waitingSnapshotJson, false, null);
         runMapper.updateStatusWithTtl(run.getId(), run.getUserId(), AgentRunStatus.WAITING, eventService.nextInterruptedExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "PAUSED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.WAITING.name());
@@ -365,7 +415,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         runMapper.resetForResume(run.getId(), run.getUserId(), eventService.nextTtlExpiresAt());
         eventService.append(run.getId(), run.getUserId(), "WORKFLOW_RESUMED", Map.of("run_id", run.getId()));
         stateStore.markRunStatus(run.getId(), AgentRunStatus.RECEIVED.name());
-        executor.executeAsync(run.getId());
+        enqueueRunExecution(run.getId(), run.getUserId());
         return toRunMessage(requireRun(run.getId(), run.getUserId()));
     }
 
@@ -380,15 +430,41 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         AgentRun run = requireRun(request.getId(), request.getUserId());
         String snapshotJson = run.getSnapshotJson();
         String observabilityJson = nvl(observabilityService.loadObservabilityJson(run.getId(), snapshotJson));
+        
+        log.info("Getting result for run {}, status: {}, snapshot length: {}, observability length: {}",
+                run.getId(), run.getStatus(), 
+                snapshotJson == null ? 0 : snapshotJson.length(),
+                observabilityJson.length());
+        
         String answer = "";
+        String answerMarkdown = "";
+        String structuredAnswerJson = "";
+        AgentCitationService.CitationMap citationMap = AgentCitationService.CitationMap.empty();
         if (snapshotJson != null && !snapshotJson.isBlank()) {
             try {
                 Map<?, ?> snap = objectMapper.readValue(snapshotJson, Map.class);
                 Object v = snap.get("answer");
                 answer = v == null ? "" : String.valueOf(v);
+                Object markdown = snap.get("answer_markdown");
+                answerMarkdown = markdown == null ? "" : String.valueOf(markdown);
+                Object structured = snap.get("structured_answer");
+                if (structured != null) {
+                    structuredAnswerJson = objectMapper.writeValueAsString(structured);
+                }
+                Object snapshotCitationMap = snap.get("citation_map");
+                citationMap = citationService.fromSnapshotMap(snapshotCitationMap);
+                if (citationMap.isEmpty()) {
+                    citationMap = citationService.buildCitationMapFromSnapshotCompletedItems(snap.get("completed_items"));
+                }
             } catch (Exception ignore) {
                 // ignore
             }
+        }
+        if (answerMarkdown == null || answerMarkdown.isBlank()) {
+            AgentFinalAnswerParser.ParsedAnswer parsed = finalAnswerParser.parse(answer, citationMap);
+            answerMarkdown = parsed.answerMarkdown();
+            structuredAnswerJson = finalAnswerParser.writeStructuredJson(parsed.structuredAnswer());
+            answer = answerMarkdown;
         }
         int totalCreditsConsumed = creditService.calculateRunTotalCredits(
                 run,
@@ -402,6 +478,8 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPayloadJson(snapshotJson == null ? "" : snapshotJson)
                 .setObservabilityJson(observabilityJson)
                 .setTotalCreditsConsumed(totalCreditsConsumed)
+                .setAnswerMarkdown(answerMarkdown == null ? "" : answerMarkdown)
+                .setStructuredAnswerJson(structuredAnswerJson == null ? "" : structuredAnswerJson)
                 .build();
     }
 
@@ -424,13 +502,27 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         if (planJson != null && !planJson.isBlank()) {
             progressJson = stateStore.buildProgressJson(run.getId(), planJson);
         }
-        String observabilityJson = observabilityService.loadObservabilityJson(run.getId(), run.getSnapshotJson());
+        String observabilitySummaryJson = observabilityService.loadObservabilitySummaryJson(run.getId(), run.getSnapshotJson());
+        String observabilityJson = observabilitySummaryJson;
+        boolean observabilityFullAvailable = observabilityService.isFullObservabilityAvailable(run.getId(), run.getSnapshotJson());
         int totalCreditsConsumed = creditService.calculateRunTotalCredits(
                 run,
                 eventMapper.listByRunId(run.getId()),
-                observabilityJson
+                observabilitySummaryJson
         );
-        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson, totalCreditsConsumed);
+
+        // 事件总数
+        Integer maxSeq = eventMapper.findMaxSeq(run.getId());
+        int eventCount = maxSeq != null ? maxSeq : 0;
+
+        // 时间戳（epoch millis）
+        long startedAtMs = toEpochMillis(run.getStartedAt());
+        long completedAtMs = toEpochMillis(run.getCompletedAt());
+        long elapsedMs = computeElapsedMs(run, System.currentTimeMillis());
+
+        return toStatusMessage(run, latestEvent, planJson, progressJson, observabilityJson, observabilitySummaryJson,
+                observabilityFullAvailable,
+                totalCreditsConsumed, eventCount, startedAtMs, completedAtMs, elapsedMs);
     }
 
     /**
@@ -445,41 +537,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             throw new IllegalArgumentException("user_id is required");
         }
         return ListAgentToolsResponse.newBuilder()
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getStockInfo")
-                        .setDescription("Get basic information about a stock by its TS code (e.g., 000001.SZ)")
-                        .setParametersJson("{\"tsCode\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getStockDaily")
-                        .setDescription("Get daily stock market data for a specific stock within a date range")
-                        .setParametersJson("{\"tsCode\":\"string\",\"startDateStr\":\"YYYYMMDD\",\"endDateStr\":\"YYYYMMDD\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchStock")
-                        .setDescription("Search for a stock by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchFund")
-                        .setDescription("Search for a fund by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getIndexInfo")
-                        .setDescription("Get basic information about an index by its TS code (e.g., 000300.SH)")
-                        .setParametersJson("{\"tsCode\":\"string\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("getIndexDaily")
-                        .setDescription("Get daily index market data for a specific index within a date range")
-                        .setParametersJson("{\"tsCode\":\"string\",\"startDateStr\":\"YYYYMMDD\",\"endDateStr\":\"YYYYMMDD\"}")
-                        .build())
-                .addItems(AgentToolMessage.newBuilder()
-                        .setName("searchIndex")
-                        .setDescription("Search for an index by keyword")
-                        .setParametersJson("{\"keyword\":\"string\"}")
-                        .build())
+                .addAllItems(toolCatalogService.listToolMessages())
                 .build();
     }
 
@@ -720,8 +778,7 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 "message_seq", userMessage.getSeq()
         ));
 
-        // 触发异步执行
-        executor.executeAsync(runId);
+        enqueueRunExecution(runId, userId);
 
         return SendAgentMessageResponse.newBuilder()
                 .setMessageId(userMessage.getId())
@@ -784,6 +841,46 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         }
 
         return builder.build();
+    }
+
+    @Override
+    public AgentSnapshotPartsMetaMessage getSnapshotPartsMeta(GetAgentSnapshotPartsRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        SnapshotPartsMeta meta = snapshotPartService.getOrBuildMeta(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getMaxPartSize());
+        return AgentSnapshotPartsMetaMessage.newBuilder()
+                .setRunId(nvl(meta.getRunId()))
+                .setPartSize(meta.getPartSize())
+                .setTotalParts(meta.getTotalParts())
+                .setUncompressedSize(meta.getUncompressedSize())
+                .setCompressedSize(meta.getCompressedSize())
+                .setCompression(nvl(meta.getCompression()))
+                .setChecksum(nvl(meta.getChecksum()))
+                .build();
+    }
+
+    @Override
+    public AgentSnapshotPartMessage getSnapshotPart(GetAgentSnapshotPartRequest request) {
+        AgentRun run = requireRun(request.getId(), request.getUserId());
+        SnapshotPartsMeta meta = snapshotPartService.getOrBuildMeta(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getMaxPartSize());
+        byte[] content = snapshotPartService.getPartBytes(
+                run.getId(),
+                run.getSnapshotJson(),
+                request.getPartIndex(),
+                request.getMaxPartSize());
+        return AgentSnapshotPartMessage.newBuilder()
+                .setRunId(nvl(meta.getRunId()))
+                .setPartIndex(request.getPartIndex())
+                .setPartSize(meta.getPartSize())
+                .setTotalParts(meta.getTotalParts())
+                .setContent(com.google.protobuf.ByteString.copyFrom(content))
+                .setCompression(nvl(meta.getCompression()))
+                .build();
     }
 
     private AgentRun requireRun(String id, String userId) {
@@ -955,7 +1052,13 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                                                   String planJson,
                                                   String progressJson,
                                                   String observabilityJson,
-                                                  int totalCreditsConsumed) {
+                                                  String observabilitySummaryJson,
+                                                  boolean observabilityFullAvailable,
+                                                  int totalCreditsConsumed,
+                                                  int eventCount,
+                                                  long startedAtMs,
+                                                  long completedAtMs,
+                                                  long elapsedMs) {
         String lastEventType = lastEvent == null ? "" : nvl(lastEvent.getEventType());
         String currentTool = "";
         if ("TOOL_CALL_STARTED".equals(lastEventType) && lastEvent.getPayloadJson() != null) {
@@ -973,7 +1076,13 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
                 .setPlanJson(nvl(planJson))
                 .setProgressJson(nvl(progressJson))
                 .setObservabilityJson(nvl(observabilityJson))
+                .setObservabilitySummaryJson(nvl(observabilitySummaryJson))
+                .setObservabilityFullAvailable(observabilityFullAvailable)
                 .setTotalCreditsConsumed(Math.max(0, totalCreditsConsumed))
+                .setEventCount(eventCount)
+                .setStartedAtMs(startedAtMs)
+                .setCompletedAtMs(completedAtMs)
+                .setElapsedMs(elapsedMs)
                 .build();
     }
 
@@ -1049,6 +1158,23 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
         return v == null ? 0 : Math.max(0, v);
     }
 
+    private void enqueueRunExecution(String runId, String userId) {
+        try {
+            executor.executeAsync(runId);
+            eventService.append(runId, userId, "RUN_ENQUEUED", Map.of(
+                    "run_id", runId,
+                    "executor", "agentRunTaskExecutor"
+            ));
+        } catch (TaskRejectedException e) {
+            log.error("Agent run enqueue rejected: runId={} userId={}", runId, userId, e);
+            eventService.append(runId, userId, "RUN_ENQUEUE_FAILED", Map.of(
+                    "run_id", runId,
+                    "reason", e.getMessage() == null ? "executor queue full" : e.getMessage()
+            ));
+            throw new IllegalStateException("agent run executor queue full, runId=" + runId, e);
+        }
+    }
+
     private void ensureUserActive(String userId) {
         Long userIdLong;
         try {
@@ -1084,5 +1210,29 @@ public class AgentDubboServiceImpl extends DubboAgentDubboServiceTriple.AgentDub
             return content;
         }
         return content.substring(0, maxLen) + "...";
+    }
+
+    /**
+     * 将 OffsetDateTime 转为 epoch millis，null 返回 0。
+     */
+    private long toEpochMillis(java.time.OffsetDateTime dt) {
+        if (dt == null) {
+            return 0L;
+        }
+        return dt.toInstant().toEpochMilli();
+    }
+
+    /**
+     * 计算 run 已耗时（millis）。已完成则用 completedAt - startedAt，否则用当前时间 - startedAt。
+     */
+    private long computeElapsedMs(AgentRun run, long nowMs) {
+        if (run.getStartedAt() == null) {
+            return 0L;
+        }
+        long startMs = run.getStartedAt().toInstant().toEpochMilli();
+        if (run.getCompletedAt() != null) {
+            return Math.max(0, run.getCompletedAt().toInstant().toEpochMilli() - startMs);
+        }
+        return Math.max(0, nowMs - startMs);
     }
 }

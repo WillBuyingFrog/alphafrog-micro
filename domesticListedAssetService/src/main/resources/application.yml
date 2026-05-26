@@ -1,0 +1,44 @@
+spring:
+  application:
+    name: domestic-listed-asset-service
+  datasource:
+    driver-class-name: org.postgresql.Driver
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST}:${AF_DB_MAIN_PORT}/${AF_DB_MAIN_DATABASE}
+    username: ${AF_DB_MAIN_USER}
+    password: ${AF_DB_MAIN_PASSWORD}
+    hikari:
+      maximum-pool-size: 10
+      minimum-idle: 2
+      idle-timeout: 300000
+
+server:
+  tomcat:
+    threads:
+      max: 20
+      min-spare: 5
+
+mybatis:
+  configuration:
+    map-underscore-to-camel-case: true
+
+dubbo:
+  application:
+    name: domestic-listed-asset-service
+    register-mode: interface
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+    use-as-config-center: false
+    use-as-metadata-center: false
+  protocol:
+    port: 50062
+    name: tri
+  consumer:
+    check: false
+
+meilisearch:
+  host: ${AF_MEILI_HOST:http://localhost:7700}
+  api-key: ${AF_MEILI_API_KEY:alphafrog_search_key}
+
+advanced:
+  meili-enabled: true
+  meili-auto-sync: true

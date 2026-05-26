@@ -19,9 +19,15 @@ class ExternalInfoDubboServiceImplTest {
     @Mock
     private MarketNewsService marketNewsService;
 
+    @Mock
+    private world.willfrog.externalinfo.retrieval.RagSearchServiceImpl ragSearchService;
+
+    @Mock
+    private world.willfrog.externalinfo.search.WebSearchOrchestrator webSearchOrchestrator;
+
     @Test
     void getTodayMarketNews_shouldDelegateAndMapResponse() {
-        ExternalInfoDubboServiceImpl service = new ExternalInfoDubboServiceImpl(marketNewsService);
+        ExternalInfoDubboServiceImpl service = new ExternalInfoDubboServiceImpl(marketNewsService, ragSearchService, webSearchOrchestrator);
 
         when(marketNewsService.getTodayMarketNews(org.mockito.ArgumentMatchers.any())).thenReturn(
                 new MarketNewsService.MarketNewsResult(

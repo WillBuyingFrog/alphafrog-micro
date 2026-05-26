@@ -1,0 +1,93 @@
+spring:
+  application:
+    name: agentLangchainService
+  config:
+    import:
+      - classpath:application-agent-platform-shared.yml
+      - classpath:application-agent-llm-prompts.yml
+  autoconfigure:
+    exclude:
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboAutoConfiguration
+      - org.apache.dubbo.spring.boot.autoconfigure.DubboRelaxedBinding2AutoConfiguration
+
+server:
+  port: ${AGENT_LANGCHAIN_SERVER_PORT:50158}
+
+agent:
+  langchain:
+    provider:
+      enabled: false
+    service:
+      version: P0-skeleton
+  llm:
+    config-file: ${AF_AGENT_LLM_CONFIG_FILE:}
+    prompt-base-dir: ${AF_AGENT_LLM_PROMPT_BASE_DIR:}
+    config-refresh-interval-ms: ${AF_AGENT_LLM_CONFIG_REFRESH_INTERVAL_MS:10000}
+    default-endpoint: ${AF_AGENT_DEFAULT_ENDPOINT:openrouter}
+    default-model: ${AF_AGENT_DEFAULT_MODEL:openai/gpt-5.2}
+    models: ${AF_AGENT_MODELS:openai/gpt-5.2,openai/gpt-5.1,google/gemini-3-pro-preview,moonshotai/kimi-k2.5,accounts/fireworks/models/kimi-k2p5}
+    endpoints:
+      openrouter:
+        base-url: ${AF_AGENT_ENDPOINT_OPENROUTER:https://openrouter.ai/api/v1}
+        api-key: ${AF_AGENT_ENDPOINT_OPENROUTER_API_KEY:}
+      openai:
+        base-url: ${AF_AGENT_ENDPOINT_OPENAI:https://api.openai.com/v1}
+        api-key: ${AF_AGENT_ENDPOINT_OPENAI_API_KEY:}
+      fireworks:
+        base-url: ${AF_AGENT_ENDPOINT_FIREWORKS:https://api.fireworks.ai/inference/v1}
+        api-key: ${AF_AGENT_ENDPOINT_FIREWORKS_API_KEY:}
+    openrouter:
+      http-referer: ${AF_OPENROUTER_HTTP_REFERER:}
+      title: ${AF_OPENROUTER_TITLE:}
+
+langchain4j:
+  open-ai:
+    api-key: ${AF_AGENT_API_KEY:demo}
+    base-url: ${AF_AGENT_BASE_URL:https://openrouter.ai/api/v1}
+    model-name: ${AF_AGENT_MODEL_NAME:openai/gpt-4o}
+    max-tokens: ${AF_AGENT_MAX_TOKENS:16384}
+    temperature: ${AF_AGENT_TEMPERATURE:0.7}
+    reasoning:
+      effort: ${AF_AGENT_REASONING_EFFORT:#{null}}
+      max-tokens: ${AF_AGENT_REASONING_MAX_TOKENS:#{null}}
+      exclude: ${AF_AGENT_REASONING_EXCLUDE:false}
+      enabled: ${AF_AGENT_REASONING_ENABLED:#{null}}
+
+# Nacos 配置订阅（与 legacy agentService 一致：推送写本地文件 → LocalConfigLoader 热加载）
+alphafrog:
+  config:
+    nacos:
+      enabled: ${AF_CONFIG_NACOS_ENABLED:false}
+      server-addr: ${NACOS_ADDRESS:127.0.0.1}:8848
+      namespace: ${AF_CONFIG_NACOS_NAMESPACE:}
+      data-id: ${AF_CONFIG_NACOS_DATA_ID:}
+      group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+      subscriptions:
+        - data-id: ${AF_CONFIG_NACOS_CODE_REFINE_DATA_ID:code-refine.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE:}
+        - data-id: ${AF_CONFIG_NACOS_AGENT_LLM_DATA_ID:agent-llm.json}
+          group: ${AF_CONFIG_NACOS_GROUP:alphafrog-config}
+          target-file: ${AF_AGENT_LLM_CONFIG_FILE:}
+
+stress:
+  test:
+    enabled: ${STRESS_TEST_ENABLED:false}
+    tool-latency-enabled: ${STRESS_TEST_TOOL_LATENCY_ENABLED:false}
+    tool-latency-ms: ${STRESS_TEST_TOOL_LATENCY_MS:100}
+    tool-failure-rate: ${STRESS_TEST_TOOL_FAILURE_RATE:0.0}
+
+logging:
+  level:
+    world.willfrog.agent: ${LOGGING_LEVEL_AGENT:INFO}
+    dev.langchain4j: ${LOGGING_LEVEL_LANGCHAIN4J:INFO}
+    dev.ai4j.openai4j: ${LOGGING_LEVEL_OPENAI4J:${LOGGING_LEVEL_AGENT:INFO}}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health
+  endpoint:
+    health:
+      show-details: when_authorized

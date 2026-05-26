@@ -5,20 +5,20 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.Builder;
 import lombok.Data;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.config.CodeRefineProperties;
-import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
-import world.willfrog.agent.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.CodeRefineLocalConfigLoader;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.config.CodeRefineProperties;
+import world.willfrog.agent.platform.service.AgentLlmRequestSnapshotBuilder;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
+import world.willfrog.agent.platform.service.AgentPromptService;
+import world.willfrog.agent.platform.service.CodeRefineLocalConfigLoader;
+import world.willfrog.agent.tools.router.ToolRouter;
 
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -98,7 +98,7 @@ public class PythonCodeRefinementNode {
         private String decisionExcerpt;
     }
 
-    public Result execute(Request request, ChatLanguageModel model) {
+    public Result execute(Request request, ChatModel model) {
         int maxAttempts = resolveMaxAttempts();
         List<AttemptTrace> traces = new ArrayList<>();
         String currentCode = safe(request.getInitialCode());
@@ -198,7 +198,7 @@ public class PythonCodeRefinementNode {
     private GeneratedPlan generatePythonPlan(Request request,
                                              List<AttemptTrace> traces,
                                              Map<String, Object> currentRunArgs,
-                                             ChatLanguageModel model) {
+                                             ChatModel model) {
         String systemPrompt = promptService.pythonRefineSystemPrompt();
         StringBuilder userPrompt = new StringBuilder();
         userPrompt.append("任务目标:\n").append(safe(request.getGoal())).append("\n");
@@ -250,17 +250,17 @@ public class PythonCodeRefinementNode {
         try {
             List<dev.langchain4j.data.message.ChatMessage> llmMessages = List.of(
                     new SystemMessage(systemPrompt),
-                    new UserMessage(userPrompt.toString())
+                    new UserMessage(promptService.dynamicContextPrefix() + "\n" + userPrompt.toString())
             );
             // 设置当前 phase 并记录开始时间
             AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
             AgentContext.setStage("python_refine_plan");
             long llmStartedAt = System.currentTimeMillis();
-            Response<dev.langchain4j.data.message.AiMessage> resp = model.generate(llmMessages);
+            ChatResponse resp = model.chat(llmMessages);
             long llmCompletedAt = System.currentTimeMillis();
             long llmDurationMs = llmCompletedAt - llmStartedAt;
             String runId = AgentContext.getRunId();
-            String llmText = resp.content().text();
+            String llmText = resp.aiMessage().text();
             String traceId = "";
             if (runId != null && !runId.isBlank()) {
                 Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
@@ -274,7 +274,7 @@ public class PythonCodeRefinementNode {
                 traceId = observabilityService.recordLlmCall(
                         runId,
                         AgentObservabilityService.PHASE_SUB_AGENT,
-                        resp.tokenUsage(),
+                        resp.metadata() != null ? resp.metadata().tokenUsage() : null,
                         llmDurationMs,
                         llmStartedAt,
                         llmCompletedAt,

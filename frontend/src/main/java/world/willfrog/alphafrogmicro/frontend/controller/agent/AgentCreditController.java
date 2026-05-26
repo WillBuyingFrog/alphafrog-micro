@@ -1,14 +1,14 @@
 package world.willfrog.alphafrogmicro.frontend.controller.agent;
 
-import lombok.RequiredArgsConstructor;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
-import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.ApplyAgentCreditsRequest;
@@ -22,24 +22,65 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentCreditsResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
 
 @RestController
-@RequestMapping("/api/agent/credits")
-@RequiredArgsConstructor
 @Slf4j
 public class AgentCreditController {
 
-    @DubboReference
-    private AgentDubboService agentDubboService;
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
+
+    @Autowired
+    private HttpServletRequest request;
 
     private final AuthService authService;
 
-    @GetMapping
+    public AgentCreditController(AuthService authService) {
+        this.authService = authService;
+    }
+
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
+
+    @GetMapping("/api/agent/credits")
     public ResponseWrapper<AgentCreditsResponse> credits(Authentication authentication) {
+        return creditsInternal(authentication);
+    }
+
+    /** @deprecated Use {@code GET /api/agent/credits}. */
+    @Deprecated
+    @GetMapping("/api/agent-legacy/credits")
+    public ResponseWrapper<AgentCreditsResponse> creditsLegacy(Authentication authentication) {
+        return creditsInternal(authentication);
+    }
+
+    @PostMapping("/api/agent/credits/apply")
+    public ResponseWrapper<AgentCreditsApplyResponse> applyCredits(Authentication authentication,
+                                                                   @RequestBody(required = false) AgentCreditsApplyRequest request) {
+        return applyCreditsInternal(authentication, request);
+    }
+
+    /** @deprecated Use {@code POST /api/agent/credits/apply}. */
+    @Deprecated
+    @PostMapping("/api/agent-legacy/credits/apply")
+    public ResponseWrapper<AgentCreditsApplyResponse> applyCreditsLegacy(Authentication authentication,
+                                                                         @RequestBody(required = false) AgentCreditsApplyRequest request) {
+        return applyCreditsInternal(authentication, request);
+    }
+
+    private ResponseWrapper<AgentCreditsResponse> creditsInternal(Authentication authentication) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            var resp = agentDubboService.getCredits(
+            var resp = resolveService().getCredits(
                     GetAgentCreditsRequest.newBuilder().setUserId(userId).build()
             );
             return ResponseWrapper.success(new AgentCreditsResponse(
@@ -58,9 +99,8 @@ public class AgentCreditController {
         }
     }
 
-    @PostMapping("/apply")
-    public ResponseWrapper<AgentCreditsApplyResponse> applyCredits(Authentication authentication,
-                                                                   @RequestBody(required = false) AgentCreditsApplyRequest request) {
+    private ResponseWrapper<AgentCreditsApplyResponse> applyCreditsInternal(Authentication authentication,
+                                                                            AgentCreditsApplyRequest request) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -72,7 +112,7 @@ public class AgentCreditController {
         String reason = request == null || request.reason() == null ? "" : request.reason();
         String contact = request == null || request.contact() == null ? "" : request.contact();
         try {
-            var resp = agentDubboService.applyCredits(
+            var resp = resolveService().applyCredits(
                     ApplyAgentCreditsRequest.newBuilder()
                             .setUserId(userId)
                             .setAmount(amount)

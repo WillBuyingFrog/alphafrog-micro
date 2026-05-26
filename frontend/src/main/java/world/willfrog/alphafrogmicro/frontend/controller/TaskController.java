@@ -12,9 +12,11 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import world.willfrog.alphafrogmicro.frontend.config.TaskProducerRabbitConfig;
 import world.willfrog.alphafrogmicro.frontend.service.FetchTaskStatusService;
+import world.willfrog.alphafrogmicro.frontend.service.RagIngestAuthService;
 import world.willfrog.alphafrogmicro.frontend.service.RateLimitingService;
 
 import java.util.Map;
+import java.util.Set;
 import java.util.UUID;
 
 @Controller
@@ -25,9 +27,13 @@ public class TaskController {
 
     private static final String DEFAULT_DIRECT_EXCHANGE = "";
 
+    /** 需要二次鉴权（ingest_token）的 RAG 任务名称集合。 */
+    private static final Set<String> RAG_TASK_NAMES = Set.of("rag_ann_fetch", "rag_report_fetch");
+
     private final RabbitTemplate rabbitTemplate;
     private final RateLimitingService rateLimitingService;
     private final FetchTaskStatusService fetchTaskStatusService;
+    private final RagIngestAuthService ragIngestAuthService;
 
     @PostMapping("/create")
     public ResponseEntity<String> createTask(@RequestBody Map<String, Object> taskConfig) {
@@ -56,10 +62,20 @@ public class TaskController {
             return ResponseEntity.badRequest().body("{\"message\":\"Invalid task_type. Allowed values: fetch, analyze\"}");
         }
 
+        String taskName = taskConfigJSON.getString("task_name");
+
+        // RAG 任务二次鉴权：在常规 JWT 登录之上还需提供有效的 ingest_token
+        if (RAG_TASK_NAMES.contains(taskName)) {
+            String ingestToken = taskConfigJSON.getString("ingest_token");
+            if (!ragIngestAuthService.isAuthorized(ingestToken)) {
+                return ResponseEntity.status(403).body(
+                        "{\"error\":\"RAG ingest 二次鉴权失败，需要有效的 ingest_token\"}");
+            }
+        }
+
         String exchange = getExchangeForTaskType(taskType);
         String routingKey = getRoutingKeyForTaskType(taskType);
         String taskUuid = null;
-        String taskName = taskConfigJSON.getString("task_name");
         Integer taskSubType = taskConfigJSON.getInteger("task_sub_type");
         if ("fetch".equals(taskType)) {
             taskUuid = UUID.randomUUID().toString();

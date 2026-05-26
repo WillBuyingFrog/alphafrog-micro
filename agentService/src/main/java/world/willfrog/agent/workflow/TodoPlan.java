@@ -16,4 +16,22 @@ public class TodoPlan {
     private String analysis;
     @Builder.Default
     private List<TodoItem> items = new ArrayList<>();
+    @Builder.Default
+    private List<String> extractedEntities = new ArrayList<>();
+
+    /** 执行模式：LINEAR / DAG / AUTO */
+    private PlanExecutionMode executionMode;
+
+    /** DAG 元数据（可选） */
+    private DagMetadata dagMetadata;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class DagMetadata {
+        private int totalNodes;
+        private int maxDepth;
+        private int maxParallelism;
+    }
 }

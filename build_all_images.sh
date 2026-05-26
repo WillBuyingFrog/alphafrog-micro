@@ -2,6 +2,7 @@ bash domesticFetchService/docker_build.sh
 bash domesticFundService/docker_build.sh
 bash domesticIndexService/docker_build.sh
 bash domesticStockService/docker_build.sh
+bash domesticListedAssetService/docker_build.sh
 bash adminService/docker_build.sh
 bash portfolioService/docker_build.sh
 bash agentService/docker_build.sh

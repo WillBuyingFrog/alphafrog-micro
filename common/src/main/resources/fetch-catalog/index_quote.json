@@ -1,0 +1,408 @@
+{
+  "dataType": "index_quote",
+  "label": "指数行情",
+  "description": "通过 TuShare index_daily 接口抓取指数日线行情。由于该接口要求逐个指数代码请求，系统采用本地指数分批 + TuShare 分页的双层机制。",
+  "serviceModule": "domesticIndexFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日抓取",
+      "description": "按单个交易日抓取指数日线。先从本地指数库取一批 ts_code，再逐个代码向 TuShare 请求该交易日的日线数据。",
+      "requiredParams": [
+        "trade_date"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "trade_date": {
+          "label": "交易日",
+          "description": "目标交易日，格式 yyyyMMdd，直接传给 TuShare",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量上限",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页步长，也作为每次请求的 limit",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging"
+      ]
+    },
+    {
+      "subType": 2,
+      "label": "按日期范围抓取",
+      "description": "按日期范围批量抓取指数日线。先从本地指数库取一批 ts_code，再逐个代码请求该日期范围内的日线数据。",
+      "requiredParams": [
+        "start_date",
+        "end_date"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "description": "日期范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "日期范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量上限",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 请求 TuShare 时的分页步长",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging"
+      ]
+    },
+    {
+      "subType": 3,
+      "label": "历史初始化",
+      "description": "按固定日期范围做历史数据初始化。逻辑与按日期范围抓取相同，但专用于 task_sets 的 date_range 展开模式。",
+      "requiredParams": [
+        "start_date",
+        "end_date"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "description": "历史数据初始化的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "历史数据初始化的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量上限",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 请求 TuShare 时的分页步长",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging",
+        "historical_init"
+      ]
+    }
+  ],
+  "taskSetVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日逐日展开",
+      "description": "将指定的日期范围内每个交易日生成一个叶子任务，每个任务处理一批本地指数代码",
+      "expandParam": "trade_dates",
+      "expandDescription": "将 trade_dates.start_date 到 trade_dates.end_date 之间的每个交易日生成一条叶子任务，任务内按本地指数分批处理",
+      "expandStrategy": "trade_dates_with_index_batches",
+      "requiredParams": [
+        "trade_dates"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "index_count_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "trade_dates.start_date": {
+          "label": "开始日期",
+          "description": "交易日范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "trade_dates.end_date": {
+          "label": "结束日期",
+          "description": "交易日范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量",
+          "type": "number",
+          "default": 5000
+        },
+        "index_count_limit": {
+          "label": "本地指数总数限制",
+          "description": "控制从本地指数库中总共要抓取多少指数代码，配合 offset 和 limit 计算需要展开多少个本地指数批次",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 向 TuShare 发起请求时的分页步长",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging"
+      ],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 2,
+      "label": "按本地指数批次展开",
+      "description": "不叠加日期，仅按本地指数分批展开，每批生成一个叶子任务",
+      "expandParam": "index_batches",
+      "expandDescription": "根据 index_offset、index_batch_limit 和 index_count_limit 计算本地指数批次数量，每批生成一个叶子任务，内部再按 TuShare 分页参数逐页请求",
+      "expandStrategy": "index_batches",
+      "requiredParams": [],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "index_count_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量",
+          "type": "number",
+          "default": 5000
+        },
+        "index_count_limit": {
+          "label": "本地指数总数限制",
+          "description": "控制从本地指数库中总共要抓取多少指数代码",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 请求 TuShare 时的分页步长",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging"
+      ],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 3,
+      "label": "固定日期范围与本地指数批次展开",
+      "description": "使用固定的日期范围与本地指数批次做笛卡尔积展开，适合历史数据初始化",
+      "expandParam": "date_range",
+      "expandDescription": "将固定的 start_date/end_date 与本地指数批次做笛卡尔积，每个叶子任务处理一批指数代码，内部再按 TuShare 分页参数逐页请求",
+      "expandStrategy": "date_range_with_index_batches",
+      "requiredParams": [
+        "date_range"
+      ],
+      "optionalParams": [
+        "index_offset",
+        "index_batch_limit",
+        "index_count_limit",
+        "api_offset_start",
+        "api_offset_end",
+        "api_offset_step"
+      ],
+      "paramDefs": {
+        "date_range.start_date": {
+          "label": "开始日期",
+          "description": "日期范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "date_range.end_date": {
+          "label": "结束日期",
+          "description": "日期范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "index_offset": {
+          "label": "本地指数起始偏移",
+          "description": "从本地指数库选取指数代码的起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "index_batch_limit": {
+          "label": "本地指数批次大小",
+          "description": "每批从本地指数库选取的指数代码数量",
+          "type": "number",
+          "default": 5000
+        },
+        "index_count_limit": {
+          "label": "本地指数总数限制",
+          "description": "控制从本地指数库中总共要抓取多少指数代码",
+          "type": "number",
+          "default": 5000
+        },
+        "api_offset_start": {
+          "label": "TuShare 分页起始 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页起始 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_end": {
+          "label": "TuShare 分页结束 offset",
+          "description": "对每个 ts_code 请求 TuShare 时的分页结束 offset",
+          "type": "number",
+          "default": 0
+        },
+        "api_offset_step": {
+          "label": "TuShare 分页步长",
+          "description": "对每个 ts_code 请求 TuShare 时的分页步长",
+          "type": "number",
+          "default": 0
+        }
+      },
+      "specialFlags": [
+        "secondary_paging",
+        "historical_init"
+      ],
+      "outputTaskVariantSubType": 3
+    }
+  ]
+}

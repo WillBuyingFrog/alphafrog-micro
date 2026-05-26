@@ -1,0 +1,37 @@
+{
+  "dataType": "etf_daily",
+  "label": "ETF 场内日线",
+  "description": "通过 TuShare fund_daily 接口抓取 ETF 场内日线（api_name=fund_daily）",
+  "serviceModule": "domesticFundFetchService",
+  "tushareApiName": "fund_daily",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日抓取",
+      "description": "按单个交易日抓取 ETF 日线",
+      "requiredParams": ["trade_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_date": { "label": "交易日", "type": "string", "format": "yyyyMMdd", "default": null },
+        "offset": { "label": "偏移量", "type": "number", "default": 0 },
+        "limit": { "label": "每页条数", "type": "number", "default": 5000 }
+      },
+      "specialFlags": []
+    },
+    {
+      "subType": 2,
+      "label": "按日期范围抓取",
+      "description": "按 ts_code 与日期范围抓取 ETF 日线",
+      "requiredParams": ["ts_code", "start_date", "end_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "ts_code": { "label": "基金代码", "type": "string", "default": null },
+        "start_date": { "label": "开始日期", "type": "string", "format": "yyyyMMdd", "default": null },
+        "end_date": { "label": "结束日期", "type": "string", "format": "yyyyMMdd", "default": null },
+        "offset": { "label": "偏移量", "type": "number", "default": 0 },
+        "limit": { "label": "每页条数", "type": "number", "default": 5000 }
+      },
+      "specialFlags": ["string_date"]
+    }
+  ]
+}

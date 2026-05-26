@@ -1,0 +1,209 @@
+{
+  "dataType": "fund_nav",
+  "label": "基金净值",
+  "description": "通过 TuShare fund_nav 接口抓取基金净值数据（单位净值、累计净值、复权净值等）",
+  "serviceModule": "domesticFundFetchService",
+
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日抓取",
+      "description": "按单个交易日抓取全部基金净值数据",
+      "requiredParams": ["trade_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_date": {
+          "label": "交易日",
+          "description": "目标净值日期，格式 yyyyMMdd，直接作为 nav_date 传给 TuShare",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "TuShare 分页偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "TuShare 分页每页条数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    },
+    {
+      "subType": 2,
+      "label": "按日期范围抓取",
+      "description": "使用 TuShare fund_nav 的 start_date/end_date 一次性拉取该区间内的净值数据，配合 offset/limit 分页",
+      "requiredParams": ["start_date", "end_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "description": "净值日期范围开始，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "净值日期范围结束，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "TuShare 分页偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "TuShare 分页每页条数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    }
+  ],
+
+  "taskSetVariants": [
+    {
+      "subType": 1,
+      "label": "按交易日逐日展开",
+      "description": "将指定的日期范围内每个交易日生成一个叶子任务，抓取当日全部基金净值",
+      "expandParam": "trade_dates",
+      "expandDescription": "将 trade_dates.start_date 到 trade_dates.end_date 之间的每个交易日生成一条叶子任务",
+      "expandStrategy": "trade_dates",
+      "requiredParams": ["trade_dates"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "trade_dates.start_date": {
+          "label": "开始日期",
+          "description": "交易日范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "trade_dates.end_date": {
+          "label": "结束日期",
+          "description": "交易日范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "TuShare 分页偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "TuShare 分页每页条数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 2,
+      "label": "交易日与 offset 笛卡尔积展开",
+      "description": "交易日列表与 offset 步进做笛卡尔积，用于大批量抓取特定日期范围的基金净值",
+      "expandParam": "trade_dates",
+      "expandDescription": "将每个交易日与每个 offset 步进值做笛卡尔积，每个组合生成一条叶子任务",
+      "expandStrategy": "trade_dates_with_offsets",
+      "requiredParams": ["trade_dates", "offset_range"],
+      "optionalParams": [],
+      "paramDefs": {
+        "trade_dates.start_date": {
+          "label": "开始日期",
+          "description": "交易日范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "trade_dates.end_date": {
+          "label": "结束日期",
+          "description": "交易日范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset_range.start": {
+          "label": "Offset 起始",
+          "description": "分页起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "offset_range.end": {
+          "label": "Offset 结束",
+          "description": "分页结束偏移量",
+          "type": "number",
+          "default": null
+        },
+        "offset_range.step": {
+          "label": "Offset 步长",
+          "description": "每次步进的偏移量",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    },
+    {
+      "subType": 3,
+      "label": "固定日期范围与 offset 步进展开",
+      "description": "使用固定的 start_date/end_date 配合 offset_range 步进，每个 offset 生成一条叶子任务，单次请求覆盖完整日期区间（推荐作为默认 task_sets 写法）",
+      "expandParam": "date_range",
+      "expandDescription": "使用 date_range 与 offset_range，每个叶子任务调用 fund_nav(start_date,end_date,offset,limit)",
+      "expandStrategy": "date_range_with_offsets",
+      "requiredParams": ["date_range", "offset_range"],
+      "optionalParams": [],
+      "paramDefs": {
+        "date_range.start_date": {
+          "label": "开始日期",
+          "description": "固定的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "date_range.end_date": {
+          "label": "结束日期",
+          "description": "固定的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset_range.start": {
+          "label": "Offset 起始",
+          "description": "分页起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "offset_range.end": {
+          "label": "Offset 结束",
+          "description": "分页结束偏移量",
+          "type": "number",
+          "default": null
+        },
+        "offset_range.step": {
+          "label": "Offset 步长",
+          "description": "每次步进的偏移量",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 2
+    }
+  ]
+}

@@ -6,12 +6,20 @@ import world.willfrog.alphafrogmicro.externalinfo.idl.DubboExternalInfoDubboServ
 import world.willfrog.alphafrogmicro.externalinfo.idl.GetTodayMarketNewsRequest;
 import world.willfrog.alphafrogmicro.externalinfo.idl.GetTodayMarketNewsResponse;
 import world.willfrog.alphafrogmicro.externalinfo.idl.MarketNewsItemMessage;
+import world.willfrog.alphafrogmicro.externalinfo.idl.RagSearchRequest;
+import world.willfrog.alphafrogmicro.externalinfo.idl.RagSearchResponse;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchRequest;
+import world.willfrog.alphafrogmicro.externalinfo.idl.WebSearchResponse;
+import world.willfrog.externalinfo.retrieval.RagSearchServiceImpl;
+import world.willfrog.externalinfo.search.WebSearchOrchestrator;
 
 @DubboService
 @RequiredArgsConstructor
 public class ExternalInfoDubboServiceImpl extends DubboExternalInfoDubboServiceTriple.ExternalInfoDubboServiceImplBase {
 
     private final MarketNewsService marketNewsService;
+    private final RagSearchServiceImpl ragSearchService;
+    private final WebSearchOrchestrator webSearchOrchestrator;
 
     @Override
     public GetTodayMarketNewsResponse getTodayMarketNews(GetTodayMarketNewsRequest request) {
@@ -46,5 +54,15 @@ public class ExternalInfoDubboServiceImpl extends DubboExternalInfoDubboServiceT
 
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    @Override
+    public RagSearchResponse ragSearch(RagSearchRequest request) {
+        return ragSearchService.ragSearch(request);
+    }
+
+    @Override
+    public WebSearchResponse webSearch(WebSearchRequest request) {
+        return webSearchOrchestrator.search(request);
     }
 }

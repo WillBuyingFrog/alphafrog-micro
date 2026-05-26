@@ -1,1232 +1,628 @@
 package world.willfrog.agent.workflow;
 
-import com.fasterxml.jackson.databind.ObjectMapper;
 import dev.langchain4j.agent.tool.ToolSpecification;
-import dev.langchain4j.data.message.AiMessage;
 import dev.langchain4j.data.message.ChatMessage;
 import dev.langchain4j.data.message.SystemMessage;
 import dev.langchain4j.data.message.UserMessage;
-import dev.langchain4j.model.chat.ChatLanguageModel;
-import dev.langchain4j.model.output.Response;
-import lombok.Builder;
-import lombok.Data;
+import dev.langchain4j.model.chat.ChatModel;
+import dev.langchain4j.model.chat.response.ChatResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.config.AgentLlmProperties;
-import world.willfrog.agent.context.AgentContext;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.graph.SubAgentRunner;
-import world.willfrog.agent.service.AgentEventService;
-import world.willfrog.agent.service.AgentCreditService;
-import world.willfrog.agent.service.AgentLlmLocalConfigLoader;
-import world.willfrog.agent.service.AgentLlmRequestSnapshotBuilder;
-import world.willfrog.agent.service.AgentObservabilityService;
-import world.willfrog.agent.service.AgentPromptService;
-import world.willfrog.agent.service.AgentRunStateStore;
-import world.willfrog.agent.service.AgentMessageService;
-import world.willfrog.agent.service.AgentContextCompressor;
-import world.willfrog.agent.service.AgentAiServiceFactory;
-import world.willfrog.agent.entity.AgentRunMessage;
-import world.willfrog.agent.tool.ToolRouter;
+import world.willfrog.agent.platform.context.AgentContext;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.agent.platform.service.AgentObservabilityService;
+import world.willfrog.agent.service.AgentCitationService;
+import world.willfrog.agent.platform.service.AgentEventService;
+import world.willfrog.agent.platform.service.AgentPromptService;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
 
-import java.time.Instant;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
-import java.util.regex.Matcher;
-import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
+/**
+ * ReAct 模式的线性（串行）工作流执行器。
+ *
+ * <h3>在整体架构中的位置</h3>
+ * 本执行器是 {@link WorkflowExecutor} 接口的两种实现之一（另一个是 {@link DagWorkflowExecutor}）。
+ * 由 {@link world.willfrog.agent.platform.service.AgentRunExecutor} 在 Plan 生成后通过
+ * {@link WorkflowExecutorFactory} 选择本执行器或 DAG 执行器。
+ *
+ * <h3>核心执行流程（{@link #execute}）</h3>
+ * <ol>
+ *   <li><b>初始化</b>：从 Plan 中提取待执行项列表，构建可用工具名称白名单。</li>
+ *   <li><b>遍历执行</b>：按 sequence 顺序依次处理每个 TodoItem：
+ *     <ul>
+ *       <li>跳过已完成的 Todo（可能由 Plan Patch 引入）。</li>
+ *       <li>检查全局工具调用次数上限，超限则终止。</li>
+ *       <li>为每个 Todo 构建 {@link ReactTodoExecutor.TodoExecutionContext}。</li>
+ *       <li>调用 {@link ReactTodoExecutor#executeWithObservability} 执行 ReAct 循环。</li>
+ *       <li>成功：收集结果到已完成列表，继续下一个。</li>
+ *       <li>失败：进入失败恢复流程。</li>
+ *     </ul>
+ *   </li>
+ *   <li><b>失败恢复</b>（仅当 enablePlanPatch=true 时启用）：
+ *     <ul>
+ *       <li>先检查 run 是否已被外部取消/失败，若是则跳过 patch 避免浪费 LLM 资源。</li>
+ *       <li>调用 {@link PlanJudge} 对失败做出判断：RETRY / CONTINUE_WITH_RECOVERY_PARAMS / PATCH_PLAN / FAIL / ABORT。</li>
+ *       <li>RETRY / CONTINUE_WITH_RECOVERY_PARAMS：不修改 Plan，直接原地重试当前 Todo（有次数上限）。</li>
+ *       <li>PATCH_PLAN：调用 {@link PatchPlanner} 让 LLM 生成 PlanPatch，
+ *           通过 {@link PlanPatcher} 应用到当前 Plan，然后继续执行（有总 patch 次数上限）。</li>
+ *       <li>FAIL / ABORT：立即终止执行并返回失败。</li>
+ *     </ul>
+ *   </li>
+ *   <li><b>生成最终回答</b>：所有 Todo 执行完毕后，将已完成 Todo 的 summary/output +
+ *       引用表注入提示词，调用 LLM 生成可直接展示的 Markdown 最终答案。</li>
+ * </ol>
+ *
+ * <h3>Plan Patch 机制</h3>
+ * 当某个 Todo 执行失败时，Plan Patch 允许 LLM 重新审视现有 Plan 并提出修改：
+ * <ul>
+ *   <li>{@code REPLACE} 类型的 patch 会用新 TodoItem 替换失败的节点。</li>
+ *   <li>应用 patch 后，会重新构建待处理列表（过滤掉已完成的，剩余按 sequence 排序）。</li>
+ *   <li>每个 run 最多应用 {@code maxPatchesPerRun} 次 patch（默认 2 次）。</li>
+ *   <li>单 Todo 最多原地重试 {@code maxRetriesPerTodoAfterJudge} 次（默认 2 次）。</li>
+ * </ul>
+ *
+ * @see DagWorkflowExecutor
+ * @see ReactTodoExecutor
+ * @see PlanJudge
+ * @see PlanPatcher
+ */
 @Component
 @RequiredArgsConstructor
 @Slf4j
 public class LinearWorkflowExecutor implements WorkflowExecutor {
-    private static final Pattern UNRESOLVED_PLACEHOLDER_PATTERN = Pattern.compile("\\$\\{[^}]+}");
 
+    /** 事件流服务，用于追加 run 执行过程中的关键事件 */
     private final AgentEventService eventService;
+    /** 提示词服务，提供 System Prompt、最终回答指令等 */
     private final AgentPromptService promptService;
-    private final ToolRouter toolRouter;
-    private final SubAgentRunner subAgentRunner;
-    private final TodoParamResolver paramResolver;
-    private final ToolCallCounter toolCallCounter;
+    /** 单个 Todo 的 ReAct 执行器 */
+    private final ReactTodoExecutor reactTodoExecutor;
+    /** Plan 质量判断器，对失败的 Todo 输出判断决策（RETRY/PATCH/FAIL 等） */
+    private final PlanJudge planJudge;
+    /** Patch 计划生成器，让 LLM 根据失败信息生成 Plan 修正方案 */
+    private final PatchPlanner patchPlanner;
+    /** Patch 应用器，将 PlanPatch 应用到 TodoPlan 得到修正后的新 Plan */
+    private final PlanPatcher planPatcher;
+    /** Run 级 Redis 状态缓存，用于在执行过程中检查 run 状态 */
     private final AgentRunStateStore stateStore;
-    private final AgentLlmRequestSnapshotBuilder llmRequestSnapshotBuilder;
-    private final AgentObservabilityService observabilityService;
-    private final AgentCreditService creditService;
-    private final AgentLlmLocalConfigLoader localConfigLoader;
-    private final AgentLlmProperties llmProperties;
-    private final AgentMessageService messageService;
-    private final AgentContextCompressor contextCompressor;
-    private final AgentAiServiceFactory aiServiceFactory;
-    private final PythonStaticPrecheckService pythonStaticPrecheckService;
-    private final PythonSemanticJudgeService pythonSemanticJudgeService;
-    private final ObjectMapper objectMapper;
+    /** 引用来源服务，从已完成任务中提取引用并构建引用表 */
+    private final AgentCitationService citationService;
+    /** 轻量失败分类器，避免所有失败都进入 LLM Judge。 */
+    private final WorkflowFailureClassifier failureClassifier;
 
+    /** 整个 Run 的全局工具调用次数上限（默认 20 次），防止失控消耗 */
     @Value("${agent.flow.workflow.max-tool-calls:20}")
     private int defaultMaxToolCalls;
 
-    @Value("${agent.flow.workflow.max-tool-calls-per-sub-agent:10}")
-    private int defaultMaxToolCallsPerSubAgent;
+    /** Plan Judge 判定 RETRY 后，单 Todo 最多原地重试的次数（默认 2 次） */
+    @Value("${agent.flow.plan-patch.max-retries-per-todo:2}")
+    private int maxRetriesPerTodoAfterJudge;
 
-    @Value("${agent.flow.workflow.fail-fast:false}")
-    private boolean defaultFailFast;
+    /** 整个 Run 中 Plan Patch（修改 Plan 结构）的总次数上限（默认 2 次） */
+    @Value("${agent.flow.plan-patch.max-patches-per-run:2}")
+    private int maxPatchesPerRun;
 
-    @Value("${agent.flow.workflow.default-execution-mode:AUTO}")
-    private String defaultExecutionMode;
+    /** 观测阶段名常量 */
+    private static final String PHASE_LINEAR_EXECUTION = "linear_execution";
 
-    @Value("${agent.flow.workflow.sub-agent-enabled:true}")
-    private boolean defaultSubAgentEnabled;
-
-    @Value("${agent.flow.workflow.sub-agent-max-steps:6}")
-    private int defaultSubAgentMaxSteps;
-
-    @Value("${agent.flow.workflow.max-retries-per-todo:3}")
-    private int defaultMaxRetriesPerTodo;
-
+    /**
+     * 执行线性工作流。
+     *
+     * <p>将 Todo Plan 中的每个 TodoItem 按 sequence 顺序逐个执行。
+     * 支持失败时的 Plan Patch 自动修复和原地重试。</p>
+     *
+     * @param request 工作流请求，含 Run、Plan、ChatModel、工具定义等
+     * @return 执行结果，含最终答案、成功/失败标记、引用表等
+     */
     @Override
     public WorkflowExecutionResult execute(WorkflowRequest request) {
         AgentRun run = request.getRun();
         String runId = run.getId();
         String userId = request.getUserId();
-        WorkflowConfig config = resolveConfig();
+        TodoPlan currentPlan = request.getPlan();
 
-        WorkflowState state = stateStore.loadWorkflowState(runId)
-                .orElseGet(() -> WorkflowState.builder()
-                        .currentIndex(0)
-                        .completedItems(new ArrayList<>())
-                        .context(new LinkedHashMap<>())
-                        .toolCallsUsed(0)
-                        .savedAt(Instant.now())
+        eventService.append(runId, userId, "REACT_LINEAR_EXECUTION_STARTED", Map.of(
+                "items_count", currentPlan.getItems().size(),
+                "plan_patch_enabled", request.isEnablePlanPatch()
+        ));
+
+        // 构建可用工具名称白名单（LLM 只能调用此集合内的工具）
+        Set<String> availableTools = request.getToolSpecifications().stream()
+                .map(ToolSpecification::name)
+                .collect(Collectors.toCollection(LinkedHashSet::new));
+        String userGoal = request.getUserGoal();
+
+        // ── 执行状态追踪 ──
+        List<CompletedTodoInfo> completedTodos = new ArrayList<>();
+        /** 已有数据集 ID → 路径 映射，跨 Todo 共享 */
+        Map<String, String> datasetRefs = new HashMap<>();
+        /** 单 Todo 的原地重试次数追踪 */
+        Map<String, Integer> retryCountByTodo = new HashMap<>();
+        /** 执行上下文（供 PlanJudge 诊断失败原因） */
+        Map<String, TodoExecutionRecord> executionContext = new LinkedHashMap<>();
+        /** 已完成 Todo ID 集合（用于判断是否跳过） */
+        Set<String> completedTodoIds = new LinkedHashSet<>();
+
+        int totalToolCalls = 0;
+        int patchCount = 0;
+        List<TodoItem> pendingItems = new ArrayList<>(currentPlan.getItems());
+        int index = 0;
+
+        while (index < pendingItems.size()) {
+            TodoItem item = pendingItems.get(index);
+
+            // Plan Patch 后可能产生与已完成 Todo 重复的项，跳过
+            if (completedTodoIds.contains(item.getId())) {
+                index++;
+                continue;
+            }
+
+            // 检查全局工具调用次数上限
+            if (totalToolCalls >= defaultMaxToolCalls) {
+                eventService.append(runId, userId, "TOOL_CALL_LIMIT_REACHED", Map.of("limit", defaultMaxToolCalls));
+                return buildFailureResult(completedTodos, "Tool call limit reached");
+            }
+
+            eventService.append(runId, userId, "TODO_STARTED", Map.of(
+                    "todo_id", item.getId(),
+                    "description", item.getDescription()
+            ));
+
+            // 为当前 Todo 构建执行上下文
+            ReactTodoExecutor.TodoExecutionContext todoContext = ReactTodoExecutor.TodoExecutionContext.builder()
+                    .userGoal(userGoal)
+                    .availableTools(availableTools)
+                    .toolSpecifications(request.getToolSpecifications())
+                    .completedTodos(new ArrayList<>(completedTodos))
+                    .datasetRefs(new HashMap<>(datasetRefs))
+                    .build();
+
+            // 执行 ReAct 循环
+            ReactTodoExecutor.TodoExecutionRecord record = reactTodoExecutor.executeWithObservability(
+                    item.getDescription(),
+                    todoContext,
+                    request.getModel(),
+                    runId,
+                    PHASE_LINEAR_EXECUTION
+            );
+            totalToolCalls += record.getToolCallsUsed();
+
+            // ── 执行成功 ──
+            if (record.isSuccess()) {
+                DatasetRefExtractor.mergeRecordDatasetRefs(record, todoContext.getDatasetRefs());
+                datasetRefs.putAll(todoContext.getDatasetRefs());
+                emitDatasetHandoffMismatchEvent(runId, userId, item, index, record.getOutput(), datasetRefs);
+                completedTodoIds.add(item.getId());
+                completedTodos.add(CompletedTodoInfo.builder()
+                        .todoId(item.getId())
+                        .description(item.getDescription())
+                        .output(record.getOutput())
+                        .summary(record.getSummary())
+                        .messageHistory(record.getMessageHistory())
                         .build());
-
-        toolCallCounter.reset(runId);
-        toolCallCounter.set(runId, state.getToolCallsUsed());
-
-        List<TodoItem> items = request.getTodoPlan().getItems() == null ? List.of() : request.getTodoPlan().getItems();
-        List<TodoItem> completed = new ArrayList<>(state.getCompletedItems());
-        List<TodoItem> allProcessedItems = new ArrayList<>(completed);
-        Map<String, TodoExecutionRecord> context = new LinkedHashMap<>(state.getContext());
-        boolean hasFailure = false;
-
-        for (int idx = Math.max(0, state.getCurrentIndex()); idx < items.size(); idx++) {
-            if (!eventService.isRunnable(runId, userId)) {
-                WorkflowState pausedState = WorkflowState.builder()
-                        .currentIndex(idx)
-                        .completedItems(completed)
-                        .context(context)
-                        .toolCallsUsed(toolCallCounter.get(runId))
-                        .savedAt(Instant.now())
-                        .build();
-                stateStore.saveWorkflowState(runId, pausedState);
-                eventService.append(runId, userId, "WORKFLOW_PAUSED", Map.of(
-                        "current_index", idx,
-                        "tool_calls_used", toolCallCounter.get(runId)
+                executionContext.put(item.getId(), toLegacyRecord(record));
+                eventService.append(runId, userId, "TODO_COMPLETED", Map.of(
+                        "todo_id", item.getId(),
+                        "tool_calls_used", record.getToolCallsUsed(),
+                        "summary", nvl(record.getSummary())
                 ));
-                return WorkflowExecutionResult.builder()
-                        .paused(true)
-                        .success(false)
-                        .failureReason("")
-                        .finalAnswer("")
-                        .completedItems(allProcessedItems)
-                        .context(context)
-                        .toolCallsUsed(toolCallCounter.get(runId))
-                        .build();
+                index++;
+                continue;
             }
 
-            TodoItem item = items.get(idx);
-            TodoExecutionRecord record = executeTodoWithRetry(request, item, context, allProcessedItems, config);
-            item.setCompletedAt(Instant.now());
-            item.setResultSummary(nvl(record.getSummary()));
-            item.setOutput(nvl(record.getOutput()));
+            // ── 执行失败 ──
+            eventService.append(runId, userId, "TODO_FAILED", Map.of(
+                    "todo_id", item.getId(),
+                    "summary", nvl(record.getSummary())
+            ));
+            TodoExecutionRecord failedRecord = toLegacyRecord(record);
 
-            if (record.isSuccess()) {
-                item.setStatus(TodoStatus.COMPLETED);
-                completed.add(item);
-                context.put(item.getId(), record);
-                eventService.append(runId, userId, "TODO_FINISHED", Map.of(
-                        "todo_id", nvl(item.getId()),
-                        "success", true,
-                        "summary", nvl(record.getSummary()),
-                        "output_preview", preview(record.getOutput()),
-                        "tool_calls_used", toolCallCounter.get(runId)
+            // 若未启用 Plan Patch，直接返回失败
+            if (!request.isEnablePlanPatch()) {
+                return buildFailureResult(completedTodos, nvl(record.getSummary()));
+            }
+
+            // 检查 run 是否已被外部取消/失败，若是则跳过 patch 避免无效 LLM 消耗
+            Optional<String> runStatus = stateStore.loadRunStatus(runId);
+            if (runStatus.isPresent() &&
+                    (runStatus.get().equals(AgentRunStatus.CANCELED.name()) ||
+                     runStatus.get().equals(AgentRunStatus.FAILED.name()))) {
+                log.info("Run {} has been {}, skipping plan patch", runId, runStatus.get());
+                return buildFailureResult(completedTodos,
+                        "run_" + runStatus.get().toLowerCase() + ":" + nvl(record.getSummary()));
+            }
+
+            WorkflowFailureClassifier.FailureClassification classification = failureClassifier.classify(record);
+            eventService.append(runId, userId, "FAILURE_CLASSIFIED", Map.of(
+                    "todoId", item.getId(),
+                    "category", classification.category().name(),
+                    "action", classification.action().name(),
+                    "errorCode", nvl(classification.errorCode())
+            ));
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.FAIL_FAST) {
+                return buildFailureResult(completedTodos, nvl(record.getSummary()));
+            }
+            if (classification.action() == WorkflowFailureClassifier.RecoveryAction.RETRY_CURRENT) {
+                int retries = retryCountByTodo.getOrDefault(item.getId(), 0);
+                if (retries >= maxRetriesPerTodoAfterJudge) {
+                    return buildFailureResult(completedTodos,
+                            "todo_retry_exhausted:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                retryCountByTodo.put(item.getId(), retries + 1);
+                eventService.append(runId, userId, "TODO_RETRY_SCHEDULED", Map.of(
+                        "todo_id", item.getId(),
+                        "retry_count", retries + 1,
+                        "max_retries", maxRetriesPerTodoAfterJudge,
+                        "source", classification.category().name()
                 ));
-            } else {
-                item.setStatus(TodoStatus.FAILED);
-                hasFailure = true;
-                eventService.append(runId, userId, "TODO_FAILED", Map.of(
-                        "todo_id", nvl(item.getId()),
-                        "success", false,
-                        "summary", nvl(record.getSummary()),
-                        "output_preview", preview(record.getOutput()),
-                        "tool_calls_used", toolCallCounter.get(runId)
+                continue;
+            }
+
+            // 调用 Plan Judge 对失败做出判断
+            JudgeDecision decision = planJudge.judge(
+                    failedRecord,
+                    currentPlan,
+                    executionContext,
+                    userGoal,
+                    request.getModel()
+            );
+
+            // Judge 判定：原地重试（不修改 Plan 结构）
+            if (decision == JudgeDecision.RETRY || decision == JudgeDecision.CONTINUE_WITH_RECOVERY_PARAMS) {
+                int retries = retryCountByTodo.getOrDefault(item.getId(), 0);
+                if (retries >= maxRetriesPerTodoAfterJudge) {
+                    return buildFailureResult(completedTodos,
+                            "todo_retry_exhausted:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                retryCountByTodo.put(item.getId(), retries + 1);
+                eventService.append(runId, userId, "TODO_RETRY_SCHEDULED", Map.of(
+                        "todo_id", item.getId(),
+                        "retry_count", retries + 1,
+                        "max_retries", maxRetriesPerTodoAfterJudge
                 ));
-            }
-            allProcessedItems.add(item);
-
-            WorkflowState checkpoint = WorkflowState.builder()
-                    .currentIndex(idx + 1)
-                    .completedItems(completed)
-                    .context(context)
-                    .toolCallsUsed(toolCallCounter.get(runId))
-                    .savedAt(Instant.now())
-                    .build();
-            stateStore.saveWorkflowState(runId, checkpoint);
-
-            if (!record.isSuccess() && config.failFast()) {
-                String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
-                return WorkflowExecutionResult.builder()
-                        .paused(false)
-                        .success(false)
-                        .failureReason("todo_failed:" + nvl(item.getId()))
-                        .finalAnswer(finalAnswer)
-                        .completedItems(allProcessedItems)
-                        .context(context)
-                        .toolCallsUsed(toolCallCounter.get(runId))
-                        .build();
-            }
-        }
-
-        stateStore.clearWorkflowState(runId);
-        String finalAnswer = generateFinalAnswer(request, allProcessedItems, context);
-        if (hasFailure) {
-            return WorkflowExecutionResult.builder()
-                    .paused(false)
-                    .success(false)
-                    .failureReason("todo_partial_failed")
-                    .finalAnswer(finalAnswer)
-                    .completedItems(allProcessedItems)
-                    .context(context)
-                    .toolCallsUsed(toolCallCounter.get(runId))
-                    .build();
-        }
-        return WorkflowExecutionResult.builder()
-                .paused(false)
-                .success(true)
-                .failureReason("")
-                .finalAnswer(finalAnswer)
-                .completedItems(allProcessedItems)
-                .context(context)
-                .toolCallsUsed(toolCallCounter.get(runId))
-                .build();
-    }
-
-    private TodoExecutionRecord executeTodoWithRetry(WorkflowRequest request,
-                                                     TodoItem item,
-                                                     Map<String, TodoExecutionRecord> context,
-                                                     List<TodoItem> allProcessedItems,
-                                                     WorkflowConfig config) {
-        String runId = request.getRun().getId();
-        String userId = request.getUserId();
-        TodoType type = item.getType() == null ? TodoType.TOOL_CALL : item.getType();
-
-        if (type == TodoType.THOUGHT || type == TodoType.SUB_AGENT) {
-            item.setStatus(TodoStatus.RUNNING);
-            eventService.append(runId, userId, "TODO_STARTED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "sequence", item.getSequence(),
-                    "type", type.name(),
-                    "tool", nvl(item.getToolName())
-            ));
-            return executeItem(request, item, context, config);
-        }
-
-        int attempt = 0;
-        int totalRecoveryAttempts = 0;
-        int staticRecoveryAttempts = 0;
-        int runtimeRecoveryAttempts = 0;
-        int semanticRecoveryAttempts = 0;
-        TodoExecutionRecord record;
-        while (true) {
-            item.setStatus(TodoStatus.RUNNING);
-            eventService.append(runId, userId, "TODO_STARTED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "sequence", item.getSequence(),
-                    "type", type.name(),
-                    "tool", nvl(item.getToolName()),
-                    "attempt", attempt + 1
-            ));
-
-            record = executeItem(request, item, context, config);
-
-            if (record.isSuccess()) {
-                return record;
+                // 不递增 index，下一轮循环依旧处理同一个 Todo
+                continue;
             }
 
-            attempt++;
-            TodoFailureCategory category = resolveFailureCategory(record);
-            if (!canRetryByCategory(category, staticRecoveryAttempts, runtimeRecoveryAttempts, semanticRecoveryAttempts, totalRecoveryAttempts, config)) {
-                log.debug("Todo {} retry budget exhausted, category={}, static={}, runtime={}, semantic={}, total={}",
-                        item.getId(), category, staticRecoveryAttempts, runtimeRecoveryAttempts, semanticRecoveryAttempts, totalRecoveryAttempts);
-                return record;
-            }
-            if (attempt >= config.maxRetriesPerTodo()) {
-                log.debug("Todo {} failed after {} attempts, giving up", item.getId(), attempt);
-                return record;
-            }
-            if (toolCallCounter.isLimitReached(runId, config.maxToolCalls())) {
-                log.debug("Tool call limit reached, cannot retry todo {}", item.getId());
-                return record;
-            }
-
-            Map<String, Object> recovery = requestRecoveryParams(request, item, record, context, config);
-            if (recovery == null) {
-                return record;
-            }
-
-            @SuppressWarnings("unchecked")
-            Map<String, Object> newParams = (Map<String, Object>) recovery.get("params");
-            if (newParams == null || newParams.isEmpty()) {
-                return record;
-            }
-
-            item.setParams(newParams);
-            totalRecoveryAttempts++;
-            switch (category) {
-                case STATIC -> staticRecoveryAttempts++;
-                case SEMANTIC -> semanticRecoveryAttempts++;
-                default -> runtimeRecoveryAttempts++;
-            }
-            observabilityService.incrementRecoveryAttempt(runId, category.name());
-            eventService.append(runId, userId, "TODO_RETRY", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "attempt", attempt + 1,
-                    "tool_calls_used", toolCallCounter.get(runId),
-                    "failure_category", category.name(),
-                    "static_recovery_attempts", staticRecoveryAttempts,
-                    "runtime_recovery_attempts", runtimeRecoveryAttempts,
-                    "semantic_recovery_attempts", semanticRecoveryAttempts,
-                    "total_recovery_attempts", totalRecoveryAttempts
-            ));
-        }
-    }
-
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> requestRecoveryParams(WorkflowRequest request,
-                                                      TodoItem item,
-                                                      TodoExecutionRecord failedRecord,
-                                                      Map<String, TodoExecutionRecord> context,
-                                                      WorkflowConfig config) {
-        String runId = request.getRun().getId();
-        String userId = request.getUserId();
-        TodoFailureCategory failureCategory = resolveFailureCategory(failedRecord);
-
-        eventService.append(runId, userId, "TODO_RECOVERY_STARTED", Map.of(
-                "todo_id", nvl(item.getId()),
-                "tool", nvl(item.getToolName()),
-                "error_preview", preview(failedRecord.getSummary()),
-                "error_category", failureCategory.name()
-        ));
-
-        Map<String, Object> userPayload = new LinkedHashMap<>();
-        userPayload.put("user_goal", nvl(request.getUserGoal()));
-        userPayload.put("failed_todo", Map.of(
-                "id", nvl(item.getId()),
-                "tool", nvl(item.getToolName()),
-                "params", item.getParams() == null ? Map.of() : item.getParams(),
-                "reasoning", nvl(item.getReasoning()),
-                "error", nvl(failedRecord.getSummary()),
-                "error_category", failureCategory.name(),
-                "precheck_report", failedRecord.getPrecheckReport() == null ? Map.of() : failedRecord.getPrecheckReport(),
-                "semantic_judge_report", failedRecord.getSemanticJudgeReport() == null ? Map.of() : failedRecord.getSemanticJudgeReport()
-        ));
-        userPayload.put("context", context == null ? Map.of() : context);
-
-        List<ChatMessage> messages = List.of(
-                new SystemMessage(promptService.workflowTodoRecoverySystemPrompt()),
-                new UserMessage(safeWrite(userPayload))
-        );
-        RecoveryModelSelection recoveryModel = resolveRecoveryModel(request, failedRecord, config);
-
-        // 设置当前 phase 并记录开始时间
-        String previousStage = AgentContext.getStage();
-        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
-        AgentContext.setStage("workflow_todo_recovery");
-        long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response;
-        try {
-            response = recoveryModel.model().generate(messages);
-        } finally {
-            if (previousStage == null || previousStage.isBlank()) {
-                AgentContext.clearStage();
-            } else {
-                AgentContext.setStage(previousStage);
-            }
-        }
-        long llmCompletedAt = System.currentTimeMillis();
-        long llmDurationMs = llmCompletedAt - llmStartedAt;
-        String text = response.content() == null ? "" : nvl(response.content().text());
-
-        Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                recoveryModel.endpointName(),
-                recoveryModel.endpointBaseUrl(),
-                recoveryModel.modelName(),
-                messages,
-                request.getToolSpecifications(),
-                Map.of(
-                        "stage", "workflow_todo_recovery",
-                        "error_category", failureCategory.name(),
-                        "using_static_fix_model", recoveryModel.staticFixModel()
-                )
-        );
-        String recoveryTraceId = observabilityService.recordLlmCall(
-                runId,
-                AgentObservabilityService.PHASE_SUMMARIZING,
-                response.tokenUsage(),
-                llmDurationMs,
-                llmStartedAt,
-                llmCompletedAt,
-                recoveryModel.endpointName(),
-                recoveryModel.modelName(),
-                null,
-                llmRequestSnapshot,
-                text
-        );
-
-        eventService.append(runId, userId, "TODO_RECOVERY_COMPLETED", Map.of(
-                "todo_id", nvl(item.getId()),
-                "response_preview", preview(text),
-                "error_category", failureCategory.name(),
-                "recovery_model", recoveryModel.modelName(),
-                "recovery_endpoint", recoveryModel.endpointName(),
-                "using_static_fix_model", recoveryModel.staticFixModel()
-        ));
-
-        String json = extractJsonFromResponse(text);
-        if (json == null || json.isBlank()) {
-            return null;
-        }
-        try {
-            Map<String, Object> parsed = objectMapper.readValue(json, Map.class);
-            if (Boolean.TRUE.equals(parsed.get("abandon"))) {
-                return null;
-            }
-            item.setDecisionLlmTraceId(recoveryTraceId);
-            item.setDecisionStage("workflow_todo_recovery");
-            item.setDecisionExcerpt(preview(text));
-            return parsed;
-        } catch (Exception e) {
-            log.warn("Failed to parse recovery response: {}", e.getMessage());
-            return null;
-        }
-    }
-
-    private String extractJsonFromResponse(String text) {
-        if (text == null || text.isBlank()) {
-            return null;
-        }
-        String trimmed = text.trim();
-        int start = trimmed.indexOf('{');
-        int end = trimmed.lastIndexOf('}');
-        if (start >= 0 && end > start) {
-            return trimmed.substring(start, end + 1);
-        }
-        return null;
-    }
-
-    private RecoveryModelSelection resolveRecoveryModel(WorkflowRequest request,
-                                                        TodoExecutionRecord failedRecord,
-                                                        WorkflowConfig config) {
-        TodoFailureCategory category = resolveFailureCategory(failedRecord);
-        if (category == TodoFailureCategory.STATIC && !isBlank(config.staticFixModel())) {
-            try {
-                var resolved = aiServiceFactory.resolveLlm(config.staticFixEndpoint(), config.staticFixModel());
-                ChatLanguageModel model = aiServiceFactory.buildChatModelWithProviderOrderAndTemperature(
-                        resolved,
-                        List.of(),
-                        config.staticFixTemperature()
-                );
-                return new RecoveryModelSelection(
-                        model,
-                        nvl(resolved.endpointName()),
-                        nvl(resolved.baseUrl()),
-                        nvl(resolved.modelName()),
-                        true
-                );
-            } catch (Exception e) {
-                log.warn("Failed to init static fix model endpoint={}, model={}, fallback to run model, err={}",
-                        config.staticFixEndpoint(), config.staticFixModel(), e.getMessage());
-            }
-        }
-        return new RecoveryModelSelection(
-                request.getModel(),
-                nvl(request.getEndpointName()),
-                nvl(request.getEndpointBaseUrl()),
-                nvl(request.getModelName()),
-                false
-        );
-    }
-
-    private TodoFailureCategory resolveFailureCategory(TodoExecutionRecord failedRecord) {
-        if (failedRecord == null) {
-            return TodoFailureCategory.OTHER;
-        }
-        String raw = nvl(failedRecord.getFailureCategory()).trim().toUpperCase();
-        if (raw.isBlank()) {
-            return TodoFailureCategory.RUNTIME;
-        }
-        try {
-            return TodoFailureCategory.valueOf(raw);
-        } catch (Exception e) {
-            return TodoFailureCategory.RUNTIME;
-        }
-    }
-
-    private boolean canRetryByCategory(TodoFailureCategory category,
-                                       int staticRecoveryAttempts,
-                                       int runtimeRecoveryAttempts,
-                                       int semanticRecoveryAttempts,
-                                       int totalRecoveryAttempts,
-                                       WorkflowConfig config) {
-        if (totalRecoveryAttempts >= config.maxTotalRecoveryRetries()) {
-            return false;
-        }
-        return switch (category) {
-            case STATIC -> staticRecoveryAttempts < config.maxStaticRecoveryRetries();
-            case SEMANTIC -> semanticRecoveryAttempts < config.maxSemanticRecoveryRetries();
-            case RUNTIME, OTHER -> runtimeRecoveryAttempts < config.maxRuntimeRecoveryRetries();
-        };
-    }
-
-    private TodoExecutionRecord executeItem(WorkflowRequest request,
-                                            TodoItem item,
-                                            Map<String, TodoExecutionRecord> context,
-                                            WorkflowConfig config) {
-        String runId = request.getRun().getId();
-        String userId = request.getUserId();
-        ExecutionMode mode = resolveExecutionMode(item, config.defaultExecutionMode());
-        TodoType type = item.getType() == null ? TodoType.TOOL_CALL : item.getType();
-
-        if (type == TodoType.THOUGHT) {
-            return TodoExecutionRecord.builder()
-                    .success(true)
-                    .output(nvl(item.getReasoning()))
-                    .summary(nvl(item.getReasoning()))
-                    .toolCallsUsed(0)
-                    .build();
-        }
-
-        if (type == TodoType.SUB_AGENT || mode == ExecutionMode.FORCE_SUB_AGENT) {
-            if (!config.subAgentEnabled()) {
-                return TodoExecutionRecord.builder()
-                        .success(false)
-                        .output("")
-                        .summary("sub_agent_disabled")
-                        .toolCallsUsed(0)
-                        .build();
-            }
-            eventService.append(runId, userId, "SUB_AGENT_STARTED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "goal", nvl(item.getReasoning())
-            ));
-            Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
-            String goal = nvl(item.getReasoning()).isBlank()
-                    ? "请完成任务: " + nvl(item.getId())
-                    : nvl(item.getReasoning());
-            Set<String> whitelist = request.getToolSpecifications().stream()
-                    .map(ToolSpecification::name)
-                    .collect(Collectors.toCollection(LinkedHashSet::new));
-
-            SubAgentRunner.SubAgentResult subResult;
-            AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
-            AgentContext.setPhase(AgentObservabilityService.PHASE_SUB_AGENT);
-            AgentContext.setStage("workflow_sub_agent");
-            AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
-            AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
-            try {
-                subResult = subAgentRunner.run(
-                        SubAgentRunner.SubAgentRequest.builder()
-                                .runId(runId)
-                                .userId(userId)
-                                .taskId(item.getId())
-                                .goal(goal)
-                                .context(buildSubAgentContext(request.getUserGoal(), context, resolvedParams))
-                                .seedArgs(resolvedParams)
-                                .toolWhitelist(whitelist)
-                                .toolSpecifications(request.getToolSpecifications())
-                                .maxSteps(Math.min(config.maxToolCallsPerSubAgent(), config.subAgentMaxSteps()))
-                                .endpointName(request.getEndpointName())
-                                .endpointBaseUrl(request.getEndpointBaseUrl())
-                                .modelName(request.getModelName())
-                                .build(),
+            // Judge 判定：修改 Plan 结构
+            if (decision == JudgeDecision.PATCH_PLAN) {
+                if (patchCount >= maxPatchesPerRun) {
+                    return buildFailureResult(completedTodos,
+                            "plan_patch_exhausted:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                // 让 LLM 生成 Plan 修正方案
+                PlanPatch patch = patchPlanner.generatePatch(
+                        failedRecord,
+                        currentPlan,
+                        executionContext,
+                        userGoal,
                         request.getModel()
                 );
-            } finally {
-                restoreAgentContext(snapshot);
-            }
-
-            int usedCalls = subResult.getSteps() == null ? 1 : Math.max(1, subResult.getSteps().size());
-            toolCallCounter.increment(runId, usedCalls);
-
-            eventService.append(runId, userId, "SUB_AGENT_FINISHED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "success", subResult.isSuccess(),
-                    "tool_calls_used", usedCalls,
-                    "summary", preview(subResult.getAnswer())
-            ));
-
-            if (!subResult.isSuccess()) {
-                return TodoExecutionRecord.builder()
-                        .success(false)
-                        .output(nvl(subResult.getError()))
-                        .summary(nvl(subResult.getError()))
-                        .toolCallsUsed(usedCalls)
-                        .build();
-            }
-            return TodoExecutionRecord.builder()
-                    .success(true)
-                    .output(nvl(subResult.getAnswer()))
-                    .summary(preview(subResult.getAnswer()))
-                    .toolCallsUsed(usedCalls)
-                    .build();
-        }
-
-        if (toolCallCounter.isLimitReached(runId, config.maxToolCalls())) {
-            eventService.append(runId, userId, "TOOL_CALL_LIMIT_REACHED", Map.of(
-                    "limit", config.maxToolCalls(),
-                    "used", toolCallCounter.get(runId)
-            ));
-            return TodoExecutionRecord.builder()
-                    .success(false)
-                    .output("")
-                    .summary("tool_call_limit_reached")
-                    .toolCallsUsed(0)
-                    .build();
-        }
-
-        Map<String, Object> resolvedParams = paramResolver.resolve(item.getParams(), context);
-        String toolName = nvl(item.getToolName());
-        List<Map<String, String>> unresolvedPlaceholders = collectUnresolvedPlaceholderRefs(resolvedParams);
-        if (!unresolvedPlaceholders.isEmpty()) {
-            Map<String, String> first = unresolvedPlaceholders.get(0);
-            String errorMessage = "PARAM_PLACEHOLDER_UNRESOLVED: tool=" + toolName
-                    + ", param=" + nvl(first.get("paramKey"))
-                    + ", placeholder=" + nvl(first.get("rawPlaceholder"));
-            eventService.append(runId, userId, "TOOL_CALL_PLACEHOLDER_UNRESOLVED", Map.of(
-                    "todo_id", nvl(item.getId()),
-                    "tool_name", toolName,
-                    "toolName", toolName,
-                    "error_category", "PARAM_PLACEHOLDER_UNRESOLVED",
-                    "unresolved_placeholders", unresolvedPlaceholders
-            ));
-            return TodoExecutionRecord.builder()
-                    .success(false)
-                    .output("")
-                    .summary(errorMessage)
-                    .toolCallsUsed(0)
-                    .build();
-        }
-        String displayName = toolDisplayName(toolName);
-        String description = toolDescription(toolName);
-        eventService.append(runId, userId, "TOOL_CALL_STARTED", Map.of(
-                "todo_id", nvl(item.getId()),
-                "tool_name", toolName,
-                "toolName", toolName,
-                "displayName", displayName,
-                "description", description,
-                "parameters", resolvedParams
-        ));
-
-        if ("executePython".equals(toolName) && config.staticPrecheckEnabled()) {
-            AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
-            AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
-            AgentContext.setStage("workflow_static_precheck");
-            AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
-            AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
-            PythonStaticPrecheckService.Result precheck;
-            try {
-                precheck = pythonStaticPrecheckService.check(
-                        firstNonBlank(resolvedParams.get("code"), resolvedParams.get("arg0")),
-                        firstNonBlank(resolvedParams.get("dataset_ids"), resolvedParams.get("dataset_id"), resolvedParams.get("datasetId"), resolvedParams.get("arg1")),
-                        resolvedParams
-                );
-            } finally {
-                restoreAgentContext(snapshot);
-            }
-            if (!precheck.isPassed()) {
-                String summary = nvl(precheck.getErrorCode()) + ": " + nvl(precheck.getMessage());
-                eventService.append(runId, userId, "TOOL_CALL_STATIC_PRECHECK_FAILED", Map.of(
-                        "todo_id", nvl(item.getId()),
-                        "tool_name", toolName,
-                        "error_category", TodoFailureCategory.STATIC.name(),
-                        "summary", summary,
-                        "report", precheck.getReport() == null ? Map.of() : precheck.getReport()
+                if (patch == null) {
+                    return buildFailureResult(completedTodos,
+                            "plan_patch_generation_failed:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                // 应用 patch 得到修正后的新 Plan
+                TodoPlan patchedPlan = planPatcher.applyPatch(currentPlan, patch);
+                if (patchedPlan == null || patchedPlan.getItems() == null || patchedPlan.getItems().isEmpty()) {
+                    return buildFailureResult(completedTodos,
+                            "plan_patch_apply_failed:" + item.getId() + ":" + nvl(record.getSummary()));
+                }
+                patchCount++;
+                currentPlan = patchedPlan;
+                // 重建待处理列表：过滤掉已完成的，剩余按 sequence 排序
+                pendingItems = patchedPlan.getItems().stream()
+                        .filter(t -> !completedTodoIds.contains(t.getId()))
+                        .sorted(java.util.Comparator.comparingInt(TodoItem::getSequence))
+                        .collect(Collectors.toCollection(ArrayList::new));
+                // 尝试定位当前失败的 Todo 在新列表中的位置，继续处理
+                index = findTodoIndex(pendingItems, item.getId());
+                eventService.append(runId, userId, "PLAN_PATCH_APPLIED", Map.of(
+                        "todo_id", item.getId(),
+                        "patch_type", patch.getPatchType().name(),
+                        "patch_count", patchCount,
+                        "max_patches", maxPatchesPerRun
                 ));
-                return TodoExecutionRecord.builder()
-                        .success(false)
-                        .output("")
-                        .summary(summary)
-                        .toolCallsUsed(0)
-                        .failureCategory(TodoFailureCategory.STATIC.name())
-                        .precheckReport(precheck.getReport())
-                        .build();
+                continue;
             }
-        }
 
-        ToolRouter.ToolInvocationResult invokeResult;
-        AgentExecutionContextSnapshot snapshot = snapshotAgentContext();
-        AgentContext.setPhase(AgentObservabilityService.PHASE_TOOL_EXECUTION);
-        AgentContext.setStage("workflow_tool_execution");
-        AgentContext.setTodoContext(nvl(item.getId()), item.getSequence());
-        AgentContext.setDecisionContext(nvl(item.getDecisionLlmTraceId()), nvl(item.getDecisionStage()), nvl(item.getDecisionExcerpt()));
-        try {
-            invokeResult = toolRouter.invokeWithMeta(toolName, resolvedParams);
-        } finally {
-            restoreAgentContext(snapshot);
-        }
-
-        toolCallCounter.increment(runId, 1);
-        boolean cacheHit = invokeResult.getCacheMeta() != null && invokeResult.getCacheMeta().isHit();
-        int creditsConsumed = creditService.calculateToolCredits(toolName, cacheHit);
-
-        eventService.append(runId, userId, "TOOL_CALL_FINISHED", Map.of(
-                "todo_id", nvl(item.getId()),
-                "tool_name", toolName,
-                "toolName", toolName,
-                "success", invokeResult.isSuccess(),
-                "cacheHit", cacheHit,
-                "creditsConsumed", creditsConsumed,
-                "credits_consumed", creditsConsumed,
-                "result_preview", preview(invokeResult.getOutput()),
-                "cache", toolRouter.toEventCachePayload(invokeResult)
-        ));
-
-        if ("executePython".equals(toolName) && invokeResult.isSuccess() && config.semanticJudgeEnabled()) {
-            Map<String, Object> toolOutput = parseJsonObject(nvl(invokeResult.getOutput()));
-            PythonSemanticJudgeService.Result judgeResult = pythonSemanticJudgeService.judge(
-                    PythonSemanticJudgeService.Request.builder()
-                            .runId(runId)
-                            .userGoal(request.getUserGoal())
-                            .todoId(item.getId())
-                            .toolName(toolName)
-                            .todoReasoning(item.getReasoning())
-                            .runArgs(resolvedParams)
-                            .code(firstNonBlank(resolvedParams.get("code"), resolvedParams.get("arg0")))
-                            .toolOutput(toolOutput)
-                            .fallbackModel(request.getModel())
-                            .fallbackEndpointName(request.getEndpointName())
-                            .fallbackEndpointBaseUrl(request.getEndpointBaseUrl())
-                            .fallbackModelName(request.getModelName())
-                            .build()
-            );
-            boolean rejected = !judgeResult.isPass();
-            observabilityService.recordSemanticJudgeCall(runId, rejected);
-            if (rejected) {
-                eventService.append(runId, userId, "SEMANTIC_JUDGE_REJECTED", Map.of(
-                        "todo_id", nvl(item.getId()),
-                        "category", nvl(judgeResult.getCategory()),
-                        "severity", nvl(judgeResult.getSeverity()),
-                        "reason_cn", nvl(judgeResult.getReasonCn())
-                ));
-                return TodoExecutionRecord.builder()
-                        .success(false)
-                        .output(nvl(invokeResult.getOutput()))
-                        .summary("SEMANTIC_JUDGE_REJECTED: " + nvl(judgeResult.getCategory()) + ", " + nvl(judgeResult.getReasonCn()))
-                        .toolCallsUsed(1)
-                        .failureCategory(TodoFailureCategory.SEMANTIC.name())
-                        .semanticJudgeReport(judgeResult.getReport())
-                        .build();
+            // Judge 判定：不可恢复的失败，立即终止
+            if (decision == JudgeDecision.FAIL || decision == JudgeDecision.ABORT) {
+                return buildFailureResult(completedTodos, nvl(record.getSummary()));
             }
-            return TodoExecutionRecord.builder()
-                    .success(true)
-                    .output(nvl(invokeResult.getOutput()))
-                    .summary(preview(invokeResult.getOutput()))
-                    .toolCallsUsed(1)
-                    .semanticJudgeReport(judgeResult.getReport())
-                    .build();
+
+            // 默认：返回失败
+            return buildFailureResult(completedTodos, nvl(record.getSummary()));
         }
 
-        return TodoExecutionRecord.builder()
-                .success(invokeResult.isSuccess())
-                .output(nvl(invokeResult.getOutput()))
-                .summary(preview(invokeResult.getOutput()))
-                .toolCallsUsed(1)
-                .failureCategory(invokeResult.isSuccess() ? "" : TodoFailureCategory.RUNTIME.name())
-                .build();
-    }
-
-    private String buildSubAgentContext(String userGoal,
-                                        Map<String, TodoExecutionRecord> context,
-                                        Map<String, Object> resolvedParams) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("user_goal", nvl(userGoal));
-        payload.put("resolved_params", resolvedParams == null ? Map.of() : resolvedParams);
-        payload.put("done", context == null ? Map.of() : context);
-        return safeWrite(payload);
-    }
-
-    private String generateFinalAnswer(WorkflowRequest request,
-                                       List<TodoItem> completed,
-                                       Map<String, TodoExecutionRecord> context) {
-        String runId = request.getRun().getId();
-        String userId = request.getUserId();
-        eventService.append(runId, userId, "FINAL_ANSWER_GENERATING", Map.of(
-                "completed_items", completed == null ? 0 : completed.size()
-        ));
-
-        List<Map<String, Object>> summary = new ArrayList<>();
-        for (TodoItem item : completed == null ? List.<TodoItem>of() : completed) {
-            Map<String, Object> row = new LinkedHashMap<>();
-            row.put("id", nvl(item.getId()));
-            row.put("sequence", item.getSequence());
-            row.put("type", item.getType() == null ? "" : item.getType().name());
-            row.put("status", item.getStatus() == null ? "" : item.getStatus().name());
-            row.put("summary", nvl(item.getResultSummary()));
-            summary.add(row);
-        }
-
-        // 加载消息历史（多轮对话支持）
-        String dialogueContext = buildDialogueContext(runId, request.getUserGoal());
-
-        String userMessageContent;
-        if (dialogueContext.isBlank()) {
-            userMessageContent = "当前轮次用户需求: " + nvl(request.getUserGoal())
-                    + "\n执行摘要: " + safeWrite(summary)
-                    + "\n执行上下文: " + safeWrite(context);
-        } else {
-            userMessageContent = "历史对话压缩内容：\n" + dialogueContext
-                    + "\n\n当前轮次用户需求: " + nvl(request.getUserGoal())
-                    + "\n执行摘要: " + safeWrite(summary)
-                    + "\n执行上下文: " + safeWrite(context)
-                    + "\n\n请参考历史对话，以当前轮次用户需求为重点回答。";
-        }
-
-        List<ChatMessage> messages = List.of(
-                new SystemMessage(promptService.workflowFinalSystemPrompt()),
-                new UserMessage(userMessageContent)
-        );
-
-        // 设置当前 phase 并记录开始时间
-        String previousStage = AgentContext.getStage();
-        AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
-        AgentContext.setStage("workflow_final_answer");
-        long llmStartedAt = System.currentTimeMillis();
-        Response<AiMessage> response;
-        try {
-            response = request.getModel().generate(messages);
-        } finally {
-            if (previousStage == null || previousStage.isBlank()) {
-                AgentContext.clearStage();
-            } else {
-                AgentContext.setStage(previousStage);
-            }
-        }
-        long llmCompletedAt = System.currentTimeMillis();
-        long llmDurationMs = llmCompletedAt - llmStartedAt;
-        String answer = response.content() == null ? "" : nvl(response.content().text());
-
-        Map<String, Object> llmRequestSnapshot = llmRequestSnapshotBuilder.buildChatCompletionsRequest(
-                request.getEndpointName(),
-                request.getEndpointBaseUrl(),
-                request.getModelName(),
-                messages,
-                request.getToolSpecifications(),
-                Map.of("stage", "workflow_final_answer")
-        );
-        observabilityService.recordLlmCall(
+        // ── 所有 Todo 执行完毕，生成最终回答 ──
+        // Final-Answer 阶段可以使用独立模型（若 run 请求中配置了 final_answer 专用模型）
+        ChatModel finalAnswerModel = request.getFinalAnswerModel() == null ? request.getModel() : request.getFinalAnswerModel();
+        FinalAnswerResult finalAnswer = generateFinalAnswer(
+                userGoal,
+                completedTodos,
+                finalAnswerModel,
+                request.getFinalAnswerReasoningEffort(),
                 runId,
-                AgentObservabilityService.PHASE_SUMMARIZING,
-                response.tokenUsage(),
-                llmDurationMs,
-                llmStartedAt,
-                llmCompletedAt,
-                request.getEndpointName(),
-                request.getModelName(),
-                null,
-                llmRequestSnapshot,
-                answer
-        );
-
-        eventService.append(runId, userId, "FINAL_ANSWER_COMPLETED", Map.of(
-                "answer_preview", preview(answer),
-                "answerPreview", preview(answer),
-                "endpoint", nvl(request.getEndpointName()),
-                "model", nvl(request.getModelName())
-        ));
-        return answer;
-    }
-
-    private WorkflowConfig resolveConfig() {
-        AgentLlmProperties.Runtime runtime = localConfigLoader.current()
-                .map(AgentLlmProperties::getRuntime)
-                .orElse(Optional.ofNullable(llmProperties.getRuntime()).orElse(new AgentLlmProperties.Runtime()));
-        AgentLlmProperties.Execution execution = runtime.getExecution();
-        AgentLlmProperties.SubAgent subAgent = runtime.getSubAgent();
-        AgentLlmProperties.Judge judge = runtime.getJudge();
-
-        int maxToolCalls = clampInt(firstPositive(
-                execution == null ? null : execution.getMaxToolCalls(),
-                defaultMaxToolCalls
-        ), 1, 200);
-        int maxPerSubAgent = clampInt(firstPositive(
-                execution == null ? null : execution.getMaxToolCallsPerSubAgent(),
-                defaultMaxToolCallsPerSubAgent
-        ), 1, 100);
-        boolean failFast = execution != null && execution.getFailFast() != null
-                ? execution.getFailFast()
-                : defaultFailFast;
-        ExecutionMode executionMode = parseMode(execution == null ? null : execution.getDefaultExecutionMode());
-        boolean subAgentEnabled = subAgent != null && subAgent.getEnabled() != null
-                ? subAgent.getEnabled()
-                : defaultSubAgentEnabled;
-        int subAgentMaxSteps = clampInt(firstPositive(
-                subAgent == null ? null : subAgent.getMaxSteps(),
-                defaultSubAgentMaxSteps
-        ), 1, 20);
-
-        int maxRetriesPerTodo = clampInt(firstPositive(
-                execution == null ? null : execution.getMaxRetriesPerTodo(),
-                defaultMaxRetriesPerTodo
-        ), 1, 10);
-        int defaultTotalRecoveryRetries = Math.max(0, maxRetriesPerTodo - 1);
-        int maxTotalRecoveryRetries = clampInt(firstNonNegative(
-                execution == null ? null : execution.getMaxTotalRecoveryRetries(),
-                defaultTotalRecoveryRetries
-        ), 0, 20);
-        int maxStaticRecoveryRetries = clampInt(firstNonNegative(
-                execution == null ? null : execution.getMaxStaticRecoveryRetries(),
-                maxTotalRecoveryRetries
-        ), 0, 20);
-        int maxRuntimeRecoveryRetries = clampInt(firstNonNegative(
-                execution == null ? null : execution.getMaxRuntimeRecoveryRetries(),
-                maxTotalRecoveryRetries
-        ), 0, 20);
-        int maxSemanticRecoveryRetries = clampInt(firstNonNegative(
-                execution == null ? null : execution.getMaxSemanticRecoveryRetries(),
-                maxTotalRecoveryRetries
-        ), 0, 20);
-        boolean staticPrecheckEnabled = execution == null || execution.getStaticPrecheckEnabled() == null
-                || execution.getStaticPrecheckEnabled();
-        boolean semanticJudgeEnabled = judge != null && judge.getSemanticEnabled() != null && judge.getSemanticEnabled();
-        String staticFixEndpoint = execution == null ? "" : nvl(execution.getStaticFixEndpoint()).trim();
-        String staticFixModel = execution == null ? "" : nvl(execution.getStaticFixModel()).trim();
-        Double staticFixTemperature = execution == null ? null : execution.getStaticFixTemperature();
-
-        return new WorkflowConfig(
-                maxToolCalls,
-                maxPerSubAgent,
-                maxRetriesPerTodo,
-                failFast,
-                executionMode,
-                subAgentEnabled,
-                subAgentMaxSteps,
-                staticPrecheckEnabled,
-                semanticJudgeEnabled,
-                maxStaticRecoveryRetries,
-                maxRuntimeRecoveryRetries,
-                maxSemanticRecoveryRetries,
-                maxTotalRecoveryRetries,
-                staticFixEndpoint,
-                staticFixModel,
-                staticFixTemperature
-        );
-    }
-
-    private int firstPositive(Integer value, int fallback) {
-        if (value != null && value > 0) {
-            return value;
+                userId);
+        if (finalAnswer.answer() == null || finalAnswer.answer().isBlank()) {
+            appendDebugArtifactEvent(runId, userId, completedTodos, "empty_final_answer");
+            return buildFailureResult(completedTodos, "empty_final_answer");
         }
-        return fallback;
-    }
-
-    private int firstNonNegative(Integer value, int fallback) {
-        if (value != null && value >= 0) {
-            return value;
-        }
-        return fallback;
-    }
-
-    private int clampInt(int value, int min, int max) {
-        return Math.max(min, Math.min(max, value));
-    }
-
-    private ExecutionMode parseMode(String text) {
-        String candidate = nvl(text).trim();
-        if (candidate.isBlank()) {
-            candidate = nvl(defaultExecutionMode).trim();
-        }
-        try {
-            return ExecutionMode.valueOf(candidate.toUpperCase());
-        } catch (Exception e) {
-            return ExecutionMode.AUTO;
-        }
-    }
-
-    private ExecutionMode resolveExecutionMode(TodoItem item, ExecutionMode defaultMode) {
-        if (item.getExecutionMode() != null) {
-            return item.getExecutionMode();
-        }
-        return defaultMode;
-    }
-
-    private String preview(String text) {
-        if (text == null) {
-            return "";
-        }
-        if (text.length() > 500) {
-            return text.substring(0, 500);
-        }
-        return text;
+        return WorkflowExecutionResult.builder()
+                .success(true)
+                .finalAnswer(finalAnswer.answer())
+                .citationMap(finalAnswer.citationMap())
+                .completedItems(new ArrayList<>())
+                .toolCallsUsed(totalToolCalls)
+                .build();
     }
 
     /**
-     * 构建对话上下文（用于多轮对话）。
-     * <p>
-     * 1. 加载消息历史
-     * 2. 应用上下文压缩
-     * 3. 格式化为对话文本
+     * 在待处理列表中根据 todoId 查找对应的索引位置。
      *
-     * @param runId Run ID
-     * @return 对话上下文文本（空字符串表示没有历史消息）
+     * <p>Plan Patch 后，待处理列表会被重建并重新排序。由于失败的 Todo 可能在
+     * 新 Plan 中仍然存在（等待重试），需要定位其在新列表中的位置以继续处理。</p>
+     *
+     * @param items  待处理列表
+     * @param todoId 待查找的 Todo ID
+     * @return 索引位置，未找到时返回 0（从头部开始处理）
      */
-    private String buildDialogueContext(String runId, String currentUserGoal) {
+    private int findTodoIndex(List<TodoItem> items, String todoId) {
+        if (items == null || items.isEmpty() || todoId == null || todoId.isBlank()) {
+            return 0;
+        }
+        for (int i = 0; i < items.size(); i++) {
+            TodoItem item = items.get(i);
+            if (item != null && todoId.equals(item.getId())) {
+                return i;
+            }
+        }
+        return 0;
+    }
+
+    /**
+     * 将 ReactTodoExecutor 的执行记录转为轻量的 TodoExecutionRecord，
+     * 供 PlanJudge 和 PatchPlanner 使用。
+     *
+     * <p>TODO: 这里的数据模型存在重复——ReactTodoExecutor.TodoExecutionRecord 和
+     * TodoExecutionRecord 几乎是同构的，后续应考虑统一。</p>
+     */
+    private TodoExecutionRecord toLegacyRecord(ReactTodoExecutor.TodoExecutionRecord record) {
+        if (record == null) {
+            return TodoExecutionRecord.builder().success(false).summary("empty_record").build();
+        }
+        return TodoExecutionRecord.builder()
+                .success(record.isSuccess())
+                .output(nvl(record.getOutput()))
+                .summary(nvl(record.getSummary()))
+                .toolCallsUsed(record.getToolCallsUsed())
+                .build();
+    }
+
+    /**
+     * 汇总所有已完成 Todo 的结果，调用 LLM 生成最终回答。
+     *
+     * <p>生成过程：</p>
+     * <ol>
+     *   <li>从已完成 Todo 的输出中提取引用来源，构建去重编号后的引用表。</li>
+     *   <li>组装提示词：System Prompt（dagReactSystemPrompt）+
+     *       最终回答指令 + 用户问题 + 已完成任务摘要 + 引用表。</li>
+     *   <li>设置 phase=summarizing 和 stage=final_answer 后调用 LLM。</li>
+     *   <li>调用前保存当前 AgentContext 的 phase/stage/reasoningEffort，
+     *       调用后在 finally 中恢复，避免污染后续流程。</li>
+     * </ol>
+     *
+     * @param userGoal                   用户原始问题
+     * @param completedTodos             所有已完成的 Todo 信息
+     * @param model                      用于生成最终回答的 ChatModel
+     * @param finalAnswerReasoningEffort Final-Answer 阶段的 reasoning effort 配置
+     * @return 最终回答和引用表
+     */
+    private FinalAnswerResult generateFinalAnswer(String userGoal,
+                                                  List<CompletedTodoInfo> completedTodos,
+                                                  ChatModel model,
+                                                  String finalAnswerReasoningEffort,
+                                                  String runId,
+                                                  String userId) {
+        // 构建引用来源映射表（按 URL 去重、重新编号）
+        AgentCitationService.CitationMap citationMap = citationService.buildCitationMap(completedTodos);
         try {
-            List<AgentRunMessage> messages = messageService.listMessages(runId);
-            if (messages == null || messages.isEmpty()) {
-                return "";
+            List<ChatMessage> messages = new ArrayList<>();
+            messages.add(new SystemMessage(promptService.dagReactSystemPrompt()));
+
+            // 组装上下文提示词
+            StringBuilder context = new StringBuilder();
+            context.append(promptService.finalAnswerStageInstruction()).append("\n\n");
+            context.append(promptService.dynamicContextPrefix()).append("\n\n");
+            context.append("用户问题：").append(userGoal).append("\n\n");
+            context.append("已完成的任务：\n");
+            for (CompletedTodoInfo todo : completedTodos) {
+                context.append(String.format("- %s: %s\n", todo.getDescription(), todo.getSummary()));
+                if (todo.getOutput() != null && !todo.getOutput().isEmpty()) {
+                    context.append("  输出: ").append(todo.getOutput()).append("\n");
+                }
             }
+            // 注入引用表：告诉 LLM 每个 [N] 编号对应的来源 URL
+            context.append(citationService.buildPromptBlock(citationMap));
+            context.append("\n请根据以上所有任务结果，生成对用户问题可直接展示的最终回答。");
+            context.append("\n请直接输出 Markdown，不要把回答包在 JSON 或代码块里。若使用搜索证据，请在相关句子后标注引用序号，例如 [1] [2]。");
+            messages.add(new UserMessage(context.toString()));
 
-            AgentContextCompressor.ContextBuildResult result = contextCompressor.buildCompressedContext(messages, currentUserGoal);
-
-            // 记录上下文压缩事件（如果发生了压缩）
-            AgentContextCompressor.CompressionResult compression = result.compression();
-            if (compression != null && compression.compressedMessages() < compression.originalMessages()) {
-                eventService.append(runId, null, "CONTEXT_COMPRESSED", Map.of(
-                        "strategy", nvl(compression.strategy()),
-                        "original_count", compression.originalMessages(),
-                        "compressed_count", compression.compressedMessages(),
-                        "dropped_sequences", compression.droppedSequences()
-                ));
+            // 保存并切换 AgentContext 的 phase/stage
+            String previousPhase = AgentContext.getPhase();
+            String previousStage = AgentContext.getStage();
+            String previousReasoningEffort = AgentContext.getReasoningEffort();
+            AgentContext.setPhase(AgentObservabilityService.PHASE_SUMMARIZING);
+            AgentContext.setStage("final_answer");
+            if (finalAnswerReasoningEffort != null && !finalAnswerReasoningEffort.isBlank()) {
+                AgentContext.setReasoningEffort(finalAnswerReasoningEffort);
             }
-
-            return result.text();
+            ChatResponse response;
+            try {
+                response = model.chat(messages);
+            } finally {
+                if (previousPhase == null || previousPhase.isBlank()) {
+                    AgentContext.clearPhase();
+                } else {
+                    AgentContext.setPhase(previousPhase);
+                }
+                if (previousStage == null || previousStage.isBlank()) {
+                    AgentContext.clearStage();
+                } else {
+                    AgentContext.setStage(previousStage);
+                }
+                if (previousReasoningEffort == null || previousReasoningEffort.isBlank()) {
+                    AgentContext.clearReasoningEffort();
+                } else {
+                    AgentContext.setReasoningEffort(previousReasoningEffort);
+                }
+            }
+            String answer = response != null && response.aiMessage() != null ? nvl(response.aiMessage().text()) : "";
+            LlmResponseIntegrity.OutputIntegrityLevel integrityLevel =
+                    LlmResponseIntegrity.classify(response);
+            emitFinalAnswerIntegrityEvent(runId, userId, integrityLevel, response);
+            if (integrityLevel == LlmResponseIntegrity.OutputIntegrityLevel.TRUNCATED && answer.isBlank()) {
+                String previousReasoningForRetry = AgentContext.getReasoningEffort();
+                try {
+                    AgentContext.clearReasoningEffort();
+                    ChatResponse retryResponse = model.chat(messages);
+                    answer = retryResponse != null && retryResponse.aiMessage() != null
+                            ? nvl(retryResponse.aiMessage().text())
+                            : "";
+                    emitFinalAnswerIntegrityEvent(runId, userId,
+                            LlmResponseIntegrity.classify(retryResponse), retryResponse);
+                } finally {
+                    if (previousReasoningForRetry == null || previousReasoningForRetry.isBlank()) {
+                        AgentContext.clearReasoningEffort();
+                    } else {
+                        AgentContext.setReasoningEffort(previousReasoningForRetry);
+                    }
+                }
+            } else if (answer.isBlank()) {
+                String previousReasoningForRetry = AgentContext.getReasoningEffort();
+                try {
+                    AgentContext.clearReasoningEffort();
+                    ChatResponse retryResponse = model.chat(messages);
+                    answer = retryResponse != null && retryResponse.aiMessage() != null
+                            ? nvl(retryResponse.aiMessage().text())
+                            : "";
+                } finally {
+                    if (previousReasoningForRetry == null || previousReasoningForRetry.isBlank()) {
+                        AgentContext.clearReasoningEffort();
+                    } else {
+                        AgentContext.setReasoningEffort(previousReasoningForRetry);
+                    }
+                }
+            }
+            answer = FinalAnswerSupport.resolveAnswerOrEmpty(answer);
+            return new FinalAnswerResult(answer, citationMap);
         } catch (Exception e) {
-            log.warn("Failed to build dialogue context for runId={}, ignoring: {}", runId, e.getMessage());
+            log.error("Failed to generate final answer", e);
+            return new FinalAnswerResult("", citationMap);
+        }
+    }
+
+    private void emitFinalAnswerIntegrityEvent(String runId,
+                                               String userId,
+                                               LlmResponseIntegrity.OutputIntegrityLevel level,
+                                               ChatResponse response) {
+        if (level == LlmResponseIntegrity.OutputIntegrityLevel.OK || runId == null || userId == null) {
+            return;
+        }
+        String eventType = LlmResponseIntegrity.eventType(level);
+        if (eventType == null) {
+            return;
+        }
+        eventService.append(runId, userId, eventType, Map.of(
+                "phase", PHASE_LINEAR_EXECUTION,
+                "stage", "final_answer",
+                "finish_reason", response != null && response.metadata() != null && response.metadata().finishReason() != null
+                        ? response.metadata().finishReason().name()
+                        : "unknown"
+        ));
+    }
+
+    private void emitDatasetHandoffMismatchEvent(String runId,
+                                                 String userId,
+                                                 TodoItem item,
+                                                 int todoIndex,
+                                                 String todoOutput,
+                                                 Map<String, String> datasetRefs) {
+        DatasetRefHandoffSupport.HandoffMismatch mismatch =
+                DatasetRefHandoffSupport.detect(todoOutput, datasetRefs);
+        if (mismatch == null) {
+            return;
+        }
+        eventService.append(runId, userId, "DATASET_REFS_HANDOFF_MISMATCH", Map.of(
+                "todoId", item.getId(),
+                "todoIndex", todoIndex + 1,
+                "phase", PHASE_LINEAR_EXECUTION,
+                "datasetRefsCount", mismatch.datasetRefsCount(),
+                "mentionedDatasetIdsCount", mismatch.mentionedDatasetIdsCount(),
+                "missingDatasetIdsSample", mismatch.missingDatasetIdsSample(),
+                "registeredDatasetIdsSample", mismatch.registeredDatasetIdsSample(),
+                "source", "completed_todo_output_vs_dataset_refs_map"
+        ));
+    }
+
+    private void appendDebugArtifactEvent(String runId,
+                                          String userId,
+                                          List<CompletedTodoInfo> completedTodos,
+                                          String reason) {
+        String artifact = FinalAnswerSupport.lastNonBlankTodoOutput(completedTodos);
+        if (artifact.isBlank()) {
+            return;
+        }
+        eventService.append(runId, userId, "FINAL_ANSWER_DEBUG_ARTIFACT", Map.of(
+                "reason", reason,
+                "artifact_preview", preview(artifact, 500)
+        ));
+    }
+
+    private String preview(String text, int maxLen) {
+        if (text == null) {
             return "";
         }
-    }
-
-    private String toolDisplayName(String toolName) {
-        return switch (nvl(toolName)) {
-            case "searchStock" -> "搜索股票代码";
-            case "searchFund" -> "搜索基金代码";
-            case "searchIndex" -> "搜索指数代码";
-            case "getStockInfo" -> "查询股票基础信息";
-            case "getStockDaily" -> "获取股票行情数据";
-            case "getIndexInfo" -> "查询指数基础信息";
-            case "getIndexDaily" -> "获取指数行情数据";
-            case "executePython" -> "执行编程计算";
-            default -> "调用工具";
-        };
-    }
-
-    private String toolDescription(String toolName) {
-        return switch (nvl(toolName)) {
-            case "searchStock", "searchFund", "searchIndex" -> "根据关键词检索代码";
-            case "getStockInfo", "getIndexInfo" -> "读取资产基础信息";
-            case "getStockDaily", "getIndexDaily" -> "读取区间行情数据";
-            case "executePython" -> "在沙箱中执行 Python 计算";
-            default -> "执行工具调用";
-        };
-    }
-
-    private String nvl(String text) {
-        return text == null ? "" : text;
-    }
-
-    private String firstNonBlank(Object... values) {
-        for (Object value : values) {
-            if (value == null) {
-                continue;
-            }
-            String text = String.valueOf(value).trim();
-            if (!text.isBlank()) {
-                return text;
-            }
+        if (text.length() <= maxLen) {
+            return text;
         }
-        return "";
+        return text.substring(0, maxLen) + "...";
     }
 
-    private boolean isBlank(String text) {
-        return text == null || text.trim().isEmpty();
+    /**
+     * 构建失败结果。
+     *
+     * <p>失败时不把 todo output 写入 {@code finalAnswer}，避免 Matrix 将 harness fallback 误判为模型回答。</p>
+     */
+    private WorkflowExecutionResult buildFailureResult(List<CompletedTodoInfo> completedTodos, String errorMessage) {
+        return WorkflowExecutionResult.builder()
+                .success(false)
+                .finalAnswer("")
+                .failureReason(errorMessage)
+                .citationMap(citationService.buildCitationMap(completedTodos))
+                .completedItems(new ArrayList<>())
+                .build();
     }
 
-    @SuppressWarnings("unchecked")
-    private Map<String, Object> parseJsonObject(String text) {
-        if (text == null || text.isBlank()) {
-            return Map.of();
-        }
-        try {
-            Object parsed = objectMapper.readValue(text, Object.class);
-            if (parsed instanceof Map<?, ?> map) {
-                Map<String, Object> normalized = new LinkedHashMap<>();
-                for (Map.Entry<?, ?> entry : map.entrySet()) {
-                    normalized.put(String.valueOf(entry.getKey()), entry.getValue());
-                }
-                return normalized;
-            }
-            return Map.of();
-        } catch (Exception e) {
-            return Map.of();
-        }
+    /** 空安全：null 转为空字符串。 */
+    private String nvl(String value) {
+        return value == null ? "" : value;
     }
 
-    private AgentExecutionContextSnapshot snapshotAgentContext() {
-        return new AgentExecutionContextSnapshot(
-                AgentContext.getPhase(),
-                AgentContext.getStage(),
-                AgentContext.getTodoId(),
-                AgentContext.getTodoSequence(),
-                AgentContext.getSubAgentStepIndex(),
-                AgentContext.getPythonRefineAttempt(),
-                AgentContext.getDecisionTraceId(),
-                AgentContext.getDecisionStage(),
-                AgentContext.getDecisionExcerpt()
-        );
-    }
-
-    private void restoreAgentContext(AgentExecutionContextSnapshot snapshot) {
-        if (snapshot == null) {
-            AgentContext.clearPhase();
-            AgentContext.clearStage();
-            AgentContext.clearTodoContext();
-            AgentContext.clearSubAgentStepIndex();
-            AgentContext.clearPythonRefineAttempt();
-            AgentContext.clearDecisionContext();
-            return;
-        }
-        if (snapshot.phase() == null || snapshot.phase().isBlank()) {
-            AgentContext.clearPhase();
-        } else {
-            AgentContext.setPhase(snapshot.phase());
-        }
-        if (snapshot.stage() == null || snapshot.stage().isBlank()) {
-            AgentContext.clearStage();
-        } else {
-            AgentContext.setStage(snapshot.stage());
-        }
-        if (snapshot.todoId() == null || snapshot.todoId().isBlank()) {
-            AgentContext.clearTodoContext();
-        } else {
-            AgentContext.setTodoContext(snapshot.todoId(), snapshot.todoSequence());
-        }
-        AgentContext.setSubAgentStepIndex(snapshot.subAgentStepIndex());
-        AgentContext.setPythonRefineAttempt(snapshot.pythonRefineAttempt());
-        if (snapshot.decisionTraceId() == null || snapshot.decisionTraceId().isBlank()) {
-            AgentContext.clearDecisionContext();
-        } else {
-            AgentContext.setDecisionContext(snapshot.decisionTraceId(), snapshot.decisionStage(), snapshot.decisionExcerpt());
-        }
-    }
-
-    private String safeWrite(Object payload) {
-        try {
-            return objectMapper.writeValueAsString(payload);
-        } catch (Exception e) {
-            return "{}";
-        }
-    }
-
-    private List<Map<String, String>> collectUnresolvedPlaceholderRefs(Object value) {
-        List<Map<String, String>> refs = new ArrayList<>();
-        Set<String> dedup = new LinkedHashSet<>();
-        collectUnresolvedPlaceholderRefs(value, "", refs, dedup);
-        return refs;
-    }
-
-    @SuppressWarnings("unchecked")
-    private void collectUnresolvedPlaceholderRefs(Object value,
-                                                  String path,
-                                                  List<Map<String, String>> refs,
-                                                  Set<String> dedup) {
-        if (value == null) {
-            return;
-        }
-        if (value instanceof Map<?, ?> map) {
-            for (Map.Entry<?, ?> entry : map.entrySet()) {
-                String key = String.valueOf(entry.getKey());
-                String nextPath = path.isBlank() ? key : path + "." + key;
-                collectUnresolvedPlaceholderRefs(entry.getValue(), nextPath, refs, dedup);
-            }
-            return;
-        }
-        if (value instanceof List<?> list) {
-            for (int idx = 0; idx < list.size(); idx++) {
-                String nextPath = path + "[" + idx + "]";
-                collectUnresolvedPlaceholderRefs(list.get(idx), nextPath, refs, dedup);
-            }
-            return;
-        }
-        if (!(value instanceof String text) || !text.contains("${")) {
-            return;
-        }
-        Matcher matcher = UNRESOLVED_PLACEHOLDER_PATTERN.matcher(text);
-        while (matcher.find()) {
-            String raw = matcher.group();
-            String paramKey = path.isBlank() ? "<root>" : path;
-            String dedupKey = paramKey + "|" + raw;
-            if (!dedup.add(dedupKey)) {
-                continue;
-            }
-            refs.add(Map.of(
-                    "paramKey", paramKey,
-                    "rawPlaceholder", raw
-            ));
-        }
-    }
-
-    private record WorkflowConfig(int maxToolCalls,
-                                  int maxToolCallsPerSubAgent,
-                                  int maxRetriesPerTodo,
-                                  boolean failFast,
-                                  ExecutionMode defaultExecutionMode,
-                                  boolean subAgentEnabled,
-                                  int subAgentMaxSteps,
-                                  boolean staticPrecheckEnabled,
-                                  boolean semanticJudgeEnabled,
-                                  int maxStaticRecoveryRetries,
-                                  int maxRuntimeRecoveryRetries,
-                                  int maxSemanticRecoveryRetries,
-                                  int maxTotalRecoveryRetries,
-                                  String staticFixEndpoint,
-                                  String staticFixModel,
-                                  Double staticFixTemperature) {
-    }
-
-    private record RecoveryModelSelection(ChatLanguageModel model,
-                                          String endpointName,
-                                          String endpointBaseUrl,
-                                          String modelName,
-                                          boolean staticFixModel) {
-    }
-
-    private record AgentExecutionContextSnapshot(String phase,
-                                                 String stage,
-                                                 String todoId,
-                                                 Integer todoSequence,
-                                                 Integer subAgentStepIndex,
-                                                 Integer pythonRefineAttempt,
-                                                 String decisionTraceId,
-                                                 String decisionStage,
-                                                 String decisionExcerpt) {
-    }
-
-    @Data
-    @Builder
-    public static class WorkflowRequest {
-        private AgentRun run;
-        private String userId;
-        private String userGoal;
-        private TodoPlan todoPlan;
-        private ChatLanguageModel model;
-        private List<ToolSpecification> toolSpecifications;
-        private String endpointName;
-        private String endpointBaseUrl;
-        private String modelName;
+    /** 最终回答及其引用表的不可变记录。 */
+    private record FinalAnswerResult(String answer, AgentCitationService.CitationMap citationMap) {
     }
 }

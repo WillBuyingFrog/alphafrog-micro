@@ -12,6 +12,46 @@ public class DateConvertUtils {
 
     private static final DateTimeFormatter YYYYMMDD_FORMATTER = DateTimeFormatter.ofPattern("yyyyMMdd");
 
+    /**
+     * 灵活解析日期字符串，支持多种格式：
+     * - yyyyMMdd (8位): 20060830
+     * - yyyyMM (6位): 200608  -> 视为该月第一天
+     * - yyyy (4位): 2014      -> 视为该年第一天
+     * - null/空: 返回 -1
+     */
+    public static Long convertFlexibleDateStrToLong(String dateStr) {
+        if (dateStr == null || dateStr.trim().isEmpty()) {
+            return -1L;
+        }
+        
+        dateStr = dateStr.trim();
+        SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd");
+        dateFormat.setTimeZone(TimeZone.getTimeZone("Asia/Shanghai"));
+        
+        try {
+            if (dateStr.length() == 8) {
+                // 完整日期 yyyyMMdd
+                Date parsedDate = dateFormat.parse(dateStr);
+                return parsedDate.getTime();
+            } else if (dateStr.length() == 6) {
+                // 年月 yyyyMM -> 补01日
+                Date parsedDate = dateFormat.parse(dateStr + "01");
+                return parsedDate.getTime();
+            } else if (dateStr.length() == 4) {
+                // 年份 yyyy -> 补0101
+                Date parsedDate = dateFormat.parse(dateStr + "0101");
+                return parsedDate.getTime();
+            } else {
+                // 其他格式，尝试直接解析
+                Date parsedDate = dateFormat.parse(dateStr);
+                return parsedDate.getTime();
+            }
+        } catch (ParseException e) {
+            System.err.println("Failed to parse date: " + dateStr);
+            return -1L;
+        }
+    }
+
     public static Long convertDateStrToLong(String dateStr, String format) {
         if (format.equals("yyyyMMdd")) {
             SimpleDateFormat dateFormat = new SimpleDateFormat("yyyyMMdd");

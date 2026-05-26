@@ -5,22 +5,28 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.apache.dubbo.config.annotation.DubboReference;
 import org.apache.dubbo.rpc.RpcException;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.core.Authentication;
 import org.springframework.web.bind.annotation.*;
+
+import jakarta.servlet.http.HttpServletRequest;
 import world.willfrog.alphafrogmicro.agent.idl.AgentDubboService;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunResultMessage;
 import world.willfrog.alphafrogmicro.agent.idl.AgentRunStatusMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartMessage;
+import world.willfrog.alphafrogmicro.agent.idl.AgentSnapshotPartsMetaMessage;
 import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DeleteAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactRequest;
 import world.willfrog.alphafrogmicro.agent.idl.DownloadAgentArtifactResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunRequest;
-import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentSnapshotPartsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunEventsResponse;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
@@ -53,36 +59,89 @@ import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunResultResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListItemResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.AgentSnapshotPartsMetaResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunStatusResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentRunUpdateRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendRequest;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageSendResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageItemResponse;
 import world.willfrog.alphafrogmicro.frontend.model.agent.AgentMessageListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceListResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceDetailResponse;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TraceSpanItem;
+import world.willfrog.alphafrogmicro.frontend.model.agent.TimelineResponse;
 import world.willfrog.alphafrogmicro.frontend.service.AuthService;
+import world.willfrog.alphafrogmicro.frontend.service.agent.AgentRunResultCacheService;
 
+import java.nio.charset.StandardCharsets;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * Agent run HTTP API.
+ * {@code /api/agent/**} routes exclusively to the {@code langchain} Dubbo group.
+ * {@code /api/agent-legacy/**} routes exclusively to the {@code legacy} Dubbo group.
+ */
 @RestController
-@RequestMapping("/api/agent/runs")
 @RequiredArgsConstructor
 @Slf4j
 public class AgentController {
 
-    private static final int ADMIN_USER_TYPE = 1127;
+    private static final String AGENT_RUNS = "/api/agent/runs";
+    private static final String AGENT_LEGACY_RUNS = "/api/agent-legacy/runs";
 
-    @DubboReference
-    private AgentDubboService agentDubboService;
+    private static final int ADMIN_USER_TYPE = 1127;
+    private static final int OBSERVABILITY_FULL_MAX_BYTES = 5 * 1024 * 1024;
+
+    @DubboReference(group = "langchain", check = false)
+    private AgentDubboService agentDubboServiceLangchain;
+
+    @DubboReference(group = "legacy", check = false)
+    private AgentDubboService agentDubboServiceLegacy;
+
+    @Autowired
+    private HttpServletRequest request;
 
     private final AuthService authService;
     private final ObjectMapper objectMapper;
+    private final AgentRunResultCacheService runResultCacheService;
 
-    @PostMapping
+    /**
+     * 根据当前 HTTP 请求路径选择对应的 Dubbo provider。
+     * /api/agent/** -> langchain；/api/agent-legacy/** -> legacy。
+     */
+    private AgentDubboService resolveService() {
+        String uri = request.getRequestURI();
+        if (uri != null && uri.startsWith("/api/agent-legacy")) {
+            return agentDubboServiceLegacy;
+        }
+        return agentDubboServiceLangchain;
+    }
+
+    @PostMapping(AGENT_RUNS)
     public ResponseWrapper<AgentRunResponse> create(Authentication authentication,
                                                     @RequestBody AgentRunCreateRequest request) {
+        return createRun(authentication, request, agentDubboServiceLangchain);
+    }
+
+    /**
+     * @deprecated Use {@link #create(Authentication, AgentRunCreateRequest)} ({@code POST /api/agent/runs}).
+     */
+    @Deprecated
+    @PostMapping(AGENT_LEGACY_RUNS)
+    public ResponseWrapper<AgentRunResponse> createLegacy(Authentication authentication,
+                                                          @RequestBody AgentRunCreateRequest request) {
+        return createRun(authentication, request, agentDubboServiceLegacy);
+    }
+
+    private ResponseWrapper<AgentRunResponse> createRun(Authentication authentication,
+                                                        AgentRunCreateRequest request,
+                                                        AgentDubboService dubboService) {
         String userId = resolveUserId(authentication);
         if (userId == null) {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
@@ -136,7 +195,9 @@ public class AgentController {
                 }
             }
             String contextJson = contextMap.isEmpty() ? "" : objectMapper.writeValueAsString(contextMap);
-            AgentRunMessage run = agentDubboService.createRun(
+            String stageConfigJson = nvl(request.stageConfigJson());
+            log.info("[AgentController] 创建 Run: userId={}, stageConfigJson={}", userId, stageConfigJson);
+            AgentRunMessage run = dubboService.createRun(
                     CreateAgentRunRequest.newBuilder()
                             .setUserId(userId)
                             .setMessage(request.message())
@@ -148,8 +209,8 @@ public class AgentController {
                             .setProvider(provider)
                             .setPlannerCandidateCount(plannerCandidateCountForRpc)
                             .setDebugMode(debugMode)
-                            .build()
-            );
+                            .setStageConfigJson(stageConfigJson)
+                            .build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "创建 agent run");
@@ -158,7 +219,7 @@ public class AgentController {
         }
     }
 
-    @GetMapping
+    @GetMapping({AGENT_RUNS, AGENT_LEGACY_RUNS})
     public ResponseWrapper<AgentRunListResponse> list(Authentication authentication,
                                                       @RequestParam(value = "limit", required = false) Integer limit,
                                                       @RequestParam(value = "offset", required = false) Integer offset,
@@ -174,7 +235,7 @@ public class AgentController {
         try {
             int resolvedLimit = resolveLimit(limit, size, max);
             int resolvedOffset = resolveOffset(offset, page, resolvedLimit);
-            ListAgentRunsResponse resp = agentDubboService.listRuns(
+            ListAgentRunsResponse resp = resolveService().listRuns(
                     ListAgentRunsRequest.newBuilder()
                             .setUserId(userId)
                             .setLimit(resolvedLimit)
@@ -205,7 +266,7 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}")
+    @GetMapping({AGENT_RUNS + "/{runId}", AGENT_LEGACY_RUNS + "/{runId}"})
     public ResponseWrapper<AgentRunResponse> get(Authentication authentication,
                                                 @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -213,7 +274,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.getRun(GetAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().getRun(GetAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent run");
@@ -222,7 +283,69 @@ public class AgentController {
         }
     }
 
-    @PutMapping("/{runId}")
+    @GetMapping({AGENT_RUNS + "/{runId}/snapshot/parts", AGENT_LEGACY_RUNS + "/{runId}/snapshot/parts"})
+    public ResponseWrapper<AgentSnapshotPartsMetaResponse> snapshotParts(Authentication authentication,
+                                                                        @PathVariable("runId") String runId,
+                                                                        @RequestParam(value = "maxPartSize", required = false, defaultValue = "0") int maxPartSize) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentSnapshotPartsMetaMessage meta = resolveService().getSnapshotPartsMeta(
+                    GetAgentSnapshotPartsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setMaxPartSize(maxPartSize)
+                            .build()
+            );
+            return ResponseWrapper.success(toSnapshotPartsMetaResponse(meta));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 agent snapshot parts");
+        } catch (Exception e) {
+            return handleError(e, "查询 agent snapshot parts");
+        }
+    }
+
+    @GetMapping({AGENT_RUNS + "/{runId}/snapshot/parts/{partIndex}",
+            AGENT_LEGACY_RUNS + "/{runId}/snapshot/parts/{partIndex}"})
+    public ResponseEntity<byte[]> snapshotPart(Authentication authentication,
+                                               @PathVariable("runId") String runId,
+                                               @PathVariable("partIndex") int partIndex,
+                                               @RequestParam(value = "maxPartSize", required = false, defaultValue = "0") int maxPartSize) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return snapshotPartError(401, "UNAUTHORIZED");
+        }
+        try {
+            AgentSnapshotPartMessage part = resolveService().getSnapshotPart(
+                    GetAgentSnapshotPartRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setPartIndex(partIndex)
+                            .setMaxPartSize(maxPartSize)
+                            .build()
+            );
+            byte[] content = part.getContent().toByteArray();
+            HttpHeaders headers = new HttpHeaders();
+            headers.setContentType(MediaType.APPLICATION_OCTET_STREAM);
+            headers.setContentLength(content.length);
+            headers.set(HttpHeaders.CACHE_CONTROL, "no-store");
+            headers.set("X-Snapshot-Compression", nvl(part.getCompression()));
+            headers.set("X-Snapshot-Part-Index", String.valueOf(part.getPartIndex()));
+            headers.set("X-Snapshot-Part-Size", String.valueOf(part.getPartSize()));
+            headers.set("X-Snapshot-Total-Parts", String.valueOf(part.getTotalParts()));
+            return ResponseEntity.ok().headers(headers).body(content);
+        } catch (RpcException e) {
+            log.error("查询 agent snapshot part 失败: {}", e.getMessage());
+            return snapshotPartError(resolveSnapshotPartErrorStatus(e.getMessage()), "RPC_ERROR");
+        } catch (Exception e) {
+            log.error("查询 agent snapshot part 失败", e);
+            return snapshotPartError(resolveSnapshotPartErrorStatus(e.getMessage()), "ERROR");
+        }
+    }
+
+    @PutMapping({AGENT_RUNS + "/{runId}", AGENT_LEGACY_RUNS + "/{runId}"})
     public ResponseWrapper<AgentRunResponse> update(Authentication authentication,
                                                     @PathVariable("runId") String runId,
                                                     @RequestBody(required = false) AgentRunUpdateRequest request) {
@@ -238,7 +361,7 @@ public class AgentController {
             return ResponseWrapper.paramError("title 长度不能超过 120");
         }
         try {
-            AgentRunMessage run = agentDubboService.updateRun(
+            AgentRunMessage run = resolveService().updateRun(
                     UpdateAgentRunRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -274,7 +397,7 @@ public class AgentController {
      * @param runId          要删除的 run ID（路径参数）
      * @return 删除成功返回 "ok"，失败返回对应错误码
      */
-    @DeleteMapping("/{runId}")
+    @DeleteMapping({AGENT_RUNS + "/{runId}", AGENT_LEGACY_RUNS + "/{runId}"})
     public ResponseWrapper<String> delete(Authentication authentication,
                                           @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -282,7 +405,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            agentDubboService.deleteRun(DeleteAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            resolveService().deleteRun(DeleteAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success("ok");
         } catch (RpcException e) {
             return handleRpcError(e, "删除 agent run");
@@ -291,7 +414,7 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}/events")
+    @GetMapping({AGENT_RUNS + "/{runId}/events", AGENT_LEGACY_RUNS + "/{runId}/events"})
     public ResponseWrapper<AgentRunEventsPageResponse> events(Authentication authentication,
                                                              @PathVariable("runId") String runId,
                                                              @RequestParam(value = "after_seq", required = false, defaultValue = "0") int afterSeq,
@@ -301,7 +424,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            ListAgentRunEventsResponse resp = agentDubboService.listEvents(
+            ListAgentRunEventsResponse resp = resolveService().listEvents(
                     ListAgentRunEventsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -316,7 +439,7 @@ public class AgentController {
                         e.getRunId(),
                         e.getSeq(),
                         e.getEventType(),
-                        e.getPayloadJson(),
+                        parseJsonOrNull(e.getPayloadJson()),
                         e.getCreatedAt()
                 ));
             }
@@ -328,7 +451,63 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}:cancel")
+    @GetMapping({AGENT_RUNS + "/{runId}/timeline", AGENT_LEGACY_RUNS + "/{runId}/timeline"})
+    public ResponseWrapper<TimelineResponse> timeline(Authentication authentication,
+                                                      @PathVariable("runId") String runId,
+                                                      @RequestParam(value = "after_seq", required = false, defaultValue = "0") int afterSeq,
+                                                      @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            int safeLimit = Math.min(Math.max(1, limit), 500);
+            ListAgentRunEventsResponse resp = resolveService().listEvents(
+                    ListAgentRunEventsRequest.newBuilder()
+                            .setUserId(userId)
+                            .setId(runId)
+                            .setAfterSeq(Math.max(0, afterSeq))
+                            .setLimit(safeLimit)
+                            .build()
+            );
+            List<TimelineResponse.TimelineItem> items = new ArrayList<>();
+            String minEventTime = null;
+            String maxEventTime = null;
+            for (var e : resp.getItemsList()) {
+                Object payload = parseJsonOrNull(e.getPayloadJson());
+                String eventTime = strVal(e.getCreatedAt());
+                if (minEventTime == null || eventTime.compareTo(minEventTime) < 0) {
+                    minEventTime = eventTime;
+                }
+                if (maxEventTime == null || eventTime.compareTo(maxEventTime) > 0) {
+                    maxEventTime = eventTime;
+                }
+                items.add(new TimelineResponse.TimelineItem(
+                        e.getSeq(),
+                        "event",
+                        null,
+                        e.getEventType(),
+                        e.getCreatedAt(),
+                        timelineTitle(e.getEventType(), payload),
+                        null,
+                        payload
+                ));
+            }
+            appendTraceTimelineItems(userId, runId, items, minEventTime, maxEventTime,
+                    Math.max(0, safeLimit - items.size()));
+            items.sort(Comparator
+                    .comparing(TimelineResponse.TimelineItem::time, Comparator.nullsLast(String::compareTo))
+                    .thenComparing(TimelineResponse.TimelineItem::source, Comparator.nullsLast(String::compareTo))
+                    .thenComparingInt(TimelineResponse.TimelineItem::seq));
+            return ResponseWrapper.success(new TimelineResponse(items, resp.getNextAfterSeq(), resp.getHasMore()));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 timeline");
+        } catch (Exception e) {
+            return handleError(e, "查询 timeline");
+        }
+    }
+
+    @PostMapping({AGENT_RUNS + "/{runId}:cancel", AGENT_LEGACY_RUNS + "/{runId}:cancel"})
     public ResponseWrapper<AgentRunResponse> cancel(Authentication authentication,
                                                    @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -336,7 +515,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.cancelRun(CancelAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().cancelRun(CancelAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "取消 agent run");
@@ -345,7 +524,7 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}:pause")
+    @PostMapping({AGENT_RUNS + "/{runId}:pause", AGENT_LEGACY_RUNS + "/{runId}:pause"})
     public ResponseWrapper<AgentRunResponse> pause(Authentication authentication,
                                                   @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -353,7 +532,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunMessage run = agentDubboService.pauseRun(PauseAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
+            AgentRunMessage run = resolveService().pauseRun(PauseAgentRunRequest.newBuilder().setUserId(userId).setId(runId).build());
             return ResponseWrapper.success(toRunResponse(run));
         } catch (RpcException e) {
             return handleRpcError(e, "暂停 agent run");
@@ -362,7 +541,7 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}:resume")
+    @PostMapping({AGENT_RUNS + "/{runId}:resume", AGENT_LEGACY_RUNS + "/{runId}:resume"})
     public ResponseWrapper<AgentRunResponse> resume(Authentication authentication,
                                                    @PathVariable("runId") String runId,
                                                    @RequestBody(required = false) AgentRunResumeRequest request) {
@@ -372,7 +551,7 @@ public class AgentController {
         }
         try {
             String planOverrideJson = request == null ? "" : nvl(request.planOverrideJson());
-            AgentRunMessage run = agentDubboService.resumeRun(ResumeAgentRunRequest.newBuilder()
+            AgentRunMessage run = resolveService().resumeRun(ResumeAgentRunRequest.newBuilder()
                     .setUserId(userId)
                     .setId(runId)
                     .setPlanOverrideJson(planOverrideJson)
@@ -385,7 +564,7 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}/result")
+    @GetMapping({AGENT_RUNS + "/{runId}/result", AGENT_LEGACY_RUNS + "/{runId}/result"})
     public ResponseEntity<ResponseWrapper<AgentRunResultResponse>> result(Authentication authentication,
                                                                           @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -393,18 +572,15 @@ public class AgentController {
             return ResponseEntity.status(401).body(ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在"));
         }
         try {
-            AgentRunResultMessage result = agentDubboService.getResult(
-                    GetAgentRunResultRequest.newBuilder()
-                            .setUserId(userId)
-                            .setId(runId)
-                            .build()
-            );
+            AgentRunResultMessage result = loadRunResult(userId, runId);
             AgentRunResultResponse body = new AgentRunResultResponse(
                     result.getId(),
                     result.getStatus(),
                     emptyToNull(result.getAnswer()),
-                    emptyToNull(result.getPayloadJson()),
-                    emptyToNull(result.getObservabilityJson()),
+                    emptyToNull(result.getAnswerMarkdown()),
+                    parseJsonOrNull(result.getStructuredAnswerJson()),
+                    parseJsonOrNull(result.getPayloadJson()),
+                    null,
                     Math.max(0, result.getTotalCreditsConsumed())
             );
             if (!"COMPLETED".equalsIgnoreCase(result.getStatus())) {
@@ -418,7 +594,7 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}/status")
+    @GetMapping({AGENT_RUNS + "/{runId}/status", AGENT_LEGACY_RUNS + "/{runId}/status"})
     public ResponseWrapper<AgentRunStatusResponse> status(Authentication authentication,
                                                           @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -426,7 +602,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            AgentRunStatusMessage status = agentDubboService.getStatus(
+            AgentRunStatusMessage status = resolveService().getStatus(
                     GetAgentRunStatusRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -439,11 +615,17 @@ public class AgentController {
                     emptyToNull(status.getCurrentTool()),
                     emptyToNull(status.getLastEventType()),
                     emptyToNull(status.getLastEventAt()),
-                    emptyToNull(status.getLastEventPayloadJson()),
-                    emptyToNull(status.getPlanJson()),
-                    emptyToNull(status.getProgressJson()),
-                    emptyToNull(status.getObservabilityJson()),
-                    Math.max(0, status.getTotalCreditsConsumed())
+                    parseJsonOrNull(status.getLastEventPayloadJson()),
+                    parseJsonOrNull(status.getPlanJson()),
+                    parseJsonOrNull(status.getProgressJson()),
+                    parseJsonOrNull(status.getObservabilityJson()),
+                    parseJsonOrNull(status.getObservabilitySummaryJson()),
+                    status.getObservabilityFullAvailable(),
+                    Math.max(0, status.getTotalCreditsConsumed()),
+                    status.getEventCount() > 0 ? status.getEventCount() : null,
+                    status.getStartedAtMs() > 0 ? status.getStartedAtMs() : null,
+                    status.getCompletedAtMs() > 0 ? status.getCompletedAtMs() : null,
+                    status.getElapsedMs() > 0 ? status.getElapsedMs() : null
             ));
         } catch (RpcException e) {
             return handleRpcError(e, "查询 agent status");
@@ -452,7 +634,232 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}/artifacts")
+    @GetMapping({AGENT_RUNS + "/{runId}/observability/full", AGENT_LEGACY_RUNS + "/{runId}/observability/full"})
+    public ResponseWrapper<Object> observabilityFull(Authentication authentication,
+                                                     @PathVariable("runId") String runId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = loadRunResult(userId, runId);
+            String observabilityJson = result.getObservabilityJson();
+            if (observabilityJson != null
+                    && observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {
+                return ResponseWrapper.error(
+                        ResponseCode.BUSINESS_ERROR,
+                        "observability 过大，请使用 /traces 或 /timeline 分页接口"
+                );
+            }
+            Object observability = parseJsonOrNull(observabilityJson);
+            if (observability == null) {
+                return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "observability 不存在");
+            }
+            return ResponseWrapper.success(observability);
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询完整 observability");
+        } catch (Exception e) {
+            return handleError(e, "查询完整 observability");
+        }
+    }
+
+    @GetMapping({AGENT_RUNS + "/{runId}/traces", AGENT_LEGACY_RUNS + "/{runId}/traces"})
+    public ResponseWrapper<TraceListResponse> traces(Authentication authentication,
+                                                     @PathVariable("runId") String runId,
+                                                     @RequestParam(value = "type", required = false, defaultValue = "") String type,
+                                                     @RequestParam(value = "phase", required = false, defaultValue = "") String phase,
+                                                     @RequestParam(value = "after", required = false, defaultValue = "0") int after,
+                                                     @RequestParam(value = "limit", required = false, defaultValue = "100") int limit) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = loadRunResult(userId, runId);
+            String obsJson = result.getObservabilityJson();
+            if (obsJson == null || obsJson.isBlank()) {
+                return ResponseWrapper.success(new TraceListResponse(List.of(),
+                        new TraceListResponse.TraceSummary(0, 0, 0, 0)));
+            }
+
+            Map<String, Object> obs = objectMapper.readValue(obsJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+            Map<String, Object> summary = obs.get("summary") instanceof Map
+                    ? (Map<String, Object>) obs.get("summary") : Map.of();
+
+            List<TraceSpanItem> spans = new ArrayList<>();
+
+            // LLM Traces
+            Object llmTracesObj = diagnostics.get("llmTraces");
+            if (llmTracesObj instanceof List<?> llmTraces) {
+                for (Object item : llmTraces) {
+                    if (item instanceof Map<?, ?> m) {
+                        spans.add(TraceSpanItem.builder()
+                                .type("llm")
+                                .traceId(strVal(m.get("traceId")))
+                                .time(strVal(m.get("time")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .model(strVal(m.get("model")))
+                                .inputTokens(nullableLong(m.get("inputTokens")))
+                                .outputTokens(nullableLong(m.get("outputTokens")))
+                                .hasError(boolVal(m.get("hasError")))
+                                .hasInputMessages(m.get("inputMessages") != null)
+                                .hasReasoning(m.get("reasoningText") != null
+                                        && !strVal(m.get("reasoningText")).isBlank())
+                                .outputSummary(truncate(strVal(m.get("outputText")), 200))
+                                .build());
+                    }
+                }
+            }
+
+            // Tool Traces
+            Object toolTracesObj = diagnostics.get("toolTraces");
+            if (toolTracesObj instanceof List<?> toolTraces) {
+                for (Object item : toolTraces) {
+                    if (item instanceof Map<?, ?> m) {
+                        spans.add(TraceSpanItem.builder()
+                                .type("tool")
+                                .traceId(strVal(m.get("traceId")))
+                                .time(strVal(m.get("time")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .toolName(strVal(m.get("toolName")))
+                                .success(boolVal(m.get("success")))
+                                .cacheHit(boolVal(m.get("cacheHit")))
+                                .decisionLlmTraceId(emptyToNull(strVal(m.get("decisionLlmTraceId"))))
+                                .outputSummary(truncate(strVal(m.get("output")), 200))
+                                .build());
+                    }
+                }
+            }
+
+            String typeFilter = nvl(type).trim().toLowerCase();
+            String phaseFilter = nvl(phase).trim().toLowerCase();
+            if (!typeFilter.isBlank()) {
+                spans.removeIf(s -> s.getType() == null || !typeFilter.equalsIgnoreCase(s.getType()));
+            }
+            if (!phaseFilter.isBlank()) {
+                spans.removeIf(s -> s.getPhase() == null || !phaseFilter.equalsIgnoreCase(s.getPhase()));
+            }
+
+            // Sort by time, assign seq
+            spans.sort(Comparator.comparing(s -> s.getTime() == null ? "" : s.getTime()));
+            AtomicInteger seqCounter = new AtomicInteger(1);
+            spans.forEach(s -> s.setSeq(seqCounter.getAndIncrement()));
+            int safeAfter = Math.max(0, after);
+            int safeLimit = Math.min(Math.max(1, limit), 500);
+            spans = spans.stream()
+                    .filter(s -> s.getSeq() > safeAfter)
+                    .limit(safeLimit)
+                    .toList();
+
+            TraceListResponse.TraceSummary traceSummary = new TraceListResponse.TraceSummary(
+                    longVal(summary.get("llmCalls")),
+                    longVal(summary.get("toolCalls")),
+                    longVal(summary.get("totalDurationMs")),
+                    longVal(summary.get("totalTokens"))
+            );
+
+            return ResponseWrapper.success(new TraceListResponse(spans, traceSummary));
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 traces");
+        } catch (Exception e) {
+            return handleError(e, "查询 traces");
+        }
+    }
+
+    @GetMapping({AGENT_RUNS + "/{runId}/traces/{traceId}", AGENT_LEGACY_RUNS + "/{runId}/traces/{traceId}"})
+    public ResponseWrapper<TraceDetailResponse> traceDetail(Authentication authentication,
+                                                            @PathVariable("runId") String runId,
+                                                            @PathVariable("traceId") String traceId) {
+        String userId = resolveUserId(authentication);
+        if (userId == null) {
+            return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
+        }
+        try {
+            AgentRunResultMessage result = loadRunResult(userId, runId);
+            String obsJson = result.getObservabilityJson();
+            if (obsJson == null || obsJson.isBlank()) {
+                return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "trace 不存在");
+            }
+
+            Map<String, Object> obs = objectMapper.readValue(obsJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+
+            // Search in LLM Traces
+            Object llmTracesObj = diagnostics.get("llmTraces");
+            if (llmTracesObj instanceof List<?> llmTraces) {
+                for (Object item : llmTraces) {
+                    if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("llm")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .model(strVal(m.get("model")))
+                                .endpoint(strVal(m.get("endpoint")))
+                                .inputTokens(nullableLong(m.get("inputTokens")))
+                                .outputTokens(nullableLong(m.get("outputTokens")))
+                                .cachedTokens(m.get("cachedTokens") instanceof Number n ? n.intValue() : null)
+                                .actualCost(m.get("actualCost") instanceof Number n ? n.doubleValue() : null)
+                                .inputMessages(m.get("inputMessages"))
+                                .outputText(strVal(m.get("outputText")))
+                                .reasoningText(strVal(m.get("reasoningText")))
+                                .hasError(boolVal(m.get("hasError")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .attempts(m.get("attempts"))
+                                .httpRequest(m.get("httpRequest"))
+                                .httpResponse(m.get("httpResponse"))
+                                .curlCommand(emptyToNull(strVal(m.get("curlCommand"))))
+                                .build());
+                    }
+                }
+            }
+
+            // Search in Tool Traces
+            Object toolTracesObj = diagnostics.get("toolTraces");
+            if (toolTracesObj instanceof List<?> toolTraces) {
+                for (Object item : toolTraces) {
+                    if (item instanceof Map<?, ?> m && traceId.equals(strVal(m.get("traceId")))) {
+                        return ResponseWrapper.success(TraceDetailResponse.builder()
+                                .type("tool")
+                                .traceId(strVal(m.get("traceId")))
+                                .phase(strVal(m.get("phase")))
+                                .todoId(emptyToNull(strVal(m.get("todoId"))))
+                                .todoSequence(m.get("todoSequence") instanceof Number n ? n.intValue() : null)
+                                .time(strVal(m.get("time")))
+                                .durationMs(longVal(m.get("durationMs")))
+                                .error(emptyToNull(strVal(m.get("error"))))
+                                .toolName(strVal(m.get("toolName")))
+                                .params(m.get("params") instanceof Map ? (Map<String, Object>) m.get("params") : null)
+                                .output(strVal(m.get("output")))
+                                .success(boolVal(m.get("success")))
+                                .cacheHit(boolVal(m.get("cacheHit")))
+                                .cacheKey(emptyToNull(strVal(m.get("cacheKey"))))
+                                .decisionLlmTraceId(emptyToNull(strVal(m.get("decisionLlmTraceId"))))
+                                .decisionExcerpt(emptyToNull(strVal(m.get("decisionExcerpt"))))
+                                .build());
+                    }
+                }
+            }
+
+            return ResponseWrapper.error(ResponseCode.DATA_NOT_FOUND, "trace 不存在");
+        } catch (RpcException e) {
+            return handleRpcError(e, "查询 trace 详情");
+        } catch (Exception e) {
+            return handleError(e, "查询 trace 详情");
+        }
+    }
+
+    @GetMapping({AGENT_RUNS + "/{runId}/artifacts", AGENT_LEGACY_RUNS + "/{runId}/artifacts"})
     public ResponseWrapper<List<AgentArtifactResponse>> artifacts(Authentication authentication,
                                                                   @PathVariable("runId") String runId) {
         String userId = resolveUserId(authentication);
@@ -461,7 +868,7 @@ public class AgentController {
         }
         try {
             boolean isAdmin = isAdmin(authentication);
-            ListAgentArtifactsResponse resp = agentDubboService.listArtifacts(
+            ListAgentArtifactsResponse resp = resolveService().listArtifacts(
                     ListAgentArtifactsRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -489,7 +896,8 @@ public class AgentController {
         }
     }
 
-    @GetMapping("/{runId}/artifacts/{artifactId}/download")
+    @GetMapping({AGENT_RUNS + "/{runId}/artifacts/{artifactId}/download",
+            AGENT_LEGACY_RUNS + "/{runId}/artifacts/{artifactId}/download"})
     public ResponseEntity<byte[]> downloadArtifact(Authentication authentication,
                                                    @PathVariable("runId") String runId,
                                                    @PathVariable("artifactId") String artifactId) {
@@ -501,7 +909,7 @@ public class AgentController {
             return ResponseEntity.badRequest().build();
         }
         try {
-            DownloadAgentArtifactResponse resp = agentDubboService.downloadArtifact(
+            DownloadAgentArtifactResponse resp = resolveService().downloadArtifact(
                     DownloadAgentArtifactRequest.newBuilder()
                             .setUserId(userId)
                             .setArtifactId(artifactId)
@@ -545,7 +953,7 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}/feedback")
+    @PostMapping({AGENT_RUNS + "/{runId}/feedback", AGENT_LEGACY_RUNS + "/{runId}/feedback"})
     public ResponseWrapper<String> feedback(Authentication authentication,
                                            @PathVariable("runId") String runId,
                                            @RequestBody(required = false) AgentFeedbackRequest request) {
@@ -557,7 +965,7 @@ public class AgentController {
             int rating = request == null || request.rating() == null ? 0 : request.rating();
             String tagsJson = request == null ? "" : objectMapper.writeValueAsString(request.tags());
             String payloadJson = request == null ? "" : objectMapper.writeValueAsString(request.payload());
-            agentDubboService.submitFeedback(
+            resolveService().submitFeedback(
                     SubmitAgentFeedbackRequest.newBuilder()
                             .setUserId(userId)
                             .setId(runId)
@@ -575,7 +983,7 @@ public class AgentController {
         }
     }
 
-    @PostMapping("/{runId}:export")
+    @PostMapping({AGENT_RUNS + "/{runId}:export", AGENT_LEGACY_RUNS + "/{runId}:export"})
     public ResponseWrapper<AgentExportResponse> export(Authentication authentication,
                                                       @PathVariable("runId") String runId,
                                                       @RequestBody(required = false) AgentExportRequest request) {
@@ -585,7 +993,7 @@ public class AgentController {
         }
         String format = request == null || request.format() == null ? "" : request.format().trim();
         try {
-            ExportAgentRunResponse resp = agentDubboService.exportRun(
+            ExportAgentRunResponse resp = resolveService().exportRun(
                     ExportAgentRunRequest.newBuilder().setUserId(userId).setId(runId).setFormat(nvl(format)).build()
             );
             return ResponseWrapper.success(new AgentExportResponse(
@@ -611,7 +1019,7 @@ public class AgentController {
      * @param request        发送消息请求
      * @return 发送结果
      */
-    @PostMapping("/{runId}/messages")
+    @PostMapping({AGENT_RUNS + "/{runId}/messages", AGENT_LEGACY_RUNS + "/{runId}/messages"})
     public ResponseWrapper<AgentMessageSendResponse> sendMessage(Authentication authentication,
                                                                  @PathVariable("runId") String runId,
                                                                  @RequestBody AgentMessageSendRequest request) {
@@ -627,7 +1035,7 @@ public class AgentController {
         String contextOverride = null;
         if (request.contextOverride() != null && !request.contextOverride().isBlank()) {
             boolean admin = isAdmin(authentication);
-            boolean debugMode = Boolean.TRUE.equals(request.stream()); // 或其他 debug 标识
+            boolean debugMode = Boolean.TRUE.equals(request.debugMode());
             if (admin && debugMode) {
                 contextOverride = request.contextOverride();
             } else {
@@ -636,7 +1044,7 @@ public class AgentController {
         }
 
         try {
-            SendAgentMessageResponse resp = agentDubboService.sendMessage(
+            SendAgentMessageResponse resp = resolveService().sendMessage(
                     SendAgentMessageRequest.newBuilder()
                             .setUserId(userId)
                             .setRunId(runId)
@@ -669,7 +1077,7 @@ public class AgentController {
      * @param includeInitial   是否包含初始问题（默认 true）
      * @return 消息历史列表
      */
-    @GetMapping("/{runId}/messages")
+    @GetMapping({AGENT_RUNS + "/{runId}/messages", AGENT_LEGACY_RUNS + "/{runId}/messages"})
     public ResponseWrapper<AgentMessageListResponse> listMessages(Authentication authentication,
                                                                   @PathVariable("runId") String runId,
                                                                   @RequestParam(value = "limit", required = false, defaultValue = "50") int limit,
@@ -680,7 +1088,7 @@ public class AgentController {
             return ResponseWrapper.error(ResponseCode.UNAUTHORIZED, "未登录或用户不存在");
         }
         try {
-            ListAgentMessagesResponse resp = agentDubboService.listMessages(
+            ListAgentMessagesResponse resp = resolveService().listMessages(
                     ListAgentMessagesRequest.newBuilder()
                             .setUserId(userId)
                             .setRunId(runId)
@@ -768,8 +1176,8 @@ public class AgentController {
                 run.getStatus(),
                 run.getCurrentStep(),
                 run.getMaxSteps(),
-                emptyToNull(run.getPlanJson()),
-                emptyToNull(run.getSnapshotJson()),
+                parseJsonOrNull(run.getPlanJson()),
+                parseJsonOrNull(run.getSnapshotJson()),
                 emptyToNull(run.getLastError()),
                 emptyToNull(run.getTtlExpiresAt()),
                 emptyToNull(run.getStartedAt()),
@@ -777,6 +1185,36 @@ public class AgentController {
                 emptyToNull(run.getCompletedAt()),
                 emptyToNull(run.getExt())
         );
+    }
+
+    private AgentSnapshotPartsMetaResponse toSnapshotPartsMetaResponse(AgentSnapshotPartsMetaMessage meta) {
+        return new AgentSnapshotPartsMetaResponse(
+                meta.getRunId(),
+                meta.getPartSize(),
+                meta.getTotalParts(),
+                meta.getUncompressedSize(),
+                meta.getCompressedSize(),
+                emptyToNull(meta.getCompression()),
+                emptyToNull(meta.getChecksum())
+        );
+    }
+
+    private ResponseEntity<byte[]> snapshotPartError(int status, String code) {
+        HttpHeaders headers = new HttpHeaders();
+        headers.setContentLength(0);
+        headers.set("X-Snapshot-Error", code);
+        return ResponseEntity.status(status).headers(headers).body(new byte[0]);
+    }
+
+    private int resolveSnapshotPartErrorStatus(String message) {
+        String msg = message == null ? "" : message.toLowerCase();
+        if (msg.contains("run not found")) {
+            return 404;
+        }
+        if (msg.contains("part_index") || msg.contains("out of range") || msg.contains("snapshot has no parts")) {
+            return 400;
+        }
+        return 500;
     }
 
     private <T> ResponseWrapper<T> handleRpcError(RpcException e, String action) {
@@ -827,8 +1265,163 @@ public class AgentController {
         return ResponseWrapper.error(ResponseCode.SYSTEM_ERROR, action + "失败");
     }
 
+    private AgentRunResultMessage loadRunResult(String userId, String runId) {
+        return runResultCacheService.getRunResult(userId, runId);
+    }
+
     private String nvl(String value) {
         return value == null ? "" : value;
+    }
+
+    private Object parseJsonOrNull(String json) {
+        if (json == null || json.isBlank()) return null;
+        try {
+            return objectMapper.readValue(json, Object.class);
+        } catch (Exception e) {
+            return json;
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private void appendTraceTimelineItems(String userId,
+                                          String runId,
+                                          List<TimelineResponse.TimelineItem> items,
+                                          String minEventTime,
+                                          String maxEventTime,
+                                          int maxAdditionalItems) {
+        if (maxAdditionalItems <= 0) {
+            return;
+        }
+        try {
+            AgentRunResultMessage result = loadRunResult(userId, runId);
+            String observabilityJson = result.getObservabilityJson();
+            if (observabilityJson == null || observabilityJson.isBlank()
+                    || observabilityJson.getBytes(StandardCharsets.UTF_8).length > OBSERVABILITY_FULL_MAX_BYTES) {
+                return;
+            }
+            Map<String, Object> obs = objectMapper.readValue(observabilityJson, Map.class);
+            Map<String, Object> diagnostics = obs.get("diagnostics") instanceof Map
+                    ? (Map<String, Object>) obs.get("diagnostics") : Map.of();
+            AtomicInteger traceSeq = new AtomicInteger(1);
+            appendTraceTimelineItems(items, diagnostics.get("llmTraces"), "llm", minEventTime, maxEventTime,
+                    traceSeq, maxAdditionalItems);
+            appendTraceTimelineItems(items, diagnostics.get("toolTraces"), "tool", minEventTime, maxEventTime,
+                    traceSeq, maxAdditionalItems);
+        } catch (Exception e) {
+            log.debug("合并 timeline trace 失败: runId={}, error={}", runId, e.getMessage());
+        }
+    }
+
+    private void appendTraceTimelineItems(List<TimelineResponse.TimelineItem> items,
+                                          Object tracesObj,
+                                          String traceType,
+                                          String minEventTime,
+                                          String maxEventTime,
+                                          AtomicInteger traceSeq,
+                                          int maxAdditionalItems) {
+        if (!(tracesObj instanceof List<?> traces)) {
+            return;
+        }
+        for (Object item : traces) {
+            if (traceSeq.get() > maxAdditionalItems) {
+                return;
+            }
+            if (!(item instanceof Map<?, ?> trace)) {
+                continue;
+            }
+            String traceTime = strVal(trace.get("time"));
+            if (!withinTimelineWindow(traceTime, minEventTime, maxEventTime)) {
+                continue;
+            }
+            Map<String, Object> detail = new LinkedHashMap<>();
+            detail.put("trace_id", strVal(trace.get("traceId")));
+            detail.put("phase", strVal(trace.get("phase")));
+            detail.put("todo_id", emptyToNull(strVal(trace.get("todoId"))));
+            detail.put("duration_ms", longVal(trace.get("durationMs")));
+            if ("llm".equals(traceType)) {
+                detail.put("model", strVal(trace.get("model")));
+                detail.put("endpoint", strVal(trace.get("endpoint")));
+                detail.put("has_error", boolVal(trace.get("hasError")));
+                detail.put("input_tokens", nullableLong(trace.get("inputTokens")));
+                detail.put("output_tokens", nullableLong(trace.get("outputTokens")));
+            } else {
+                detail.put("tool_name", strVal(trace.get("toolName")));
+                detail.put("success", boolVal(trace.get("success")));
+                detail.put("cache_hit", boolVal(trace.get("cacheHit")));
+            }
+            items.add(new TimelineResponse.TimelineItem(
+                    -traceSeq.getAndIncrement(),
+                    "trace",
+                    strVal(trace.get("traceId")),
+                    traceType,
+                    traceTime,
+                    traceTimelineTitle(traceType, trace),
+                    longVal(trace.get("durationMs")),
+                    detail
+            ));
+        }
+    }
+
+    private boolean withinTimelineWindow(String time, String minEventTime, String maxEventTime) {
+        if (time == null || time.isBlank()) {
+            return false;
+        }
+        if (minEventTime == null || maxEventTime == null) {
+            return true;
+        }
+        return time.compareTo(minEventTime) >= 0 && time.compareTo(maxEventTime) <= 0;
+    }
+
+    private String strVal(Object value) {
+        return value == null ? "" : String.valueOf(value);
+    }
+
+    private String traceTimelineTitle(String traceType, Map<?, ?> trace) {
+        String phase = strVal(trace.get("phase"));
+        long durationMs = longVal(trace.get("durationMs"));
+        if ("llm".equals(traceType)) {
+            return truncate("LLM " + phase + " " + strVal(trace.get("model")) + " " + durationMs + "ms", 120);
+        }
+        return truncate("Tool " + phase + " " + strVal(trace.get("toolName")) + " " + durationMs + "ms", 120);
+    }
+
+    private String timelineTitle(String eventType, Object payload) {
+        String type = nvl(eventType);
+        if (payload instanceof Map<?, ?> map) {
+            Object todo = map.get("todo_id");
+            Object tool = map.get("tool");
+            Object summary = map.get("summary");
+            if (todo != null && !String.valueOf(todo).isBlank()) {
+                return type + " " + todo;
+            }
+            if (tool != null && !String.valueOf(tool).isBlank()) {
+                return type + " " + tool;
+            }
+            if (summary != null && !String.valueOf(summary).isBlank()) {
+                return truncate(type + " " + summary, 120);
+            }
+        }
+        return type;
+    }
+
+    private long longVal(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        return 0L;
+    }
+
+    private Long nullableLong(Object value) {
+        if (value instanceof Number n) return n.longValue();
+        return null;
+    }
+
+    private boolean boolVal(Object value) {
+        if (value instanceof Boolean b) return b;
+        return false;
+    }
+
+    private String truncate(String value, int maxLen) {
+        if (value == null || value.length() <= maxLen) return value;
+        return value.substring(0, maxLen) + "...";
     }
 
     private boolean toBoolean(Object value) {

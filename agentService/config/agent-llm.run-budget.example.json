@@ -1,0 +1,11 @@
+{
+  "runtime": {
+    "runBudget": {
+      "maxWallClockMs": 1200000,
+      "maxLlmCalls": 80,
+      "maxToolCalls": 120,
+      "maxTokens": 600000,
+      "maxHttpAttemptsPerLogicalCall": 2
+    }
+  }
+}

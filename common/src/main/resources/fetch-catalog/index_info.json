@@ -1,0 +1,37 @@
+{
+  "dataType": "index_info",
+  "label": "指数基本信息",
+  "description": "获取A股指数基本信息，包含指数代码、名称、发布机构、基日等元数据。",
+  "serviceModule": "domesticIndexFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按市场筛选",
+      "description": "根据市场类型筛选指数基本信息，支持分页。",
+      "requiredParams": [],
+      "optionalParams": ["market", "offset", "limit"],
+      "paramDefs": {
+        "market": {
+          "label": "市场代码",
+          "description": "交易所或市场标识，如SSE、SZSE等",
+          "type": "string",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    }
+  ],
+  "taskSetVariants": []
+}

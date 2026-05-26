@@ -1,35 +1,48 @@
 package world.willfrog.agent.service;
 
+import world.willfrog.agent.platform.service.*;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
+import org.mockito.ArgumentCaptor;
 import org.mockito.Mock;
 import org.mockito.junit.jupiter.MockitoExtension;
+import org.springframework.core.task.TaskRejectedException;
 import org.springframework.test.util.ReflectionTestUtils;
-import world.willfrog.agent.entity.AgentRun;
-import world.willfrog.agent.entity.AgentRunEvent;
-import world.willfrog.agent.mapper.AgentRunEventMapper;
-import world.willfrog.agent.mapper.AgentRunMapper;
-import world.willfrog.agent.model.AgentRunStatus;
+import world.willfrog.agent.platform.entity.AgentRun;
+import world.willfrog.agent.platform.entity.AgentRunEvent;
+import world.willfrog.agent.platform.mapper.AgentRunEventMapper;
+import world.willfrog.agent.platform.mapper.AgentRunMapper;
+import world.willfrog.agent.platform.model.AgentRunStatus;
+import world.willfrog.alphafrogmicro.agent.idl.CancelAgentRunRequest;
+import world.willfrog.alphafrogmicro.agent.idl.CreateAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentConfigResponse;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentCreditsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunResultRequest;
 import world.willfrog.alphafrogmicro.agent.idl.GetAgentRunStatusRequest;
+import world.willfrog.alphafrogmicro.agent.idl.AgentToolMessage;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentRunsRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ListAgentModelsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.ListAgentToolsRequest;
+import world.willfrog.alphafrogmicro.agent.idl.PauseAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.ResumeAgentRunRequest;
 import world.willfrog.alphafrogmicro.agent.idl.UpdateAgentRunRequest;
 import world.willfrog.alphafrogmicro.common.dao.user.UserDao;
+import world.willfrog.alphafrogmicro.common.pojo.user.User;
 
 import java.time.OffsetDateTime;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.argThat;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.lenient;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -62,12 +75,32 @@ class AgentDubboServiceImplTest {
     private UserDao userDao;
     @Mock
     private AgentMessageService messageService;
+    @Mock
+    private AgentToolCatalogService toolCatalogService;
+    @Mock
+    private SnapshotPartService snapshotPartService;
 
     private AgentDubboServiceImpl service;
 
     @BeforeEach
     void setUp() {
-        service = new AgentDubboServiceImpl(
+        service = createService(new AgentFinalAnswerParser(new ObjectMapper()), new AgentCitationService(new ObjectMapper()));
+
+        lenient().when(eventService.shouldMarkExpired(org.mockito.ArgumentMatchers.any())).thenReturn(false);
+        lenient().when(eventService.extractRunDisplayTitle(anyString())).thenReturn("");
+        lenient().when(stateStore.loadPlan(anyString())).thenReturn(java.util.Optional.empty());
+        lenient().when(observabilityService.loadObservabilityJson(anyString(), anyString())).thenReturn("{}");
+        lenient().when(observabilityService.loadObservabilitySummaryJson(anyString(), anyString())).thenReturn("{}");
+        lenient().when(observabilityService.isFullObservabilityAvailable(anyString(), anyString())).thenReturn(false);
+        lenient().when(creditService.calculateRunTotalCredits(
+                org.mockito.ArgumentMatchers.any(),
+                org.mockito.ArgumentMatchers.anyList(),
+                org.mockito.ArgumentMatchers.anyString()
+        )).thenReturn(0);
+    }
+
+    private AgentDubboServiceImpl createService(AgentFinalAnswerParser parser, AgentCitationService citations) {
+        AgentDubboServiceImpl created = new AgentDubboServiceImpl(
                 runMapper,
                 eventMapper,
                 eventService,
@@ -80,22 +113,17 @@ class AgentDubboServiceImplTest {
                 creditService,
                 userDao,
                 new ObjectMapper(),
-                messageService
+                messageService,
+                toolCatalogService,
+                parser,
+                citations,
+                snapshotPartService
         );
-        ReflectionTestUtils.setField(service, "checkpointVersion", "v2");
-        ReflectionTestUtils.setField(service, "artifactRetentionNormalDays", 7);
-        ReflectionTestUtils.setField(service, "artifactRetentionAdminDays", 30);
-        ReflectionTestUtils.setField(service, "maxPollingIntervalSeconds", 3);
-
-        lenient().when(eventService.shouldMarkExpired(org.mockito.ArgumentMatchers.any())).thenReturn(false);
-        lenient().when(eventService.extractRunDisplayTitle(anyString())).thenReturn("");
-        lenient().when(stateStore.loadPlan(anyString())).thenReturn(java.util.Optional.empty());
-        lenient().when(observabilityService.loadObservabilityJson(anyString(), anyString())).thenReturn("{}");
-        lenient().when(creditService.calculateRunTotalCredits(
-                org.mockito.ArgumentMatchers.any(),
-                org.mockito.ArgumentMatchers.anyList(),
-                org.mockito.ArgumentMatchers.anyString()
-        )).thenReturn(0);
+        ReflectionTestUtils.setField(created, "checkpointVersion", "v2");
+        ReflectionTestUtils.setField(created, "artifactRetentionNormalDays", 7);
+        ReflectionTestUtils.setField(created, "artifactRetentionAdminDays", 30);
+        ReflectionTestUtils.setField(created, "maxPollingIntervalSeconds", 3);
+        return created;
     }
 
     @Test
@@ -103,6 +131,19 @@ class AgentDubboServiceImplTest {
         GetAgentConfigResponse response = service.getConfig(GetAgentConfigRequest.newBuilder().setUserId("u1").build());
         assertEquals(false, response.getFeatures().getParallelExecution());
         assertEquals(true, response.getFeatures().getPauseResume());
+    }
+
+    @Test
+    void listTools_shouldUseToolCatalog() {
+        when(toolCatalogService.listToolMessages()).thenReturn(List.of(
+                AgentToolMessage.newBuilder().setName("searchWeb").setDescription("联网搜索").setParametersJson("{}").build()
+        ));
+
+        var response = service.listTools(ListAgentToolsRequest.newBuilder().setUserId("u1").build());
+
+        assertEquals(1, response.getItemsCount());
+        assertEquals("searchWeb", response.getItems(0).getName());
+        verify(toolCatalogService).listToolMessages();
     }
 
     @Test
@@ -118,6 +159,82 @@ class AgentDubboServiceImplTest {
                 service.resumeRun(ResumeAgentRunRequest.newBuilder().setUserId("u1").setId("run-1").build())
         );
         org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("SNAPSHOT_VERSION_INCOMPATIBLE"));
+    }
+
+    @Test
+    void createRun_shouldAppendRunEnqueuedAfterExecuteAsync() {
+        User user = new User();
+        user.setUserId(1127L);
+        when(userDao.getUserById(1127L)).thenReturn(user);
+
+        AgentRun run = new AgentRun();
+        run.setId("run-enqueue");
+        run.setUserId("1127");
+        run.setStatus(AgentRunStatus.RECEIVED);
+        when(eventService.createRun(
+                eq("1127"),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString()
+        )).thenReturn(run);
+
+        service.createRun(CreateAgentRunRequest.newBuilder()
+                .setUserId("1127")
+                .setMessage("hello")
+                .setEndpointName("openrouter")
+                .setModelName("moonshotai/kimi-k2.6")
+                .build());
+
+        verify(executor).executeAsync("run-enqueue");
+        verify(eventService).append(eq("run-enqueue"), eq("1127"), eq("RUN_ENQUEUED"), argThat(payload ->
+                payload instanceof Map<?, ?> map
+                        && "run-enqueue".equals(map.get("run_id"))
+                        && "agentRunTaskExecutor".equals(map.get("executor"))
+        ));
+    }
+
+    @Test
+    void createRun_shouldRecordEnqueueFailureWhenExecutorRejects() {
+        User user = new User();
+        user.setUserId(1127L);
+        when(userDao.getUserById(1127L)).thenReturn(user);
+
+        AgentRun run = new AgentRun();
+        run.setId("run-reject");
+        run.setUserId("1127");
+        run.setStatus(AgentRunStatus.RECEIVED);
+        when(eventService.createRun(
+                eq("1127"),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString(),
+                org.mockito.ArgumentMatchers.anyInt(),
+                org.mockito.ArgumentMatchers.anyBoolean(),
+                anyString()
+        )).thenReturn(run);
+        doThrow(new TaskRejectedException("queue full")).when(executor).executeAsync("run-reject");
+
+        IllegalStateException ex = assertThrows(IllegalStateException.class, () ->
+                service.createRun(CreateAgentRunRequest.newBuilder()
+                        .setUserId("1127")
+                        .setMessage("hello")
+                        .setEndpointName("openrouter")
+                        .setModelName("moonshotai/kimi-k2.6")
+                        .build())
+        );
+        org.junit.jupiter.api.Assertions.assertTrue(ex.getMessage().contains("run-reject"));
+        verify(eventService).append(eq("run-reject"), eq("1127"), eq("RUN_ENQUEUE_FAILED"), any());
     }
 
     @Test
@@ -139,6 +256,125 @@ class AgentDubboServiceImplTest {
         var status = service.getStatus(GetAgentRunStatusRequest.newBuilder().setUserId("u1").setId("run-2").build());
         assertEquals("EXECUTING", status.getPhase());
         assertEquals(0, status.getTotalCreditsConsumed());
+    }
+
+    @Test
+    void getStatus_shouldPopulateLegacyObservabilityJsonWithLiteSummary() {
+        AgentRun run = new AgentRun();
+        run.setId("run-status-lite");
+        run.setUserId("u1");
+        run.setStatus(AgentRunStatus.EXECUTING);
+        run.setPlanJson("{}");
+        run.setSnapshotJson("{}");
+        when(runMapper.findByIdAndUser("run-status-lite", "u1")).thenReturn(run);
+        when(observabilityService.loadObservabilitySummaryJson("run-status-lite", "{}"))
+                .thenReturn("{\"summary\":{\"llmCalls\":1}}");
+        when(observabilityService.isFullObservabilityAvailable("run-status-lite", "{}")).thenReturn(true);
+
+        var status = service.getStatus(GetAgentRunStatusRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-status-lite")
+                .build());
+
+        assertEquals("{\"summary\":{\"llmCalls\":1}}", status.getObservabilityJson());
+        assertEquals("{\"summary\":{\"llmCalls\":1}}", status.getObservabilitySummaryJson());
+        assertEquals(true, status.getObservabilityFullAvailable());
+    }
+
+    @Test
+    void getResult_fallbackParseShouldUseCitationMapFromCompletedItems() {
+        AgentRun run = new AgentRun();
+        run.setId("run-result-citations");
+        run.setUserId("u1");
+        run.setStatus(AgentRunStatus.COMPLETED);
+        run.setSnapshotJson("""
+                {
+                  "answer": "回答 [1]",
+                  "completed_items": [
+                    {
+                      "todo_id": "todo_1",
+                      "description": "搜索",
+                      "summary": "done",
+                      "output": "{\\"citations\\":[{\\"index\\":1,\\"title\\":\\"来源\\",\\"url\\":\\"https://example.com/a\\",\\"entityMatch\\":true,\\"relevanceJudged\\":true}]}"
+                    }
+                  ]
+                }
+                """);
+        when(runMapper.findByIdAndUser("run-result-citations", "u1")).thenReturn(run);
+        AgentFinalAnswerParser parser = org.mockito.Mockito.mock(AgentFinalAnswerParser.class);
+        when(parser.parse(eq("回答 [1]"), any(AgentCitationService.CitationMap.class)))
+                .thenReturn(new AgentFinalAnswerParser.ParsedAnswer("回答 [1]", "回答 [1]", null, List.of()));
+        when(parser.writeStructuredJson(any())).thenReturn("");
+        AgentDubboServiceImpl localService = createService(parser, new AgentCitationService(new ObjectMapper()));
+
+        var response = localService.getResult(GetAgentRunResultRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-result-citations")
+                .build());
+
+        ArgumentCaptor<AgentCitationService.CitationMap> citationMapCaptor =
+                ArgumentCaptor.forClass(AgentCitationService.CitationMap.class);
+        verify(parser).parse(eq("回答 [1]"), citationMapCaptor.capture());
+        assertEquals("回答 [1]", response.getAnswerMarkdown());
+        assertEquals("https://example.com/a", citationMapCaptor.getValue().byIndex(1).url());
+    }
+
+    @Test
+    void cancelRun_shouldPersistObservabilitySnapshotBeforeUpdatingStatus() {
+        AgentRun existing = new AgentRun();
+        existing.setId("run-cancel-1");
+        existing.setUserId("u1");
+        existing.setStatus(AgentRunStatus.EXECUTING);
+        existing.setSnapshotJson("{\"answer\":\"partial\"}");
+
+        AgentRun updated = new AgentRun();
+        updated.setId("run-cancel-1");
+        updated.setUserId("u1");
+        updated.setStatus(AgentRunStatus.CANCELED);
+        updated.setSnapshotJson("{\"answer\":\"partial\",\"observability\":{}}");
+
+        when(runMapper.findByIdAndUser("run-cancel-1", "u1")).thenReturn(existing, updated);
+        when(observabilityService.attachObservabilityToSnapshot("run-cancel-1", "{\"answer\":\"partial\"}", AgentRunStatus.CANCELED))
+                .thenReturn("{\"answer\":\"partial\",\"observability\":{}}");
+
+        service.cancelRun(CancelAgentRunRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-cancel-1")
+                .build());
+
+        verify(observabilityService).attachObservabilityToSnapshot("run-cancel-1", "{\"answer\":\"partial\"}", AgentRunStatus.CANCELED);
+        verify(runMapper).updateSnapshot("run-cancel-1", "u1", AgentRunStatus.CANCELED,
+                "{\"answer\":\"partial\",\"observability\":{}}", false, null);
+        verify(stateStore).markRunStatus("run-cancel-1", AgentRunStatus.CANCELED.name());
+    }
+
+    @Test
+    void pauseRun_shouldPersistObservabilitySnapshotForRedisFallbackBackup() {
+        AgentRun existing = new AgentRun();
+        existing.setId("run-pause-1");
+        existing.setUserId("u1");
+        existing.setStatus(AgentRunStatus.EXECUTING);
+        existing.setSnapshotJson("{\"answer\":\"partial\"}");
+
+        AgentRun updated = new AgentRun();
+        updated.setId("run-pause-1");
+        updated.setUserId("u1");
+        updated.setStatus(AgentRunStatus.WAITING);
+        updated.setSnapshotJson("{\"answer\":\"partial\",\"observability\":{}}");
+
+        when(runMapper.findByIdAndUser("run-pause-1", "u1")).thenReturn(existing, updated);
+        when(observabilityService.attachObservabilityToSnapshot("run-pause-1", "{\"answer\":\"partial\"}", AgentRunStatus.WAITING))
+                .thenReturn("{\"answer\":\"partial\",\"observability\":{}}");
+
+        service.pauseRun(PauseAgentRunRequest.newBuilder()
+                .setUserId("u1")
+                .setId("run-pause-1")
+                .build());
+
+        verify(observabilityService).attachObservabilityToSnapshot("run-pause-1", "{\"answer\":\"partial\"}", AgentRunStatus.WAITING);
+        verify(runMapper).updateSnapshot("run-pause-1", "u1", AgentRunStatus.WAITING,
+                "{\"answer\":\"partial\",\"observability\":{}}", false, null);
+        verify(stateStore).markRunStatus("run-pause-1", AgentRunStatus.WAITING.name());
     }
 
     @Test

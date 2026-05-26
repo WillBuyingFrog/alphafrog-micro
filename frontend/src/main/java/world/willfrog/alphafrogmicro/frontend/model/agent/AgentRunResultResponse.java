@@ -4,8 +4,10 @@ public record AgentRunResultResponse(
         String id,
         String status,
         String answer,
-        String payloadJson,
-        String observabilityJson,
+        String answerMarkdown,
+        Object structuredAnswer,
+        Object payload,
+        Object observability,
         Integer totalCreditsConsumed
 ) {
 }

@@ -1,0 +1,92 @@
+{
+  "dataType": "trade_calendar",
+  "label": "交易日历",
+  "description": "通过 TuShare trade_cal 接口抓取上交所交易日历数据，exchange 固定为 SSE",
+  "serviceModule": "domesticTradeCalendarFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按日期范围抓取",
+      "description": "按指定的日期范围抓取上交所交易日历数据，exchange 固定为 SSE",
+      "requiredParams": ["start_date", "end_date"],
+      "optionalParams": ["offset", "limit"],
+      "paramDefs": {
+        "start_date": {
+          "label": "开始日期",
+          "description": "日期范围的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "end_date": {
+          "label": "结束日期",
+          "description": "日期范围的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "TuShare 分页偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "TuShare 分页每页条数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    }
+  ],
+  "taskSetVariants": [
+    {
+      "subType": 1,
+      "label": "固定日期范围与 offset 步进展开",
+      "description": "使用固定的日期范围配合 offset 步进抓取交易日历",
+      "expandParam": "date_range",
+      "expandDescription": "使用固定的 start_date/end_date 配合 offset_range 的步进值，每个 offset 生成一条叶子任务",
+      "expandStrategy": "date_range_with_offsets",
+      "requiredParams": ["date_range", "offset_range"],
+      "optionalParams": [],
+      "paramDefs": {
+        "date_range.start_date": {
+          "label": "开始日期",
+          "description": "固定的开始日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "date_range.end_date": {
+          "label": "结束日期",
+          "description": "固定的结束日期，格式 yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "offset_range.start": {
+          "label": "Offset 起始",
+          "description": "分页起始偏移量",
+          "type": "number",
+          "default": 0
+        },
+        "offset_range.end": {
+          "label": "Offset 结束",
+          "description": "分页结束偏移量",
+          "type": "number",
+          "default": null
+        },
+        "offset_range.step": {
+          "label": "Offset 步长",
+          "description": "每次步进的偏移量",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": [],
+      "outputTaskVariantSubType": 1
+    }
+  ]
+}

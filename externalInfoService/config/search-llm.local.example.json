@@ -2,7 +2,16 @@
   "providers": {
     "perplexity": {
       "baseUrl": "https://api.perplexity.ai",
-      "apiKey": "replace-with-your-perplexity-api-key",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_PPLX_API_KEY}",
+      "searchPath": "/search",
+      "authHeader": "Authorization",
+      "authPrefix": "Bearer ",
+      "connectTimeoutSeconds": 20,
+      "requestTimeoutSeconds": 45
+    },
+    "tavily": {
+      "baseUrl": "https://api.tavily.com",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_TAVILY_API_KEY}",
       "searchPath": "/search",
       "authHeader": "Authorization",
       "authPrefix": "Bearer ",
@@ -11,7 +20,7 @@
     },
     "exa": {
       "baseUrl": "https://api.exa.ai",
-      "apiKey": "replace-with-your-exa-api-key",
+      "apiKey": "${AF_EXTERNAL_INFO_SEARCH_EXA_API_KEY}",
       "searchPath": "/search",
       "authHeader": "x-api-key",
       "authPrefix": "",
@@ -59,6 +68,59 @@
           "categoryHint": "global"
         }
       ]
+    },
+    "webSearch": {
+      "defaultPreset": "finance_default",
+      "presets": {
+        "finance_default": {
+          "scene": "finance",
+          "backend": "perplexity",
+          "strength": "standard",
+          "maxResults": 8
+        },
+        "finance_deep": {
+          "scene": "finance",
+          "backend": "tavily",
+          "strength": "deep",
+          "maxResults": 10
+        },
+        "news_fast": {
+          "scene": "news",
+          "backend": "exa",
+          "strength": "fast",
+          "maxResults": 10,
+          "timeRange": "day"
+        },
+        "general_default": {
+          "scene": "general",
+          "backend": "perplexity",
+          "strength": "standard",
+          "maxResults": 5
+        }
+      },
+      "backends": {
+        "perplexity": {
+          "baseUrl": "https://api.perplexity.ai",
+          "authHeader": "Authorization",
+          "authPrefix": "Bearer ",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        },
+        "tavily": {
+          "baseUrl": "https://api.tavily.com",
+          "authHeader": "Authorization",
+          "authPrefix": "Bearer ",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        },
+        "exa": {
+          "baseUrl": "https://api.exa.ai",
+          "authHeader": "x-api-key",
+          "authPrefix": "",
+          "connectTimeoutSeconds": 20,
+          "requestTimeoutSeconds": 45
+        }
+      }
     }
   },
   "prompts": {

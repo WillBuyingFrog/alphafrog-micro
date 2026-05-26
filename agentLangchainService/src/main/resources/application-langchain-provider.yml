@@ -1,0 +1,47 @@
+spring:
+  application:
+    name: agentLangchainService
+  datasource:
+    url: jdbc:postgresql://${AF_DB_MAIN_HOST:localhost}:${AF_DB_MAIN_PORT:5432}/${AF_DB_MAIN_DATABASE:alphafrog}
+    username: ${AF_DB_MAIN_USER:postgres}
+    password: ${AF_DB_MAIN_PASSWORD:postgres}
+    driver-class-name: org.postgresql.Driver
+  data:
+    redis:
+      host: ${AF_REDIS_HOST:127.0.0.1}
+      port: ${AF_REDIS_PORT:6379}
+      password: ${AF_REDIS_PASSWORD:}
+  autoconfigure:
+    exclude: []
+
+mybatis:
+  mapper-locations: classpath*:mapper/*.xml
+  configuration:
+    map-underscore-to-camel-case: true
+
+dubbo:
+  application:
+    name: agent-langchain-service
+    register-mode: interface
+    # Keep method metadata local; do not push full AgentDubboService descriptor to Nacos (1024-byte limit).
+    metadata-type: local
+  protocol:
+    name: tri
+    port: ${AGENT_LANGCHAIN_DUBBO_PORT:50059}
+  registry:
+    address: nacos://${NACOS_ADDRESS:127.0.0.1}:8848
+    use-as-config-center: false
+    use-as-metadata-center: false
+    simplified: true  # 避免 AgentDubboService 全量 methods metadata 超过 Nacos 1024 限制
+  consumer:
+    check: false
+  provider:
+    timeout: ${AF_DUBBO_PROVIDER_TIMEOUT_MS:10000}
+    simplify: true
+
+agent:
+  langchain:
+    provider:
+      enabled: true
+    service:
+      version: P1-linear

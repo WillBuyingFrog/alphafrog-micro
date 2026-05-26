@@ -1,0 +1,61 @@
+{
+  "dataType": "sw_industry_member",
+  "label": "申万行业成分股",
+  "description": "获取申万行业成分股数据，包含各层级行业对应的个股成员及入出日期。",
+  "serviceModule": "domesticIndexFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按条件筛选成分股",
+      "description": "支持按各级行业代码、股票代码筛选申万行业成分股，支持分页。",
+      "requiredParams": [],
+      "optionalParams": ["l1_code", "l2_code", "l3_code", "ts_code", "is_new", "offset", "limit"],
+      "paramDefs": {
+        "l1_code": {
+          "label": "一级行业代码",
+          "description": "申万一级行业代码",
+          "type": "string",
+          "default": null
+        },
+        "l2_code": {
+          "label": "二级行业代码",
+          "description": "申万二级行业代码",
+          "type": "string",
+          "default": null
+        },
+        "l3_code": {
+          "label": "三级行业代码",
+          "description": "申万三级行业代码",
+          "type": "string",
+          "default": null
+        },
+        "ts_code": {
+          "label": "股票代码",
+          "description": "股票代码，如000001.SZ",
+          "type": "string",
+          "default": null
+        },
+        "is_new": {
+          "label": "是否最新",
+          "description": "是否仅返回最新成分股，Y是/N否",
+          "type": "string",
+          "default": "Y"
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": ["empty_params_allowed"]
+    }
+  ],
+  "taskSetVariants": []
+}

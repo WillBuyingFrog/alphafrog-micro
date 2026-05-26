@@ -2,7 +2,7 @@ package world.willfrog.agent.workflow;
 
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
-import world.willfrog.agent.service.AgentRunStateStore;
+import world.willfrog.agent.platform.service.AgentRunStateStore;
 
 @Component
 @RequiredArgsConstructor

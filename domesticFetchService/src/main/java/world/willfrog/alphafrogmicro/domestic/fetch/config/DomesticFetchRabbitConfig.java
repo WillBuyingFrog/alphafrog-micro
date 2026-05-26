@@ -1,5 +1,6 @@
 package world.willfrog.alphafrogmicro.domestic.fetch.config;
 
+import org.springframework.amqp.core.AcknowledgeMode;
 import org.springframework.amqp.core.Binding;
 import org.springframework.amqp.core.BindingBuilder;
 import org.springframework.amqp.core.DirectExchange;
@@ -17,6 +18,9 @@ public class DomesticFetchRabbitConfig {
 
     @Value("${af.fetch.concurrency:3}")
     private int fetchConcurrency;
+
+    @Value("${spring.rabbitmq.listener.simple.auto-startup:true}")
+    private boolean listenerAutoStartup;
 
     public static final String FETCH_EXCHANGE = "fetch.exchange";
     public static final String FETCH_TASK_QUEUE = "fetch.task.queue.domesticFetchService";
@@ -55,6 +59,8 @@ public class DomesticFetchRabbitConfig {
         SimpleRabbitListenerContainerFactory factory = new SimpleRabbitListenerContainerFactory();
         factory.setConnectionFactory(connectionFactory);
         factory.setConcurrentConsumers(fetchConcurrency);
+        factory.setAcknowledgeMode(AcknowledgeMode.MANUAL);
+        factory.setAutoStartup(listenerAutoStartup);
         return factory;
     }
 }

@@ -35,6 +35,7 @@ message CreateAgentRunRequest {
   string provider = 8;
   int32 planner_candidate_count = 9;
   bool debug_mode = 10;
+  string stage_config_json = 11;  // 各阶段 LLM 配置（包含 planning/execution/sub_agent）
 }
 
 message GetAgentRunRequest {
@@ -134,6 +135,8 @@ message AgentRunResultMessage {
   string payload_json = 4;
   string observability_json = 5;
   int32 total_credits_consumed = 6;
+  string answer_markdown = 7;
+  string structured_answer_json = 8;
 }
 
 message AgentRunStatusMessage {
@@ -148,6 +151,12 @@ message AgentRunStatusMessage {
   string progress_json = 9;
   string observability_json = 10;
   int32 total_credits_consumed = 11;
+  int32 event_count = 12;
+  int64 started_at_ms = 13;
+  int64 completed_at_ms = 14;
+  int64 elapsed_ms = 15;
+  string observability_summary_json = 16;
+  bool observability_full_available = 17;
 }
 
 message AgentToolMessage {
@@ -331,6 +340,38 @@ message ListAgentMessagesResponse {
   bool has_more = 3;
 }
 
+message GetAgentSnapshotPartsRequest {
+  string user_id = 1;
+  string id = 2;
+  int32 max_part_size = 3;
+}
+
+message AgentSnapshotPartsMetaMessage {
+  string run_id = 1;
+  int32 part_size = 2;
+  int32 total_parts = 3;
+  int64 uncompressed_size = 4;
+  int64 compressed_size = 5;
+  string compression = 6;
+  string checksum = 7;
+}
+
+message GetAgentSnapshotPartRequest {
+  string user_id = 1;
+  string id = 2;
+  int32 part_index = 3;
+  int32 max_part_size = 4;
+}
+
+message AgentSnapshotPartMessage {
+  string run_id = 1;
+  int32 part_index = 2;
+  int32 part_size = 3;
+  int32 total_parts = 4;
+  bytes content = 5;
+  string compression = 6;
+}
+
 service AgentDubboService {
   rpc CreateRun(CreateAgentRunRequest) returns (AgentRunMessage);
   rpc GetRun(GetAgentRunRequest) returns (AgentRunMessage);
@@ -354,4 +395,6 @@ service AgentDubboService {
   rpc ExportRun(ExportAgentRunRequest) returns (ExportAgentRunResponse);
   rpc SendMessage(SendAgentMessageRequest) returns (SendAgentMessageResponse);
   rpc ListMessages(ListAgentMessagesRequest) returns (ListAgentMessagesResponse);
+  rpc GetSnapshotPartsMeta(GetAgentSnapshotPartsRequest) returns (AgentSnapshotPartsMetaMessage);
+  rpc GetSnapshotPart(GetAgentSnapshotPartRequest) returns (AgentSnapshotPartMessage);
 }

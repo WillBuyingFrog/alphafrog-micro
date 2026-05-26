@@ -1,9 +1,8 @@
 syntax = "proto3";
 
+option java_multiple_files = true;
 
 package world.willfrog.alphafrogmicro.domestic.idl;
-
-option java_multiple_files = true;
 
 /**
   基金基本信息
@@ -185,6 +184,19 @@ message DomesticFundNavFetchByTradeDateResponse {
   int32 fetchedItemsCount = 2;
 }
 
+// 根据日期范围一次性爬取基金净值（TuShare fund_nav 支持 start_date/end_date）
+message DomesticFundNavFetchByDateRangeRequest {
+  int64 startDateTimestamp = 1;
+  int64 endDateTimestamp = 2;
+  int32 offset = 3;
+  int32 limit = 4;
+}
+
+message DomesticFundNavFetchByDateRangeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
 // 根据公告时间范围爬取基金持仓
 message DomesticFundPortfolioFetchByDateRangeRequest {
   int64 startDateTimestamp = 1;
@@ -208,11 +220,166 @@ service DomesticFundService {
   rpc searchDomesticFundInfo(DomesticFundSearchRequest) returns (DomesticFundSearchResponse);
   rpc getDomesticFundPortfolioByTsCodeAndDateRange(DomesticFundPortfolioByTsCodeAndDateRangeRequest) returns (DomesticFundPortfolioByTsCodeAndDateRangeResponse);
   rpc getDomesticFundPortfolioBySymbolAndDateRange(DomesticFundPortfolioBySymbolAndDateRangeRequest) returns (DomesticFundPortfolioBySymbolAndDateRangeResponse);
+  rpc getDomesticEtfShareSizesByTsCodeAndDateRange(DomesticEtfShareSizesByTsCodeAndDateRangeRequest) returns (DomesticEtfShareSizesByTsCodeAndDateRangeResponse);
 
 }
+
+/**
+  基金管理人爬取
+ */
+
+message DomesticFundCompanyFetchRequest {
+}
+
+message DomesticFundCompanyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金经理爬取
+ */
+
+message DomesticFundManagerFetchByTsCodeRequest {
+  string tsCode = 1;
+  string annDate = 2;
+  string name = 3;
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticFundManagerFetchByTsCodeResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  基金份额爬取
+ */
+
+message DomesticFundShareFetchByTradeDateRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string market = 5;
+  int32 offset = 6;
+  int32 limit = 7;
+}
+
+message DomesticFundShareFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF份额规模爬取
+ */
+
+message DomesticEtfShareSizeFetchByTradeDateRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  string exchange = 5;
+  int32 offset = 6;
+  int32 limit = 7;
+}
+
+message DomesticEtfShareSizeFetchByTradeDateResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 基本信息爬取
+ */
+
+message DomesticEtfInfoFetchRequest {
+  string tsCode = 1;
+  string listStatus = 2;
+  string exchange = 3;
+  int32 offset = 4;
+  int32 limit = 5;
+}
+
+message DomesticEtfInfoFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 场内日线爬取（TuShare fund_daily）
+ */
+
+message DomesticEtfDailyFetchRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  int32 offset = 5;
+  int32 limit = 6;
+}
+
+message DomesticEtfDailyFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 复权因子爬取（TuShare fund_adj）
+ */
+
+message DomesticEtfAdjFactorFetchRequest {
+  string tsCode = 1;
+  string tradeDate = 2;
+  string startDate = 3;
+  string endDate = 4;
+  int32 offset = 5;
+  int32 limit = 6;
+}
+
+message DomesticEtfAdjFactorFetchResponse {
+  string status = 1;
+  int32 fetchedItemsCount = 2;
+}
+
+/**
+  ETF 份额规模查询（复用 alphafrog_fund_etf_share_size）
+ */
+
+message DomesticEtfShareSizeItem {
+  string tsCode = 1;
+  int64 tradeDate = 2;
+  optional string etfName = 3;
+  optional double totalShare = 4;
+  optional double totalSize = 5;
+  optional double nav = 6;
+  optional double close = 7;
+  optional string exchange = 8;
+}
+
+message DomesticEtfShareSizesByTsCodeAndDateRangeRequest {
+  string tsCode = 1;
+  int64 startDateTimestamp = 2;
+  int64 endDateTimestamp = 3;
+}
+
+message DomesticEtfShareSizesByTsCodeAndDateRangeResponse {
+  repeated DomesticEtfShareSizeItem items = 1;
+}
+
 
 service DomesticFundFetchService {
   rpc fetchDomesticFundInfoByMarket(DomesticFundInfoFetchByMarketRequest) returns (DomesticFundInfoFetchByMarketResponse);
   rpc fetchDomesticFundNavByTradeDate(DomesticFundNavFetchByTradeDateRequest) returns (DomesticFundNavFetchByTradeDateResponse);
+  rpc fetchDomesticFundNavByDateRange(DomesticFundNavFetchByDateRangeRequest) returns (DomesticFundNavFetchByDateRangeResponse);
   rpc fetchDomesticFundPortfolioByDateRange(DomesticFundPortfolioFetchByDateRangeRequest) returns (DomesticFundPortfolioFetchByDateRangeResponse);
+  rpc fetchFundCompany(DomesticFundCompanyFetchRequest) returns (DomesticFundCompanyFetchResponse);
+  rpc fetchFundManagerByTsCode(DomesticFundManagerFetchByTsCodeRequest) returns (DomesticFundManagerFetchByTsCodeResponse);
+  rpc fetchFundShareByTradeDate(DomesticFundShareFetchByTradeDateRequest) returns (DomesticFundShareFetchByTradeDateResponse);
+  rpc fetchEtfShareSizeByTradeDate(DomesticEtfShareSizeFetchByTradeDateRequest) returns (DomesticEtfShareSizeFetchByTradeDateResponse);
+  rpc fetchEtfInfo(DomesticEtfInfoFetchRequest) returns (DomesticEtfInfoFetchResponse);
+  rpc fetchEtfDaily(DomesticEtfDailyFetchRequest) returns (DomesticEtfDailyFetchResponse);
+  rpc fetchEtfAdjFactor(DomesticEtfAdjFactorFetchRequest) returns (DomesticEtfAdjFactorFetchResponse);
 }

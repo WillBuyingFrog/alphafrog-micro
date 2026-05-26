@@ -1,0 +1,38 @@
+# 跨项目共享的基础设施容器（Qdrant 等）
+# 部署位置：服务器上的 ~/infra/docker-compose.yml（不在任何单个项目目录内）
+#
+# 首次启动：
+#   cd ~/infra && docker compose up -d
+#
+# 说明：
+#   - 此文件管理所有需要被多个项目共享的基础设施服务
+#   - 每个业务项目的 docker-compose.yml 通过声明 shared-infra 为 external 网络来接入
+#   - docker compose up -d 是幂等的：已在运行时什么都不做
+
+services:
+  qdrant:
+    image: qdrant/qdrant:v1.14.0
+    container_name: shared-qdrant
+    ports:
+      - "127.0.0.1:6333:6333"   # HTTP REST API（仅本机调试，不对公网暴露）
+      # 6334 gRPC 不绑定宿主机端口：Java 客户端通过 shared-infra Docker 网络直接访问容器名
+    volumes:
+      - qdrant_data:/qdrant/storage
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          memory: 6G
+        reservations:
+          memory: 2G
+    networks:
+      - shared-infra
+
+networks:
+  shared-infra:
+    name: shared-infra    # 固定网络名，不随 compose project 前缀变化
+    driver: bridge
+
+volumes:
+  qdrant_data:
+    name: shared-qdrant-data

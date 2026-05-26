@@ -1,0 +1,28 @@
+[Stage: PLANNING_TODOS]
+
+统筹规划（来自第一阶段）：
+Mode: {{mode}}
+Detail: {{detail}}
+
+{{modeGuidance}}
+
+请将上述统筹规划转化为具体的 Todo List JSON。
+注意：analysis 字段直接复用上面的 Detail 内容。
+
+## 输出格式
+{"analysis":"复用第一阶段的detail","items":[{"id":"todo_1","sequence":1,"description":"...","dependsOn":[]}]}
+
+## 字段说明
+- analysis: 直接复制上面的 Detail 内容
+- items: Todo 列表
+  - id: 唯一标识，如 todo_1, todo_2
+  - sequence: 执行顺序
+  - description: 1-3句话描述任务意图，不包含具体工具参数
+  - dependsOn: 依赖的 todoId 列表（DAG模式下可选）
+  - groupKey: 可选，并行分组键
+  - parallelizable: 可选，是否可并行化
+
+## 规则
+1) 只能使用工具: {{toolWhitelist}}
+2) 步骤数尽可能少，上限 {{maxTodos}}，目标是远少于上限
+3) DAG 模式下用 dependsOn 表达依赖关系（而非仅靠 sequence）

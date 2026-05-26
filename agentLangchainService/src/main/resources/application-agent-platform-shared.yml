@@ -1,0 +1,111 @@
+# Shared agent platform config — aligned with legacy agentService (excluding legacy-only llm.prompts).
+agent:
+  run:
+    interrupted-ttl-days: ${AF_AGENT_RUN_INTERRUPTED_TTL_DAYS:7}
+    checkpoint-version: ${AF_AGENT_RUN_CHECKPOINT_VERSION:v2}
+    executor:
+      core-pool-size: ${AF_AGENT_RUN_EXECUTOR_CORE_POOL_SIZE:10}
+      max-pool-size: ${AF_AGENT_RUN_EXECUTOR_MAX_POOL_SIZE:10}
+      queue-capacity: ${AF_AGENT_RUN_EXECUTOR_QUEUE_CAPACITY:100}
+      thread-name-prefix: ${AF_AGENT_RUN_EXECUTOR_THREAD_NAME_PREFIX:agent-run-}
+    budget:
+      max-wall-clock-ms: ${AF_AGENT_RUN_BUDGET_MAX_WALL_CLOCK_MS:600000}
+      max-llm-calls: ${AF_AGENT_RUN_BUDGET_MAX_LLM_CALLS:50}
+      max-tool-calls: ${AF_AGENT_RUN_BUDGET_MAX_TOOL_CALLS:30}
+      max-tokens: ${AF_AGENT_RUN_BUDGET_MAX_TOKENS:300000}
+      max-http-attempts-per-logical-call: ${AF_AGENT_RUN_BUDGET_MAX_HTTP_ATTEMPTS_PER_LOGICAL_CALL:2}
+  tool-cache:
+    version: ${AF_AGENT_TOOL_CACHE_VERSION:v1}
+    search-ttl-seconds: ${AF_AGENT_TOOL_CACHE_SEARCH_TTL_SECONDS:3600}
+    info-ttl-seconds: ${AF_AGENT_TOOL_CACHE_INFO_TTL_SECONDS:21600}
+    dataset-ttl-seconds: ${AF_AGENT_TOOL_CACHE_DATASET_TTL_SECONDS:604800}
+  api:
+    max-polling-interval-seconds: ${AF_AGENT_API_MAX_POLLING_INTERVAL_SECONDS:3}
+  credit:
+    default-tool-cost: ${AF_AGENT_CREDIT_DEFAULT_TOOL_COST:1}
+    execute-python-cost: ${AF_AGENT_CREDIT_EXECUTE_PYTHON_COST:5}
+  observability:
+    debug-file:
+      enabled: ${AF_AGENT_OBS_DEBUG_FILE_ENABLED:false}
+      path: ${AF_AGENT_OBS_DEBUG_FILE_PATH:/data/logs/agent-observability-debug.log}
+    llm-trace:
+      enabled: ${AF_AGENT_OBS_LLM_TRACE_ENABLED:false}
+      max-calls: ${AF_AGENT_OBS_LLM_TRACE_MAX_CALLS:100}
+      max-text-chars: ${AF_AGENT_OBS_LLM_TRACE_MAX_TEXT_CHARS:20000}
+      capture-cached-tokens: ${AF_AGENT_OBS_CAPTURE_CACHED_TOKENS:true}
+    raw-http:
+      enabled: ${AF_AGENT_OBS_RAW_HTTP_ENABLED:true}
+      capture-body-max-chars: ${AF_AGENT_OBS_RAW_HTTP_MAX_CHARS:100000}
+      capture-headers: ${AF_AGENT_OBS_RAW_HTTP_HEADERS:true}
+      generate-curl: ${AF_AGENT_OBS_RAW_HTTP_CURL:true}
+      capture-endpoints: ${AF_AGENT_OBS_CAPTURE_ENDPOINTS:}
+      exclude-endpoints: ${AF_AGENT_OBS_EXCLUDE_ENDPOINTS:}
+    openrouter:
+      cost-enrichment:
+        enabled: ${AF_AGENT_OBS_OPENROUTER_COST_ENABLED:false}
+        timeout-ms: ${AF_AGENT_OBS_OPENROUTER_COST_TIMEOUT_MS:5000}
+        max-attempts: ${AF_AGENT_OBS_OPENROUTER_COST_MAX_ATTEMPTS:3}
+        retry-delay-ms: ${AF_AGENT_OBS_OPENROUTER_COST_RETRY_DELAY_MS:1000}
+  artifact:
+    retention-days:
+      normal: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_NORMAL:7}
+      admin: ${AF_AGENT_ARTIFACT_RETENTION_DAYS_ADMIN:30}
+    download:
+      max-bytes: ${AF_AGENT_ARTIFACT_DOWNLOAD_MAX_BYTES:10485760}
+  event:
+    payload:
+      max-chars: ${AF_AGENT_EVENT_PAYLOAD_MAX_CHARS:10000}
+      preview-chars: ${AF_AGENT_EVENT_PAYLOAD_PREVIEW_CHARS:4096}
+  llm:
+    runtime:
+      execution:
+        static-precheck-enabled: ${AF_AGENT_RUNTIME_EXECUTION_STATIC_PRECHECK_ENABLED:true}
+        max-static-recovery-retries: ${AF_AGENT_RUNTIME_EXECUTION_MAX_STATIC_RECOVERY_RETRIES:2}
+        max-runtime-recovery-retries: ${AF_AGENT_RUNTIME_EXECUTION_MAX_RUNTIME_RECOVERY_RETRIES:2}
+        max-semantic-recovery-retries: ${AF_AGENT_RUNTIME_EXECUTION_MAX_SEMANTIC_RECOVERY_RETRIES:1}
+        max-total-recovery-retries: ${AF_AGENT_RUNTIME_EXECUTION_MAX_TOTAL_RECOVERY_RETRIES:2}
+        static-fix-endpoint: ${AF_AGENT_RUNTIME_EXECUTION_STATIC_FIX_ENDPOINT:}
+        static-fix-model: ${AF_AGENT_RUNTIME_EXECUTION_STATIC_FIX_MODEL:}
+        static-fix-temperature: ${AF_AGENT_RUNTIME_EXECUTION_STATIC_FIX_TEMPERATURE:0.0}
+      run-budget:
+        max-wall-clock-ms: ${AF_AGENT_RUN_BUDGET_MAX_WALL_CLOCK_MS:600000}
+        max-llm-calls: ${AF_AGENT_RUN_BUDGET_MAX_LLM_CALLS:50}
+        max-tool-calls: ${AF_AGENT_RUN_BUDGET_MAX_TOOL_CALLS:30}
+        max-tokens: ${AF_AGENT_RUN_BUDGET_MAX_TOKENS:300000}
+        max-http-attempts-per-logical-call: ${AF_AGENT_RUN_BUDGET_MAX_HTTP_ATTEMPTS_PER_LOGICAL_CALL:2}
+      judge:
+        semantic-enabled: ${AF_AGENT_RUNTIME_JUDGE_SEMANTIC_ENABLED:false}
+        max-attempts: ${AF_AGENT_RUNTIME_JUDGE_MAX_ATTEMPTS:2}
+        fail-open: ${AF_AGENT_RUNTIME_JUDGE_FAIL_OPEN:true}
+        block-on-insufficient-evidence: ${AF_AGENT_RUNTIME_JUDGE_BLOCK_ON_INSUFFICIENT_EVIDENCE:false}
+  tools:
+    market-data:
+      dataset:
+        enabled: ${AF_AGENT_MARKET_DATA_DATASET_ENABLED:true}
+        path: ${AF_AGENT_MARKET_DATA_DATASET_PATH:/data/agent_datasets}
+        cache-ttl-seconds: ${AF_AGENT_MARKET_DATA_DATASET_TTL_SECONDS:604800}
+        allow-range-reuse: ${AF_AGENT_MARKET_DATA_DATASET_ALLOW_RANGE_REUSE:true}
+        cleanup-interval-ms: ${AF_AGENT_MARKET_DATA_DATASET_CLEANUP_INTERVAL_MS:600000}
+        cleanup-scan-count: ${AF_AGENT_MARKET_DATA_DATASET_CLEANUP_SCAN_COUNT:500}
+  flow:
+    parallel:
+      enabled: ${AF_AGENT_FLOW_PARALLEL_ENABLED:false}
+    workflow:
+      max-todos: ${AF_AGENT_FLOW_WORKFLOW_MAX_TODOS:10}
+      max-tool-calls: ${AF_AGENT_FLOW_WORKFLOW_MAX_TOOL_CALLS:20}
+      max-tool-calls-per-sub-agent: ${AF_AGENT_FLOW_WORKFLOW_MAX_TOOL_CALLS_PER_SUB_AGENT:10}
+      fail-fast: ${AF_AGENT_FLOW_WORKFLOW_FAIL_FAST:false}
+      default-execution-mode: ${AF_AGENT_FLOW_WORKFLOW_DEFAULT_EXECUTION_MODE:AUTO}
+      sub-agent-enabled: ${AF_AGENT_FLOW_WORKFLOW_SUB_AGENT_ENABLED:true}
+      sub-agent-max-steps: ${AF_AGENT_FLOW_WORKFLOW_SUB_AGENT_MAX_STEPS:6}
+    code-refine:
+      config-file: ${AF_AGENT_FLOW_CODE_REFINE_CONFIG_FILE:}
+      max-attempts: ${AF_AGENT_FLOW_CODE_REFINE_MAX_ATTEMPTS:3}
+    hitl:
+      state-ttl-seconds: ${AF_AGENT_FLOW_HITL_STATE_TTL_SECONDS:3600}
+  snapshot:
+    default-part-size: ${AF_AGENT_SNAPSHOT_DEFAULT_PART_SIZE:524288}
+    min-part-size: ${AF_AGENT_SNAPSHOT_MIN_PART_SIZE:65536}
+    max-part-size: ${AF_AGENT_SNAPSHOT_MAX_PART_SIZE:2097152}
+    cache-ttl-seconds: ${AF_AGENT_SNAPSHOT_CACHE_TTL_SECONDS:3600}
+    gzip-enabled: ${AF_AGENT_SNAPSHOT_GZIP_ENABLED:true}

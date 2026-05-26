@@ -1,0 +1,37 @@
+{
+  "dataType": "fund_info",
+  "label": "基金基本信息",
+  "description": "获取公募基金基本信息，包含基金代码、名称、类型、成立日期、管理人等元数据。",
+  "serviceModule": "domesticFundFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按市场筛选",
+      "description": "根据市场类型筛选基金基本信息，支持分页。",
+      "requiredParams": [],
+      "optionalParams": ["market", "offset", "limit"],
+      "paramDefs": {
+        "market": {
+          "label": "市场代码",
+          "description": "交易所或市场标识，如E、O等",
+          "type": "string",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": []
+    }
+  ],
+  "taskSetVariants": []
+}

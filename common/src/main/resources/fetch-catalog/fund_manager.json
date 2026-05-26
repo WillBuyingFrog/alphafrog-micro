@@ -1,0 +1,50 @@
+{
+  "dataType": "fund_manager",
+  "label": "基金经理",
+  "description": "获取公募基金经理数据，包含基金经理姓名、任职基金、上任离任日期等。",
+  "serviceModule": "domesticFundFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "按条件筛选",
+      "description": "支持按基金代码、公告日期、经理姓名等条件筛选基金经理信息，支持空参数全量抓取。",
+      "requiredParams": [],
+      "optionalParams": ["ts_code", "ann_date", "name", "offset", "limit"],
+      "paramDefs": {
+        "ts_code": {
+          "label": "基金代码",
+          "description": "基金代码，如000001.OF",
+          "type": "string",
+          "default": null
+        },
+        "ann_date": {
+          "label": "公告日期",
+          "description": "公告日期，格式yyyyMMdd",
+          "type": "string",
+          "format": "yyyyMMdd",
+          "default": null
+        },
+        "name": {
+          "label": "基金经理姓名",
+          "description": "基金经理姓名",
+          "type": "string",
+          "default": null
+        },
+        "offset": {
+          "label": "偏移量",
+          "description": "分页偏移量，从0开始",
+          "type": "number",
+          "default": 0
+        },
+        "limit": {
+          "label": "每页条数",
+          "description": "单次返回最大记录数",
+          "type": "number",
+          "default": 5000
+        }
+      },
+      "specialFlags": ["empty_params_allowed"]
+    }
+  ],
+  "taskSetVariants": []
+}

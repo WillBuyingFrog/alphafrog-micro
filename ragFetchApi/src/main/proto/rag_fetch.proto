@@ -1,0 +1,29 @@
+syntax = "proto3";
+
+package world.willfrog.ragfetchapi;
+
+option java_multiple_files = true;
+option java_package = "world.willfrog.ragfetchapi";
+option java_outer_classname = "RagFetchServiceProto";
+
+// RAG 元数据抓取触发服务（公告 + 研报）
+service RagFetchService {
+  rpc TriggerRagFetch(RagFetchRequest) returns (RagFetchResponse);
+}
+
+message RagFetchRequest {
+  // "announcement" | "research_report" | "both"
+  string type = 1;
+  // 开始日期 YYYYMMDD
+  string start_date = 2;
+  // 结束日期 YYYYMMDD
+  string end_date = 3;
+  // 研报行业过滤列表，空列表表示全量不过滤
+  repeated string target_industries = 4;
+}
+
+message RagFetchResponse {
+  // "triggered" | "error"
+  string status = 1;
+  string message = 2;
+}

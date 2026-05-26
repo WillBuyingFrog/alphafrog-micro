@@ -1,0 +1,31 @@
+{
+  "dataType": "sw_industry_classify",
+  "label": "申万行业分类",
+  "description": "获取申万行业分类体系数据，包含一级、二级、三级行业代码及名称。",
+  "serviceModule": "domesticIndexFetchService",
+  "taskVariants": [
+    {
+      "subType": 1,
+      "label": "全量或按条件筛选",
+      "description": "获取申万行业分类，可指定层级和数据来源，支持空参数全量抓取。",
+      "requiredParams": [],
+      "optionalParams": ["level", "src"],
+      "paramDefs": {
+        "level": {
+          "label": "行业层级",
+          "description": "行业分类层级，如L1、L2、L3",
+          "type": "string",
+          "default": null
+        },
+        "src": {
+          "label": "数据来源",
+          "description": "行业分类标准版本",
+          "type": "string",
+          "default": "SW2021"
+        }
+      },
+      "specialFlags": ["empty_params_allowed"]
+    }
+  ],
+  "taskSetVariants": []
+}
